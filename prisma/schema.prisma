@@ -1,0 +1,512 @@
+// Sunset Tires ERP v4 — Prisma schema
+// Fonte da verdade: vault Obsidian `sunset-tires-brain` (acessado exclusivamente via MCP).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum CuentaTipo {
+  SINTETICA
+  ANALITICA
+}
+
+enum CuentaCategoria {
+  ACTIVO
+  PASIVO
+  PATRIMONIO
+  INGRESO
+  EGRESO
+}
+
+enum PeriodoEstado {
+  ABIERTO
+  CERRADO
+}
+
+enum AsientoEstado {
+  BORRADOR
+  CONTABILIZADO
+  ANULADO
+}
+
+enum AsientoOrigen {
+  MANUAL
+  TESORERIA
+  COMEX
+  AJUSTE
+}
+
+enum TipoCuentaBancaria {
+  CUENTA_CORRIENTE
+  CAJA_AHORRO
+  CAJA_CHICA
+}
+
+enum Moneda {
+  ARS
+  USD
+}
+
+enum MovimientoTesoreriaTipo {
+  PAGO
+  COBRO
+  TRANSFERENCIA
+}
+
+enum PrestamoClasificacion {
+  CORTO_PLAZO
+  LARGO_PLAZO
+}
+
+enum EmbarqueEstado {
+  BORRADOR
+  EN_TRANSITO
+  EN_PUERTO
+  EN_ADUANA
+  DESPACHADO
+  EN_DEPOSITO
+  CERRADO
+}
+
+enum CompraEstado {
+  BORRADOR
+  EMITIDA
+  RECIBIDA
+  CANCELADA
+}
+
+enum VentaEstado {
+  BORRADOR
+  EMITIDA
+  CANCELADA
+}
+
+enum MovimientoStockTipo {
+  INGRESO
+  EGRESO
+  AJUSTE
+  TRANSFERENCIA
+}
+
+enum CondicionIva {
+  RI
+  MONOTRIBUTO
+  EXENTO
+  CONSUMIDOR_FINAL
+}
+
+enum AuditAccion {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+// ============================================================
+// AUTENTICACIÓN
+// ============================================================
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  nombre       String
+  role         Role     @default(USER)
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  auditLogs AuditLog[]
+}
+
+// ============================================================
+// CONTABILIDAD
+// ============================================================
+
+model CuentaContable {
+  id          Int             @id @default(autoincrement())
+  codigo      String          @unique
+  nombre      String
+  tipo        CuentaTipo
+  categoria   CuentaCategoria
+  nivel       Int
+  padreCodigo String?
+  activa      Boolean         @default(true)
+
+  padre CuentaContable?  @relation("CuentaPadre", fields: [padreCodigo], references: [codigo])
+  hijos CuentaContable[] @relation("CuentaPadre")
+
+  lineas           LineaAsiento[]
+  cuentasBancarias CuentaBancaria[]
+  clientes         Cliente[]
+  proveedores      Proveedor[]
+  prestamos        PrestamoExterno[]
+  movimientos      MovimientoTesoreria[]
+}
+
+model PeriodoContable {
+  id          Int           @id @default(autoincrement())
+  codigo      String        @unique
+  nombre      String
+  fechaInicio DateTime
+  fechaFin    DateTime
+  estado      PeriodoEstado @default(ABIERTO)
+
+  asientos Asiento[]
+}
+
+model Asiento {
+  id          String        @id @default(uuid())
+  numero      Int
+  fecha       DateTime
+  descripcion String
+  estado      AsientoEstado @default(BORRADOR)
+  totalDebe   Decimal       @db.Decimal(18, 2)
+  totalHaber  Decimal       @db.Decimal(18, 2)
+  origen      AsientoOrigen
+  moneda      Moneda        @default(ARS)
+  tipoCambio  Decimal       @default(1) @db.Decimal(18, 6)
+  periodoId   Int
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  periodo    PeriodoContable      @relation(fields: [periodoId], references: [id])
+  lineas     LineaAsiento[]
+  movimiento MovimientoTesoreria?
+  prestamo   PrestamoExterno?
+  venta      Venta?
+  embarque   Embarque?
+
+  @@unique([periodoId, numero])
+  @@index([fecha])
+  @@index([estado])
+}
+
+model LineaAsiento {
+  id          Int     @id @default(autoincrement())
+  asientoId   String
+  cuentaId    Int
+  debe        Decimal @default(0) @db.Decimal(18, 2)
+  haber       Decimal @default(0) @db.Decimal(18, 2)
+  descripcion String?
+
+  asiento Asiento        @relation(fields: [asientoId], references: [id], onDelete: Restrict)
+  cuenta  CuentaContable @relation(fields: [cuentaId], references: [id])
+
+  @@index([cuentaId])
+}
+
+// ============================================================
+// TESORERÍA
+// ============================================================
+
+model CuentaBancaria {
+  id               String             @id @default(uuid())
+  banco            String
+  tipo             TipoCuentaBancaria
+  moneda           Moneda
+  numero           String
+  cbu              String?
+  alias            String?
+  cuentaContableId Int
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  cuentaContable CuentaContable        @relation(fields: [cuentaContableId], references: [id])
+  movimientos    MovimientoTesoreria[]
+  prestamos      PrestamoExterno[]
+}
+
+model MovimientoTesoreria {
+  id               String                  @id @default(uuid())
+  tipo             MovimientoTesoreriaTipo
+  cuentaBancariaId String
+  monto            Decimal                 @db.Decimal(18, 2)
+  moneda           Moneda
+  tipoCambio       Decimal                 @db.Decimal(18, 6)
+  fecha            DateTime
+  cuentaContableId Int
+  asientoId        String?                 @unique
+  descripcion      String?
+  comprobante      String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  cuentaBancaria CuentaBancaria @relation(fields: [cuentaBancariaId], references: [id])
+  cuentaContable CuentaContable @relation(fields: [cuentaContableId], references: [id])
+  asiento        Asiento?       @relation(fields: [asientoId], references: [id])
+
+  @@index([fecha])
+}
+
+model PrestamoExterno {
+  id               String                @id @default(uuid())
+  prestamista      String
+  cuentaBancariaId String
+  moneda           Moneda
+  principal        Decimal               @db.Decimal(18, 2)
+  tipoCambio       Decimal               @db.Decimal(18, 6)
+  clasificacion    PrestamoClasificacion
+  cuentaContableId Int
+  asientoId        String?               @unique
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  cuentaBancaria CuentaBancaria @relation(fields: [cuentaBancariaId], references: [id])
+  cuentaContable CuentaContable @relation(fields: [cuentaContableId], references: [id])
+  asiento        Asiento?       @relation(fields: [asientoId], references: [id])
+}
+
+// ============================================================
+// COMEX
+// ============================================================
+
+model Embarque {
+  id                    String         @id @default(uuid())
+  codigo                String         @unique
+  proveedorId           String
+  estado                EmbarqueEstado @default(BORRADOR)
+  moneda                Moneda
+  tipoCambio            Decimal        @db.Decimal(18, 6)
+  fobTotal              Decimal        @default(0) @db.Decimal(18, 2)
+  flete                 Decimal        @default(0) @db.Decimal(18, 2)
+  seguro                Decimal        @default(0) @db.Decimal(18, 2)
+  cifTotal              Decimal        @default(0) @db.Decimal(18, 2)
+  die                   Decimal        @default(0) @db.Decimal(18, 2)
+  tasaEstadistica       Decimal        @default(0) @db.Decimal(18, 2)
+  arancelSim            Decimal        @default(0) @db.Decimal(18, 2)
+  iva                   Decimal        @default(0) @db.Decimal(18, 2)
+  ivaAdicional          Decimal        @default(0) @db.Decimal(18, 2)
+  ganancias             Decimal        @default(0) @db.Decimal(18, 2)
+  iibb                  Decimal        @default(0) @db.Decimal(18, 2)
+  gastosPortuarios      Decimal        @default(0) @db.Decimal(18, 2)
+  honorariosDespachante Decimal        @default(0) @db.Decimal(18, 2)
+  costoTotal            Decimal        @default(0) @db.Decimal(18, 2)
+  asientoId             String?        @unique
+  depositoDestinoId     String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  proveedor       Proveedor      @relation(fields: [proveedorId], references: [id])
+  items           ItemEmbarque[]
+  asiento         Asiento?       @relation(fields: [asientoId], references: [id])
+  depositoDestino Deposito?      @relation(fields: [depositoDestinoId], references: [id])
+}
+
+model ItemEmbarque {
+  id                Int     @id @default(autoincrement())
+  embarqueId        String
+  productoId        String
+  cantidad          Int
+  precioUnitarioFob Decimal @db.Decimal(18, 2)
+  costoUnitario     Decimal @default(0) @db.Decimal(18, 2)
+
+  embarque Embarque @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
+  producto Producto @relation(fields: [productoId], references: [id])
+}
+
+model Compra {
+  id          String       @id @default(uuid())
+  numero      String       @unique
+  proveedorId String
+  fecha       DateTime
+  moneda      Moneda
+  subtotal    Decimal      @db.Decimal(18, 2)
+  iva         Decimal      @db.Decimal(18, 2)
+  total       Decimal      @db.Decimal(18, 2)
+  estado      CompraEstado @default(BORRADOR)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  proveedor Proveedor    @relation(fields: [proveedorId], references: [id])
+  items     ItemCompra[]
+}
+
+model ItemCompra {
+  id             Int     @id @default(autoincrement())
+  compraId       String
+  productoId     String
+  cantidad       Int
+  precioUnitario Decimal @db.Decimal(18, 2)
+  subtotal       Decimal @db.Decimal(18, 2)
+  iva            Decimal @db.Decimal(18, 2)
+  total          Decimal @db.Decimal(18, 2)
+
+  compra   Compra   @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  producto Producto @relation(fields: [productoId], references: [id])
+}
+
+// ============================================================
+// DATOS MAESTROS
+// ============================================================
+
+model Cliente {
+  id               String       @id @default(uuid())
+  nombre           String
+  cuit             String?      @unique
+  tipo             String       @default("minorista")
+  condicionIva     CondicionIva @default(RI)
+  direccion        String?
+  telefono         String?
+  email            String?
+  estado           String       @default("activo")
+  cuentaContableId Int?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  cuentaContable CuentaContable? @relation(fields: [cuentaContableId], references: [id])
+  ventas         Venta[]
+}
+
+model Proveedor {
+  id               String   @id @default(uuid())
+  nombre           String
+  cuit             String   @unique
+  tipo             String   @default("otro")
+  pais             String   @default("AR")
+  direccion        String?
+  telefono         String?
+  email            String?
+  estado           String   @default("activo")
+  cuentaContableId Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  cuentaContable CuentaContable? @relation(fields: [cuentaContableId], references: [id])
+  embarques      Embarque[]
+  compras        Compra[]
+}
+
+model Producto {
+  id            String   @id @default(uuid())
+  codigo        String   @unique
+  nombre        String
+  descripcion   String?
+  marca         String?
+  modelo        String?
+  medida        String?
+  ncm           String?
+  unidad        String   @default("UN")
+  diePorcentaje Decimal  @default(0) @db.Decimal(8, 4)
+  precioVenta   Decimal  @default(0) @db.Decimal(18, 2)
+  costoPromedio Decimal  @default(0) @db.Decimal(18, 2)
+  stockActual   Int      @default(0)
+  stockMinimo   Int      @default(0)
+  activo        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  itemsEmbarque    ItemEmbarque[]
+  itemsCompra      ItemCompra[]
+  itemsVenta       ItemVenta[]
+  movimientosStock MovimientoStock[]
+}
+
+model Deposito {
+  id        String  @id @default(uuid())
+  nombre    String
+  direccion String?
+  activo    Boolean @default(true)
+
+  movimientos MovimientoStock[]
+  embarques   Embarque[]
+}
+
+// ============================================================
+// STOCK Y VENTAS
+// ============================================================
+
+model MovimientoStock {
+  id            String              @id @default(uuid())
+  productoId    String
+  depositoId    String
+  tipo          MovimientoStockTipo
+  cantidad      Int
+  costoUnitario Decimal             @db.Decimal(18, 2)
+  fecha         DateTime            @default(now())
+
+  producto Producto @relation(fields: [productoId], references: [id])
+  deposito Deposito @relation(fields: [depositoId], references: [id])
+
+  @@index([productoId])
+}
+
+model Venta {
+  id        String      @id @default(uuid())
+  numero    String      @unique
+  clienteId String
+  fecha     DateTime
+  moneda    Moneda
+  subtotal  Decimal     @db.Decimal(18, 2)
+  iva       Decimal     @db.Decimal(18, 2)
+  total     Decimal     @db.Decimal(18, 2)
+  estado    VentaEstado @default(BORRADOR)
+  asientoId String?     @unique
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  cliente Cliente     @relation(fields: [clienteId], references: [id])
+  asiento Asiento?    @relation(fields: [asientoId], references: [id])
+  items   ItemVenta[]
+}
+
+model ItemVenta {
+  id             Int     @id @default(autoincrement())
+  ventaId        String
+  productoId     String
+  cantidad       Int
+  precioUnitario Decimal @db.Decimal(18, 2)
+  subtotal       Decimal @db.Decimal(18, 2)
+  iva            Decimal @db.Decimal(18, 2)
+  total          Decimal @db.Decimal(18, 2)
+
+  venta    Venta    @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  producto Producto @relation(fields: [productoId], references: [id])
+}
+
+// ============================================================
+// AUXILIARES
+// ============================================================
+
+model JurisdiccionIIBB {
+  id       Int     @id @default(autoincrement())
+  codigo   String  @unique
+  nombre   String
+  alicuota Decimal @db.Decimal(8, 4)
+}
+
+model IndiceIPC {
+  id      Int     @id @default(autoincrement())
+  periodo String  @unique
+  valor   Decimal @db.Decimal(15, 4)
+  fuente  String
+}
+
+model AuditLog {
+  id              Int         @id @default(autoincrement())
+  tabla           String
+  registroId      String
+  accion          AuditAccion
+  datosAnteriores Json?
+  datosNuevos     Json?
+  usuarioId       String
+  fecha           DateTime    @default(now())
+
+  usuario User @relation(fields: [usuarioId], references: [id])
+
+  @@index([usuarioId])
+  @@index([tabla, registroId])
+}
