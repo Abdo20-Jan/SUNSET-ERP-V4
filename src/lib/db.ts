@@ -43,52 +43,74 @@ function isConnectionError(err: unknown): boolean {
   );
 }
 
+let rebuildInFlight: Promise<void> | null = null;
+
 async function rebuild(): Promise<void> {
-  const old = baseClient;
-  baseClient = buildClient();
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prismaBase = baseClient;
-  }
-  try {
-    await old.$disconnect();
-  } catch {
-    // ignore disconnect errors on a dead pool
-  }
+  if (rebuildInFlight) return rebuildInFlight;
+  rebuildInFlight = (async () => {
+    console.warn("[db] rebuilding pool after connection error");
+    const old = baseClient;
+    baseClient = buildClient();
+    if (process.env.NODE_ENV !== "production") {
+      globalForPrisma.prismaBase = baseClient;
+    }
+    // Fire-and-forget the disconnect of the old pool so concurrent retries
+    // that may still be reading from the soon-to-die client don't get
+    // their socket yanked out from under them.
+    old.$disconnect().catch(() => {});
+    rebuildInFlight = null;
+  })();
+  return rebuildInFlight;
 }
 
 type AnyFn = (...args: unknown[]) => unknown;
 type AnyRec = Record<string | symbol, unknown>;
 
-function withRetry<T extends AnyFn>(
+async function withRetryGeneric<T>(
+  label: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  let attempt = 0;
+  // Allow up to 2 retries because: 1st failure triggers rebuild, but a new
+  // pool may also surface a stale conn (Postgres limits, brief net blip).
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isConnectionError(err) || attempt >= 2) {
+        if (isConnectionError(err)) {
+          console.error(`[db] ${label} exhausted retries`, err);
+        }
+        throw err;
+      }
+      attempt++;
+      console.warn(
+        `[db] ${label} attempt ${attempt} failed with connection error, retrying`,
+      );
+      await rebuild();
+    }
+  }
+}
+
+function withRetry(
   modelKey: string | symbol,
   methodKey: string | symbol,
 ): AnyFn {
   return async (...args: unknown[]) => {
-    const delegate = (baseClient as unknown as AnyRec)[modelKey] as AnyRec;
-    const method = delegate[methodKey] as AnyFn;
-    try {
-      return await (method.apply(delegate, args) as Promise<unknown>);
-    } catch (err) {
-      if (!isConnectionError(err)) throw err;
-      await rebuild();
-      const fresh = (baseClient as unknown as AnyRec)[modelKey] as AnyRec;
-      const freshMethod = fresh[methodKey] as AnyFn;
-      return await (freshMethod.apply(fresh, args) as Promise<unknown>);
-    }
+    return withRetryGeneric(`${String(modelKey)}.${String(methodKey)}`, () => {
+      const delegate = (baseClient as unknown as AnyRec)[modelKey] as AnyRec;
+      const method = delegate[methodKey] as AnyFn;
+      return method.apply(delegate, args) as Promise<unknown>;
+    });
   };
 }
 
 function wrapTopLevelFn(methodKey: string | symbol): AnyFn {
   return async (...args: unknown[]) => {
-    const fn = (baseClient as unknown as AnyRec)[methodKey] as AnyFn;
-    try {
-      return await (fn.apply(baseClient, args) as Promise<unknown>);
-    } catch (err) {
-      if (!isConnectionError(err)) throw err;
-      await rebuild();
-      const fresh = (baseClient as unknown as AnyRec)[methodKey] as AnyFn;
-      return await (fresh.apply(baseClient, args) as Promise<unknown>);
-    }
+    return withRetryGeneric(String(methodKey), () => {
+      const fn = (baseClient as unknown as AnyRec)[methodKey] as AnyFn;
+      return fn.apply(baseClient, args) as Promise<unknown>;
+    });
   };
 }
 
