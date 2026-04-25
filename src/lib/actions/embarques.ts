@@ -393,20 +393,21 @@ export async function guardarEmbarqueAction(
   );
 
   // costoTotal del embarque (en ARS) = FOB×TC + Σ subtotal×TC de cada
-  // costo + tributos aduaneros (en ARS).
-  const fobArs = toDecimal(fobTotal).times(toDecimal(input.tipoCambio));
+  // costo + tributos aduaneros×TC (despacho viene en moneda del embarque,
+  // se paga a AFIP en pesos al cierre).
+  const tcEmb = toDecimal(input.tipoCambio);
+  const fobArs = toDecimal(fobTotal).times(tcEmb);
   const costosSubtotalArs = input.costos.reduce(
     (acc, c) =>
       acc.plus(toDecimal(c.subtotal).times(toDecimal(c.tipoCambio))),
     toDecimal(0),
   );
-  const costoTotal = sumMoney([
-    fobArs,
-    costosSubtotalArs,
-    input.die,
-    input.tasaEstadistica,
-    input.arancelSim,
+  const tributosArs = sumMoney([
+    toDecimal(input.die).times(tcEmb),
+    toDecimal(input.tasaEstadistica).times(tcEmb),
+    toDecimal(input.arancelSim).times(tcEmb),
   ]);
+  const costoTotal = sumMoney([fobArs, costosSubtotalArs, tributosArs]);
 
   // CIF lo mantenemos para retrocompat: FOB + flete_internacional + seguro
   // marítimo (en moneda original del embarque).

@@ -759,15 +759,28 @@ export async function crearAsientoEmbarque(
     }
 
     const tcEmb = toDecimal(embarque.tipoCambio);
-    const fobArs = toDecimal(embarque.fobTotal).times(tcEmb);
+    const fobArs = toDecimal(embarque.fobTotal).times(tcEmb).toDecimalPlaces(2);
 
-    const die = toDecimal(embarque.die);
-    const te = toDecimal(embarque.tasaEstadistica);
-    const arancelSim = toDecimal(embarque.arancelSim);
-    const ivaAduana = toDecimal(embarque.iva);
-    const ivaAdicional = toDecimal(embarque.ivaAdicional);
-    const iibbAduana = toDecimal(embarque.iibb);
-    const ganancias = toDecimal(embarque.ganancias);
+    // Tributos vienen en moneda del embarque (despacho en USD); se convierten
+    // a ARS aplicando el TC del embarque. Cada uno se redondea a 2dp ANTES
+    // de sumarlos para el HABER consolidado, garantizando DEBE = HABER.
+    const die = toDecimal(embarque.die).times(tcEmb).toDecimalPlaces(2);
+    const te = toDecimal(embarque.tasaEstadistica)
+      .times(tcEmb)
+      .toDecimalPlaces(2);
+    const arancelSim = toDecimal(embarque.arancelSim)
+      .times(tcEmb)
+      .toDecimalPlaces(2);
+    const ivaAduana = toDecimal(embarque.iva).times(tcEmb).toDecimalPlaces(2);
+    const ivaAdicional = toDecimal(embarque.ivaAdicional)
+      .times(tcEmb)
+      .toDecimalPlaces(2);
+    const iibbAduana = toDecimal(embarque.iibb)
+      .times(tcEmb)
+      .toDecimalPlaces(2);
+    const ganancias = toDecimal(embarque.ganancias)
+      .times(tcEmb)
+      .toDecimalPlaces(2);
 
     type Linea = {
       cuentaId: number;

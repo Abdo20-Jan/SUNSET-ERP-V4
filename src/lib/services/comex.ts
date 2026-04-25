@@ -109,8 +109,9 @@ export type ItemRateioResult<T> = T & {
 // La base rateable (que se incorpora al costo del producto) incluye:
 //   FOB + Σ subtotal de cada costo logístico + DIE + Tasa + Arancel SIM
 // IVA, IIBB y Ganancias son créditos fiscales (Activo) y NO se ratean.
-// Todo se convierte a ARS antes de ratear (FOB usa el TC del embarque,
-// cada costo usa el suyo, los tributos aduaneros ya están en ARS).
+// Todo se convierte a ARS antes de ratear: FOB y tributos aduaneros usan
+// el TC del embarque (el despacho viene en USD); cada costo logístico
+// usa su propio TC (puede pagar el flete en una fecha con otro TC).
 export function calcularRateioEmbarque<T extends ItemRateioInput>(
   embarque: EmbarqueRateio,
   items: readonly T[],
@@ -130,12 +131,14 @@ export function calcularRateioEmbarque<T extends ItemRateioInput>(
     return acc.plus(ars);
   }, new Decimal(0));
 
+  const dieArs = round2(toDecimal(embarque.die).times(embarqueTC));
+  const teArs = round2(toDecimal(embarque.tasaEstadistica).times(embarqueTC));
+  const arancelArs = round2(
+    toDecimal(embarque.arancelSim).times(embarqueTC),
+  );
+
   const costoRateable = round2(
-    fobTotalArs
-      .plus(costosArs)
-      .plus(toDecimal(embarque.die))
-      .plus(toDecimal(embarque.tasaEstadistica))
-      .plus(toDecimal(embarque.arancelSim)),
+    fobTotalArs.plus(costosArs).plus(dieArs).plus(teArs).plus(arancelArs),
   );
 
   const lastIdx = items.length - 1;

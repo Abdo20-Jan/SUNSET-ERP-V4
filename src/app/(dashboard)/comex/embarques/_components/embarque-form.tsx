@@ -425,16 +425,18 @@ export function EmbarqueForm(props: Props) {
     [iva, ivaAdicional, iibb, ganancias],
   );
 
+  const tributosArs = useMemo(() => {
+    const tc = new Decimal(safeMoney(tipoCambioEmbarque));
+    return sumAs2dp([
+      new Decimal(safeMoney(die)).times(tc),
+      new Decimal(safeMoney(tasaEstadistica)).times(tc),
+      new Decimal(safeMoney(arancelSim)).times(tc),
+    ]);
+  }, [die, tasaEstadistica, arancelSim, tipoCambioEmbarque]);
+
   const costoTotal = useMemo(
-    () =>
-      sumAs2dp([
-        fobTotalArs,
-        costosSubtotalArs,
-        safeMoney(die),
-        safeMoney(tasaEstadistica),
-        safeMoney(arancelSim),
-      ]),
-    [fobTotalArs, costosSubtotalArs, die, tasaEstadistica, arancelSim],
+    () => sumAs2dp([fobTotalArs, costosSubtotalArs, tributosArs]),
+    [fobTotalArs, costosSubtotalArs, tributosArs],
   );
 
   // ---------- Acciones ----------
@@ -443,7 +445,11 @@ export function EmbarqueForm(props: Props) {
       toast.error("Complete FOB y costos logísticos para calcular tributos.");
       return;
     }
-    const t = calcularTributosSugeridos(cifTotalArs);
+    // Tributos se ingresan en moneda del embarque; convertimos CIF (ARS)
+    // de vuelta a moneda original dividiendo por TC para sugerir valores.
+    const tc = new Decimal(safeMoney(tipoCambioEmbarque));
+    const cifMoneda = tc.gt(0) ? cifTotalArs.dividedBy(tc) : new Decimal(0);
+    const t = calcularTributosSugeridos(cifMoneda);
     setValue("die", t.die.toFixed(2), { shouldValidate: true });
     setValue("tasaEstadistica", t.tasaEstadistica.toFixed(2), {
       shouldValidate: true,
@@ -836,20 +842,24 @@ export function EmbarqueForm(props: Props) {
             />
             <div className="space-y-0.5">
               <p>
-                <strong>Tributos aduaneros</strong> (van a Aduana/AFIP, no a un
-                proveedor): DIE, Tasa Estadística, Arancel SIM. Componen el
-                costo del producto.
+                Ingrese estos valores en la <strong>moneda del embarque</strong>
+                {moneda && <> ({moneda})</>} tal como aparecen en el despacho.
+                Al cerrar el embarque se convierten a ARS multiplicando por el
+                TC del embarque ({tipoCambioEmbarque || "—"}) — la AFIP cobra en
+                pesos.
               </p>
               <p>
-                <strong>Créditos fiscales</strong> (al ACTIVO, no al costo):
-                IVA, IVA Adicional, Percepción IIBB, Percepción Ganancias.
+                <strong>Tributos aduaneros</strong> (DIE, Tasa, Arancel SIM):
+                componen el costo del producto.{" "}
+                <strong>Créditos fiscales</strong> (IVA, IVA Adicional, IIBB,
+                Ganancias): van al ACTIVO, no al costo.
               </p>
             </div>
           </div>
 
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Tributos aduaneros
+              Tributos aduaneros ({moneda})
             </h3>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <MoneyField
@@ -878,7 +888,7 @@ export function EmbarqueForm(props: Props) {
 
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Créditos fiscales
+              Créditos fiscales ({moneda})
             </h3>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
               <MoneyField
