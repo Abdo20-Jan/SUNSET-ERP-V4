@@ -8,6 +8,7 @@ import {
   AsientoEstado,
   AsientoOrigen,
   CuentaTipo,
+  EmbarqueEstado,
   Moneda,
   MovimientoTesoreriaTipo,
   PeriodoEstado,
@@ -344,6 +345,30 @@ async function anularEnTx(tx: TxClient, asientoId: string): Promise<Asiento> {
       `No se puede anular un asiento en período ${asiento.periodo.estado}.`,
     );
   }
+
+  // Detach any operational record linked to this asiento so it becomes
+  // editable / re-postable. The accounting trail still shows the asiento
+  // as ANULADO; this just unlocks the source document (embarque,
+  // movimiento, préstamo, venta).
+  await tx.embarque.updateMany({
+    where: { asientoId },
+    data: {
+      asientoId: null,
+      estado: EmbarqueEstado.EN_DEPOSITO,
+    },
+  });
+  await tx.movimientoTesoreria.updateMany({
+    where: { asientoId },
+    data: { asientoId: null },
+  });
+  await tx.prestamoExterno.updateMany({
+    where: { asientoId },
+    data: { asientoId: null },
+  });
+  await tx.venta.updateMany({
+    where: { asientoId },
+    data: { asientoId: null },
+  });
 
   return tx.asiento.update({
     where: { id: asientoId },
