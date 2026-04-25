@@ -890,10 +890,15 @@ export async function crearAsientoEmbarque(
     // 3) Costos logísticos por proveedor (uno por línea)
     for (const c of embarque.costos) {
       const tc = toDecimal(c.tipoCambio);
-      const subtotalArs = toDecimal(c.subtotal).times(tc);
-      const ivaArs = toDecimal(c.iva).times(tc);
-      const iibbArs = toDecimal(c.iibb).times(tc);
-      const otrosArs = toDecimal(c.otros).times(tc);
+      // Redondear cada componente a 2dp ANTES de sumar el total, para que
+      // sum(DEBE rounded) === HABER rounded y el asiento no quede
+      // desbalanceado por décimos perdidos en la conversión a ARS.
+      const subtotalArs = toDecimal(c.subtotal)
+        .times(tc)
+        .toDecimalPlaces(2);
+      const ivaArs = toDecimal(c.iva).times(tc).toDecimalPlaces(2);
+      const iibbArs = toDecimal(c.iibb).times(tc).toDecimalPlaces(2);
+      const otrosArs = toDecimal(c.otros).times(tc).toDecimalPlaces(2);
       const totalArs = subtotalArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
 
       if (!totalArs.gt(0)) continue;

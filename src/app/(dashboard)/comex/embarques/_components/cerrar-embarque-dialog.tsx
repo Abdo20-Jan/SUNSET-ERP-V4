@@ -80,11 +80,14 @@ export function CerrarEmbarqueDialog({
           <ul className="mt-2 space-y-1 text-muted-foreground">
             <li>
               <span className="inline-block w-24 font-mono">DEBE</span>
-              Mercaderías en tránsito (CIF) + gastos reales + créditos fiscales
+              Mercaderías en tránsito (FOB) + cuentas de gasto + créditos
+              fiscales (IVA, IIBB importación) + tributos aduaneros
             </li>
             <li>
               <span className="inline-block w-24 font-mono">HABER</span>
-              Proveedor exterior, derechos, IVA, IIBB, Ganancias, Despachante
+              Proveedor exterior + 1 línea por proveedor logístico (flete,
+              despachante, operador, etc.) + Aduana (DIE, tasa, arancel, IVA
+              importación, IIBB, Ganancias)
             </li>
             <li className="pt-2 font-medium text-foreground">
               Total: {previewTotalDebe}
