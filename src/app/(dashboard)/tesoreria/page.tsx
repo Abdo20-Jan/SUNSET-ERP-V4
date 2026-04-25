@@ -6,6 +6,7 @@ import {
   CreditCardIcon,
   ExchangeIcon,
   Invoice01Icon,
+  ReceiptDollarIcon,
 } from "@hugeicons/core-free-icons";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -41,6 +42,13 @@ const SECTIONS = [
     title: "Préstamos",
     description:
       "Préstamos del exterior: alta, saldo pendiente y amortizaciones",
+  },
+  {
+    href: "/tesoreria/cuentas-a-pagar",
+    icon: ReceiptDollarIcon,
+    title: "Cuentas a pagar",
+    description:
+      "Saldos pendientes a proveedores, despachante, Aduana e impuestos",
   },
 ] as const;
 
