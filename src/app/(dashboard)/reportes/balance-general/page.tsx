@@ -10,10 +10,8 @@ import {
   type PeriodoOption,
 } from "../_components/periodo-select";
 import { fmtMoney } from "../_components/money";
-import {
-  CuentaTreeTable,
-  serializeTreeNode,
-} from "../_components/cuenta-tree-table";
+import { CuentaTreeTable } from "../_components/cuenta-tree-table";
+import { serializeTreeNode } from "../_components/cuenta-tree-node";
 
 type SearchParams = Promise<{ periodoId?: string }>;
 
