@@ -81,15 +81,18 @@ export function calcularTributosSugeridos(
   };
 }
 
+export type CostoLogisticoInput = {
+  subtotal: DineroInput;
+  tipoCambio: DineroInput;
+};
+
 export type EmbarqueRateio = {
   fobTotal: DineroInput;
-  flete: DineroInput;
-  seguro: DineroInput;
+  embarqueTipoCambio: DineroInput;
+  costos: readonly CostoLogisticoInput[];
   die: DineroInput;
   tasaEstadistica: DineroInput;
   arancelSim: DineroInput;
-  gastosPortuarios: DineroInput;
-  honorariosDespachante: DineroInput;
 };
 
 export type ItemRateioInput = {
@@ -103,8 +106,11 @@ export type ItemRateioResult<T> = T & {
   costoUnitario: Decimal;
 };
 
-// IVA, IVA Adicional, IIBB y Ganancias son créditos fiscales (Activo) y
-// NO forman parte del costo de la mercadería; por eso no se ratean.
+// La base rateable (que se incorpora al costo del producto) incluye:
+//   FOB + Σ subtotal de cada costo logístico + DIE + Tasa + Arancel SIM
+// IVA, IIBB y Ganancias son créditos fiscales (Activo) y NO se ratean.
+// Todo se convierte a ARS antes de ratear (FOB usa el TC del embarque,
+// cada costo usa el suyo, los tributos aduaneros ya están en ARS).
 export function calcularRateioEmbarque<T extends ItemRateioInput>(
   embarque: EmbarqueRateio,
   items: readonly T[],
@@ -116,15 +122,20 @@ export function calcularRateioEmbarque<T extends ItemRateioInput>(
     throw new Error("fobTotal debe ser > 0 para ratear");
   }
 
+  const embarqueTC = toDecimal(embarque.embarqueTipoCambio);
+  const fobTotalArs = round2(fobTotal.times(embarqueTC));
+
+  const costosArs = embarque.costos.reduce((acc, c) => {
+    const ars = round2(toDecimal(c.subtotal).times(toDecimal(c.tipoCambio)));
+    return acc.plus(ars);
+  }, new Decimal(0));
+
   const costoRateable = round2(
-    fobTotal
-      .plus(toDecimal(embarque.flete))
-      .plus(toDecimal(embarque.seguro))
+    fobTotalArs
+      .plus(costosArs)
       .plus(toDecimal(embarque.die))
       .plus(toDecimal(embarque.tasaEstadistica))
-      .plus(toDecimal(embarque.arancelSim))
-      .plus(toDecimal(embarque.gastosPortuarios))
-      .plus(toDecimal(embarque.honorariosDespachante)),
+      .plus(toDecimal(embarque.arancelSim)),
   );
 
   const lastIdx = items.length - 1;
@@ -137,7 +148,6 @@ export function calcularRateioEmbarque<T extends ItemRateioInput>(
 
     let costoTotal: Decimal;
     if (idx === lastIdx) {
-      // La última línea absorbe el residuo para que sum(costoTotal) === costoRateable.
       costoTotal = round2(costoRateable.minus(acumulado));
     } else {
       const proporcion = fobItem.dividedBy(fobTotal);

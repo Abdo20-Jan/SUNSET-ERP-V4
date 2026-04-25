@@ -82,6 +82,20 @@ enum EmbarqueEstado {
   CERRADO
 }
 
+enum TipoCostoEmbarque {
+  FLETE_INTERNACIONAL
+  FLETE_NACIONAL
+  SEGURO_MARITIMO
+  GASTOS_PORTUARIOS
+  HONORARIOS_DESPACHANTE
+  OPERADOR_LOGISTICO
+  ALMACENAJE
+  DEVOLUCION_CONTENEDOR
+  AGENTE_DE_CARGAS
+  GASTOS_LOCALES
+  GASTOS_EXTRAS
+}
+
 enum CompraEstado {
   BORRADOR
   EMITIDA
@@ -155,6 +169,7 @@ model CuentaContable {
   proveedores      Proveedor[]
   prestamos        PrestamoExterno[]
   movimientos      MovimientoTesoreria[]
+  embarqueCostos   EmbarqueCosto[]       @relation("EmbarqueCostoCuentaGasto")
 }
 
 model PeriodoContable {
@@ -275,35 +290,62 @@ model PrestamoExterno {
 // ============================================================
 
 model Embarque {
-  id                    String         @id @default(uuid())
-  codigo                String         @unique
-  proveedorId           String
-  estado                EmbarqueEstado @default(BORRADOR)
-  moneda                Moneda
-  tipoCambio            Decimal        @db.Decimal(18, 6)
-  fobTotal              Decimal        @default(0) @db.Decimal(18, 2)
-  flete                 Decimal        @default(0) @db.Decimal(18, 2)
-  seguro                Decimal        @default(0) @db.Decimal(18, 2)
-  cifTotal              Decimal        @default(0) @db.Decimal(18, 2)
-  die                   Decimal        @default(0) @db.Decimal(18, 2)
-  tasaEstadistica       Decimal        @default(0) @db.Decimal(18, 2)
-  arancelSim            Decimal        @default(0) @db.Decimal(18, 2)
-  iva                   Decimal        @default(0) @db.Decimal(18, 2)
-  ivaAdicional          Decimal        @default(0) @db.Decimal(18, 2)
-  ganancias             Decimal        @default(0) @db.Decimal(18, 2)
-  iibb                  Decimal        @default(0) @db.Decimal(18, 2)
-  gastosPortuarios      Decimal        @default(0) @db.Decimal(18, 2)
-  honorariosDespachante Decimal        @default(0) @db.Decimal(18, 2)
-  costoTotal            Decimal        @default(0) @db.Decimal(18, 2)
-  asientoId             String?        @unique
-  depositoDestinoId     String?
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
+  id                String         @id @default(uuid())
+  codigo            String         @unique
+  proveedorId       String
+  estado            EmbarqueEstado @default(BORRADOR)
+  moneda            Moneda
+  tipoCambio        Decimal        @db.Decimal(18, 6)
+  fobTotal          Decimal        @default(0) @db.Decimal(18, 2)
+  cifTotal          Decimal        @default(0) @db.Decimal(18, 2)
+  die               Decimal        @default(0) @db.Decimal(18, 2)
+  tasaEstadistica   Decimal        @default(0) @db.Decimal(18, 2)
+  arancelSim        Decimal        @default(0) @db.Decimal(18, 2)
+  iva               Decimal        @default(0) @db.Decimal(18, 2)
+  ivaAdicional      Decimal        @default(0) @db.Decimal(18, 2)
+  ganancias         Decimal        @default(0) @db.Decimal(18, 2)
+  iibb              Decimal        @default(0) @db.Decimal(18, 2)
+  costoTotal        Decimal        @default(0) @db.Decimal(18, 2)
+  asientoId         String?        @unique
+  depositoDestinoId String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
-  proveedor       Proveedor      @relation(fields: [proveedorId], references: [id])
+  proveedor       Proveedor       @relation(fields: [proveedorId], references: [id])
   items           ItemEmbarque[]
-  asiento         Asiento?       @relation(fields: [asientoId], references: [id])
-  depositoDestino Deposito?      @relation(fields: [depositoDestinoId], references: [id])
+  costos          EmbarqueCosto[]
+  asiento         Asiento?        @relation(fields: [asientoId], references: [id])
+  depositoDestino Deposito?       @relation(fields: [depositoDestinoId], references: [id])
+}
+
+// Costos logísticos del embarque que generan cuentas a pagar a distintos
+// proveedores (flete, seguro, despachante, portuarios, operador, etc.).
+// Cada línea: subtotal neto + IVA + IIBB + otras retenciones + total.
+model EmbarqueCosto {
+  id                    Int               @id @default(autoincrement())
+  embarqueId            String
+  tipo                  TipoCostoEmbarque
+  proveedorId           String
+  cuentaContableGastoId Int
+  moneda                Moneda
+  tipoCambio            Decimal           @db.Decimal(18, 6)
+  subtotal              Decimal           @db.Decimal(18, 2)
+  iva                   Decimal           @default(0) @db.Decimal(18, 2)
+  iibb                  Decimal           @default(0) @db.Decimal(18, 2)
+  otros                 Decimal           @default(0) @db.Decimal(18, 2)
+  total                 Decimal           @db.Decimal(18, 2)
+  facturaNumero         String?
+  fechaFactura          DateTime?
+  descripcion           String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  embarque            Embarque       @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
+  proveedor           Proveedor      @relation(fields: [proveedorId], references: [id])
+  cuentaContableGasto CuentaContable @relation("EmbarqueCostoCuentaGasto", fields: [cuentaContableGastoId], references: [id])
+
+  @@index([embarqueId])
+  @@index([proveedorId])
 }
 
 model ItemEmbarque {
@@ -385,9 +427,10 @@ model Proveedor {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  cuentaContable CuentaContable? @relation(fields: [cuentaContableId], references: [id])
-  embarques      Embarque[]
-  compras        Compra[]
+  cuentaContable  CuentaContable? @relation(fields: [cuentaContableId], references: [id])
+  embarques       Embarque[]
+  compras         Compra[]
+  costosEmbarque  EmbarqueCosto[]
 }
 
 model Producto {

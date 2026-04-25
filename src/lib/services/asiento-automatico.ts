@@ -687,26 +687,26 @@ export async function crearAsientoTransferencia(
 }
 
 const EMBARQUE_CODIGOS = {
-  // DEBE
+  // DEBE — capitalización + créditos fiscales
   MERCADERIAS_EN_TRANSITO: "1.1.5.02",
   DIE_EGRESO: "5.7.1.01",
   TASA_ESTADISTICA_EGRESO: "5.7.1.02",
   ARANCEL_SIM_EGRESO: "5.7.1.03",
-  GASTOS_PORTUARIOS_EGRESO: "5.4.1.01",
-  HONORARIOS_DESPACHANTE_EGRESO: "5.6.1.01",
-  IVA_CREDITO: "1.1.4.04",
+  IVA_CREDITO_IMPORTACION: "1.1.4.04",
   IVA_ADICIONAL_CREDITO: "1.1.4.05",
-  IIBB_CREDITO: "1.1.4.06",
+  IIBB_CREDITO_IMPORTACION: "1.1.4.06",
   GANANCIAS_CREDITO: "1.1.4.07",
-  // HABER
-  PROVEEDOR_EXTERIOR: "2.1.1.02",
-  DESPACHANTE_POR_PAGAR: "2.1.1.03",
+  // DEBE — créditos fiscales de costos logísticos (no importación)
+  IVA_CREDITO_COMPRAS: "1.1.4.01",
+  IIBB_CREDITO_COMPRAS: "1.1.4.11",
+  // HABER — proveedor de la mercadería + AFIP/Aduana
   DIE_PASIVO: "2.1.5.01",
   TASA_ESTADISTICA_PASIVO: "2.1.5.02",
   ARANCEL_SIM_PASIVO: "2.1.5.03",
   IVA_POR_PAGAR: "2.1.5.04",
   IIBB_POR_PAGAR: "2.1.3.02",
   GANANCIAS_POR_PAGAR: "2.1.3.03",
+  PROVEEDOR_EXTERIOR_FALLBACK: "2.1.1.02",
 } as const;
 
 export async function crearAsientoEmbarque(
@@ -716,6 +716,17 @@ export async function crearAsientoEmbarque(
   const run = async (inner: TxClient) => {
     const embarque = await inner.embarque.findUnique({
       where: { id: embarqueId },
+      include: {
+        proveedor: { select: { id: true, nombre: true, cuentaContableId: true } },
+        costos: {
+          include: {
+            proveedor: {
+              select: { id: true, nombre: true, cuentaContableId: true },
+            },
+          },
+          orderBy: { id: "asc" },
+        },
+      },
     });
 
     if (!embarque) {
@@ -747,149 +758,193 @@ export async function crearAsientoEmbarque(
       }
     }
 
-    const fob = toDecimal(embarque.fobTotal);
-    const flete = toDecimal(embarque.flete);
-    const seguro = toDecimal(embarque.seguro);
-    const cif = fob.plus(flete).plus(seguro);
+    const tcEmb = toDecimal(embarque.tipoCambio);
+    const fobArs = toDecimal(embarque.fobTotal).times(tcEmb);
 
     const die = toDecimal(embarque.die);
     const te = toDecimal(embarque.tasaEstadistica);
     const arancelSim = toDecimal(embarque.arancelSim);
-    const gastosPort = toDecimal(embarque.gastosPortuarios);
-    const honorarios = toDecimal(embarque.honorariosDespachante);
-    const iva = toDecimal(embarque.iva);
-    const ivaAd = toDecimal(embarque.ivaAdicional);
-    const iibb = toDecimal(embarque.iibb);
+    const ivaAduana = toDecimal(embarque.iva);
+    const ivaAdicional = toDecimal(embarque.ivaAdicional);
+    const iibbAduana = toDecimal(embarque.iibb);
     const ganancias = toDecimal(embarque.ganancias);
 
-    // DEBE: Mercaderías en Tránsito (CIF completo) + Gastos Reales + Créditos Fiscales
-    const debeItems: Array<{
-      codigo: string;
-      valor: import("decimal.js").Decimal;
+    type Linea = {
+      cuentaId: number;
+      debe: import("decimal.js").Decimal;
+      haber: import("decimal.js").Decimal;
       descripcion: string;
-    }> = [
-      {
-        codigo: EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO,
-        valor: cif,
-        descripcion: "FOB + Flete + Seguro (CIF)",
-      },
-      { codigo: EMBARQUE_CODIGOS.DIE_EGRESO, valor: die, descripcion: "DIE" },
-      {
-        codigo: EMBARQUE_CODIGOS.TASA_ESTADISTICA_EGRESO,
-        valor: te,
-        descripcion: "Tasa estadística",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO,
-        valor: arancelSim,
-        descripcion: "Arancel SIM",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.GASTOS_PORTUARIOS_EGRESO,
-        valor: gastosPort,
-        descripcion: "Gastos portuarios",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.HONORARIOS_DESPACHANTE_EGRESO,
-        valor: honorarios,
-        descripcion: "Honorarios despachante",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.IVA_CREDITO,
-        valor: iva,
-        descripcion: "IVA crédito fiscal",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.IVA_ADICIONAL_CREDITO,
-        valor: ivaAd,
-        descripcion: "IVA adicional crédito",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.IIBB_CREDITO,
-        valor: iibb,
-        descripcion: "Percepción IIBB",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.GANANCIAS_CREDITO,
-        valor: ganancias,
-        descripcion: "Percepción Ganancias",
-      },
-    ].filter((i) => i.valor.gt(0));
+    };
+    const lineas: Linea[] = [];
 
-    if (debeItems.length === 0) {
+    const pushDebe = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({
+        cuentaId,
+        debe: valor,
+        haber: toDecimal(0),
+        descripcion,
+      });
+    };
+    const pushHaber = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({
+        cuentaId,
+        debe: toDecimal(0),
+        haber: valor,
+        descripcion,
+      });
+    };
+
+    // 1) FOB → Mercadería en tránsito vs. proveedor del exterior
+    const proveedorExteriorCuentaId =
+      embarque.proveedor.cuentaContableId ??
+      porCodigo.get(EMBARQUE_CODIGOS.PROVEEDOR_EXTERIOR_FALLBACK)!;
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO)!,
+      fobArs,
+      `FOB embarque ${embarque.codigo} (${embarque.proveedor.nombre})`,
+    );
+    pushHaber(
+      proveedorExteriorCuentaId,
+      fobArs,
+      `Proveedor exterior (${embarque.proveedor.nombre}) — FOB`,
+    );
+
+    // 2) Tributos aduaneros (DEBE gasto/crédito, HABER AFIP/Aduana por pagar)
+    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.DIE_EGRESO)!, die, "DIE");
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO)!,
+      die,
+      "DIE por pagar (Aduana)",
+    );
+
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_EGRESO)!,
+      te,
+      "Tasa estadística",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_PASIVO)!,
+      te,
+      "Tasa estadística por pagar",
+    );
+
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO)!,
+      arancelSim,
+      "Arancel SIM",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO)!,
+      arancelSim,
+      "Arancel SIM por pagar",
+    );
+
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_IMPORTACION)!,
+      ivaAduana,
+      "IVA crédito fiscal importación",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_ADICIONAL_CREDITO)!,
+      ivaAdicional,
+      "IVA adicional importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_POR_PAGAR)!,
+      ivaAduana.plus(ivaAdicional),
+      "IVA importación por pagar (IVA + adicional)",
+    );
+
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_IMPORTACION)!,
+      iibbAduana,
+      "Percepción IIBB importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.IIBB_POR_PAGAR)!,
+      iibbAduana,
+      "IIBB importación por pagar",
+    );
+
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_CREDITO)!,
+      ganancias,
+      "Percepción Ganancias importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_POR_PAGAR)!,
+      ganancias,
+      "Ganancias importación por pagar",
+    );
+
+    // 3) Costos logísticos por proveedor (uno por línea)
+    for (const c of embarque.costos) {
+      const tc = toDecimal(c.tipoCambio);
+      const subtotalArs = toDecimal(c.subtotal).times(tc);
+      const ivaArs = toDecimal(c.iva).times(tc);
+      const iibbArs = toDecimal(c.iibb).times(tc);
+      const otrosArs = toDecimal(c.otros).times(tc);
+      const totalArs = subtotalArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+
+      if (!totalArs.gt(0)) continue;
+
+      if (!c.proveedor.cuentaContableId) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `El proveedor ${c.proveedor.nombre} no tiene cuenta contable asociada (revisar Maestros / Proveedores).`,
+        );
+      }
+
+      const desc = `${c.tipo.replace(/_/g, " ").toLowerCase()} — ${c.proveedor.nombre}${c.facturaNumero ? ` (Fact. ${c.facturaNumero})` : ""}`;
+
+      pushDebe(c.cuentaContableGastoId, subtotalArs, `${desc} — neto`);
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS)!,
+        ivaArs,
+        `${desc} — IVA`,
+      );
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS)!,
+        iibbArs,
+        `${desc} — IIBB`,
+      );
+      pushDebe(c.cuentaContableGastoId, otrosArs, `${desc} — otros`);
+      pushHaber(
+        c.proveedor.cuentaContableId,
+        totalArs,
+        `${desc} — total a pagar`,
+      );
+    }
+
+    if (lineas.length === 0) {
       throw new AsientoError(
         "DOMINIO_INVALIDO",
         `Embarque ${embarque.codigo} no tiene montos a contabilizar.`,
       );
     }
 
-    // HABER: contrapartidas detalladas (1 línea por concepto a pagar)
-    const haberItems: Array<{
-      codigo: string;
-      valor: import("decimal.js").Decimal;
-      descripcion: string;
-    }> = [
-      {
-        codigo: EMBARQUE_CODIGOS.PROVEEDOR_EXTERIOR,
-        valor: cif,
-        descripcion: "Proveedor del exterior (FOB + Flete + Seguro)",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.DIE_PASIVO,
-        valor: die,
-        descripcion: "DIE por pagar",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.TASA_ESTADISTICA_PASIVO,
-        valor: te,
-        descripcion: "Tasa estadística por pagar",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO,
-        valor: arancelSim,
-        descripcion: "Arancel SIM por pagar",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.IVA_POR_PAGAR,
-        valor: iva.plus(ivaAd),
-        descripcion: "IVA importación por pagar (IVA + IVA adicional)",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.IIBB_POR_PAGAR,
-        valor: iibb,
-        descripcion: "IIBB por pagar",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.GANANCIAS_POR_PAGAR,
-        valor: ganancias,
-        descripcion: "Ganancias por pagar",
-      },
-      {
-        codigo: EMBARQUE_CODIGOS.DESPACHANTE_POR_PAGAR,
-        valor: gastosPort.plus(honorarios),
-        descripcion: "Despachante por pagar (honorarios + gastos portuarios)",
-      },
-    ].filter((i) => i.valor.gt(0));
-
-    const debeLineas: LineaInput[] = debeItems.map((item) => ({
-      cuentaId: porCodigo.get(item.codigo)!,
-      debe: money(item.valor).toString(),
-      haber: 0,
-      descripcion: item.descripcion,
-    }));
-
-    const haberLineas: LineaInput[] = haberItems.map((item) => ({
-      cuentaId: porCodigo.get(item.codigo)!,
-      debe: 0,
-      haber: money(item.valor).toString(),
-      descripcion: item.descripcion,
+    const lineasInput: LineaInput[] = lineas.map((l) => ({
+      cuentaId: l.cuentaId,
+      debe: money(l.debe).toString(),
+      haber: money(l.haber).toString(),
+      descripcion: l.descripcion,
     }));
 
     const asiento = await crearAsientoEnTx(inner, {
       fecha: new Date(),
       descripcion: `Nacionalización embarque ${embarque.codigo}`,
       origen: AsientoOrigen.COMEX,
-      lineas: [...debeLineas, ...haberLineas],
+      lineas: lineasInput,
     });
 
     await inner.embarque.update({

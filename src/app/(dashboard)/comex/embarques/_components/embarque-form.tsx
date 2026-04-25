@@ -38,6 +38,10 @@ import {
   ProductoCombobox,
   type ProductoOption,
 } from "@/components/producto-combobox";
+import {
+  CuentaCombobox,
+  type CuentaOption,
+} from "@/components/cuenta-combobox";
 import Decimal from "decimal.js";
 
 import { calcularTributosSugeridos } from "@/lib/services/comex";
@@ -96,6 +100,36 @@ const ESTADO_LABELS: Record<EmbarqueEstado, string> = {
   CERRADO: "Cerrado",
 };
 
+const TIPO_COSTO_VALUES = [
+  "FLETE_INTERNACIONAL",
+  "FLETE_NACIONAL",
+  "SEGURO_MARITIMO",
+  "GASTOS_PORTUARIOS",
+  "HONORARIOS_DESPACHANTE",
+  "OPERADOR_LOGISTICO",
+  "ALMACENAJE",
+  "DEVOLUCION_CONTENEDOR",
+  "AGENTE_DE_CARGAS",
+  "GASTOS_LOCALES",
+  "GASTOS_EXTRAS",
+] as const;
+
+type TipoCosto = (typeof TIPO_COSTO_VALUES)[number];
+
+const TIPO_COSTO_LABELS: Record<TipoCosto, string> = {
+  FLETE_INTERNACIONAL: "Flete internacional",
+  FLETE_NACIONAL: "Flete nacional",
+  SEGURO_MARITIMO: "Seguro marítimo",
+  GASTOS_PORTUARIOS: "Gastos portuarios",
+  HONORARIOS_DESPACHANTE: "Honorarios despachante",
+  OPERADOR_LOGISTICO: "Operador logístico",
+  ALMACENAJE: "Almacenaje / WMS",
+  DEVOLUCION_CONTENEDOR: "Devolución contenedor",
+  AGENTE_DE_CARGAS: "Agente de cargas",
+  GASTOS_LOCALES: "Gastos locales",
+  GASTOS_EXTRAS: "Gastos extras",
+};
+
 const formSchema = z
   .object({
     codigo: z.string().trim().min(1, "Código requerido").max(32),
@@ -104,8 +138,6 @@ const formSchema = z
     moneda: z.enum(["ARS", "USD"]),
     tipoCambio: z.string().regex(rateRegex, "Tipo de cambio inválido"),
     estado: z.enum(ESTADO_VALUES),
-    flete: z.string().regex(moneyRegex, "Inválido"),
-    seguro: z.string().regex(moneyRegex, "Inválido"),
     die: z.string().regex(moneyRegex, "Inválido"),
     tasaEstadistica: z.string().regex(moneyRegex, "Inválido"),
     arancelSim: z.string().regex(moneyRegex, "Inválido"),
@@ -113,8 +145,6 @@ const formSchema = z
     ivaAdicional: z.string().regex(moneyRegex, "Inválido"),
     ganancias: z.string().regex(moneyRegex, "Inválido"),
     iibb: z.string().regex(moneyRegex, "Inválido"),
-    gastosPortuarios: z.string().regex(moneyRegex, "Inválido"),
-    honorariosDespachante: z.string().regex(moneyRegex, "Inválido"),
     items: z
       .array(
         z.object({
@@ -129,6 +159,25 @@ const formSchema = z
         }),
       )
       .min(1, "Agregue al menos un ítem"),
+    costos: z.array(
+      z.object({
+        tipo: z.enum(TIPO_COSTO_VALUES),
+        proveedorId: z.string().uuid("Seleccione un proveedor"),
+        cuentaContableGastoId: z
+          .number()
+          .int()
+          .positive("Seleccione la cuenta de gasto"),
+        moneda: z.enum(["ARS", "USD"]),
+        tipoCambio: z.string().regex(rateRegex, "TC inválido"),
+        subtotal: z.string().regex(moneyRegex, "Subtotal inválido"),
+        iva: z.string().regex(moneyRegex, "IVA inválido"),
+        iibb: z.string().regex(moneyRegex, "IIBB inválido"),
+        otros: z.string().regex(moneyRegex, "Otros inválido"),
+        facturaNumero: z.string().max(64).optional(),
+        fechaFactura: z.string().optional(),
+        descripcion: z.string().max(200).optional(),
+      }),
+    ),
   })
   .superRefine((data, ctx) => {
     if (data.estado === "CERRADO") {
@@ -156,6 +205,15 @@ const formSchema = z
         });
       }
     }
+    data.costos.forEach((c, idx) => {
+      if (c.moneda === "ARS" && c.tipoCambio !== "1") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["costos", idx, "tipoCambio"],
+          message: "Para ARS, TC=1",
+        });
+      }
+    });
   });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -171,6 +229,7 @@ type Props =
       proveedores: ProveedorOption[];
       productos: ProductoOption[];
       depositos: DepositoOption[];
+      cuentasGasto: CuentaOption[];
       codigoSugerido: string;
     }
   | {
@@ -178,6 +237,7 @@ type Props =
       proveedores: ProveedorOption[];
       productos: ProductoOption[];
       depositos: DepositoOption[];
+      cuentasGasto: CuentaOption[];
       initialData: EmbarqueDetalle;
       readonly: boolean;
     };
@@ -198,8 +258,6 @@ export function EmbarqueForm(props: Props) {
           moneda: "USD",
           tipoCambio: "",
           estado: "BORRADOR",
-          flete: "0",
-          seguro: "0",
           die: "0",
           tasaEstadistica: "0",
           arancelSim: "0",
@@ -207,9 +265,8 @@ export function EmbarqueForm(props: Props) {
           ivaAdicional: "0",
           ganancias: "0",
           iibb: "0",
-          gastosPortuarios: "0",
-          honorariosDespachante: "0",
           items: [],
+          costos: [],
         }
       : {
           codigo: props.initialData.codigo,
@@ -221,8 +278,6 @@ export function EmbarqueForm(props: Props) {
             props.initialData.estado === "CERRADO"
               ? "BORRADOR"
               : props.initialData.estado,
-          flete: props.initialData.flete,
-          seguro: props.initialData.seguro,
           die: props.initialData.die,
           tasaEstadistica: props.initialData.tasaEstadistica,
           arancelSim: props.initialData.arancelSim,
@@ -230,12 +285,24 @@ export function EmbarqueForm(props: Props) {
           ivaAdicional: props.initialData.ivaAdicional,
           ganancias: props.initialData.ganancias,
           iibb: props.initialData.iibb,
-          gastosPortuarios: props.initialData.gastosPortuarios,
-          honorariosDespachante: props.initialData.honorariosDespachante,
           items: props.initialData.items.map((it) => ({
             productoId: it.productoId,
             cantidad: it.cantidad,
             precioUnitarioFob: it.precioUnitarioFob,
+          })),
+          costos: props.initialData.costos.map((c) => ({
+            tipo: c.tipo as TipoCosto,
+            proveedorId: c.proveedorId,
+            cuentaContableGastoId: c.cuentaContableGastoId,
+            moneda: c.moneda,
+            tipoCambio: c.tipoCambio,
+            subtotal: c.subtotal,
+            iva: c.iva,
+            iibb: c.iibb,
+            otros: c.otros,
+            facturaNumero: c.facturaNumero ?? "",
+            fechaFactura: c.fechaFactura ? c.fechaFactura.slice(0, 10) : "",
+            descripcion: c.descripcion ?? "",
           })),
         };
 
@@ -256,7 +323,18 @@ export function EmbarqueForm(props: Props) {
     name: "items",
   });
 
+  const {
+    fields: costoFields,
+    append: appendCosto,
+    remove: removeCosto,
+  } = useFieldArray({
+    control,
+    name: "costos",
+  });
+
   const moneda = useWatch({ control, name: "moneda" });
+  const tipoCambioEmbarque =
+    useWatch({ control, name: "tipoCambio" }) ?? "0";
 
   useEffect(() => {
     if (moneda === "ARS") {
@@ -266,8 +344,7 @@ export function EmbarqueForm(props: Props) {
 
   // ---------- Cálculos en tiempo real ----------
   const items = useWatch({ control, name: "items" }) ?? [];
-  const flete = useWatch({ control, name: "flete" }) ?? "0";
-  const seguro = useWatch({ control, name: "seguro" }) ?? "0";
+  const costos = useWatch({ control, name: "costos" }) ?? [];
   const die = useWatch({ control, name: "die" }) ?? "0";
   const tasaEstadistica =
     useWatch({ control, name: "tasaEstadistica" }) ?? "0";
@@ -276,10 +353,6 @@ export function EmbarqueForm(props: Props) {
   const ivaAdicional = useWatch({ control, name: "ivaAdicional" }) ?? "0";
   const ganancias = useWatch({ control, name: "ganancias" }) ?? "0";
   const iibb = useWatch({ control, name: "iibb" }) ?? "0";
-  const gastosPortuarios =
-    useWatch({ control, name: "gastosPortuarios" }) ?? "0";
-  const honorariosDespachante =
-    useWatch({ control, name: "honorariosDespachante" }) ?? "0";
 
   const fobTotal = useMemo(
     () =>
@@ -293,32 +366,53 @@ export function EmbarqueForm(props: Props) {
     [items],
   );
 
-  const cifTotal = useMemo(
-    () => sumAs2dp([fobTotal, safeMoney(flete), safeMoney(seguro)]),
-    [fobTotal, flete, seguro],
+  const fobTotalArs = useMemo(() => {
+    const tc = safeMoney(tipoCambioEmbarque);
+    return fobTotal.times(new Decimal(tc)).toDecimalPlaces(2);
+  }, [fobTotal, tipoCambioEmbarque]);
+
+  // Subtotales de costos en ARS (subtotal × TC del costo)
+  const costosSubtotalArs = useMemo(
+    () =>
+      sumAs2dp(
+        costos.map((c) => {
+          const sub = safeMoney(c?.subtotal);
+          const tc = safeMoney(c?.tipoCambio);
+          return new Decimal(sub).times(new Decimal(tc));
+        }),
+      ),
+    [costos],
   );
 
-  const totalGastosReales = useMemo(
-    () =>
-      sumAs2dp([
-        safeMoney(flete),
-        safeMoney(seguro),
-        safeMoney(die),
-        safeMoney(tasaEstadistica),
-        safeMoney(arancelSim),
-        safeMoney(gastosPortuarios),
-        safeMoney(honorariosDespachante),
-      ]),
-    [
-      flete,
-      seguro,
-      die,
-      tasaEstadistica,
-      arancelSim,
-      gastosPortuarios,
-      honorariosDespachante,
-    ],
-  );
+  // CIF = FOB + Flete internacional + Seguro marítimo (en ARS).
+  const cifTotalArs = useMemo(() => {
+    const fleteIntl = costos
+      .filter((c) => c?.tipo === "FLETE_INTERNACIONAL")
+      .reduce(
+        (acc, c) =>
+          acc.plus(
+            new Decimal(safeMoney(c?.subtotal)).times(
+              new Decimal(safeMoney(c?.tipoCambio)),
+            ),
+          ),
+        new Decimal(0),
+      );
+    const seguroIntl = costos
+      .filter((c) => c?.tipo === "SEGURO_MARITIMO")
+      .reduce(
+        (acc, c) =>
+          acc.plus(
+            new Decimal(safeMoney(c?.subtotal)).times(
+              new Decimal(safeMoney(c?.tipoCambio)),
+            ),
+          ),
+        new Decimal(0),
+      );
+    return fobTotalArs
+      .plus(fleteIntl)
+      .plus(seguroIntl)
+      .toDecimalPlaces(2);
+  }, [fobTotalArs, costos]);
 
   const totalCreditosFiscales = useMemo(
     () =>
@@ -332,17 +426,24 @@ export function EmbarqueForm(props: Props) {
   );
 
   const costoTotal = useMemo(
-    () => sumAs2dp([fobTotal, totalGastosReales]),
-    [fobTotal, totalGastosReales],
+    () =>
+      sumAs2dp([
+        fobTotalArs,
+        costosSubtotalArs,
+        safeMoney(die),
+        safeMoney(tasaEstadistica),
+        safeMoney(arancelSim),
+      ]),
+    [fobTotalArs, costosSubtotalArs, die, tasaEstadistica, arancelSim],
   );
 
   // ---------- Acciones ----------
   const handleCalcularTributos = () => {
-    if (cifTotal.lte(0)) {
+    if (cifTotalArs.lte(0)) {
       toast.error("Complete FOB y costos logísticos para calcular tributos.");
       return;
     }
-    const t = calcularTributosSugeridos(cifTotal);
+    const t = calcularTributosSugeridos(cifTotalArs);
     setValue("die", t.die.toFixed(2), { shouldValidate: true });
     setValue("tasaEstadistica", t.tasaEstadistica.toFixed(2), {
       shouldValidate: true,
@@ -639,32 +740,71 @@ export function EmbarqueForm(props: Props) {
         </CardContent>
       </Card>
 
-      {/* Sección 3: Costos Logísticos */}
+      {/* Sección 3: Costos Logísticos por proveedor */}
       <Card>
         <CardContent className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold">Costos logísticos</h2>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <MoneyField
-              label="Flete internacional"
-              name="flete"
-              register={register}
-              errors={errors}
-              disabled={readonly}
-            />
-            <MoneyField
-              label="Seguro"
-              name="seguro"
-              register={register}
-              errors={errors}
-              disabled={readonly}
-            />
-            <div className="flex flex-col gap-2">
-              <Label>CIF Total (FOB + Flete + Seguro)</Label>
-              <div className="flex h-9 items-center justify-end rounded-md border border-input bg-muted/30 px-3 font-mono text-sm tabular-nums">
-                {formatMoney(cifTotal.toString())}
-              </div>
-            </div>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">Costos logísticos</h2>
+            {!readonly && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  appendCosto({
+                    tipo: "FLETE_INTERNACIONAL",
+                    proveedorId: "",
+                    cuentaContableGastoId: 0,
+                    moneda: "USD",
+                    tipoCambio: tipoCambioEmbarque || "1",
+                    subtotal: "0",
+                    iva: "0",
+                    iibb: "0",
+                    otros: "0",
+                    facturaNumero: "",
+                    fechaFactura: "",
+                    descripcion: "",
+                  })
+                }
+              >
+                <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+                Agregar costo
+              </Button>
+            )}
           </div>
+
+          <p className="text-xs text-muted-foreground">
+            Cada costo genera una <strong>cuenta a pagar</strong> a su
+            proveedor (flete, despachante, operador, etc.) con su IVA e IIBB
+            propios. CIF (FOB + flete internacional + seguro marítimo) ={" "}
+            <span className="font-mono font-medium">
+              ARS {formatMoney(cifTotalArs.toString())}
+            </span>
+            .
+          </p>
+
+          {costoFields.length === 0 ? (
+            <p className="rounded-lg border border-dashed bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+              Aún no hay costos logísticos. Use “Agregar costo”.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {costoFields.map((field, index) => (
+                <CostoRow
+                  key={field.id}
+                  index={index}
+                  control={control}
+                  register={register}
+                  setValue={setValue}
+                  proveedores={props.proveedores}
+                  cuentasGasto={props.cuentasGasto}
+                  disabled={readonly}
+                  onRemove={() => removeCosto(index)}
+                  errors={errors.costos?.[index]}
+                />
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -696,9 +836,9 @@ export function EmbarqueForm(props: Props) {
             />
             <div className="space-y-0.5">
               <p>
-                <strong>Gastos reales</strong> (componen el costo del producto):
-                DIE, Tasa Estadística, Arancel SIM, Gastos Portuarios,
-                Honorarios Despachante.
+                <strong>Tributos aduaneros</strong> (van a Aduana/AFIP, no a un
+                proveedor): DIE, Tasa Estadística, Arancel SIM. Componen el
+                costo del producto.
               </p>
               <p>
                 <strong>Créditos fiscales</strong> (al ACTIVO, no al costo):
@@ -709,7 +849,7 @@ export function EmbarqueForm(props: Props) {
 
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Gastos reales
+              Tributos aduaneros
             </h3>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <MoneyField
@@ -729,20 +869,6 @@ export function EmbarqueForm(props: Props) {
               <MoneyField
                 label="Arancel SIM (5.7.1.03)"
                 name="arancelSim"
-                register={register}
-                errors={errors}
-                disabled={readonly}
-              />
-              <MoneyField
-                label="Gastos portuarios (5.4.1.01)"
-                name="gastosPortuarios"
-                register={register}
-                errors={errors}
-                disabled={readonly}
-              />
-              <MoneyField
-                label="Honorarios despachante (5.6.1.01)"
-                name="honorariosDespachante"
                 register={register}
                 errors={errors}
                 disabled={readonly}
@@ -794,23 +920,27 @@ export function EmbarqueForm(props: Props) {
           <h2 className="text-sm font-semibold">Resumen</h2>
           <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
             <ResumenLinha
-              label="FOB Total"
+              label="FOB Total (moneda)"
               value={formatMoney(fobTotal.toString())}
             />
             <ResumenLinha
-              label="CIF Total"
-              value={formatMoney(cifTotal.toString())}
+              label="FOB Total (ARS)"
+              value={formatMoney(fobTotalArs.toString())}
             />
             <ResumenLinha
-              label="Gastos reales (al costo)"
-              value={formatMoney(totalGastosReales.toString())}
+              label="CIF (FOB + Flete intl + Seguro)"
+              value={formatMoney(cifTotalArs.toString())}
+            />
+            <ResumenLinha
+              label="Costos logísticos (subtotal ARS)"
+              value={formatMoney(costosSubtotalArs.toString())}
             />
             <ResumenLinha
               label="Créditos fiscales (al activo)"
               value={formatMoney(totalCreditosFiscales.toString())}
             />
             <ResumenLinha
-              label="Costo total del embarque"
+              label="Costo total del embarque (ARS)"
               value={formatMoney(costoTotal.toString())}
               emphasis
             />
@@ -966,6 +1096,283 @@ function ItemRow({
         </td>
       )}
     </tr>
+  );
+}
+
+type CostoErrors = {
+  tipo?: { message?: string };
+  proveedorId?: { message?: string };
+  cuentaContableGastoId?: { message?: string };
+  moneda?: { message?: string };
+  tipoCambio?: { message?: string };
+  subtotal?: { message?: string };
+  iva?: { message?: string };
+  iibb?: { message?: string };
+  otros?: { message?: string };
+};
+
+function CostoRow({
+  index,
+  control,
+  register,
+  setValue,
+  proveedores,
+  cuentasGasto,
+  disabled,
+  onRemove,
+  errors,
+}: {
+  index: number;
+  control: Control<FormValues>;
+  register: ReturnType<typeof useForm<FormValues>>["register"];
+  setValue: ReturnType<typeof useForm<FormValues>>["setValue"];
+  proveedores: ProveedorOption[];
+  cuentasGasto: CuentaOption[];
+  disabled: boolean;
+  onRemove: () => void;
+  errors?: CostoErrors;
+}) {
+  const moneda = useWatch({ control, name: `costos.${index}.moneda` as const });
+  const subtotal = useWatch({
+    control,
+    name: `costos.${index}.subtotal` as const,
+  });
+  const iva = useWatch({ control, name: `costos.${index}.iva` as const });
+  const iibb = useWatch({ control, name: `costos.${index}.iibb` as const });
+  const otros = useWatch({ control, name: `costos.${index}.otros` as const });
+  const tc = useWatch({
+    control,
+    name: `costos.${index}.tipoCambio` as const,
+  });
+
+  useEffect(() => {
+    if (moneda === "ARS") {
+      setValue(`costos.${index}.tipoCambio` as const, "1", {
+        shouldValidate: true,
+      });
+    }
+  }, [moneda, index, setValue]);
+
+  const totalMoneda = useMemo(() => {
+    const s = new Decimal(safeMoney(subtotal));
+    const i = new Decimal(safeMoney(iva));
+    const b = new Decimal(safeMoney(iibb));
+    const o = new Decimal(safeMoney(otros));
+    return s.plus(i).plus(b).plus(o).toDecimalPlaces(2);
+  }, [subtotal, iva, iibb, otros]);
+
+  const totalArs = useMemo(
+    () =>
+      totalMoneda
+        .times(new Decimal(safeMoney(tc)))
+        .toDecimalPlaces(2),
+    [totalMoneda, tc],
+  );
+
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Tipo</Label>
+          <Controller
+            control={control}
+            name={`costos.${index}.tipo` as const}
+            render={({ field }) => (
+              <Select
+                value={field.value}
+                onValueChange={field.onChange}
+                disabled={disabled}
+              >
+                <SelectTrigger className="h-9 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIPO_COSTO_VALUES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {TIPO_COSTO_LABELS[t]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+          {errors?.tipo?.message && (
+            <FieldError message={errors.tipo.message} />
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Proveedor</Label>
+          <Controller
+            control={control}
+            name={`costos.${index}.proveedorId` as const}
+            render={({ field }) => (
+              <ProveedorCombobox
+                value={field.value || null}
+                onChange={field.onChange}
+                proveedores={proveedores}
+                disabled={disabled}
+              />
+            )}
+          />
+          {errors?.proveedorId?.message && (
+            <FieldError message={errors.proveedorId.message} />
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Cuenta de gasto</Label>
+          <Controller
+            control={control}
+            name={`costos.${index}.cuentaContableGastoId` as const}
+            render={({ field }) => (
+              <CuentaCombobox
+                value={field.value || null}
+                onChange={(id) => field.onChange(id ?? 0)}
+                cuentas={cuentasGasto}
+                disabled={disabled}
+              />
+            )}
+          />
+          {errors?.cuentaContableGastoId?.message && (
+            <FieldError message={errors.cuentaContableGastoId.message} />
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-6">
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Moneda</Label>
+          <Controller
+            control={control}
+            name={`costos.${index}.moneda` as const}
+            render={({ field }) => (
+              <Select
+                value={field.value}
+                onValueChange={field.onChange}
+                disabled={disabled}
+              >
+                <SelectTrigger className="h-9 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ARS">ARS</SelectItem>
+                  <SelectItem value="USD">USD</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">TC</Label>
+          <Input
+            inputMode="decimal"
+            className="h-9 text-right tabular-nums"
+            disabled={disabled || moneda === "ARS"}
+            {...register(`costos.${index}.tipoCambio` as const)}
+          />
+          {errors?.tipoCambio?.message && (
+            <FieldError message={errors.tipoCambio.message} />
+          )}
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Subtotal</Label>
+          <Input
+            inputMode="decimal"
+            className="h-9 text-right tabular-nums"
+            disabled={disabled}
+            {...register(`costos.${index}.subtotal` as const)}
+          />
+          {errors?.subtotal?.message && (
+            <FieldError message={errors.subtotal.message} />
+          )}
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">IVA</Label>
+          <Input
+            inputMode="decimal"
+            className="h-9 text-right tabular-nums"
+            disabled={disabled}
+            {...register(`costos.${index}.iva` as const)}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">IIBB</Label>
+          <Input
+            inputMode="decimal"
+            className="h-9 text-right tabular-nums"
+            disabled={disabled}
+            {...register(`costos.${index}.iibb` as const)}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Otros</Label>
+          <Input
+            inputMode="decimal"
+            className="h-9 text-right tabular-nums"
+            disabled={disabled}
+            {...register(`costos.${index}.otros` as const)}
+          />
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Nº Factura (opcional)</Label>
+          <Input
+            className="h-9"
+            disabled={disabled}
+            {...register(`costos.${index}.facturaNumero` as const)}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Fecha factura (opcional)</Label>
+          <Input
+            type="date"
+            className="h-9"
+            disabled={disabled}
+            {...register(`costos.${index}.fechaFactura` as const)}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Descripción (opcional)</Label>
+          <Input
+            className="h-9"
+            disabled={disabled}
+            {...register(`costos.${index}.descripcion` as const)}
+          />
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between border-t pt-3">
+        <p className="text-xs text-muted-foreground">
+          Total {moneda}{" "}
+          <span className="font-mono font-medium">
+            {formatMoney(totalMoneda.toString())}
+          </span>{" "}
+          · Total ARS{" "}
+          <span className="font-mono font-medium">
+            {formatMoney(totalArs.toString())}
+          </span>
+        </p>
+        {!disabled && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onRemove}
+            aria-label="Remover costo"
+          >
+            <HugeiconsIcon
+              icon={Delete02Icon}
+              strokeWidth={2}
+              className="size-4"
+            />
+            Quitar
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 

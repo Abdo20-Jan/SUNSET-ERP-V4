@@ -160,8 +160,7 @@ export async function getFlujoCaja(
       },
       select: {
         id: true,
-        flete: true,
-        seguro: true,
+        tipoCambio: true,
         die: true,
         tasaEstadistica: true,
         arancelSim: true,
@@ -169,8 +168,15 @@ export async function getFlujoCaja(
         ivaAdicional: true,
         ganancias: true,
         iibb: true,
-        gastosPortuarios: true,
-        honorariosDespachante: true,
+        costos: {
+          select: {
+            tipoCambio: true,
+            subtotal: true,
+            iva: true,
+            iibb: true,
+            cuentaContableGastoId: true,
+          },
+        },
       },
     });
 
@@ -180,10 +186,13 @@ export async function getFlujoCaja(
       );
     }
 
-    // Mapeamento campo Embarque → codigo de conta principal.
-    // Adiciona o valor no bucket "próximo mês futuro".
-    const mapEmbarque: Array<[keyof (typeof embarques)[number], string]> = [
-      ["flete", "5.5.1.02"],
+    // Tributos aduaneros — campos planos del Embarque, mapeados a cuentas fijas.
+    const mapEmbarque: Array<
+      [
+        Exclude<keyof (typeof embarques)[number], "id" | "tipoCambio" | "costos">,
+        string,
+      ]
+    > = [
       ["die", "5.7.1.01"],
       ["tasaEstadistica", "5.7.1.02"],
       ["arancelSim", "5.7.1.03"],
@@ -191,9 +200,9 @@ export async function getFlujoCaja(
       ["ivaAdicional", "1.1.4.05"],
       ["iibb", "1.1.4.06"],
       ["ganancias", "1.1.4.07"],
-      ["gastosPortuarios", "5.4.1.01"],
-      ["honorariosDespachante", "5.6.1.01"],
     ];
+
+    const idToInfo = new Map(cuentas.map((c) => [c.id, c]));
 
     for (const emb of embarques) {
       for (const [campo, codigo] of mapEmbarque) {
@@ -204,6 +213,17 @@ export async function getFlujoCaja(
         const key = `${info.id}|${proximoMesFuturo}`;
         const prev = proyeccionPorCuentaMes.get(key) ?? new Decimal(0);
         proyeccionPorCuentaMes.set(key, prev.plus(valor));
+      }
+      // Costos logísticos por proveedor: proyectamos el subtotal en ARS al
+      // mes futuro, distribuido en la cuenta de gasto elegida por el usuario.
+      for (const c of emb.costos) {
+        const info = idToInfo.get(c.cuentaContableGastoId);
+        if (!info) continue;
+        const subtotalArs = toDecimal(c.subtotal).times(toDecimal(c.tipoCambio));
+        if (subtotalArs.isZero()) continue;
+        const key = `${info.id}|${proximoMesFuturo}`;
+        const prev = proyeccionPorCuentaMes.get(key) ?? new Decimal(0);
+        proyeccionPorCuentaMes.set(key, prev.plus(subtotalArs));
       }
     }
 

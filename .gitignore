@@ -46,5 +46,6 @@ next-env.d.ts
 # local-only tooling and scratch files
 .obsidian/
 .mcp.json
+.claude/settings.local.json
 Sem título.base
 check_data.ts

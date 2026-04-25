@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import {
+  listarCuentasParaCostoLogistico,
   listarDepositosParaEmbarque,
   listarProductosParaEmbarque,
   listarProveedoresParaEmbarque,
@@ -19,12 +20,14 @@ export default async function EditarEmbarquePage({
 }) {
   const { id } = await params;
 
-  const [embarque, proveedores, productos, depositos] = await Promise.all([
-    obtenerEmbarquePorId(id),
-    listarProveedoresParaEmbarque(),
-    listarProductosParaEmbarque(),
-    listarDepositosParaEmbarque(),
-  ]);
+  const [embarque, proveedores, productos, depositos, cuentasGasto] =
+    await Promise.all([
+      obtenerEmbarquePorId(id),
+      listarProveedoresParaEmbarque(),
+      listarProductosParaEmbarque(),
+      listarDepositosParaEmbarque(),
+      listarCuentasParaCostoLogistico(),
+    ]);
 
   if (!embarque) notFound();
 
@@ -36,6 +39,7 @@ export default async function EditarEmbarquePage({
       proveedores={proveedores}
       productos={productos}
       depositos={depositos}
+      cuentasGasto={cuentasGasto}
       initialData={embarque}
       readonly={readonly}
     />
