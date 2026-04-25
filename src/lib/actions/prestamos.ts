@@ -445,13 +445,6 @@ export async function crearPrestamoAction(
     return { ok: false, error: "La cuenta bancaria seleccionada no existe." };
   }
 
-  if (cuentaBancaria.moneda !== moneda) {
-    return {
-      ok: false,
-      error: `La moneda del préstamo (${moneda}) no coincide con la moneda de la cuenta bancaria (${cuentaBancaria.moneda}).`,
-    };
-  }
-
   if (cuentaBancaria.cuentaContableId === cuentaContableId) {
     return {
       ok: false,

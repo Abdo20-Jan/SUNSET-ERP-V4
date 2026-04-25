@@ -132,12 +132,6 @@ export function PrestamoForm({
   );
 
   useEffect(() => {
-    if (bancoSeleccionado) {
-      setValue("moneda", bancoSeleccionado.moneda, { shouldValidate: true });
-    }
-  }, [bancoSeleccionado, setValue]);
-
-  useEffect(() => {
     if (moneda === "ARS") {
       setValue("tipoCambio", "1", { shouldValidate: true });
     }
@@ -236,10 +230,7 @@ export function PrestamoForm({
                   <SelectContent>
                     {cuentasBancarias.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
-                        <span className="font-medium">{c.banco}</span>
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          {c.numero} · {c.moneda}
-                        </span>
+                        {c.banco} · {c.numero} · {c.moneda}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -284,7 +275,6 @@ export function PrestamoForm({
                   <Select
                     value={field.value}
                     onValueChange={field.onChange}
-                    disabled={!!bancoSeleccionado}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue />
@@ -296,9 +286,10 @@ export function PrestamoForm({
                   </Select>
                 )}
               />
-              {bancoSeleccionado && (
+              {bancoSeleccionado && moneda !== bancoSeleccionado.moneda && (
                 <p className="text-xs text-muted-foreground">
-                  Definida por la cuenta bancaria seleccionada.
+                  El préstamo se liquida a {bancoSeleccionado.moneda} aplicando
+                  el tipo de cambio.
                 </p>
               )}
             </div>

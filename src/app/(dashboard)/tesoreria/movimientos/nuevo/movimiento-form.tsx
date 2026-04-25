@@ -278,10 +278,7 @@ export function MovimientoForm({
                     <SelectContent>
                       {cuentasBancarias.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
-                          <span className="font-medium">{c.banco}</span>
-                          <span className="ml-2 text-xs text-muted-foreground">
-                            {c.numero} · {c.moneda}
-                          </span>
+                          {c.banco} · {c.numero} · {c.moneda}
                         </SelectItem>
                       ))}
                     </SelectContent>
