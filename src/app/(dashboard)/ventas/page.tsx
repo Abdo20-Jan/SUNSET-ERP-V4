@@ -30,13 +30,21 @@ export default async function VentasPage() {
             )}
           </p>
         </div>
-        <Link
-          href="/ventas/nueva"
-          className={buttonVariants({ variant: "default" })}
-        >
-          <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-          Nueva venta
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/ventas/pedidos"
+            className={buttonVariants({ variant: "outline" })}
+          >
+            Pedidos (OV)
+          </Link>
+          <Link
+            href="/ventas/nueva"
+            className={buttonVariants({ variant: "default" })}
+          >
+            <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+            Nueva venta
+          </Link>
+        </div>
       </div>
 
       <Card className="py-0">
