@@ -5,12 +5,16 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import {
+  crearCuentaParaEntidad,
+  rangoProveedor,
+} from "@/lib/services/cuenta-auto";
 import { CuentaTipo, Prisma } from "@/generated/prisma/client";
 
 export type ProveedorRow = {
   id: string;
   nombre: string;
-  cuit: string;
+  cuit: string | null;
   tipo: string;
   pais: string;
   direccion: string | null;
@@ -84,43 +88,59 @@ const nullableStr = z
   .optional()
   .transform((v) => (v && v.trim().length > 0 ? v.trim() : null));
 
-const proveedorBaseSchema = z.object({
-  nombre: z.string().trim().min(1, "El nombre es obligatorio."),
-  cuit: z.string().trim().min(1, "El CUIT es obligatorio."),
-  tipo: z
-    .string()
-    .optional()
-    .transform((v) => (v && v.trim().length > 0 ? v.trim() : "otro")),
-  pais: z
-    .string()
-    .optional()
-    .transform((v) => (v && v.trim().length > 0 ? v.trim().toUpperCase() : "AR")),
-  direccion: nullableStr,
-  telefono: nullableStr,
-  email: z
-    .string()
-    .optional()
-    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
-    .refine(
-      (v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
-      "Email inválido.",
-    ),
-  estado: z
-    .string()
-    .optional()
-    .transform((v) => (v && v.trim().length > 0 ? v.trim() : "activo"))
-    .refine(
-      (v) => v === "activo" || v === "inactivo",
-      "Estado debe ser 'activo' o 'inactivo'.",
-    ),
-  cuentaContableId: z
-    .number()
-    .int()
-    .positive()
-    .nullable()
-    .optional()
-    .transform((v) => v ?? null),
-});
+const proveedorBaseSchema = z
+  .object({
+    nombre: z.string().trim().min(1, "El nombre es obligatorio."),
+    cuit: z
+      .string()
+      .optional()
+      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
+    tipo: z
+      .string()
+      .optional()
+      .transform((v) => (v && v.trim().length > 0 ? v.trim() : "otro")),
+    pais: z
+      .string()
+      .optional()
+      .transform((v) => (v && v.trim().length > 0 ? v.trim().toUpperCase() : "AR")),
+    direccion: nullableStr,
+    telefono: nullableStr,
+    email: z
+      .string()
+      .optional()
+      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
+      .refine(
+        (v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+        "Email inválido.",
+      ),
+    estado: z
+      .string()
+      .optional()
+      .transform((v) => (v && v.trim().length > 0 ? v.trim() : "activo"))
+      .refine(
+        (v) => v === "activo" || v === "inactivo",
+        "Estado debe ser 'activo' o 'inactivo'.",
+      ),
+    cuentaContableId: z
+      .number()
+      .int()
+      .positive()
+      .nullable()
+      .optional()
+      .transform((v) => v ?? null),
+    crearCuentaAuto: z.boolean().optional().default(false),
+  })
+  .superRefine((data, ctx) => {
+    // CUIT obligatorio sólo para nacionales (Argentina). Para extranjeros
+    // queda opcional — puede ser ID fiscal del país de origen.
+    if (data.pais === "AR" && (!data.cuit || data.cuit.length === 0)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["cuit"],
+        message: "El CUIT es obligatorio para proveedores nacionales.",
+      });
+    }
+  });
 
 export type ProveedorInput = z.input<typeof proveedorBaseSchema>;
 
@@ -167,12 +187,26 @@ export async function crearProveedorAction(
   if (!cuentaCheck.ok) return cuentaCheck;
 
   try {
-    const created = await db.proveedor.create({
-      data: parsed.data,
-      select: { id: true },
+    const created = await db.$transaction(async (tx) => {
+      let cuentaContableId = parsed.data.cuentaContableId;
+      if (cuentaContableId === null && parsed.data.crearCuentaAuto) {
+        const cuenta = await crearCuentaParaEntidad(
+          tx,
+          rangoProveedor(parsed.data.pais),
+          parsed.data.nombre,
+        );
+        cuentaContableId = cuenta.id;
+      }
+      const { crearCuentaAuto: _ignore, ...rest } = parsed.data;
+      void _ignore;
+      return tx.proveedor.create({
+        data: { ...rest, cuentaContableId },
+        select: { id: true },
+      });
     });
     revalidatePath("/maestros/proveedores");
     revalidatePath("/maestros");
+    revalidatePath("/contabilidad/cuentas");
     return { ok: true, id: created.id };
   } catch (err) {
     if (
@@ -180,6 +214,9 @@ export async function crearProveedorAction(
       err.code === "P2002"
     ) {
       return { ok: false, error: "Ya existe un proveedor con ese CUIT." };
+    }
+    if (err instanceof Error && err.message.startsWith("No hay códigos")) {
+      return { ok: false, error: err.message };
     }
     console.error("crearProveedorAction failed", err);
     return { ok: false, error: "Error inesperado al crear el proveedor." };
@@ -204,9 +241,11 @@ export async function actualizarProveedorAction(
   if (!cuentaCheck.ok) return cuentaCheck;
 
   try {
+    const { crearCuentaAuto: _ignore, ...rest } = parsed.data;
+    void _ignore;
     const updated = await db.proveedor.update({
       where: { id },
-      data: parsed.data,
+      data: rest,
       select: { id: true },
     });
     revalidatePath("/maestros/proveedores");

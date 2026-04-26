@@ -11,7 +11,7 @@ import {
 export type ProveedorAsociado = {
   id: string;
   nombre: string;
-  cuit: string;
+  cuit: string | null;
   pais: string;
   estado: string;
 };
@@ -201,7 +201,7 @@ export type FacturaPendiente = {
 export type SaldoProveedorAging = {
   proveedorId: string;
   proveedorNombre: string;
-  cuit: string;
+  cuit: string | null;
   pais: string;
   saldoTotal: string; // contable, vía cuenta. Es la verdad.
   vencido: string;

@@ -2,7 +2,7 @@
 
 import { useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -66,6 +66,7 @@ const formSchema = z.object({
     ),
   estado: z.enum(["activo", "inactivo"]),
   cuentaContableId: z.number().int().positive().nullable(),
+  crearCuentaAuto: z.boolean(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -81,6 +82,7 @@ function emptyDefaults(): FormValues {
     email: "",
     estado: "activo",
     cuentaContableId: null,
+    crearCuentaAuto: true,
   };
 }
 
@@ -95,6 +97,7 @@ function defaultsFromRow(row: ClienteRow): FormValues {
     email: row.email ?? "",
     estado: row.estado === "inactivo" ? "inactivo" : "activo",
     cuentaContableId: row.cuentaContableId,
+    crearCuentaAuto: false,
   };
 }
 
@@ -128,6 +131,8 @@ export function ClienteFormDialog({
     reset(state.mode === "edit" ? defaultsFromRow(state.row) : emptyDefaults());
   }, [state, reset]);
 
+  const crearCuentaAuto = useWatch({ control, name: "crearCuentaAuto" });
+
   const onSubmit = handleSubmit((values) => {
     if (!state) return;
     startTransition(async () => {
@@ -147,6 +152,10 @@ export function ClienteFormDialog({
         email: values.email && values.email.length > 0 ? values.email : undefined,
         estado: values.estado,
         cuentaContableId: values.cuentaContableId ?? null,
+        crearCuentaAuto:
+          state.mode === "create" &&
+          values.crearCuentaAuto &&
+          values.cuentaContableId === null,
       };
 
       const result =
@@ -281,24 +290,46 @@ export function ClienteFormDialog({
               <Input id="direccion" {...register("direccion")} />
             </div>
 
-            <div className="sm:col-span-2 flex flex-col gap-2">
-              <Label>Cuenta contable vinculada</Label>
-              <Controller
-                control={control}
-                name="cuentaContableId"
-                render={({ field }) => (
-                  <CuentaCombobox
-                    value={field.value}
-                    onChange={field.onChange}
-                    cuentas={cuentas}
-                    placeholder="Sin vincular — seleccione cuenta 1.1.3.xx"
-                    emptyMessage="No hay cuentas disponibles."
+            <div className="sm:col-span-2 flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+              <Label className="text-sm">Cuenta contable</Label>
+              {state?.mode === "create" && (
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    {...register("crearCuentaAuto")}
                   />
-                )}
-              />
+                  <span>
+                    <span className="font-medium">
+                      Crear automáticamente
+                    </span>{" "}
+                    una cuenta analítica para este cliente
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      (sugerido — rango 1.1.3.10–99)
+                    </span>
+                  </span>
+                </label>
+              )}
+              {(state?.mode === "edit" || !crearCuentaAuto) && (
+                <Controller
+                  control={control}
+                  name="cuentaContableId"
+                  render={({ field }) => (
+                    <CuentaCombobox
+                      value={field.value}
+                      onChange={field.onChange}
+                      cuentas={cuentas}
+                      placeholder="Sin vincular — seleccione cuenta 1.1.3.xx"
+                      emptyMessage="No hay cuentas disponibles."
+                    />
+                  )}
+                />
+              )}
               <p className="text-xs text-muted-foreground">
-                Opcional. Solo cuentas analíticas activas bajo{" "}
+                Solo cuentas analíticas bajo{" "}
                 <span className="font-mono">1.1.3 CRÉDITOS POR VENTAS</span>.
+                Si elige "Crear automáticamente", el sistema asigna el
+                próximo código disponible al guardar.
               </p>
             </div>
           </div>

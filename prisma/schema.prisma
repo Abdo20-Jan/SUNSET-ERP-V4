@@ -501,7 +501,7 @@ model Cliente {
 model Proveedor {
   id                   String          @id @default(uuid())
   nombre               String
-  cuit                 String          @unique
+  cuit                 String?         @unique // opcional para extranjeros (puede ser ID fiscal de su país)
   tipo                 String          @default("otro")
   pais                 String          @default("AR")
   direccion            String?

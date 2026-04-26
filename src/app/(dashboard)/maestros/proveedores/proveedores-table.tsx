@@ -88,7 +88,7 @@ export function ProveedoresTable({
       if (!q) return true;
       return (
         p.nombre.toLowerCase().includes(q) ||
-        p.cuit.toLowerCase().includes(q)
+        (p.cuit ?? "").toLowerCase().includes(q)
       );
     });
   }, [proveedores, searchText, paisFilter]);
@@ -103,10 +103,12 @@ export function ProveedoresTable({
     },
     {
       id: "cuit",
-      header: "CUIT",
+      header: "CUIT / ID fiscal",
       cell: ({ row }) => (
         <span className="font-mono text-xs tabular-nums">
-          {row.original.cuit}
+          {row.original.cuit ?? (
+            <span className="text-muted-foreground">—</span>
+          )}
         </span>
       ),
     },

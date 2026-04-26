@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { crearCuentaParaEntidad } from "@/lib/services/cuenta-auto";
 import {
   CondicionIva,
   CuentaTipo,
@@ -124,6 +125,7 @@ const clienteBaseSchema = z.object({
     .nullable()
     .optional()
     .transform((v) => v ?? null),
+  crearCuentaAuto: z.boolean().optional().default(false),
 });
 
 export type ClienteInput = z.input<typeof clienteBaseSchema>;
@@ -171,12 +173,26 @@ export async function crearClienteAction(
   if (!cuentaCheck.ok) return cuentaCheck;
 
   try {
-    const created = await db.cliente.create({
-      data: parsed.data,
-      select: { id: true },
+    const created = await db.$transaction(async (tx) => {
+      let cuentaContableId = parsed.data.cuentaContableId;
+      if (cuentaContableId === null && parsed.data.crearCuentaAuto) {
+        const cuenta = await crearCuentaParaEntidad(
+          tx,
+          "CLIENTE",
+          parsed.data.nombre,
+        );
+        cuentaContableId = cuenta.id;
+      }
+      const { crearCuentaAuto: _ignore, ...rest } = parsed.data;
+      void _ignore;
+      return tx.cliente.create({
+        data: { ...rest, cuentaContableId },
+        select: { id: true },
+      });
     });
     revalidatePath("/maestros/clientes");
     revalidatePath("/maestros");
+    revalidatePath("/contabilidad/cuentas");
     return { ok: true, id: created.id };
   } catch (err) {
     if (
@@ -184,6 +200,9 @@ export async function crearClienteAction(
       err.code === "P2002"
     ) {
       return { ok: false, error: "Ya existe un cliente con ese CUIT." };
+    }
+    if (err instanceof Error && err.message.startsWith("No hay códigos")) {
+      return { ok: false, error: err.message };
     }
     console.error("crearClienteAction failed", err);
     return { ok: false, error: "Error inesperado al crear el cliente." };
@@ -209,9 +228,11 @@ export async function actualizarClienteAction(
   if (!cuentaCheck.ok) return cuentaCheck;
 
   try {
+    const { crearCuentaAuto: _ignore, ...rest } = parsed.data;
+    void _ignore;
     const updated = await db.cliente.update({
       where: { id },
-      data: parsed.data,
+      data: rest,
       select: { id: true },
     });
     revalidatePath("/maestros/clientes");
