@@ -96,6 +96,42 @@ enum TipoCostoEmbarque {
   GASTOS_EXTRAS
 }
 
+// Incoterms 2020 (cláusulas de comercio internacional).
+// Determinan quién paga qué y cuándo se transfiere el riesgo.
+enum Incoterm {
+  EXW // Ex Works — comprador asume todo desde la fábrica
+  FCA // Free Carrier — vendedor entrega al transportista designado
+  FAS // Free Alongside Ship — costado del buque, puerto origen
+  FOB // Free on Board — a bordo del buque, puerto origen
+  CFR // Cost and Freight — incluye flete, no seguro
+  CIF // Cost, Insurance and Freight — incluye flete + seguro
+  CPT // Carriage Paid To
+  CIP // Carriage and Insurance Paid To
+  DAP // Delivered at Place
+  DPU // Delivered at Place Unloaded
+  DDP // Delivered Duty Paid — vendedor asume todo
+}
+
+// Estado de pedidos de compra/venta — flujo borrador hasta cierre.
+enum PedidoEstado {
+  BORRADOR
+  ENVIADO     // Pedido emitido al proveedor / enviado al cliente
+  CONFIRMADO  // Confirmado por la contraparte
+  PARCIAL     // Facturado/recibido parcialmente
+  COMPLETADO  // Totalmente facturado/recibido
+  CANCELADO
+}
+
+// Condición de pago estándar — cómo se paga la factura.
+enum CondicionPago {
+  CONTADO
+  TRANSFERENCIA
+  CHEQUE
+  TARJETA
+  CUENTA_CORRIENTE
+  OTRO
+}
+
 enum CompraEstado {
   BORRADOR
   EMITIDA
@@ -203,6 +239,7 @@ model Asiento {
   movimiento MovimientoTesoreria?
   prestamo   PrestamoExterno?
   venta      Venta?
+  compra     Compra?
   embarque   Embarque?
 
   @@unique([periodoId, numero])
@@ -296,6 +333,9 @@ model Embarque {
   estado            EmbarqueEstado @default(BORRADOR)
   moneda            Moneda
   tipoCambio        Decimal        @db.Decimal(18, 6)
+  incoterm          Incoterm?
+  lugarIncoterm     String?        // ej: "Shanghai", "Buenos Aires"
+  pedidoCompraId    Int?           // link opcional a OC que originó el embarque
   fobTotal          Decimal        @default(0) @db.Decimal(18, 2)
   cifTotal          Decimal        @default(0) @db.Decimal(18, 2)
   die               Decimal        @default(0) @db.Decimal(18, 2)
@@ -316,6 +356,7 @@ model Embarque {
   costos          EmbarqueCosto[]
   asiento         Asiento?        @relation(fields: [asientoId], references: [id])
   depositoDestino Deposito?       @relation(fields: [depositoDestinoId], references: [id])
+  pedidoCompra    PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
 }
 
 // Una factura de un proveedor logístico (flete, despachante, operador
@@ -325,16 +366,18 @@ model Embarque {
 // contenedor", "almacenaje" — cada uno con su IVA/IIBB propio si
 // corresponde.
 model EmbarqueCosto {
-  id            Int       @id @default(autoincrement())
-  embarqueId    String
-  proveedorId   String
-  moneda        Moneda
-  tipoCambio    Decimal   @db.Decimal(18, 6)
-  facturaNumero String?
-  fechaFactura  DateTime?
-  notas         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                Int            @id @default(autoincrement())
+  embarqueId        String
+  proveedorId       String
+  moneda            Moneda
+  tipoCambio        Decimal        @db.Decimal(18, 6)
+  facturaNumero     String?
+  fechaFactura      DateTime?
+  fechaVencimiento  DateTime?      // auto-calculada de fechaFactura + diasPagoDefault del proveedor; editable
+  condicionPago     CondicionPago  @default(CUENTA_CORRIENTE)
+  notas             String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   embarque  Embarque             @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
   proveedor Proveedor            @relation(fields: [proveedorId], references: [id])
@@ -342,6 +385,7 @@ model EmbarqueCosto {
 
   @@index([embarqueId])
   @@index([proveedorId])
+  @@index([fechaVencimiento])
 }
 
 // Línea individual dentro de una factura: un concepto, su cuenta
@@ -377,20 +421,33 @@ model ItemEmbarque {
 }
 
 model Compra {
-  id          String       @id @default(uuid())
-  numero      String       @unique
-  proveedorId String
-  fecha       DateTime
-  moneda      Moneda
-  subtotal    Decimal      @db.Decimal(18, 2)
-  iva         Decimal      @db.Decimal(18, 2)
-  total       Decimal      @db.Decimal(18, 2)
-  estado      CompraEstado @default(BORRADOR)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id               String         @id @default(uuid())
+  numero           String         @unique
+  proveedorId      String
+  fecha            DateTime
+  fechaVencimiento DateTime?
+  condicionPago    CondicionPago  @default(CUENTA_CORRIENTE)
+  moneda           Moneda
+  tipoCambio       Decimal        @default(1) @db.Decimal(18, 6)
+  subtotal         Decimal        @db.Decimal(18, 2)
+  iva              Decimal        @db.Decimal(18, 2)
+  iibb             Decimal        @default(0) @db.Decimal(18, 2)
+  otros            Decimal        @default(0) @db.Decimal(18, 2)
+  total            Decimal        @db.Decimal(18, 2)
+  estado           CompraEstado   @default(BORRADOR)
+  asientoId        String?        @unique
+  pedidoCompraId   Int?
+  notas            String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
-  proveedor Proveedor    @relation(fields: [proveedorId], references: [id])
-  items     ItemCompra[]
+  proveedor    Proveedor     @relation(fields: [proveedorId], references: [id])
+  items        ItemCompra[]
+  asiento      Asiento?      @relation(fields: [asientoId], references: [id])
+  pedidoCompra PedidoCompra? @relation(fields: [pedidoCompraId], references: [id])
+
+  @@index([fechaVencimiento])
+  @@index([proveedorId])
 }
 
 model ItemCompra {
@@ -412,41 +469,47 @@ model ItemCompra {
 // ============================================================
 
 model Cliente {
-  id               String       @id @default(uuid())
-  nombre           String
-  cuit             String?      @unique
-  tipo             String       @default("minorista")
-  condicionIva     CondicionIva @default(RI)
-  direccion        String?
-  telefono         String?
-  email            String?
-  estado           String       @default("activo")
-  cuentaContableId Int?
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  id                String         @id @default(uuid())
+  nombre            String
+  cuit              String?        @unique
+  tipo              String         @default("minorista")
+  condicionIva      CondicionIva   @default(RI)
+  direccion         String?
+  telefono          String?
+  email             String?
+  estado            String         @default("activo")
+  cuentaContableId  Int?
+  diasPagoDefault   Int?           // 0 = contado, 30/60/90 = días corridos
+  condicionPagoDefault CondicionPago @default(CONTADO)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   cuentaContable CuentaContable? @relation(fields: [cuentaContableId], references: [id])
   ventas         Venta[]
+  pedidosVenta   PedidoVenta[]
 }
 
 model Proveedor {
-  id               String   @id @default(uuid())
-  nombre           String
-  cuit             String   @unique
-  tipo             String   @default("otro")
-  pais             String   @default("AR")
-  direccion        String?
-  telefono         String?
-  email            String?
-  estado           String   @default("activo")
-  cuentaContableId Int?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                   String          @id @default(uuid())
+  nombre               String
+  cuit                 String          @unique
+  tipo                 String          @default("otro")
+  pais                 String          @default("AR")
+  direccion            String?
+  telefono             String?
+  email                String?
+  estado               String          @default("activo")
+  cuentaContableId     Int?
+  diasPagoDefault      Int?            // 0 = contado, 30/60/90 = días corridos
+  condicionPagoDefault CondicionPago   @default(CONTADO)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
 
   cuentaContable  CuentaContable? @relation(fields: [cuentaContableId], references: [id])
   embarques       Embarque[]
   compras         Compra[]
   costosEmbarque  EmbarqueCosto[]
+  pedidosCompra   PedidoCompra[]
 }
 
 model Producto {
@@ -472,6 +535,8 @@ model Producto {
   itemsCompra      ItemCompra[]
   itemsVenta       ItemVenta[]
   movimientosStock MovimientoStock[]
+  itemsPedidoCompra ItemPedidoCompra[]
+  itemsPedidoVenta  ItemPedidoVenta[]
 }
 
 model Deposito {
@@ -504,22 +569,33 @@ model MovimientoStock {
 }
 
 model Venta {
-  id        String      @id @default(uuid())
-  numero    String      @unique
-  clienteId String
-  fecha     DateTime
-  moneda    Moneda
-  subtotal  Decimal     @db.Decimal(18, 2)
-  iva       Decimal     @db.Decimal(18, 2)
-  total     Decimal     @db.Decimal(18, 2)
-  estado    VentaEstado @default(BORRADOR)
-  asientoId String?     @unique
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  id               String         @id @default(uuid())
+  numero           String         @unique
+  clienteId        String
+  fecha            DateTime
+  fechaVencimiento DateTime?
+  condicionPago    CondicionPago  @default(CUENTA_CORRIENTE)
+  moneda           Moneda
+  tipoCambio       Decimal        @default(1) @db.Decimal(18, 6)
+  subtotal         Decimal        @db.Decimal(18, 2)
+  iva              Decimal        @db.Decimal(18, 2)
+  iibb             Decimal        @default(0) @db.Decimal(18, 2)
+  otros            Decimal        @default(0) @db.Decimal(18, 2)
+  total            Decimal        @db.Decimal(18, 2)
+  estado           VentaEstado    @default(BORRADOR)
+  asientoId        String?        @unique
+  pedidoVentaId    Int?
+  notas            String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
-  cliente Cliente     @relation(fields: [clienteId], references: [id])
-  asiento Asiento?    @relation(fields: [asientoId], references: [id])
-  items   ItemVenta[]
+  cliente     Cliente      @relation(fields: [clienteId], references: [id])
+  asiento     Asiento?     @relation(fields: [asientoId], references: [id])
+  items       ItemVenta[]
+  pedidoVenta PedidoVenta? @relation(fields: [pedidoVentaId], references: [id])
+
+  @@index([fechaVencimiento])
+  @@index([clienteId])
 }
 
 model ItemVenta {
@@ -534,6 +610,79 @@ model ItemVenta {
 
   venta    Venta    @relation(fields: [ventaId], references: [id], onDelete: Cascade)
   producto Producto @relation(fields: [productoId], references: [id])
+}
+
+// ============================================================
+// PEDIDOS (Órdenes de Compra y de Venta)
+// ============================================================
+
+model PedidoCompra {
+  id            Int          @id @default(autoincrement())
+  numero        String       @unique
+  proveedorId   String
+  fecha         DateTime
+  fechaPrevista DateTime?
+  moneda        Moneda
+  tipoCambio    Decimal      @default(1) @db.Decimal(18, 6)
+  estado        PedidoEstado @default(BORRADOR)
+  observaciones String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  proveedor Proveedor          @relation(fields: [proveedorId], references: [id])
+  items     ItemPedidoCompra[]
+  compras   Compra[]
+  embarques Embarque[]
+
+  @@index([proveedorId])
+  @@index([estado])
+}
+
+model ItemPedidoCompra {
+  id             Int     @id @default(autoincrement())
+  pedidoCompraId Int
+  productoId     String
+  cantidad       Int
+  precioUnitario Decimal @db.Decimal(18, 2)
+
+  pedido   PedidoCompra @relation(fields: [pedidoCompraId], references: [id], onDelete: Cascade)
+  producto Producto     @relation(fields: [productoId], references: [id])
+
+  @@index([pedidoCompraId])
+}
+
+model PedidoVenta {
+  id            Int          @id @default(autoincrement())
+  numero        String       @unique
+  clienteId     String
+  fecha         DateTime
+  fechaPrevista DateTime?
+  moneda        Moneda
+  tipoCambio    Decimal      @default(1) @db.Decimal(18, 6)
+  estado        PedidoEstado @default(BORRADOR)
+  observaciones String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  cliente Cliente           @relation(fields: [clienteId], references: [id])
+  items   ItemPedidoVenta[]
+  ventas  Venta[]
+
+  @@index([clienteId])
+  @@index([estado])
+}
+
+model ItemPedidoVenta {
+  id             Int     @id @default(autoincrement())
+  pedidoVentaId  Int
+  productoId     String
+  cantidad       Int
+  precioUnitario Decimal @db.Decimal(18, 2)
+
+  pedido   PedidoVenta @relation(fields: [pedidoVentaId], references: [id], onDelete: Cascade)
+  producto Producto    @relation(fields: [productoId], references: [id])
+
+  @@index([pedidoVentaId])
 }
 
 // ============================================================

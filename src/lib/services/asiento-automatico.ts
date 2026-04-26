@@ -367,7 +367,11 @@ async function anularEnTx(tx: TxClient, asientoId: string): Promise<Asiento> {
   });
   await tx.venta.updateMany({
     where: { asientoId },
-    data: { asientoId: null },
+    data: { asientoId: null, estado: "CANCELADA" },
+  });
+  await tx.compra.updateMany({
+    where: { asientoId },
+    data: { asientoId: null, estado: "CANCELADA" },
   });
 
   return tx.asiento.update({
@@ -1015,6 +1019,279 @@ export async function crearAsientoEmbarque(
     return asiento;
   };
 
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
+// Ventas — asiento automático
+// ============================================================
+//
+// DEBE  cliente.cuentaContableId (or 1.1.3.01 fallback)   total × TC (en ARS)
+// HABER 4.1.1.01 Ventas Neumáticos                       subtotal × TC
+// HABER 2.1.6.01 IVA Ventas por Pagar                    iva × TC
+// HABER 2.1.3.02 IIBB por Pagar                          iibb × TC (si > 0)
+// HABER 2.1.3.04 Otros Impuestos                         otros × TC (si > 0)
+//
+// El cliente es la contraparte deudora; la venta genera la cuenta a cobrar.
+// Cada componente se redondea a 2dp ANTES de sumar para que DEBE = HABER exacto.
+
+const VENTA_CODIGOS = {
+  CLIENTE_FALLBACK: "1.1.3.01",
+  VENTAS: "4.1.1.01",
+  IVA_DEBITO: "2.1.6.01",
+  IIBB_POR_PAGAR: "2.1.3.02",
+  OTROS_IMPUESTOS: "2.1.3.04",
+} as const;
+
+export async function crearAsientoVenta(
+  ventaId: string,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const venta = await inner.venta.findUnique({
+      where: { id: ventaId },
+      include: {
+        cliente: { select: { id: true, nombre: true, cuentaContableId: true } },
+      },
+    });
+    if (!venta) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Venta ${ventaId} no existe.`,
+      );
+    }
+    if (venta.asientoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Venta ${venta.numero} ya tiene asiento contable.`,
+      );
+    }
+
+    const codigos = Object.values(VENTA_CODIGOS);
+    const cuentas = await inner.cuentaContable.findMany({
+      where: { codigo: { in: codigos } },
+      select: { id: true, codigo: true },
+    });
+    const porCodigo = new Map(cuentas.map((c) => [c.codigo, c.id]));
+    for (const c of codigos) {
+      if (!porCodigo.has(c)) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `Falta cuenta contable ${c} en el plan.`,
+        );
+      }
+    }
+
+    const tc = toDecimal(venta.tipoCambio);
+    const subtotal = toDecimal(venta.subtotal).times(tc).toDecimalPlaces(2);
+    const iva = toDecimal(venta.iva).times(tc).toDecimalPlaces(2);
+    const iibb = toDecimal(venta.iibb).times(tc).toDecimalPlaces(2);
+    const otros = toDecimal(venta.otros).times(tc).toDecimalPlaces(2);
+    const total = subtotal.plus(iva).plus(iibb).plus(otros);
+
+    const clienteCuentaId =
+      venta.cliente.cuentaContableId ??
+      porCodigo.get(VENTA_CODIGOS.CLIENTE_FALLBACK)!;
+
+    const lineas: LineaInput[] = [
+      {
+        cuentaId: clienteCuentaId,
+        debe: money(total).toString(),
+        haber: 0,
+        descripcion: `Venta ${venta.numero} — ${venta.cliente.nombre}`,
+      },
+      {
+        cuentaId: porCodigo.get(VENTA_CODIGOS.VENTAS)!,
+        debe: 0,
+        haber: money(subtotal).toString(),
+        descripcion: `Venta ${venta.numero} — ingreso neto`,
+      },
+    ];
+    if (iva.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.IVA_DEBITO)!,
+        debe: 0,
+        haber: money(iva).toString(),
+        descripcion: `Venta ${venta.numero} — IVA débito`,
+      });
+    }
+    if (iibb.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.IIBB_POR_PAGAR)!,
+        debe: 0,
+        haber: money(iibb).toString(),
+        descripcion: `Venta ${venta.numero} — IIBB`,
+      });
+    }
+    if (otros.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.OTROS_IMPUESTOS)!,
+        debe: 0,
+        haber: money(otros).toString(),
+        descripcion: `Venta ${venta.numero} — otros`,
+      });
+    }
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: venta.fecha,
+      descripcion: `Venta ${venta.numero} — ${venta.cliente.nombre}`,
+      origen: AsientoOrigen.MANUAL,
+      moneda: Moneda.ARS,
+      tipoCambio: 1,
+      lineas,
+    });
+    await inner.venta.update({
+      where: { id: ventaId },
+      data: { asientoId: asiento.id },
+    });
+    return asiento;
+  };
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
+// Compras locales — asiento automático
+// ============================================================
+//
+// DEBE  1.1.5.01 Mercaderías                  subtotal × TC
+// DEBE  1.1.4.08 IVA Crédito Fiscal Compras   iva × TC (si > 0)
+// DEBE  1.1.4.11 Crédito IIBB Compras         iibb × TC (si > 0)
+// HABER proveedor.cuentaContableId (or 2.1.1.01)   total × TC
+
+const COMPRA_CODIGOS = {
+  MERCADERIAS: "1.1.5.01",
+  IVA_CREDITO: "1.1.4.08",
+  IIBB_CREDITO: "1.1.4.11",
+  PROVEEDOR_FALLBACK: "2.1.1.01",
+  OTROS_GASTOS: "5.3.1.99",
+} as const;
+
+export async function crearAsientoCompra(
+  compraId: string,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const compra = await inner.compra.findUnique({
+      where: { id: compraId },
+      include: {
+        proveedor: {
+          select: { id: true, nombre: true, cuentaContableId: true },
+        },
+      },
+    });
+    if (!compra) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Compra ${compraId} no existe.`,
+      );
+    }
+    if (compra.asientoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Compra ${compra.numero} ya tiene asiento contable.`,
+      );
+    }
+
+    // Solo necesitamos las cuentas que SÍ usamos. El fallback PROVEEDOR_FALLBACK
+    // solo se busca si proveedor.cuentaContableId es null.
+    const codigos = [
+      COMPRA_CODIGOS.MERCADERIAS,
+      COMPRA_CODIGOS.IVA_CREDITO,
+      COMPRA_CODIGOS.IIBB_CREDITO,
+      COMPRA_CODIGOS.PROVEEDOR_FALLBACK,
+    ];
+    const cuentas = await inner.cuentaContable.findMany({
+      where: { codigo: { in: codigos } },
+      select: { id: true, codigo: true },
+    });
+    const porCodigo = new Map(cuentas.map((c) => [c.codigo, c.id]));
+    for (const c of [
+      COMPRA_CODIGOS.MERCADERIAS,
+      COMPRA_CODIGOS.IVA_CREDITO,
+      COMPRA_CODIGOS.IIBB_CREDITO,
+    ]) {
+      if (!porCodigo.has(c)) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `Falta cuenta contable ${c} en el plan.`,
+        );
+      }
+    }
+
+    const tc = toDecimal(compra.tipoCambio);
+    const subtotal = toDecimal(compra.subtotal).times(tc).toDecimalPlaces(2);
+    const iva = toDecimal(compra.iva).times(tc).toDecimalPlaces(2);
+    const iibb = toDecimal(compra.iibb).times(tc).toDecimalPlaces(2);
+    const otros = toDecimal(compra.otros).times(tc).toDecimalPlaces(2);
+    const total = subtotal.plus(iva).plus(iibb).plus(otros);
+
+    let proveedorCuentaId = compra.proveedor.cuentaContableId;
+    if (!proveedorCuentaId) {
+      proveedorCuentaId =
+        porCodigo.get(COMPRA_CODIGOS.PROVEEDOR_FALLBACK) ?? null;
+      if (!proveedorCuentaId) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `Proveedor ${compra.proveedor.nombre} sin cuenta contable y falta fallback ${COMPRA_CODIGOS.PROVEEDOR_FALLBACK}.`,
+        );
+      }
+    }
+
+    const lineas: LineaInput[] = [
+      {
+        cuentaId: porCodigo.get(COMPRA_CODIGOS.MERCADERIAS)!,
+        debe: money(subtotal).toString(),
+        haber: 0,
+        descripcion: `Compra ${compra.numero} — mercadería`,
+      },
+    ];
+    if (iva.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(COMPRA_CODIGOS.IVA_CREDITO)!,
+        debe: money(iva).toString(),
+        haber: 0,
+        descripcion: `Compra ${compra.numero} — IVA crédito`,
+      });
+    }
+    if (iibb.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(COMPRA_CODIGOS.IIBB_CREDITO)!,
+        debe: money(iibb).toString(),
+        haber: 0,
+        descripcion: `Compra ${compra.numero} — IIBB crédito`,
+      });
+    }
+    if (otros.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(COMPRA_CODIGOS.MERCADERIAS)!,
+        debe: money(otros).toString(),
+        haber: 0,
+        descripcion: `Compra ${compra.numero} — otros`,
+      });
+    }
+    lineas.push({
+      cuentaId: proveedorCuentaId,
+      debe: 0,
+      haber: money(total).toString(),
+      descripcion: `Compra ${compra.numero} — ${compra.proveedor.nombre}${compra.fechaVencimiento ? ` (vence ${compra.fechaVencimiento.toISOString().slice(0, 10)})` : ""}`,
+    });
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: compra.fecha,
+      descripcion: `Compra ${compra.numero} — ${compra.proveedor.nombre}`,
+      origen: AsientoOrigen.MANUAL,
+      moneda: Moneda.ARS,
+      tipoCambio: 1,
+      lineas,
+    });
+    await inner.compra.update({
+      where: { id: compraId },
+      data: { asientoId: asiento.id },
+    });
+    return asiento;
+  };
   if (tx) return run(tx);
   return withNumeracionRetry(() => db.$transaction(run));
 }
