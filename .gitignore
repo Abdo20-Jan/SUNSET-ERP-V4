@@ -52,3 +52,4 @@ check_data.ts
 OVERNIGHT_LOG.md
 prisma/cleanup-embarques.ts
 prisma/detach-embarque.ts
+prisma/snapshot.ts
