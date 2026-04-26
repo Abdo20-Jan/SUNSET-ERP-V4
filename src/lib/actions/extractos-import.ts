@@ -42,9 +42,8 @@ function formatCuit(digits: string): string {
 }
 
 const importarSchema = z.object({
-  cuentaBancariaId: z.string().uuid(),
-  periodoYear: z.number().int().min(2020).max(2030),
-  periodoMonth: z.number().int().min(1).max(12),
+  // Opcional — si se omite, el sistema lo detecta del PDF (CBU/numero)
+  cuentaBancariaId: z.string().uuid().nullable().optional(),
   archivoNombre: z.string().min(1).max(255),
   pdfBase64: z.string().min(100),
 });
@@ -52,8 +51,38 @@ const importarSchema = z.object({
 export type ImportarExtractoInput = z.input<typeof importarSchema>;
 
 export type ImportarExtractoResult =
-  | { ok: true; importacionId: string; totalLineas: number }
+  | {
+      ok: true;
+      importacionId: string;
+      totalLineas: number;
+      bancoDetectado: string;
+      periodoDetectado: string;
+    }
   | { ok: false; error: string };
+
+function normalizarCBU(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, "");
+  return digits.length === 22 ? digits : null;
+}
+
+function normalizarNumero(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return raw.replace(/[^\dA-Za-z]/g, "").toLowerCase();
+}
+
+function detectarPeriodoFromLineas(
+  lineas: Array<{ fecha: string }>,
+): { year: number; month: number } | null {
+  if (lineas.length === 0) return null;
+  // Usamos la fecha más reciente (saldo final del mes)
+  const fechas = lineas.map((l) => new Date(l.fecha + "T12:00:00Z"));
+  const last = fechas.reduce((a, b) => (a > b ? a : b));
+  return {
+    year: last.getUTCFullYear(),
+    month: last.getUTCMonth() + 1,
+  };
+}
 
 export async function importarExtractoAction(
   raw: ImportarExtractoInput,
@@ -66,21 +95,111 @@ export async function importarExtractoAction(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
   }
 
-  const { cuentaBancariaId, periodoYear, periodoMonth, archivoNombre, pdfBase64 } =
-    parsed.data;
+  const { cuentaBancariaId: cuentaIdInput, archivoNombre, pdfBase64 } = parsed.data;
 
-  const cuentaBancaria = await db.cuentaBancaria.findUnique({
-    where: { id: cuentaBancariaId },
-    select: { id: true, banco: true, moneda: true },
-  });
-  if (!cuentaBancaria) {
-    return { ok: false, error: "La cuenta bancaria no existe." };
+  type CuentaInfo = {
+    id: string;
+    banco: string;
+    moneda: "ARS" | "USD";
+    numero: string | null;
+    cbu: string | null;
+  };
+
+  // Si el user pre-seleccionó cuenta, usamos su moneda y banco como hint.
+  // Si no, parseamos con ARS por default y detectamos cuenta por CBU/numero.
+  let cuentaPre: CuentaInfo | null = null;
+  if (cuentaIdInput) {
+    const found = await db.cuentaBancaria.findUnique({
+      where: { id: cuentaIdInput },
+      select: { id: true, banco: true, moneda: true, numero: true, cbu: true },
+    });
+    if (!found) {
+      return { ok: false, error: "La cuenta bancaria no existe." };
+    }
+    cuentaPre = found as CuentaInfo;
   }
+
+  let parseado: Awaited<ReturnType<typeof parsearExtractoPDF>>;
+  try {
+    parseado = await parsearExtractoPDF({
+      pdfBase64,
+      banco: cuentaPre?.banco ?? null,
+      moneda: cuentaPre?.moneda ?? "ARS",
+    });
+  } catch (err) {
+    console.error("[extractos] parser failed", err);
+    const msg = err instanceof Error ? err.message : "Error desconocido";
+    return { ok: false, error: `Falló el parseo del PDF: ${msg}` };
+  }
+
+  // Resolver la cuenta final: pre-seleccionada o auto-detectada
+  let cuentaBancaria: CuentaInfo;
+
+  if (cuentaPre) {
+    // Validar banco parseado vs banco de la cuenta seleccionada
+    const bancoParseadoNorm = parseado.banco.toLowerCase().replace(/\s+/g, "");
+    const bancoCuentaNorm = cuentaPre.banco.toLowerCase().replace(/\s+/g, "");
+    if (
+      bancoParseadoNorm.length > 0 &&
+      !bancoParseadoNorm.includes(bancoCuentaNorm) &&
+      !bancoCuentaNorm.includes(bancoParseadoNorm)
+    ) {
+      return {
+        ok: false,
+        error: `El PDF parece ser de "${parseado.banco}" pero la cuenta seleccionada es "${cuentaPre.banco}". Cambiá la cuenta o subí el PDF correcto.`,
+      };
+    }
+    cuentaBancaria = cuentaPre;
+  } else {
+    const cbuPdf = normalizarCBU(parseado.cbu);
+    const numPdf = normalizarNumero(parseado.numeroCuenta);
+
+    const todasRaw = await db.cuentaBancaria.findMany({
+      select: { id: true, banco: true, moneda: true, numero: true, cbu: true },
+    });
+    const todas = todasRaw as CuentaInfo[];
+
+    const matches = todas.filter((c) => {
+      const cbuMatch =
+        cbuPdf !== null && normalizarCBU(c.cbu) === cbuPdf;
+      const numNorm = normalizarNumero(c.numero);
+      const numMatch =
+        numPdf.length > 0 &&
+        numNorm.length > 0 &&
+        (numNorm.includes(numPdf) || numPdf.includes(numNorm));
+      return cbuMatch || numMatch;
+    });
+
+    if (matches.length === 1) {
+      cuentaBancaria = matches[0];
+    } else if (matches.length > 1) {
+      return {
+        ok: false,
+        error: `El PDF coincide con ${matches.length} cuentas — seleccioná manualmente cuál.`,
+      };
+    } else {
+      return {
+        ok: false,
+        error: `No se pudo identificar la cuenta bancaria del PDF (banco: "${parseado.banco}", CBU: ${parseado.cbu ?? "?"}, nº: ${parseado.numeroCuenta ?? "?"}). Seleccionala manualmente o creala primero en Tesorería.`,
+      };
+    }
+  }
+
+  // Auto-detectar período del PDF
+  const periodo = detectarPeriodoFromLineas(parseado.lineas);
+  if (!periodo) {
+    return {
+      ok: false,
+      error: "No se detectaron movimientos en el PDF — no se puede inferir el período.",
+    };
+  }
+  const periodoYear = periodo.year;
+  const periodoMonth = periodo.month;
 
   const existente = await db.importacionExtracto.findUnique({
     where: {
       cuentaBancariaId_periodoYear_periodoMonth: {
-        cuentaBancariaId,
+        cuentaBancariaId: cuentaBancaria.id,
         periodoYear,
         periodoMonth,
       },
@@ -91,33 +210,6 @@ export async function importarExtractoAction(
     return {
       ok: false,
       error: `Ya existe una importación para ${cuentaBancaria.banco} ${String(periodoMonth).padStart(2, "0")}/${periodoYear} (estado: ${existente.status}). Eliminala antes de re-importar.`,
-    };
-  }
-
-  let parseado: Awaited<ReturnType<typeof parsearExtractoPDF>>;
-  try {
-    parseado = await parsearExtractoPDF({
-      pdfBase64,
-      banco: cuentaBancaria.banco,
-      moneda: cuentaBancaria.moneda as "ARS" | "USD",
-    });
-  } catch (err) {
-    console.error("[extractos] parser failed", err);
-    const msg = err instanceof Error ? err.message : "Error desconocido";
-    return { ok: false, error: `Falló el parseo del PDF: ${msg}` };
-  }
-
-  // Validar banco parseado vs banco de la cuenta seleccionada
-  const bancoParseadoNorm = parseado.banco.toLowerCase().replace(/\s+/g, "");
-  const bancoCuentaNorm = cuentaBancaria.banco.toLowerCase().replace(/\s+/g, "");
-  if (
-    bancoParseadoNorm.length > 0 &&
-    !bancoParseadoNorm.includes(bancoCuentaNorm) &&
-    !bancoCuentaNorm.includes(bancoParseadoNorm)
-  ) {
-    return {
-      ok: false,
-      error: `El PDF parece ser de "${parseado.banco}" pero la cuenta seleccionada es "${cuentaBancaria.banco}". Cambiá la cuenta o subí el PDF correcto.`,
     };
   }
 
@@ -188,7 +280,7 @@ export async function importarExtractoAction(
 
         const importacion = await tx.importacionExtracto.create({
           data: {
-            cuentaBancariaId,
+            cuentaBancariaId: cuentaBancaria.id,
             periodoYear,
             periodoMonth,
             saldoInicial: parseado.saldoInicial.toFixed(2),
@@ -237,7 +329,12 @@ export async function importarExtractoAction(
     );
 
     revalidatePath("/tesoreria/extractos");
-    return { ok: true, ...result };
+    return {
+      ok: true,
+      ...result,
+      bancoDetectado: cuentaBancaria.banco,
+      periodoDetectado: `${String(periodoMonth).padStart(2, "0")}/${periodoYear}`,
+    };
   } catch (err) {
     console.error("[extractos] importarExtractoAction failed", err);
     const msg = err instanceof Error ? err.message : "Error desconocido";

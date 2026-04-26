@@ -22,6 +22,8 @@ const LineaParseadaSchema = z.object({
 
 const ExtractoParseadoSchema = z.object({
   banco: z.string(),
+  cbu: z.string().nullable(),
+  numeroCuenta: z.string().nullable(),
   saldoInicial: z.number(),
   saldoFinal: z.number(),
   lineas: z.array(LineaParseadaSchema),
@@ -81,12 +83,20 @@ CONFIANZA:
 - MEDIA: cuit detectado pero falta confirmar entidad, o cheque sin info de cliente clara.
 - BAJA: requiere input humano (pago AFIP, débito automático, descripción ambigua).
 
+DATOS DEL HEADER (extraerlos del PDF):
+- banco: nombre del banco (ej "Galicia", "Santander", "BBVA")
+- cbu: CBU de la cuenta (22 dígitos, sin guiones), o null si no aparece
+- numeroCuenta: número de cuenta tal como aparece (ej "0007248-5 133-4" o "760-018446/5"), o null
+
 OUTPUT: SOLO el objeto JSON dentro de un bloque \`\`\`json ... \`\`\`. Nada más antes ni después.`;
 
-function buildUserPrompt(banco: string, moneda: "ARS" | "USD"): string {
-  return `Banco esperado: ${banco}. Moneda a parsear: ${moneda}.
+function buildUserPrompt(banco: string | null, moneda: "ARS" | "USD"): string {
+  const hint = banco
+    ? `Banco esperado: ${banco}.`
+    : `Detectá el banco a partir del header del PDF.`;
+  return `${hint} Moneda a parsear: ${moneda}.
 
-Devolvé el JSON con todas las líneas del extracto en orden cronológico, con las claves: banco, saldoInicial, saldoFinal, lineas[]. Cada línea: fecha (YYYY-MM-DD), descripcion (string), comprobante (string|null), monto (number signed), saldoExtracto (number|null), categoria (tag corto tipo "IMPUESTO_CHEQUE", "COMISION_BANCARIA", "TRANSFERENCIA_EMITIDA", etc), codigoCuentaSugerida (string|null), descripcionAsiento (string|null), confianza (ALTA|MEDIA|BAJA), razon (string|null), cuitDetectado (string sin guiones | null), tipoEntidad (CLIENTE|PROVEEDOR|NINGUNO|null).`;
+Devolvé el JSON con todas las líneas del extracto en orden cronológico, con las claves: banco, cbu, numeroCuenta, saldoInicial, saldoFinal, lineas[]. Cada línea: fecha (YYYY-MM-DD), descripcion (string), comprobante (string|null), monto (number signed), saldoExtracto (number|null), categoria (tag corto tipo "IMPUESTO_CHEQUE", "COMISION_BANCARIA", "TRANSFERENCIA_EMITIDA", etc), codigoCuentaSugerida (string|null), descripcionAsiento (string|null), confianza (ALTA|MEDIA|BAJA), razon (string|null), cuitDetectado (string sin guiones | null), tipoEntidad (CLIENTE|PROVEEDOR|NINGUNO|null).`;
 }
 
 function extractJsonBlock(text: string): string {
@@ -101,7 +111,7 @@ function extractJsonBlock(text: string): string {
 
 export async function parsearExtractoPDF(opts: {
   pdfBase64: string;
-  banco: string;
+  banco: string | null;
   moneda: "ARS" | "USD";
 }): Promise<ExtractoParseado> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
