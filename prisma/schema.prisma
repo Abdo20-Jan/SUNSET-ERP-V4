@@ -242,6 +242,7 @@ model CuentaContable {
   movimientos         MovimientoTesoreria[]
   embarqueCostoLineas EmbarqueCostoLinea[]      @relation("EmbarqueCostoLineaCuentaGasto")
   extractoLineas      LineaExtractoSugerencia[]
+  gastosFijos         GastoFijo[]
 }
 
 model PeriodoContable {
@@ -270,13 +271,14 @@ model Asiento {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  periodo    PeriodoContable      @relation(fields: [periodoId], references: [id])
-  lineas     LineaAsiento[]
-  movimiento MovimientoTesoreria?
-  prestamo   PrestamoExterno?
-  venta      Venta?
-  compra     Compra?
-  embarque   Embarque?
+  periodo           PeriodoContable      @relation(fields: [periodoId], references: [id])
+  lineas            LineaAsiento[]
+  movimiento        MovimientoTesoreria?
+  prestamo          PrestamoExterno?
+  venta             Venta?
+  compra            Compra?
+  embarque          Embarque?
+  gastoFijoRegistro GastoFijoRegistro?
 
   @@unique([periodoId, numero])
   @@index([fecha])
@@ -567,6 +569,7 @@ model Proveedor {
   costosEmbarque      EmbarqueCosto[]
   pedidosCompra       PedidoCompra[]
   extractoLineas      LineaExtractoSugerencia[]
+  gastosFijos         GastoFijo[]
 }
 
 model Producto {
@@ -774,6 +777,63 @@ model AuditLog {
 
   @@index([usuarioId])
   @@index([tabla, registroId])
+}
+
+// ============================================================
+// GASTOS FIJOS (alquiler, contador, internet, etc — recurrentes)
+// ============================================================
+
+// Template de gasto recurrente. El usuario lo crea una vez con monto
+// base y luego "registra" cada mes — eso genera un Asiento contable
+// (DEBE gasto / HABER proveedor) y queda como cuenta a pagar hasta
+// que se pague vía Tesorería.
+model GastoFijo {
+  id                    Int      @id @default(autoincrement())
+  descripcion           String
+  proveedorId           String
+  // Override del default del proveedor (si vacío, usa proveedor.cuentaGastoContableId
+  // o el fallback por tipoProveedor).
+  cuentaGastoContableId Int?
+  moneda                Moneda   @default(ARS)
+  montoNeto             Decimal  @db.Decimal(18, 2)
+  ivaPorcentaje         Decimal  @default(21) @db.Decimal(5, 2)
+  iibbPorcentaje        Decimal  @default(0) @db.Decimal(5, 2)
+  // Día del mes en que vence (1-28 para evitar feb). Opcional.
+  diaVencimiento        Int?
+  activo                Boolean  @default(true)
+  notas                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  proveedor           Proveedor           @relation(fields: [proveedorId], references: [id])
+  cuentaGastoContable CuentaContable?     @relation(fields: [cuentaGastoContableId], references: [id])
+  registros           GastoFijoRegistro[]
+
+  @@index([proveedorId])
+  @@index([activo])
+}
+
+// Registro mensual de un GastoFijo — apunta al asiento generado.
+// Único por (gastoFijoId, año, mes) para prevenir doble registro.
+model GastoFijoRegistro {
+  id           Int      @id @default(autoincrement())
+  gastoFijoId  Int
+  periodoYear  Int
+  periodoMonth Int
+  fecha        DateTime
+  tipoCambio   Decimal  @default(1) @db.Decimal(18, 6)
+  montoNeto    Decimal  @db.Decimal(18, 2)
+  iva          Decimal  @db.Decimal(18, 2)
+  iibb         Decimal  @db.Decimal(18, 2)
+  total        Decimal  @db.Decimal(18, 2)
+  asientoId    String?  @unique
+  createdAt    DateTime @default(now())
+
+  gastoFijo GastoFijo @relation(fields: [gastoFijoId], references: [id], onDelete: Cascade)
+  asiento   Asiento?  @relation(fields: [asientoId], references: [id])
+
+  @@unique([gastoFijoId, periodoYear, periodoMonth])
+  @@index([periodoYear, periodoMonth])
 }
 
 // ============================================================
