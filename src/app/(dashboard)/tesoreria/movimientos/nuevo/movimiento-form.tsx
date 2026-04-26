@@ -273,7 +273,14 @@ export function MovimientoForm({
                     onValueChange={field.onChange}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Seleccione una cuenta" />
+                      <SelectValue placeholder="Seleccione una cuenta">
+                        {(value) => {
+                          const c = cuentasBancarias.find((c) => c.id === value);
+                          return c
+                            ? `${c.banco} · ${c.numero} · ${c.moneda}`
+                            : "Seleccione una cuenta";
+                        }}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {cuentasBancarias.map((c) => (

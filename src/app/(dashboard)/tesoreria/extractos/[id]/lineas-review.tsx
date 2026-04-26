@@ -517,7 +517,15 @@ function EditarLineaDialog({
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Sin proveedor" />
+                  <SelectValue placeholder="Sin proveedor">
+                    {(value) => {
+                      if (!value || value === "__none__") return "— Sin proveedor —";
+                      const p = proveedores.find((p) => p.id === value);
+                      return p
+                        ? `${p.nombre}${p.cuit ? ` (${p.cuit})` : ""}`
+                        : "— Sin proveedor —";
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">— Sin proveedor —</SelectItem>
@@ -544,7 +552,15 @@ function EditarLineaDialog({
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Sin cliente" />
+                  <SelectValue placeholder="Sin cliente">
+                    {(value) => {
+                      if (!value || value === "__none__") return "— Sin cliente —";
+                      const c = clientes.find((c) => c.id === value);
+                      return c
+                        ? `${c.nombre}${c.cuit ? ` (${c.cuit})` : ""}`
+                        : "— Sin cliente —";
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">— Sin cliente —</SelectItem>

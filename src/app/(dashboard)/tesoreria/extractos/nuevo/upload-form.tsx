@@ -124,7 +124,14 @@ export function ExtractoUploadForm({
             onValueChange={(v) => setCuentaId(v ?? "")}
           >
             <SelectTrigger id="cuenta">
-              <SelectValue placeholder="Seleccionar..." />
+              <SelectValue placeholder="Seleccionar...">
+                {(value) => {
+                  const c = cuentas.find((c) => c.id === value);
+                  return c
+                    ? `${c.banco} · ${c.moneda}${c.numero ? ` · ${c.numero}` : ""}`
+                    : "Seleccionar...";
+                }}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {cuentas.map((c) => (
@@ -144,7 +151,9 @@ export function ExtractoUploadForm({
               onValueChange={(v) => v && setMonth(Number(v))}
             >
               <SelectTrigger id="mes">
-                <SelectValue />
+                <SelectValue>
+                  {(value) => MESES[Number(value) - 1] ?? ""}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {MESES.map((nombre, idx) => (
@@ -163,7 +172,7 @@ export function ExtractoUploadForm({
               onValueChange={(v) => v && setYear(Number(v))}
             >
               <SelectTrigger id="anio">
-                <SelectValue />
+                <SelectValue>{(value) => String(value ?? "")}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {yearOptions.map((y) => (

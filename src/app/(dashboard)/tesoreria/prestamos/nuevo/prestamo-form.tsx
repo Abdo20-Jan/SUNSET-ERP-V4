@@ -264,7 +264,14 @@ export function PrestamoForm({
                   onValueChange={field.onChange}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Seleccione la cuenta donde entra el dinero" />
+                    <SelectValue placeholder="Seleccione la cuenta donde entra el dinero">
+                      {(value) => {
+                        const c = cuentasBancarias.find((c) => c.id === value);
+                        return c
+                          ? `${c.banco} · ${c.numero} · ${c.moneda}`
+                          : "Seleccione la cuenta donde entra el dinero";
+                      }}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {cuentasBancarias.map((c) => (

@@ -222,7 +222,14 @@ export function TransferenciaForm({
                     onValueChange={field.onChange}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Seleccione cuenta" />
+                      <SelectValue placeholder="Seleccione cuenta">
+                        {(value) => {
+                          const c = cuentasBancarias.find((c) => c.id === value);
+                          return c
+                            ? `${c.banco} · ${c.numero} · ${c.moneda}`
+                            : "Seleccione cuenta";
+                        }}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {cuentasBancarias.map((c) => (
@@ -264,7 +271,14 @@ export function TransferenciaForm({
                     onValueChange={field.onChange}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Seleccione cuenta" />
+                      <SelectValue placeholder="Seleccione cuenta">
+                        {(value) => {
+                          const c = destinoOptions.find((c) => c.id === value);
+                          return c
+                            ? `${c.banco} · ${c.numero} · ${c.moneda}`
+                            : "Seleccione cuenta";
+                        }}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {destinoOptions.map((c) => (
