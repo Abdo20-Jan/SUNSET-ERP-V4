@@ -748,6 +748,7 @@ export async function crearAsientoEmbarque(
             proveedor: {
               select: { id: true, nombre: true, cuentaContableId: true },
             },
+            lineas: { orderBy: { id: "asc" } },
           },
           orderBy: { id: "asc" },
         },
@@ -925,48 +926,64 @@ export async function crearAsientoEmbarque(
       "Ganancias importación por pagar",
     );
 
-    // 3) Costos logísticos por proveedor (uno por línea)
-    for (const c of embarque.costos) {
-      const tc = toDecimal(c.tipoCambio);
-      // Redondear cada componente a 2dp ANTES de sumar el total, para que
-      // sum(DEBE rounded) === HABER rounded y el asiento no quede
-      // desbalanceado por décimos perdidos en la conversión a ARS.
-      const subtotalArs = toDecimal(c.subtotal)
-        .times(tc)
-        .toDecimalPlaces(2);
-      const ivaArs = toDecimal(c.iva).times(tc).toDecimalPlaces(2);
-      const iibbArs = toDecimal(c.iibb).times(tc).toDecimalPlaces(2);
-      const otrosArs = toDecimal(c.otros).times(tc).toDecimalPlaces(2);
-      const totalArs = subtotalArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+    // 3) Costos logísticos: por cada factura (proveedor) iteramos sus
+    //    líneas, generando una línea DEBE por concepto + IVA + IIBB
+    //    contra la cuenta del proveedor en HABER (consolidado de la factura).
+    for (const factura of embarque.costos) {
+      if (factura.lineas.length === 0) continue;
 
-      if (!totalArs.gt(0)) continue;
-
-      if (!c.proveedor.cuentaContableId) {
+      if (!factura.proveedor.cuentaContableId) {
         throw new AsientoError(
           "CUENTA_INVALIDA",
-          `El proveedor ${c.proveedor.nombre} no tiene cuenta contable asociada (revisar Maestros / Proveedores).`,
+          `El proveedor ${factura.proveedor.nombre} no tiene cuenta contable asociada (revisar Maestros / Proveedores).`,
         );
       }
 
-      const desc = `${c.tipo.replace(/_/g, " ").toLowerCase()} — ${c.proveedor.nombre}${c.facturaNumero ? ` (Fact. ${c.facturaNumero})` : ""}`;
+      const tc = toDecimal(factura.tipoCambio);
+      let totalFacturaArs = toDecimal(0);
 
-      pushDebe(c.cuentaContableGastoId, subtotalArs, `${desc} — neto`);
-      pushDebe(
-        porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS)!,
-        ivaArs,
-        `${desc} — IVA`,
-      );
-      pushDebe(
-        porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS)!,
-        iibbArs,
-        `${desc} — IIBB`,
-      );
-      pushDebe(c.cuentaContableGastoId, otrosArs, `${desc} — otros`);
-      pushHaber(
-        c.proveedor.cuentaContableId,
-        totalArs,
-        `${desc} — total a pagar`,
-      );
+      for (const linea of factura.lineas) {
+        const subtotalArs = toDecimal(linea.subtotal)
+          .times(tc)
+          .toDecimalPlaces(2);
+        const ivaArs = toDecimal(linea.iva).times(tc).toDecimalPlaces(2);
+        const iibbArs = toDecimal(linea.iibb).times(tc).toDecimalPlaces(2);
+        const otrosArs = toDecimal(linea.otros).times(tc).toDecimalPlaces(2);
+
+        const lineaTotalArs = subtotalArs
+          .plus(ivaArs)
+          .plus(iibbArs)
+          .plus(otrosArs);
+        if (!lineaTotalArs.gt(0)) continue;
+
+        totalFacturaArs = totalFacturaArs.plus(lineaTotalArs);
+
+        const lineaLabel =
+          linea.descripcion?.trim() ||
+          linea.tipo.replace(/_/g, " ").toLowerCase();
+        const desc = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""} — ${lineaLabel}`;
+
+        pushDebe(linea.cuentaContableGastoId, subtotalArs, `${desc} — neto`);
+        pushDebe(
+          porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS)!,
+          ivaArs,
+          `${desc} — IVA`,
+        );
+        pushDebe(
+          porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS)!,
+          iibbArs,
+          `${desc} — IIBB`,
+        );
+        pushDebe(linea.cuentaContableGastoId, otrosArs, `${desc} — otros`);
+      }
+
+      if (totalFacturaArs.gt(0)) {
+        pushHaber(
+          factura.proveedor.cuentaContableId,
+          totalFacturaArs,
+          `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""} — total a pagar`,
+        );
+      }
     }
 
     if (lineas.length === 0) {

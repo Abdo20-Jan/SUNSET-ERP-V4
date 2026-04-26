@@ -161,21 +161,28 @@ const formSchema = z
       .min(1, "Agregue al menos un ítem"),
     costos: z.array(
       z.object({
-        tipo: z.enum(TIPO_COSTO_VALUES),
         proveedorId: z.string().uuid("Seleccione un proveedor"),
-        cuentaContableGastoId: z
-          .number()
-          .int()
-          .positive("Seleccione la cuenta de gasto"),
         moneda: z.enum(["ARS", "USD"]),
         tipoCambio: z.string().regex(rateRegex, "TC inválido"),
-        subtotal: z.string().regex(moneyRegex, "Subtotal inválido"),
-        iva: z.string().regex(moneyRegex, "IVA inválido"),
-        iibb: z.string().regex(moneyRegex, "IIBB inválido"),
-        otros: z.string().regex(moneyRegex, "Otros inválido"),
         facturaNumero: z.string().max(64).optional(),
         fechaFactura: z.string().optional(),
-        descripcion: z.string().max(200).optional(),
+        notas: z.string().max(500).optional(),
+        lineas: z
+          .array(
+            z.object({
+              tipo: z.enum(TIPO_COSTO_VALUES),
+              cuentaContableGastoId: z
+                .number()
+                .int()
+                .positive("Seleccione la cuenta"),
+              descripcion: z.string().max(200).optional(),
+              subtotal: z.string().regex(moneyRegex, "Subtotal inválido"),
+              iva: z.string().regex(moneyRegex, "IVA inválido"),
+              iibb: z.string().regex(moneyRegex, "IIBB inválido"),
+              otros: z.string().regex(moneyRegex, "Otros inválido"),
+            }),
+          )
+          .min(1, "Agregue al menos una línea"),
       }),
     ),
   })
@@ -291,18 +298,21 @@ export function EmbarqueForm(props: Props) {
             precioUnitarioFob: it.precioUnitarioFob,
           })),
           costos: props.initialData.costos.map((c) => ({
-            tipo: c.tipo as TipoCosto,
             proveedorId: c.proveedorId,
-            cuentaContableGastoId: c.cuentaContableGastoId,
             moneda: c.moneda,
             tipoCambio: c.tipoCambio,
-            subtotal: c.subtotal,
-            iva: c.iva,
-            iibb: c.iibb,
-            otros: c.otros,
             facturaNumero: c.facturaNumero ?? "",
             fechaFactura: c.fechaFactura ? c.fechaFactura.slice(0, 10) : "",
-            descripcion: c.descripcion ?? "",
+            notas: c.notas ?? "",
+            lineas: c.lineas.map((l) => ({
+              tipo: l.tipo as TipoCosto,
+              cuentaContableGastoId: l.cuentaContableGastoId,
+              descripcion: l.descripcion ?? "",
+              subtotal: l.subtotal,
+              iva: l.iva,
+              iibb: l.iibb,
+              otros: l.otros,
+            })),
           })),
         };
 
@@ -371,47 +381,41 @@ export function EmbarqueForm(props: Props) {
     return fobTotal.times(new Decimal(tc)).toDecimalPlaces(2);
   }, [fobTotal, tipoCambioEmbarque]);
 
-  // Subtotales de costos en ARS (subtotal × TC del costo)
+  // Subtotales de costos en ARS: por cada factura, suma todas sus líneas
+  // y multiplica por el TC de la factura.
   const costosSubtotalArs = useMemo(
     () =>
       sumAs2dp(
-        costos.map((c) => {
-          const sub = safeMoney(c?.subtotal);
-          const tc = safeMoney(c?.tipoCambio);
-          return new Decimal(sub).times(new Decimal(tc));
+        costos.map((factura) => {
+          const tc = new Decimal(safeMoney(factura?.tipoCambio));
+          const subtotalFactura = (factura?.lineas ?? []).reduce(
+            (acc, l) => acc.plus(new Decimal(safeMoney(l?.subtotal))),
+            new Decimal(0),
+          );
+          return subtotalFactura.times(tc);
         }),
       ),
     [costos],
   );
 
-  // CIF = FOB + Flete internacional + Seguro marítimo (en ARS).
+  // CIF = FOB + Flete internacional + Seguro marítimo (en ARS), recorriendo
+  // cada línea de cada factura y filtrando por tipo.
   const cifTotalArs = useMemo(() => {
-    const fleteIntl = costos
-      .filter((c) => c?.tipo === "FLETE_INTERNACIONAL")
-      .reduce(
-        (acc, c) =>
-          acc.plus(
-            new Decimal(safeMoney(c?.subtotal)).times(
-              new Decimal(safeMoney(c?.tipoCambio)),
-            ),
-          ),
-        new Decimal(0),
-      );
-    const seguroIntl = costos
-      .filter((c) => c?.tipo === "SEGURO_MARITIMO")
-      .reduce(
-        (acc, c) =>
-          acc.plus(
-            new Decimal(safeMoney(c?.subtotal)).times(
-              new Decimal(safeMoney(c?.tipoCambio)),
-            ),
-          ),
-        new Decimal(0),
-      );
-    return fobTotalArs
-      .plus(fleteIntl)
-      .plus(seguroIntl)
-      .toDecimalPlaces(2);
+    function sumByTipo(tipo: string): Decimal {
+      return costos.reduce((acc, factura) => {
+        const tc = new Decimal(safeMoney(factura?.tipoCambio));
+        const sub = (factura?.lineas ?? [])
+          .filter((l) => l?.tipo === tipo)
+          .reduce(
+            (a, l) => a.plus(new Decimal(safeMoney(l?.subtotal))),
+            new Decimal(0),
+          );
+        return acc.plus(sub.times(tc));
+      }, new Decimal(0));
+    }
+    const fleteIntl = sumByTipo("FLETE_INTERNACIONAL");
+    const seguroIntl = sumByTipo("SEGURO_MARITIMO");
+    return fobTotalArs.plus(fleteIntl).plus(seguroIntl).toDecimalPlaces(2);
   }, [fobTotalArs, costos]);
 
   const totalCreditosFiscales = useMemo(
@@ -746,11 +750,13 @@ export function EmbarqueForm(props: Props) {
         </CardContent>
       </Card>
 
-      {/* Sección 3: Costos Logísticos por proveedor */}
+      {/* Sección 3: Facturas de proveedores logísticos */}
       <Card>
         <CardContent className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Costos logísticos</h2>
+            <h2 className="text-sm font-semibold">
+              Facturas de proveedores logísticos
+            </h2>
             {!readonly && (
               <Button
                 type="button"
@@ -758,31 +764,38 @@ export function EmbarqueForm(props: Props) {
                 size="sm"
                 onClick={() =>
                   appendCosto({
-                    tipo: "FLETE_INTERNACIONAL",
                     proveedorId: "",
-                    cuentaContableGastoId: 0,
                     moneda: "USD",
                     tipoCambio: tipoCambioEmbarque || "1",
-                    subtotal: "0",
-                    iva: "0",
-                    iibb: "0",
-                    otros: "0",
                     facturaNumero: "",
                     fechaFactura: "",
-                    descripcion: "",
+                    notas: "",
+                    lineas: [
+                      {
+                        tipo: "FLETE_INTERNACIONAL",
+                        cuentaContableGastoId: 0,
+                        descripcion: "",
+                        subtotal: "0",
+                        iva: "0",
+                        iibb: "0",
+                        otros: "0",
+                      },
+                    ],
                   })
                 }
               >
                 <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-                Agregar costo
+                Agregar factura
               </Button>
             )}
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Cada costo genera una <strong>cuenta a pagar</strong> a su
-            proveedor (flete, despachante, operador, etc.) con su IVA e IIBB
-            propios. CIF (FOB + flete internacional + seguro marítimo) ={" "}
+            Una <strong>factura por proveedor</strong> (flete, despachante,
+            operador, etc.). Dentro de cada factura agregue tantas líneas
+            como conceptos tenga (servicio de balanza, entrega contenedor,
+            IIBB, etc.). El sistema genera 1 cuenta a pagar al proveedor
+            por factura. CIF (FOB + flete intl + seguro marítimo) ={" "}
             <span className="font-mono font-medium">
               ARS {formatMoney(cifTotalArs.toString())}
             </span>
@@ -791,12 +804,12 @@ export function EmbarqueForm(props: Props) {
 
           {costoFields.length === 0 ? (
             <p className="rounded-lg border border-dashed bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-              Aún no hay costos logísticos. Use “Agregar costo”.
+              Aún no hay facturas. Use “Agregar factura”.
             </p>
           ) : (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-4">
               {costoFields.map((field, index) => (
-                <CostoRow
+                <FacturaCard
                   key={field.id}
                   index={index}
                   control={control}
@@ -806,7 +819,7 @@ export function EmbarqueForm(props: Props) {
                   cuentasGasto={props.cuentasGasto}
                   disabled={readonly}
                   onRemove={() => removeCosto(index)}
-                  errors={errors.costos?.[index]}
+                  errors={errors.costos?.[index] as FacturaErrors | undefined}
                 />
               ))}
             </div>
@@ -1109,19 +1122,22 @@ function ItemRow({
   );
 }
 
-type CostoErrors = {
-  tipo?: { message?: string };
+type FacturaErrors = {
   proveedorId?: { message?: string };
-  cuentaContableGastoId?: { message?: string };
   moneda?: { message?: string };
   tipoCambio?: { message?: string };
-  subtotal?: { message?: string };
-  iva?: { message?: string };
-  iibb?: { message?: string };
-  otros?: { message?: string };
+  lineas?: Array<{
+    tipo?: { message?: string };
+    cuentaContableGastoId?: { message?: string };
+    descripcion?: { message?: string };
+    subtotal?: { message?: string };
+    iva?: { message?: string };
+    iibb?: { message?: string };
+    otros?: { message?: string };
+  }>;
 };
 
-function CostoRow({
+function FacturaCard({
   index,
   control,
   register,
@@ -1140,19 +1156,36 @@ function CostoRow({
   cuentasGasto: CuentaOption[];
   disabled: boolean;
   onRemove: () => void;
-  errors?: CostoErrors;
+  errors?: FacturaErrors;
 }) {
   const moneda = useWatch({ control, name: `costos.${index}.moneda` as const });
-  const subtotal = useWatch({
-    control,
-    name: `costos.${index}.subtotal` as const,
-  });
-  const iva = useWatch({ control, name: `costos.${index}.iva` as const });
-  const iibb = useWatch({ control, name: `costos.${index}.iibb` as const });
-  const otros = useWatch({ control, name: `costos.${index}.otros` as const });
   const tc = useWatch({
     control,
     name: `costos.${index}.tipoCambio` as const,
+  });
+  const lineas = useWatch({
+    control,
+    name: `costos.${index}.lineas` as const,
+  }) as
+    | Array<{
+        subtotal?: string;
+        iva?: string;
+        iibb?: string;
+        otros?: string;
+      }>
+    | undefined;
+  const proveedorId = useWatch({
+    control,
+    name: `costos.${index}.proveedorId` as const,
+  });
+
+  const {
+    fields: lineaFields,
+    append: appendLinea,
+    remove: removeLinea,
+  } = useFieldArray({
+    control,
+    name: `costos.${index}.lineas` as const,
   });
 
   useEffect(() => {
@@ -1163,226 +1196,409 @@ function CostoRow({
     }
   }, [moneda, index, setValue]);
 
-  const totalMoneda = useMemo(() => {
-    const s = new Decimal(safeMoney(subtotal));
-    const i = new Decimal(safeMoney(iva));
-    const b = new Decimal(safeMoney(iibb));
-    const o = new Decimal(safeMoney(otros));
-    return s.plus(i).plus(b).plus(o).toDecimalPlaces(2);
-  }, [subtotal, iva, iibb, otros]);
+  const totales = useMemo(() => {
+    const cero = new Decimal(0);
+    const sums = (lineas ?? []).reduce(
+      (acc, l) => ({
+        subtotal: acc.subtotal.plus(new Decimal(safeMoney(l?.subtotal))),
+        iva: acc.iva.plus(new Decimal(safeMoney(l?.iva))),
+        iibb: acc.iibb.plus(new Decimal(safeMoney(l?.iibb))),
+        otros: acc.otros.plus(new Decimal(safeMoney(l?.otros))),
+      }),
+      { subtotal: cero, iva: cero, iibb: cero, otros: cero },
+    );
+    const total = sums.subtotal
+      .plus(sums.iva)
+      .plus(sums.iibb)
+      .plus(sums.otros);
+    const tcDec = new Decimal(safeMoney(tc));
+    return {
+      subtotal: sums.subtotal.toDecimalPlaces(2),
+      iva: sums.iva.toDecimalPlaces(2),
+      iibb: sums.iibb.toDecimalPlaces(2),
+      otros: sums.otros.toDecimalPlaces(2),
+      total: total.toDecimalPlaces(2),
+      totalArs: total.times(tcDec).toDecimalPlaces(2),
+    };
+  }, [lineas, tc]);
 
-  const totalArs = useMemo(
+  const proveedorNombre = useMemo(
     () =>
-      totalMoneda
-        .times(new Decimal(safeMoney(tc)))
-        .toDecimalPlaces(2),
-    [totalMoneda, tc],
+      proveedores.find((p) => p.id === proveedorId)?.nombre ??
+      "Sin proveedor",
+    [proveedores, proveedorId],
   );
 
   return (
-    <div className="rounded-lg border bg-muted/20 p-3">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Tipo</Label>
-          <Controller
-            control={control}
-            name={`costos.${index}.tipo` as const}
-            render={({ field }) => (
-              <Select
-                value={field.value}
-                onValueChange={field.onChange}
-                disabled={disabled}
-              >
-                <SelectTrigger className="h-9 w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TIPO_COSTO_VALUES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {TIPO_COSTO_LABELS[t]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          />
-          {errors?.tipo?.message && (
-            <FieldError message={errors.tipo.message} />
-          )}
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Proveedor</Label>
-          <Controller
-            control={control}
-            name={`costos.${index}.proveedorId` as const}
-            render={({ field }) => (
-              <ProveedorCombobox
-                value={field.value || null}
-                onChange={field.onChange}
-                proveedores={proveedores}
-                disabled={disabled}
-              />
-            )}
-          />
-          {errors?.proveedorId?.message && (
-            <FieldError message={errors.proveedorId.message} />
-          )}
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Cuenta de gasto</Label>
-          <Controller
-            control={control}
-            name={`costos.${index}.cuentaContableGastoId` as const}
-            render={({ field }) => (
-              <CuentaCombobox
-                value={field.value || null}
-                onChange={(id) => field.onChange(id ?? 0)}
-                cuentas={cuentasGasto}
-                disabled={disabled}
-              />
-            )}
-          />
-          {errors?.cuentaContableGastoId?.message && (
-            <FieldError message={errors.cuentaContableGastoId.message} />
-          )}
-        </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-6">
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Moneda</Label>
-          <Controller
-            control={control}
-            name={`costos.${index}.moneda` as const}
-            render={({ field }) => (
-              <Select
-                value={field.value}
-                onValueChange={field.onChange}
-                disabled={disabled}
-              >
-                <SelectTrigger className="h-9 w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ARS">ARS</SelectItem>
-                  <SelectItem value="USD">USD</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">TC</Label>
-          <Input
-            inputMode="decimal"
-            className="h-9 text-right tabular-nums"
-            disabled={disabled || moneda === "ARS"}
-            {...register(`costos.${index}.tipoCambio` as const)}
-          />
-          {errors?.tipoCambio?.message && (
-            <FieldError message={errors.tipoCambio.message} />
-          )}
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Subtotal</Label>
-          <Input
-            inputMode="decimal"
-            className="h-9 text-right tabular-nums"
-            disabled={disabled}
-            {...register(`costos.${index}.subtotal` as const)}
-          />
-          {errors?.subtotal?.message && (
-            <FieldError message={errors.subtotal.message} />
-          )}
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">IVA</Label>
-          <Input
-            inputMode="decimal"
-            className="h-9 text-right tabular-nums"
-            disabled={disabled}
-            {...register(`costos.${index}.iva` as const)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">IIBB</Label>
-          <Input
-            inputMode="decimal"
-            className="h-9 text-right tabular-nums"
-            disabled={disabled}
-            {...register(`costos.${index}.iibb` as const)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Otros</Label>
-          <Input
-            inputMode="decimal"
-            className="h-9 text-right tabular-nums"
-            disabled={disabled}
-            {...register(`costos.${index}.otros` as const)}
-          />
-        </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Nº Factura (opcional)</Label>
-          <Input
-            className="h-9"
-            disabled={disabled}
-            {...register(`costos.${index}.facturaNumero` as const)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Fecha factura (opcional)</Label>
-          <Input
-            type="date"
-            className="h-9"
-            disabled={disabled}
-            {...register(`costos.${index}.fechaFactura` as const)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Descripción (opcional)</Label>
-          <Input
-            className="h-9"
-            disabled={disabled}
-            {...register(`costos.${index}.descripcion` as const)}
-          />
-        </div>
-      </div>
-
-      <div className="mt-3 flex items-center justify-between border-t pt-3">
-        <p className="text-xs text-muted-foreground">
-          Total {moneda}{" "}
-          <span className="font-mono font-medium">
-            {formatMoney(totalMoneda.toString())}
-          </span>{" "}
-          · Total ARS{" "}
-          <span className="font-mono font-medium">
-            {formatMoney(totalArs.toString())}
+    <div className="rounded-lg border bg-card shadow-sm">
+      <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-4 py-3">
+        <div className="flex flex-col">
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">
+            Factura #{index + 1}
           </span>
-        </p>
+          <span className="text-sm font-medium">{proveedorNombre}</span>
+        </div>
         {!disabled && (
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={onRemove}
-            aria-label="Remover costo"
+            aria-label="Remover factura"
           >
             <HugeiconsIcon
               icon={Delete02Icon}
               strokeWidth={2}
               className="size-4"
             />
-            Quitar
+            Quitar factura
           </Button>
         )}
       </div>
+
+      <div className="flex flex-col gap-3 p-4">
+        {/* Header de la factura */}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+          <div className="md:col-span-2 flex flex-col gap-1">
+            <Label className="text-xs">Proveedor</Label>
+            <Controller
+              control={control}
+              name={`costos.${index}.proveedorId` as const}
+              render={({ field }) => (
+                <ProveedorCombobox
+                  value={field.value || null}
+                  onChange={field.onChange}
+                  proveedores={proveedores}
+                  disabled={disabled}
+                />
+              )}
+            />
+            {errors?.proveedorId?.message && (
+              <FieldError message={errors.proveedorId.message} />
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">Moneda</Label>
+            <Controller
+              control={control}
+              name={`costos.${index}.moneda` as const}
+              render={({ field }) => (
+                <Select
+                  value={field.value}
+                  onValueChange={field.onChange}
+                  disabled={disabled}
+                >
+                  <SelectTrigger className="h-9 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ARS">ARS</SelectItem>
+                    <SelectItem value="USD">USD</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">Tipo de cambio</Label>
+            <Input
+              inputMode="decimal"
+              className="h-9 text-right tabular-nums"
+              disabled={disabled || moneda === "ARS"}
+              {...register(`costos.${index}.tipoCambio` as const)}
+            />
+            {errors?.tipoCambio?.message && (
+              <FieldError message={errors.tipoCambio.message} />
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">Nº Factura</Label>
+            <Input
+              className="h-9"
+              placeholder="Opcional"
+              disabled={disabled}
+              {...register(`costos.${index}.facturaNumero` as const)}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">Fecha factura</Label>
+            <Input
+              type="date"
+              className="h-9"
+              disabled={disabled}
+              {...register(`costos.${index}.fechaFactura` as const)}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">Notas (opcional)</Label>
+            <Input
+              className="h-9"
+              placeholder="Nº de orden, observación, etc."
+              disabled={disabled}
+              {...register(`costos.${index}.notas` as const)}
+            />
+          </div>
+        </div>
+
+        {/* Tabla de líneas */}
+        <div className="mt-1 flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Conceptos / líneas de la factura
+          </h3>
+          {!disabled && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                appendLinea({
+                  tipo: "GASTOS_PORTUARIOS",
+                  cuentaContableGastoId: 0,
+                  descripcion: "",
+                  subtotal: "0",
+                  iva: "0",
+                  iibb: "0",
+                  otros: "0",
+                })
+              }
+            >
+              <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+              Agregar línea
+            </Button>
+          )}
+        </div>
+
+        {lineaFields.length === 0 ? (
+          <p className="rounded-md border border-dashed bg-muted/30 p-4 text-center text-xs text-muted-foreground">
+            La factura debe tener al menos una línea.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-xs text-muted-foreground">
+                <tr>
+                  <th className="w-44 py-2 pl-3 text-left font-medium">
+                    Tipo
+                  </th>
+                  <th className="py-2 px-2 text-left font-medium">
+                    Cuenta de gasto
+                  </th>
+                  <th className="w-44 py-2 px-2 text-left font-medium">
+                    Descripción
+                  </th>
+                  <th className="w-28 py-2 px-2 text-right font-medium">
+                    Subtotal
+                  </th>
+                  <th className="w-24 py-2 px-2 text-right font-medium">
+                    IVA
+                  </th>
+                  <th className="w-24 py-2 px-2 text-right font-medium">
+                    IIBB
+                  </th>
+                  <th className="w-24 py-2 px-2 text-right font-medium">
+                    Otros
+                  </th>
+                  {!disabled && <th className="w-10"></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {lineaFields.map((field, lineaIdx) => (
+                  <LineaRow
+                    key={field.id}
+                    facturaIndex={index}
+                    lineaIndex={lineaIdx}
+                    control={control}
+                    register={register}
+                    cuentasGasto={cuentasGasto}
+                    disabled={disabled}
+                    onRemove={() => removeLinea(lineaIdx)}
+                    errors={errors?.lineas?.[lineaIdx]}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Totales */}
+        <div className="flex flex-wrap items-center justify-end gap-x-6 gap-y-1 border-t pt-3 text-xs">
+          <span className="text-muted-foreground">
+            Subtotal:{" "}
+            <span className="font-mono font-medium text-foreground">
+              {moneda} {formatMoney(totales.subtotal.toString())}
+            </span>
+          </span>
+          <span className="text-muted-foreground">
+            IVA:{" "}
+            <span className="font-mono font-medium text-foreground">
+              {formatMoney(totales.iva.toString())}
+            </span>
+          </span>
+          <span className="text-muted-foreground">
+            IIBB:{" "}
+            <span className="font-mono font-medium text-foreground">
+              {formatMoney(totales.iibb.toString())}
+            </span>
+          </span>
+          <span className="text-muted-foreground">
+            Otros:{" "}
+            <span className="font-mono font-medium text-foreground">
+              {formatMoney(totales.otros.toString())}
+            </span>
+          </span>
+          <span className="text-sm">
+            <span className="text-muted-foreground">Total factura:</span>{" "}
+            <span className="font-mono font-semibold">
+              {moneda} {formatMoney(totales.total.toString())}
+            </span>
+          </span>
+          <span className="text-sm">
+            <span className="text-muted-foreground">≈</span>{" "}
+            <span className="font-mono font-semibold">
+              ARS {formatMoney(totales.totalArs.toString())}
+            </span>
+          </span>
+        </div>
+      </div>
     </div>
+  );
+}
+
+type LineaErrors = NonNullable<FacturaErrors["lineas"]>[number];
+
+function LineaRow({
+  facturaIndex,
+  lineaIndex,
+  control,
+  register,
+  cuentasGasto,
+  disabled,
+  onRemove,
+  errors,
+}: {
+  facturaIndex: number;
+  lineaIndex: number;
+  control: Control<FormValues>;
+  register: ReturnType<typeof useForm<FormValues>>["register"];
+  cuentasGasto: CuentaOption[];
+  disabled: boolean;
+  onRemove: () => void;
+  errors?: LineaErrors;
+}) {
+  const path = `costos.${facturaIndex}.lineas.${lineaIndex}` as const;
+
+  return (
+    <tr className="border-t align-top">
+      <td className="py-2 pl-3 pr-2">
+        <Controller
+          control={control}
+          name={`${path}.tipo` as const}
+          render={({ field }) => (
+            <Select
+              value={field.value}
+              onValueChange={field.onChange}
+              disabled={disabled}
+            >
+              <SelectTrigger className="h-8 w-full text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TIPO_COSTO_VALUES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {TIPO_COSTO_LABELS[t]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        />
+        {errors?.tipo?.message && <FieldError message={errors.tipo.message} />}
+      </td>
+      <td className="py-2 px-2">
+        <Controller
+          control={control}
+          name={`${path}.cuentaContableGastoId` as const}
+          render={({ field }) => (
+            <CuentaCombobox
+              value={field.value || null}
+              onChange={(id) => field.onChange(id ?? 0)}
+              cuentas={cuentasGasto}
+              disabled={disabled}
+            />
+          )}
+        />
+        {errors?.cuentaContableGastoId?.message && (
+          <FieldError message={errors.cuentaContableGastoId.message} />
+        )}
+      </td>
+      <td className="py-2 px-2">
+        <Input
+          className="h-8 text-xs"
+          placeholder="Servicio de balanza, etc."
+          disabled={disabled}
+          {...register(`${path}.descripcion` as const)}
+        />
+      </td>
+      <td className="py-2 px-2">
+        <Input
+          inputMode="decimal"
+          className="h-8 text-right text-xs tabular-nums"
+          disabled={disabled}
+          {...register(`${path}.subtotal` as const)}
+        />
+        {errors?.subtotal?.message && (
+          <FieldError message={errors.subtotal.message} />
+        )}
+      </td>
+      <td className="py-2 px-2">
+        <Input
+          inputMode="decimal"
+          className="h-8 text-right text-xs tabular-nums"
+          disabled={disabled}
+          {...register(`${path}.iva` as const)}
+        />
+      </td>
+      <td className="py-2 px-2">
+        <Input
+          inputMode="decimal"
+          className="h-8 text-right text-xs tabular-nums"
+          disabled={disabled}
+          {...register(`${path}.iibb` as const)}
+        />
+      </td>
+      <td className="py-2 px-2">
+        <Input
+          inputMode="decimal"
+          className="h-8 text-right text-xs tabular-nums"
+          disabled={disabled}
+          {...register(`${path}.otros` as const)}
+        />
+      </td>
+      {!disabled && (
+        <td className="py-2 pr-2 text-right">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={onRemove}
+            aria-label="Quitar línea"
+          >
+            <HugeiconsIcon
+              icon={Delete02Icon}
+              strokeWidth={2}
+              className="size-3.5"
+            />
+          </Button>
+        </td>
+      )}
+    </tr>
   );
 }
 

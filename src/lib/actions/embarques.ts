@@ -136,21 +136,26 @@ export async function listarCuentasParaCostoLogistico(): Promise<CuentaOption[]>
   }));
 }
 
-export type EmbarqueCostoDetalle = {
+export type EmbarqueCostoLineaDetalle = {
   id: number;
   tipo: TipoCostoEmbarque;
-  proveedorId: string;
   cuentaContableGastoId: number;
-  moneda: Moneda;
-  tipoCambio: string;
+  descripcion: string | null;
   subtotal: string;
   iva: string;
   iibb: string;
   otros: string;
-  total: string;
+};
+
+export type EmbarqueCostoDetalle = {
+  id: number;
+  proveedorId: string;
+  moneda: Moneda;
+  tipoCambio: string;
   facturaNumero: string | null;
   fechaFactura: string | null;
-  descripcion: string | null;
+  notas: string | null;
+  lineas: EmbarqueCostoLineaDetalle[];
 };
 
 export type EmbarqueDetalle = {
@@ -192,7 +197,10 @@ export async function obtenerEmbarquePorId(
     where: { id },
     include: {
       items: { orderBy: { id: "asc" } },
-      costos: { orderBy: { id: "asc" } },
+      costos: {
+        orderBy: { id: "asc" },
+        include: { lineas: { orderBy: { id: "asc" } } },
+      },
       asiento: { select: { id: true, numero: true, estado: true } },
     },
   });
@@ -232,19 +240,22 @@ export async function obtenerEmbarquePorId(
     })),
     costos: embarque.costos.map((c) => ({
       id: c.id,
-      tipo: c.tipo,
       proveedorId: c.proveedorId,
-      cuentaContableGastoId: c.cuentaContableGastoId,
       moneda: c.moneda,
       tipoCambio: c.tipoCambio.toString(),
-      subtotal: c.subtotal.toString(),
-      iva: c.iva.toString(),
-      iibb: c.iibb.toString(),
-      otros: c.otros.toString(),
-      total: c.total.toString(),
       facturaNumero: c.facturaNumero,
       fechaFactura: c.fechaFactura?.toISOString() ?? null,
-      descripcion: c.descripcion,
+      notas: c.notas,
+      lineas: c.lineas.map((l) => ({
+        id: l.id,
+        tipo: l.tipo,
+        cuentaContableGastoId: l.cuentaContableGastoId,
+        descripcion: l.descripcion,
+        subtotal: l.subtotal.toString(),
+        iva: l.iva.toString(),
+        iibb: l.iibb.toString(),
+        otros: l.otros.toString(),
+      })),
     })),
   };
 }
@@ -272,16 +283,24 @@ export async function generarCodigoEmbarque(): Promise<string> {
 const moneyRegex = /^\d+(\.\d{1,2})?$/;
 const rateRegex = /^\d+(\.\d{1,6})?$/;
 
-const costoSchema = z.object({
+const costoLineaSchema = z.object({
   tipo: z.nativeEnum(TipoCostoEmbarque),
-  proveedorId: z.string().uuid("Seleccione un proveedor"),
   cuentaContableGastoId: z.number().int().positive("Seleccione la cuenta"),
-  moneda: z.nativeEnum(Moneda),
-  tipoCambio: z.string().regex(rateRegex, "Tipo de cambio inválido"),
+  descripcion: z
+    .string()
+    .max(200)
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
   subtotal: z.string().regex(moneyRegex, "Subtotal inválido"),
   iva: z.string().regex(moneyRegex, "IVA inválido"),
   iibb: z.string().regex(moneyRegex, "IIBB inválido"),
   otros: z.string().regex(moneyRegex, "Otros inválido"),
+});
+
+const costoSchema = z.object({
+  proveedorId: z.string().uuid("Seleccione un proveedor"),
+  moneda: z.nativeEnum(Moneda),
+  tipoCambio: z.string().regex(rateRegex, "Tipo de cambio inválido"),
   facturaNumero: z
     .string()
     .max(64)
@@ -295,13 +314,15 @@ const costoSchema = z.object({
       const d = new Date(v);
       return Number.isFinite(d.getTime()) ? d : null;
     }),
-  descripcion: z
+  notas: z
     .string()
-    .max(200)
+    .max(500)
     .optional()
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
+  lineas: z.array(costoLineaSchema).min(1, "Agregue al menos una línea"),
 });
 
+export type CostoEmbarqueLineaInput = z.input<typeof costoLineaSchema>;
 export type CostoEmbarqueInput = z.input<typeof costoSchema>;
 
 const inputSchema = z
@@ -364,15 +385,6 @@ export type GuardarEmbarqueResult =
   | { ok: true; id: string; codigo: string }
   | { ok: false; error: string };
 
-function totalCosto(
-  subtotal: string,
-  iva: string,
-  iibb: string,
-  otros: string,
-) {
-  return sumMoney([subtotal, iva, iibb, otros]);
-}
-
 export async function guardarEmbarqueAction(
   raw: GuardarEmbarqueInput,
 ): Promise<GuardarEmbarqueResult> {
@@ -392,16 +404,19 @@ export async function guardarEmbarqueAction(
     ),
   );
 
-  // costoTotal del embarque (en ARS) = FOB×TC + Σ subtotal×TC de cada
-  // costo + tributos aduaneros×TC (despacho viene en moneda del embarque,
-  // se paga a AFIP en pesos al cierre).
+  // costoTotal del embarque (en ARS) = FOB×TC + Σ (subtotal de cada
+  // línea ×TC de su factura) + tributos aduaneros×TC. Despacho llega en
+  // moneda del embarque, AFIP cobra en pesos al cierre.
   const tcEmb = toDecimal(input.tipoCambio);
   const fobArs = toDecimal(fobTotal).times(tcEmb);
-  const costosSubtotalArs = input.costos.reduce(
-    (acc, c) =>
-      acc.plus(toDecimal(c.subtotal).times(toDecimal(c.tipoCambio))),
-    toDecimal(0),
-  );
+  const costosSubtotalArs = input.costos.reduce((acc, factura) => {
+    const tc = toDecimal(factura.tipoCambio);
+    const subtotalFactura = factura.lineas.reduce(
+      (a, l) => a.plus(toDecimal(l.subtotal)),
+      toDecimal(0),
+    );
+    return acc.plus(subtotalFactura.times(tc));
+  }, toDecimal(0));
   const tributosArs = sumMoney([
     toDecimal(input.die).times(tcEmb),
     toDecimal(input.tasaEstadistica).times(tcEmb),
@@ -410,21 +425,18 @@ export async function guardarEmbarqueAction(
   const costoTotal = sumMoney([fobArs, costosSubtotalArs, tributosArs]);
 
   // CIF lo mantenemos para retrocompat: FOB + flete_internacional + seguro
-  // marítimo (en moneda original del embarque).
-  const fleteIntlArs = input.costos
-    .filter((c) => c.tipo === TipoCostoEmbarque.FLETE_INTERNACIONAL)
-    .reduce(
-      (acc, c) =>
-        acc.plus(toDecimal(c.subtotal).times(toDecimal(c.tipoCambio))),
-      toDecimal(0),
-    );
-  const seguroIntlArs = input.costos
-    .filter((c) => c.tipo === TipoCostoEmbarque.SEGURO_MARITIMO)
-    .reduce(
-      (acc, c) =>
-        acc.plus(toDecimal(c.subtotal).times(toDecimal(c.tipoCambio))),
-      toDecimal(0),
-    );
+  // marítimo (líneas con esos tipos, sumadas y convertidas a ARS).
+  function sumLineasPorTipo(tipo: TipoCostoEmbarque) {
+    return input.costos.reduce((acc, factura) => {
+      const tc = toDecimal(factura.tipoCambio);
+      const sub = factura.lineas
+        .filter((l) => l.tipo === tipo)
+        .reduce((a, l) => a.plus(toDecimal(l.subtotal)), toDecimal(0));
+      return acc.plus(sub.times(tc));
+    }, toDecimal(0));
+  }
+  const fleteIntlArs = sumLineasPorTipo(TipoCostoEmbarque.FLETE_INTERNACIONAL);
+  const seguroIntlArs = sumLineasPorTipo(TipoCostoEmbarque.SEGURO_MARITIMO);
   const cifTotalArs = fobArs.plus(fleteIntlArs).plus(seguroIntlArs);
 
   const data = {
@@ -483,25 +495,32 @@ export async function guardarEmbarqueAction(
         });
       }
 
-      if (input.costos.length > 0) {
-        await tx.embarqueCosto.createMany({
-          data: input.costos.map((c) => ({
+      for (const factura of input.costos) {
+        const created = await tx.embarqueCosto.create({
+          data: {
             embarqueId,
-            tipo: c.tipo,
-            proveedorId: c.proveedorId,
-            cuentaContableGastoId: c.cuentaContableGastoId,
-            moneda: c.moneda,
-            tipoCambio: new Prisma.Decimal(c.tipoCambio),
-            subtotal: money(c.subtotal),
-            iva: money(c.iva),
-            iibb: money(c.iibb),
-            otros: money(c.otros),
-            total: money(totalCosto(c.subtotal, c.iva, c.iibb, c.otros)),
-            facturaNumero: c.facturaNumero,
-            fechaFactura: c.fechaFactura,
-            descripcion: c.descripcion,
-          })),
+            proveedorId: factura.proveedorId,
+            moneda: factura.moneda,
+            tipoCambio: new Prisma.Decimal(factura.tipoCambio),
+            facturaNumero: factura.facturaNumero,
+            fechaFactura: factura.fechaFactura,
+            notas: factura.notas,
+          },
         });
+        if (factura.lineas.length > 0) {
+          await tx.embarqueCostoLinea.createMany({
+            data: factura.lineas.map((l) => ({
+              embarqueCostoId: created.id,
+              tipo: l.tipo,
+              cuentaContableGastoId: l.cuentaContableGastoId,
+              descripcion: l.descripcion,
+              subtotal: money(l.subtotal),
+              iva: money(l.iva),
+              iibb: money(l.iibb),
+              otros: money(l.otros),
+            })),
+          });
+        }
       }
 
       return tx.embarque.findUniqueOrThrow({
@@ -556,7 +575,10 @@ export async function cerrarYContabilizarEmbarqueAction(
         where: { id: embarqueId },
         include: {
           items: { orderBy: { id: "asc" } },
-          costos: { orderBy: { id: "asc" } },
+          costos: {
+            orderBy: { id: "asc" },
+            include: { lineas: { orderBy: { id: "asc" } } },
+          },
         },
       });
 
@@ -591,14 +613,19 @@ export async function cerrarYContabilizarEmbarqueAction(
       const asiento = await crearAsientoEmbarque(embarqueId, tx);
       const contabilizado = await contabilizarAsiento(asiento.id, tx);
 
+      // Para el rateio aplanamos cada línea de cada factura: el TC de la
+      // factura aplica a cada línea (todas las líneas comparten moneda y TC).
+      const costosRateio = embarque.costos.flatMap((factura) =>
+        factura.lineas.map((l) => ({
+          subtotal: l.subtotal,
+          tipoCambio: factura.tipoCambio,
+        })),
+      );
       const rateio = calcularRateioEmbarque(
         {
           fobTotal: embarque.fobTotal,
           embarqueTipoCambio: embarque.tipoCambio,
-          costos: embarque.costos.map((c) => ({
-            subtotal: c.subtotal,
-            tipoCambio: c.tipoCambio,
-          })),
+          costos: costosRateio,
           die: embarque.die,
           tasaEstadistica: embarque.tasaEstadistica,
           arancelSim: embarque.arancelSim,

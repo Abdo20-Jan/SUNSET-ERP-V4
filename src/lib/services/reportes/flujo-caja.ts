@@ -171,10 +171,12 @@ export async function getFlujoCaja(
         costos: {
           select: {
             tipoCambio: true,
-            subtotal: true,
-            iva: true,
-            iibb: true,
-            cuentaContableGastoId: true,
+            lineas: {
+              select: {
+                subtotal: true,
+                cuentaContableGastoId: true,
+              },
+            },
           },
         },
       },
@@ -214,16 +216,20 @@ export async function getFlujoCaja(
         const prev = proyeccionPorCuentaMes.get(key) ?? new Decimal(0);
         proyeccionPorCuentaMes.set(key, prev.plus(valor));
       }
-      // Costos logísticos por proveedor: proyectamos el subtotal en ARS al
-      // mes futuro, distribuido en la cuenta de gasto elegida por el usuario.
-      for (const c of emb.costos) {
-        const info = idToInfo.get(c.cuentaContableGastoId);
-        if (!info) continue;
-        const subtotalArs = toDecimal(c.subtotal).times(toDecimal(c.tipoCambio));
-        if (subtotalArs.isZero()) continue;
-        const key = `${info.id}|${proximoMesFuturo}`;
-        const prev = proyeccionPorCuentaMes.get(key) ?? new Decimal(0);
-        proyeccionPorCuentaMes.set(key, prev.plus(subtotalArs));
+      // Costos logísticos por proveedor: cada factura tiene N líneas;
+      // proyectamos el subtotal de cada línea en ARS al mes futuro,
+      // distribuido en la cuenta de gasto elegida.
+      for (const factura of emb.costos) {
+        const tc = toDecimal(factura.tipoCambio);
+        for (const linea of factura.lineas) {
+          const info = idToInfo.get(linea.cuentaContableGastoId);
+          if (!info) continue;
+          const subtotalArs = toDecimal(linea.subtotal).times(tc);
+          if (subtotalArs.isZero()) continue;
+          const key = `${info.id}|${proximoMesFuturo}`;
+          const prev = proyeccionPorCuentaMes.get(key) ?? new Decimal(0);
+          proyeccionPorCuentaMes.set(key, prev.plus(subtotalArs));
+        }
       }
     }
 

@@ -169,7 +169,7 @@ model CuentaContable {
   proveedores      Proveedor[]
   prestamos        PrestamoExterno[]
   movimientos      MovimientoTesoreria[]
-  embarqueCostos   EmbarqueCosto[]       @relation("EmbarqueCostoCuentaGasto")
+  embarqueCostoLineas EmbarqueCostoLinea[] @relation("EmbarqueCostoLineaCuentaGasto")
 }
 
 model PeriodoContable {
@@ -318,34 +318,50 @@ model Embarque {
   depositoDestino Deposito?       @relation(fields: [depositoDestinoId], references: [id])
 }
 
-// Costos logísticos del embarque que generan cuentas a pagar a distintos
-// proveedores (flete, seguro, despachante, portuarios, operador, etc.).
-// Cada línea: subtotal neto + IVA + IIBB + otras retenciones + total.
+// Una factura de un proveedor logístico (flete, despachante, operador
+// portuario, etc.) asociada al embarque. Cada factura agrupa N conceptos
+// (servicios) en sus EmbarqueCostoLinea, permitiendo que una sola
+// factura del operador portuario incluya p.ej. "balanza", "entrega de
+// contenedor", "almacenaje" — cada uno con su IVA/IIBB propio si
+// corresponde.
 model EmbarqueCosto {
+  id            Int       @id @default(autoincrement())
+  embarqueId    String
+  proveedorId   String
+  moneda        Moneda
+  tipoCambio    Decimal   @db.Decimal(18, 6)
+  facturaNumero String?
+  fechaFactura  DateTime?
+  notas         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  embarque  Embarque             @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
+  proveedor Proveedor            @relation(fields: [proveedorId], references: [id])
+  lineas    EmbarqueCostoLinea[]
+
+  @@index([embarqueId])
+  @@index([proveedorId])
+}
+
+// Línea individual dentro de una factura: un concepto, su cuenta
+// contable de gasto, su monto neto y los impuestos/retenciones que
+// aplican a esa línea específica.
+model EmbarqueCostoLinea {
   id                    Int               @id @default(autoincrement())
-  embarqueId            String
+  embarqueCostoId       Int
   tipo                  TipoCostoEmbarque
-  proveedorId           String
   cuentaContableGastoId Int
-  moneda                Moneda
-  tipoCambio            Decimal           @db.Decimal(18, 6)
+  descripcion           String?
   subtotal              Decimal           @db.Decimal(18, 2)
   iva                   Decimal           @default(0) @db.Decimal(18, 2)
   iibb                  Decimal           @default(0) @db.Decimal(18, 2)
   otros                 Decimal           @default(0) @db.Decimal(18, 2)
-  total                 Decimal           @db.Decimal(18, 2)
-  facturaNumero         String?
-  fechaFactura          DateTime?
-  descripcion           String?
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
 
-  embarque            Embarque       @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
-  proveedor           Proveedor      @relation(fields: [proveedorId], references: [id])
-  cuentaContableGasto CuentaContable @relation("EmbarqueCostoCuentaGasto", fields: [cuentaContableGastoId], references: [id])
+  costo               EmbarqueCosto  @relation(fields: [embarqueCostoId], references: [id], onDelete: Cascade)
+  cuentaContableGasto CuentaContable @relation("EmbarqueCostoLineaCuentaGasto", fields: [cuentaContableGastoId], references: [id])
 
-  @@index([embarqueId])
-  @@index([proveedorId])
+  @@index([embarqueCostoId])
 }
 
 model ItemEmbarque {
