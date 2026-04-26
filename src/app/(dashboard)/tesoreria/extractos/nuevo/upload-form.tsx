@@ -129,8 +129,7 @@ export function ExtractoUploadForm({
             <SelectContent>
               {cuentas.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
-                  {c.banco} · {c.moneda}
-                  {c.numero ? ` · ${c.numero}` : ""}
+                  {`${c.banco} · ${c.moneda}${c.numero ? ` · ${c.numero}` : ""}`}
                 </SelectItem>
               ))}
             </SelectContent>

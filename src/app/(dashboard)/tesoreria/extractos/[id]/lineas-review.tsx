@@ -523,8 +523,7 @@ function EditarLineaDialog({
                   <SelectItem value="__none__">— Sin proveedor —</SelectItem>
                   {proveedores.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.nombre}
-                      {p.cuit ? ` (${p.cuit})` : ""}
+                      {`${p.nombre}${p.cuit ? ` (${p.cuit})` : ""}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -551,8 +550,7 @@ function EditarLineaDialog({
                   <SelectItem value="__none__">— Sin cliente —</SelectItem>
                   {clientes.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
-                      {c.nombre}
-                      {c.cuit ? ` (${c.cuit})` : ""}
+                      {`${c.nombre}${c.cuit ? ` (${c.cuit})` : ""}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
