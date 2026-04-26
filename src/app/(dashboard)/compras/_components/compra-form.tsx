@@ -29,6 +29,7 @@ import {
   type ProveedorParaCompra,
 } from "@/lib/actions/compras";
 import { fmtMoney } from "@/lib/format";
+import { useCmdShortcut } from "@/lib/hooks/use-cmd-shortcut";
 import {
   ProductoCombobox,
   type ProductoOption,
@@ -341,6 +342,8 @@ export function CompraForm({
       }
     });
   });
+
+  useCmdShortcut("s", () => submitGuardar(), !isPending);
 
   const submitEmitir = handleSubmit((values) => {
     startTransition(async () => {

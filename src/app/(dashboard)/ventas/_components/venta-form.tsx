@@ -29,6 +29,7 @@ import {
   type VentaDetalle,
 } from "@/lib/actions/ventas";
 import { fmtMoney } from "@/lib/format";
+import { useCmdShortcut } from "@/lib/hooks/use-cmd-shortcut";
 import {
   ClienteCombobox,
   type ClienteOption,
@@ -340,6 +341,8 @@ export function VentaForm({
       }
     });
   });
+
+  useCmdShortcut("s", () => submitGuardar(), !isPending);
 
   const submitEmitir = handleSubmit((values) => {
     startTransition(async () => {
