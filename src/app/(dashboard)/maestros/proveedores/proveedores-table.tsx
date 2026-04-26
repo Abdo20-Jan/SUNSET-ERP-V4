@@ -65,9 +65,11 @@ import {
 export function ProveedoresTable({
   proveedores,
   cuentas,
+  cuentasGasto,
 }: {
   proveedores: ProveedorRow[];
   cuentas: CuentaContableOption[];
+  cuentasGasto: CuentaContableOption[];
 }) {
   const router = useRouter();
   const [searchText, setSearchText] = useState("");
@@ -268,6 +270,7 @@ export function ProveedoresTable({
       <ProveedorFormDialog
         state={formState}
         cuentas={cuentas}
+        cuentasGasto={cuentasGasto}
         onClose={() => setFormState(null)}
       />
 

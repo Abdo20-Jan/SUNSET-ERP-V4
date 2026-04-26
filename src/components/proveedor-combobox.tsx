@@ -23,6 +23,8 @@ export type ProveedorOption = {
   id: string;
   nombre: string;
   pais: string;
+  /** Cuenta de gasto/activo por defecto del proveedor — auto-fill en embarques. */
+  cuentaGastoContableId?: number | null;
 };
 
 type Props = {

@@ -1119,6 +1119,7 @@ export async function crearAsientoCompra(
             id: true,
             nombre: true,
             cuentaContableId: true,
+            cuentaGastoContableId: true,
             tipoProveedor: true,
           },
         },
@@ -1139,10 +1140,13 @@ export async function crearAsientoCompra(
 
     const porCodigo = await ensureCuentasMap(inner, COMPRA_CODIGOS);
 
-    // Contrapartida (DEBE) según tipoProveedor — mercadería va a 1.1.5.01,
-    // honorarios a 5.1.1.x, alquileres a 5.2.1.01, etc.
+    // Contrapartida (DEBE) — preferencia:
+    //   1. proveedor.cuentaGastoContableId (override manual)
+    //   2. tipoProveedor → GASTO_POR_TIPO_PROVEEDOR (default por categoría)
     const gastoDef = GASTO_POR_TIPO_PROVEEDOR[compra.proveedor.tipoProveedor];
-    const gastoCuentaId = await getOrCreateCuenta(inner, gastoDef);
+    const gastoCuentaId =
+      compra.proveedor.cuentaGastoContableId ??
+      (await getOrCreateCuenta(inner, gastoDef));
 
     const tc = toDecimal(compra.tipoCambio);
     const subtotal = toDecimal(compra.subtotal).times(tc).toDecimalPlaces(2);

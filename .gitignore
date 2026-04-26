@@ -56,5 +56,6 @@ prisma/detach-embarque.ts
 prisma/snapshot.ts
 prisma/wipe-transactional.ts
 prisma/wipe-extractos.ts
+prisma/seed-cbu-cuentas.ts
 prisma/add-productos.ts
 prisma/*.bak

@@ -1661,14 +1661,15 @@ function FacturaCard({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() =>
+              onClick={() => {
+                const prov = proveedores.find((p) => p.id === proveedorId);
                 appendLinea({
                   tipo: "GASTOS_PORTUARIOS",
-                  cuentaContableGastoId: 0,
+                  cuentaContableGastoId: prov?.cuentaGastoContableId ?? 0,
                   descripcion: "",
                   subtotal: "0",
-                })
-              }
+                });
+              }}
             >
               <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
               Agregar gasto

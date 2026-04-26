@@ -119,6 +119,7 @@ const formSchema = z.object({
     ),
   estado: z.enum(["activo", "inactivo"]),
   cuentaContableId: z.number().int().positive().nullable(),
+  cuentaGastoContableId: z.number().int().positive().nullable(),
   crearCuentaAuto: z.boolean(),
 });
 
@@ -137,6 +138,7 @@ function emptyDefaults(): FormValues {
     email: "",
     estado: "activo",
     cuentaContableId: null,
+    cuentaGastoContableId: null,
     crearCuentaAuto: true,
   };
 }
@@ -154,6 +156,7 @@ function defaultsFromRow(row: ProveedorRow): FormValues {
     email: row.email ?? "",
     estado: row.estado === "inactivo" ? "inactivo" : "activo",
     cuentaContableId: row.cuentaContableId,
+    cuentaGastoContableId: row.cuentaGastoContableId,
     crearCuentaAuto: false,
   };
 }
@@ -161,10 +164,12 @@ function defaultsFromRow(row: ProveedorRow): FormValues {
 export function ProveedorFormDialog({
   state,
   cuentas,
+  cuentasGasto,
   onClose,
 }: {
   state: ProveedorFormState | null;
   cuentas: CuentaContableOption[];
+  cuentasGasto: CuentaContableOption[];
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -230,6 +235,7 @@ export function ProveedorFormDialog({
         email: values.email && values.email.length > 0 ? values.email : undefined,
         estado: values.estado,
         cuentaContableId: values.cuentaContableId ?? null,
+        cuentaGastoContableId: values.cuentaGastoContableId ?? null,
         crearCuentaAuto:
           state.mode === "create" &&
           values.crearCuentaAuto &&
@@ -497,6 +503,31 @@ export function ProveedorFormDialog({
                 <span className="font-mono">2.1.1 DEUDAS COMERCIALES</span>.
                 Si elige "Crear automáticamente", el sistema asigna el
                 próximo código disponible al guardar.
+              </p>
+            </div>
+
+            <div className="sm:col-span-2 flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+              <Label className="text-sm">
+                Cuenta de gasto / activo (contrapartida)
+              </Label>
+              <Controller
+                control={control}
+                name="cuentaGastoContableId"
+                render={({ field }) => (
+                  <CuentaCombobox
+                    value={field.value}
+                    onChange={field.onChange}
+                    cuentas={cuentasGasto}
+                    placeholder="Auto-detectar por tipo de proveedor"
+                    emptyMessage="No hay cuentas disponibles."
+                  />
+                )}
+              />
+              <p className="text-xs text-muted-foreground">
+                Cuenta que se debita al facturarle (DEBE en compras /
+                embarques). Si la dejás vacía, el sistema usa el default según
+                el tipo de proveedor (despachante → 5.1.1.03; almacenaje →
+                5.5.1.05; etc).
               </p>
             </div>
           </div>

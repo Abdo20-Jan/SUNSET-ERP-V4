@@ -88,7 +88,12 @@ export async function listarEmbarques(
 export async function listarProveedoresParaEmbarque(): Promise<ProveedorOption[]> {
   const proveedores = await db.proveedor.findMany({
     orderBy: { nombre: "asc" },
-    select: { id: true, nombre: true, pais: true },
+    select: {
+      id: true,
+      nombre: true,
+      pais: true,
+      cuentaGastoContableId: true,
+    },
   });
   return proveedores;
 }

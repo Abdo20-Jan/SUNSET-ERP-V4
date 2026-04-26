@@ -1,4 +1,5 @@
 import {
+  listarCuentasContablesParaGastoProveedor,
   listarCuentasContablesParaProveedor,
   listarProveedores,
 } from "@/lib/actions/proveedores";
@@ -7,9 +8,10 @@ import { Card } from "@/components/ui/card";
 import { ProveedoresTable } from "./proveedores-table";
 
 export default async function ProveedoresPage() {
-  const [proveedores, cuentas] = await Promise.all([
+  const [proveedores, cuentas, cuentasGasto] = await Promise.all([
     listarProveedores(),
     listarCuentasContablesParaProveedor(),
+    listarCuentasContablesParaGastoProveedor(),
   ]);
 
   return (
@@ -24,7 +26,11 @@ export default async function ProveedoresPage() {
       </div>
 
       <Card className="py-0">
-        <ProveedoresTable proveedores={proveedores} cuentas={cuentas} />
+        <ProveedoresTable
+          proveedores={proveedores}
+          cuentas={cuentas}
+          cuentasGasto={cuentasGasto}
+        />
       </Card>
     </div>
   );

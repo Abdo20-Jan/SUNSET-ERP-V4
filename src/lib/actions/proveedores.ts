@@ -11,6 +11,7 @@ import {
 } from "@/lib/services/cuenta-auto";
 import {
   ConceptoRG830,
+  CuentaCategoria,
   CuentaTipo,
   Prisma,
   TipoProveedor,
@@ -31,6 +32,9 @@ export type ProveedorRow = {
   cuentaContableId: number | null;
   cuentaContableCodigo: string | null;
   cuentaContableNombre: string | null;
+  cuentaGastoContableId: number | null;
+  cuentaGastoContableCodigo: string | null;
+  cuentaGastoContableNombre: string | null;
 };
 
 export type CuentaContableOption = {
@@ -58,6 +62,8 @@ export async function listarProveedores(): Promise<ProveedorRow[]> {
       estado: true,
       cuentaContableId: true,
       cuentaContable: { select: { codigo: true, nombre: true } },
+      cuentaGastoContableId: true,
+      cuentaGastoContable: { select: { codigo: true, nombre: true } },
     },
   });
 
@@ -76,6 +82,9 @@ export async function listarProveedores(): Promise<ProveedorRow[]> {
     cuentaContableId: p.cuentaContableId,
     cuentaContableCodigo: p.cuentaContable?.codigo ?? null,
     cuentaContableNombre: p.cuentaContable?.nombre ?? null,
+    cuentaGastoContableId: p.cuentaGastoContableId,
+    cuentaGastoContableCodigo: p.cuentaGastoContable?.codigo ?? null,
+    cuentaGastoContableNombre: p.cuentaGastoContable?.nombre ?? null,
   }));
 }
 
@@ -87,6 +96,24 @@ export async function listarCuentasContablesParaProveedor(): Promise<
       tipo: CuentaTipo.ANALITICA,
       activa: true,
       codigo: { startsWith: CUENTAS_PROVEEDORES_PREFIX },
+    },
+    orderBy: { codigo: "asc" },
+    select: { id: true, codigo: true, nombre: true },
+  });
+  return cuentas;
+}
+
+// Cuentas elegibles como contrapartida de gasto/activo cuando se factura
+// del proveedor: ANALITICAS activas categoría EGRESO (5.x) o ACTIVO (1.x —
+// para capitalizar en mercaderías en tránsito).
+export async function listarCuentasContablesParaGastoProveedor(): Promise<
+  CuentaContableOption[]
+> {
+  const cuentas = await db.cuentaContable.findMany({
+    where: {
+      tipo: CuentaTipo.ANALITICA,
+      activa: true,
+      categoria: { in: [CuentaCategoria.EGRESO, CuentaCategoria.ACTIVO] },
     },
     orderBy: { codigo: "asc" },
     select: { id: true, codigo: true, nombre: true },
@@ -143,6 +170,13 @@ const proveedorBaseSchema = z
       .nullable()
       .optional()
       .transform((v) => v ?? null),
+    cuentaGastoContableId: z
+      .number()
+      .int()
+      .positive()
+      .nullable()
+      .optional()
+      .transform((v) => v ?? null),
     crearCuentaAuto: z.boolean().optional().default(false),
   });
   // CUIT siempre opcional — tanto para nacionales como extranjeros.
@@ -190,6 +224,8 @@ export async function crearProveedorAction(
 
   const cuentaCheck = await validarCuentaContable(parsed.data.cuentaContableId);
   if (!cuentaCheck.ok) return cuentaCheck;
+  const gastoCheck = await validarCuentaContable(parsed.data.cuentaGastoContableId);
+  if (!gastoCheck.ok) return gastoCheck;
 
   try {
     const created = await db.$transaction(async (tx) => {
@@ -244,6 +280,8 @@ export async function actualizarProveedorAction(
 
   const cuentaCheck = await validarCuentaContable(parsed.data.cuentaContableId);
   if (!cuentaCheck.ok) return cuentaCheck;
+  const gastoCheck = await validarCuentaContable(parsed.data.cuentaGastoContableId);
+  if (!gastoCheck.ok) return gastoCheck;
 
   try {
     const { crearCuentaAuto: _ignore, ...rest } = parsed.data;

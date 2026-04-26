@@ -236,7 +236,8 @@ model CuentaContable {
   lineas              LineaAsiento[]
   cuentasBancarias    CuentaBancaria[]
   clientes            Cliente[]
-  proveedores         Proveedor[]
+  proveedores         Proveedor[]               @relation("ProveedorPasivo")
+  proveedoresGasto    Proveedor[]               @relation("ProveedorGasto")
   prestamos           PrestamoExterno[]
   movimientos         MovimientoTesoreria[]
   embarqueCostoLineas EmbarqueCostoLinea[]      @relation("EmbarqueCostoLineaCuentaGasto")
@@ -541,29 +542,31 @@ model Cliente {
 }
 
 model Proveedor {
-  id                   String         @id @default(uuid())
-  nombre               String
-  cuit                 String?        @unique // opcional para extranjeros (puede ser ID fiscal de su país)
-  tipo                 String         @default("otro")
-  tipoProveedor        TipoProveedor  @default(MERCADERIA_LOCAL)
-  conceptoRG830        ConceptoRG830? // mapping para retención Ganancias
-  pais                 String         @default("AR")
-  direccion            String?
-  telefono             String?
-  email                String?
-  estado               String         @default("activo")
-  cuentaContableId     Int?
-  diasPagoDefault      Int? // 0 = contado, 30/60/90 = días corridos
-  condicionPagoDefault CondicionPago  @default(CONTADO)
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
+  id                    String         @id @default(uuid())
+  nombre                String
+  cuit                  String?        @unique // opcional para extranjeros (puede ser ID fiscal de su país)
+  tipo                  String         @default("otro")
+  tipoProveedor         TipoProveedor  @default(MERCADERIA_LOCAL)
+  conceptoRG830         ConceptoRG830? // mapping para retención Ganancias
+  pais                  String         @default("AR")
+  direccion             String?
+  telefono              String?
+  email                 String?
+  estado                String         @default("activo")
+  cuentaContableId      Int? // pasivo (cta a pagar) — auto-creada por tipoProveedor
+  cuentaGastoContableId Int? // contrapartida de gasto/activo por defecto — auto-fill en embarques/compras
+  diasPagoDefault       Int? // 0 = contado, 30/60/90 = días corridos
+  condicionPagoDefault  CondicionPago  @default(CONTADO)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
-  cuentaContable CuentaContable?           @relation(fields: [cuentaContableId], references: [id])
-  embarques      Embarque[]
-  compras        Compra[]
-  costosEmbarque EmbarqueCosto[]
-  pedidosCompra  PedidoCompra[]
-  extractoLineas LineaExtractoSugerencia[]
+  cuentaContable      CuentaContable?           @relation("ProveedorPasivo", fields: [cuentaContableId], references: [id])
+  cuentaGastoContable CuentaContable?           @relation("ProveedorGasto", fields: [cuentaGastoContableId], references: [id])
+  embarques           Embarque[]
+  compras             Compra[]
+  costosEmbarque      EmbarqueCosto[]
+  pedidosCompra       PedidoCompra[]
+  extractoLineas      LineaExtractoSugerencia[]
 }
 
 model Producto {
