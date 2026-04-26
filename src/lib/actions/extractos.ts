@@ -6,6 +6,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
+  anularAsiento,
   AsientoError,
   contabilizarAsiento,
   crearAsientoManual,
@@ -302,8 +303,104 @@ export async function ignorarLineaAction(lineaId: string) {
 
 export async function revertirLineaAction(lineaId: string) {
   // Solo permitido para IGNORADA / RECHAZADA — APROBADA tiene movimiento
-  // y debe anularse desde Tesorería.
+  // y debe anularse desde Tesorería o vía desaprobarLineaAction.
   return cambiarEstadoLinea(lineaId, LineaExtractoStatus.PENDIENTE);
+}
+
+/**
+ * Anula el asiento y movimiento generados por una línea aprobada y
+ * la deja PENDIENTE para re-aprobar (con cuenta corregida, etc).
+ * Falla si el período ya cerró o si el asiento ya fue anulado por otra vía.
+ */
+export async function desaprobarLineaAction(
+  lineaId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await auth();
+  if (!session) return { ok: false, error: "No autorizado." };
+  if (!z.string().uuid().safeParse(lineaId).success) {
+    return { ok: false, error: "ID inválido." };
+  }
+
+  try {
+    await db.$transaction(async (tx) => {
+      const linea = await tx.lineaExtractoSugerencia.findUnique({
+        where: { id: lineaId },
+        select: {
+          status: true,
+          importacionId: true,
+          movimientoId: true,
+          movimiento: { select: { id: true, asientoId: true } },
+        },
+      });
+
+      if (!linea) throw new Error("Línea no encontrada.");
+      if (linea.status !== LineaExtractoStatus.APROBADA) {
+        throw new Error(
+          `La línea está en estado ${linea.status}. Solo APROBADA se puede desaprobar.`,
+        );
+      }
+
+      // Anular asiento si todavía está contabilizado.
+      const asientoId = linea.movimiento?.asientoId;
+      if (asientoId) {
+        await anularAsiento(asientoId, tx);
+        // anularAsiento ya detachea movimiento.asientoId
+      }
+
+      // Eliminar movimiento huérfano (sin asientoId)
+      if (linea.movimientoId) {
+        await tx.movimientoTesoreria.delete({
+          where: { id: linea.movimientoId },
+        });
+      }
+
+      await tx.lineaExtractoSugerencia.update({
+        where: { id: lineaId },
+        data: {
+          status: LineaExtractoStatus.PENDIENTE,
+          movimientoId: null,
+        },
+      });
+
+      // Recalcular contadores
+      const counts = await tx.lineaExtractoSugerencia.groupBy({
+        by: ["status"],
+        where: { importacionId: linea.importacionId },
+        _count: { _all: true },
+      });
+      const aprobadas =
+        counts.find((c) => c.status === LineaExtractoStatus.APROBADA)?._count
+          ._all ?? 0;
+      const pendientes =
+        counts.find((c) => c.status === LineaExtractoStatus.PENDIENTE)?._count
+          ._all ?? 0;
+
+      await tx.importacionExtracto.update({
+        where: { id: linea.importacionId },
+        data: {
+          lineasAprobadas: aprobadas,
+          status:
+            pendientes === 0
+              ? ImportacionExtractoStatus.COMPLETADO
+              : aprobadas > 0
+                ? ImportacionExtractoStatus.PARCIAL
+                : ImportacionExtractoStatus.PENDIENTE,
+        },
+      });
+    });
+
+    revalidatePath("/tesoreria/extractos");
+    revalidatePath("/tesoreria/movimientos");
+
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof AsientoError) {
+      return { ok: false, error: err.message };
+    }
+    const msg = err instanceof Error ? err.message : "Error desconocido";
+    console.error("[extractos] desaprobarLineaAction failed", err);
+    return { ok: false, error: msg };
+  }
 }
 
 export async function eliminarImportacionAction(

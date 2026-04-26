@@ -14,6 +14,7 @@ import {
 
 import {
   aprobarLineaAction,
+  desaprobarLineaAction,
   editarLineaAction,
   ignorarLineaAction,
   rechazarLineaAction,
@@ -370,6 +371,28 @@ export function LineasReview({
                       >
                         <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={2} />
                         Reactivar
+                      </Button>
+                    ) : l.status === LineaExtractoStatus.APROBADA ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={isPending}
+                        title="Anula el asiento, elimina el movimiento y vuelve a pendiente"
+                        onClick={() => {
+                          if (
+                            confirm(
+                              "¿Desaprobar esta línea? Se anulará el asiento contabilizado y el movimiento asociado.",
+                            )
+                          ) {
+                            handleAction(
+                              () => desaprobarLineaAction(l.id),
+                              "Línea desaprobada — asiento anulado.",
+                            );
+                          }
+                        }}
+                      >
+                        <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={2} />
+                        Desaprobar
                       </Button>
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>
