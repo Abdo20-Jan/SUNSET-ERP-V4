@@ -119,7 +119,7 @@ export function MovimientoDetalleSheet({
                 <InfoRow label="Tipo" value={movimiento.tipo} />
                 <InfoRow
                   label="Cuenta bancaria"
-                  value={`${movimiento.cuentaBancaria.banco} · ${movimiento.cuentaBancaria.numero}`}
+                  value={`${movimiento.cuentaBancaria.banco}${movimiento.cuentaBancaria.numero ? ` · ${movimiento.cuentaBancaria.numero}` : ""}`}
                 />
                 <InfoRow
                   label="Monto"

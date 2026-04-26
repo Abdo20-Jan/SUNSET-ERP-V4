@@ -70,7 +70,7 @@ export type MovimientoRow = {
     id: string;
     banco: string;
     moneda: Moneda;
-    numero: string;
+    numero: string | null;
   };
   cuentaContable: {
     codigo: string;
@@ -154,7 +154,7 @@ export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
             </span>
           </span>
           <span className="font-mono text-xs text-muted-foreground">
-            {row.original.cuentaBancaria.numero}
+            {row.original.cuentaBancaria.numero ?? ""}
           </span>
         </div>
       ),

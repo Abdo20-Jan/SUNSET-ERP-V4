@@ -114,7 +114,7 @@ export type PrestamoRow = {
   cuentaBancaria: {
     id: string;
     banco: string;
-    numero: string;
+    numero: string | null;
     moneda: Moneda;
   };
   cuentaContable: {
@@ -223,7 +223,7 @@ export type PrestamoDetalle = {
   principal: string;
   tipoCambio: string;
   valorArs: string;
-  cuentaBancaria: { banco: string; numero: string; moneda: Moneda };
+  cuentaBancaria: { banco: string; numero: string | null; moneda: Moneda };
   cuentaContable: { id: number; codigo: string; nombre: string };
   asiento: {
     id: string;

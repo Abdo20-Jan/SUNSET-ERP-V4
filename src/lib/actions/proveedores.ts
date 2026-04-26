@@ -129,18 +129,8 @@ const proveedorBaseSchema = z
       .optional()
       .transform((v) => v ?? null),
     crearCuentaAuto: z.boolean().optional().default(false),
-  })
-  .superRefine((data, ctx) => {
-    // CUIT obligatorio sólo para nacionales (Argentina). Para extranjeros
-    // queda opcional — puede ser ID fiscal del país de origen.
-    if (data.pais === "AR" && (!data.cuit || data.cuit.length === 0)) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["cuit"],
-        message: "El CUIT es obligatorio para proveedores nacionales.",
-      });
-    }
   });
+  // CUIT siempre opcional — tanto para nacionales como extranjeros.
 
 export type ProveedorInput = z.input<typeof proveedorBaseSchema>;
 

@@ -39,7 +39,7 @@ const formSchema = z.object({
   banco: z.string().min(1, "El banco/caja es obligatorio"),
   tipo: z.enum(["CUENTA_CORRIENTE", "CAJA_AHORRO", "CAJA_CHICA"]),
   moneda: z.enum(["ARS", "USD"]),
-  numero: z.string().min(1, "El número es obligatorio"),
+  numero: z.string().optional(),
   cbu: z.string().optional(),
   alias: z.string().optional(),
   cuentaContableId: z.number().int().positive().nullable(),
@@ -233,7 +233,7 @@ function NuevaCuentaSheet({
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="numero">Número</Label>
+              <Label htmlFor="numero">Número (opcional)</Label>
               <Input
                 id="numero"
                 placeholder="0000-0000-0000-0000"

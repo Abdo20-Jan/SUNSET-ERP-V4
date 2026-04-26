@@ -20,7 +20,7 @@ export type CuentaBancariaRow = {
   banco: string;
   tipo: TipoCuentaBancaria;
   moneda: Moneda;
-  numero: string;
+  numero: string | null;
   cbu: string | null;
   alias: string | null;
   cuentaContableCodigo: string;
@@ -97,7 +97,10 @@ const crearInputSchema = z.object({
   banco: z.string().min(1, "El banco/caja es obligatorio"),
   tipo: z.nativeEnum(TipoCuentaBancaria),
   moneda: z.nativeEnum(Moneda),
-  numero: z.string().min(1, "El número es obligatorio"),
+  numero: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
   cbu: z
     .string()
     .optional()

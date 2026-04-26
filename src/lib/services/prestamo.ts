@@ -19,7 +19,7 @@ export type AmortizacionPrestamo = {
   monto: Decimal;
   moneda: Moneda;
   tipoCambio: Decimal;
-  cuentaBancaria: { id: string; banco: string; numero: string };
+  cuentaBancaria: { id: string; banco: string; numero: string | null };
   asiento: { id: string; numero: number; estado: AsientoEstado } | null;
   descripcion: string | null;
 };

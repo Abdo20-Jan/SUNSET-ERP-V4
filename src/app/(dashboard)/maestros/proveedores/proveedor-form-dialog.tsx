@@ -53,40 +53,27 @@ const PAISES: Array<{ code: string; label: string }> = [
   { code: "ES", label: "España" },
 ];
 
-const formSchema = z
-  .object({
-    nombre: z.string().trim().min(1, "El nombre es obligatorio."),
-    nacionalidad: z.enum(["NACIONAL", "EXTRANJERO"]),
-    cuit: z.string().trim().optional().or(z.literal("")),
-    pais: z.string().trim().min(2).max(2),
-    tipo: z.string().trim().optional().or(z.literal("")),
-    direccion: z.string().trim().optional().or(z.literal("")),
-    telefono: z.string().trim().optional().or(z.literal("")),
-    email: z
-      .string()
-      .trim()
-      .optional()
-      .or(z.literal(""))
-      .refine(
-        (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
-        "Email inválido.",
-      ),
-    estado: z.enum(["activo", "inactivo"]),
-    cuentaContableId: z.number().int().positive().nullable(),
-    crearCuentaAuto: z.boolean(),
-  })
-  .superRefine((data, ctx) => {
-    if (
-      data.nacionalidad === "NACIONAL" &&
-      (!data.cuit || data.cuit.length === 0)
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["cuit"],
-        message: "El CUIT es obligatorio para proveedores nacionales.",
-      });
-    }
-  });
+const formSchema = z.object({
+  nombre: z.string().trim().min(1, "El nombre es obligatorio."),
+  nacionalidad: z.enum(["NACIONAL", "EXTRANJERO"]),
+  cuit: z.string().trim().optional().or(z.literal("")),
+  pais: z.string().trim().min(2).max(2),
+  tipo: z.string().trim().optional().or(z.literal("")),
+  direccion: z.string().trim().optional().or(z.literal("")),
+  telefono: z.string().trim().optional().or(z.literal("")),
+  email: z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal(""))
+    .refine(
+      (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+      "Email inválido.",
+    ),
+  estado: z.enum(["activo", "inactivo"]),
+  cuentaContableId: z.number().int().positive().nullable(),
+  crearCuentaAuto: z.boolean(),
+});
 
 type FormValues = z.infer<typeof formSchema>;
 
@@ -282,7 +269,7 @@ export function ProveedorFormDialog({
             <div className="flex flex-col gap-2">
               <Label htmlFor="cuit">
                 {nacionalidad === "NACIONAL"
-                  ? "CUIT *"
+                  ? "CUIT (opcional)"
                   : "ID fiscal (opcional)"}
               </Label>
               <Input

@@ -31,7 +31,7 @@ export type CuentaBancariaOption = {
   id: string;
   banco: string;
   moneda: Moneda;
-  numero: string;
+  numero: string | null;
 };
 
 type Props = {

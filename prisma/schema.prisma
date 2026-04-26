@@ -270,7 +270,7 @@ model CuentaBancaria {
   banco            String
   tipo             TipoCuentaBancaria
   moneda           Moneda
-  numero           String
+  numero           String?
   cbu              String?
   alias            String?
   cuentaContableId Int
