@@ -55,4 +55,5 @@ prisma/cleanup-embarques.ts
 prisma/detach-embarque.ts
 prisma/snapshot.ts
 prisma/wipe-transactional.ts
+prisma/add-productos.ts
 prisma/*.bak

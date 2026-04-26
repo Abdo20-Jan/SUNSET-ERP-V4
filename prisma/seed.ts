@@ -198,6 +198,63 @@ async function seedCuentas() {
 }
 
 // ============================================================
+// 3.1. ANALITICAs base — cuentas que el motor contable no
+// auto-crea pero que el usuario necesita seleccionar como
+// contrapartida en movimientos manuales (aportes, intereses,
+// comisiones, diferencia de cambio, etc.). Patrimônio +
+// ingresos/egresos financieros básicos.
+// ============================================================
+
+type AnaliticaBaseSeed = {
+  codigo: string;
+  nombre: string;
+  categoria: CuentaCategoria;
+};
+
+const ANALITICAS_BASE: AnaliticaBaseSeed[] = [
+  // Patrimônio (necesario para aportes y cierres)
+  { codigo: "3.1.1.01", nombre: "CAPITAL SOCIAL",                      categoria: CuentaCategoria.PATRIMONIO },
+  { codigo: "3.1.1.02", nombre: "APORTES IRREVOCABLES",                categoria: CuentaCategoria.PATRIMONIO },
+  { codigo: "3.2.1.01", nombre: "RESULTADOS EJERCICIOS ANTERIORES",    categoria: CuentaCategoria.PATRIMONIO },
+  { codigo: "3.2.1.02", nombre: "RESULTADO DEL EJERCICIO",             categoria: CuentaCategoria.PATRIMONIO },
+
+  // Ingresos no operativos
+  { codigo: "4.2.1.01", nombre: "DESCUENTOS OBTENIDOS",                categoria: CuentaCategoria.INGRESO },
+  { codigo: "4.2.1.02", nombre: "INTERESES GANADOS",                   categoria: CuentaCategoria.INGRESO },
+  { codigo: "4.3.1.01", nombre: "DIFERENCIA DE CAMBIO POSITIVA",       categoria: CuentaCategoria.INGRESO },
+
+  // Egresos financieros
+  { codigo: "5.8.1.01", nombre: "COMISIONES BANCARIAS",                categoria: CuentaCategoria.EGRESO },
+  { codigo: "5.8.1.02", nombre: "GASTOS TRANSFERENCIA EXTERIOR",       categoria: CuentaCategoria.EGRESO },
+  { codigo: "5.8.1.06", nombre: "IMPUESTO LEY 25413 (DEB/CRED BANCARIOS)", categoria: CuentaCategoria.EGRESO },
+  { codigo: "5.8.2.01", nombre: "DIFERENCIA DE CAMBIO NEGATIVA",       categoria: CuentaCategoria.EGRESO },
+  { codigo: "5.8.2.02", nombre: "INTERESES PAGADOS",                   categoria: CuentaCategoria.EGRESO },
+];
+
+async function seedAnaliticasBase() {
+  for (const c of ANALITICAS_BASE) {
+    const padreCodigo = derivePadreCodigo(c.codigo);
+    const data = {
+      codigo: c.codigo,
+      nombre: c.nombre,
+      tipo: CuentaTipo.ANALITICA,
+      categoria: c.categoria,
+      nivel: c.codigo.split(".").length,
+      padreCodigo,
+      activa: true,
+    };
+    await prisma.cuentaContable.upsert({
+      where: { codigo: c.codigo },
+      update: data,
+      create: data,
+    });
+  }
+  console.log(
+    `✓ ${ANALITICAS_BASE.length} cuentas ANALITICAs base (patrimônio, intereses, comisiones, etc.) creadas/actualizadas`,
+  );
+}
+
+// ============================================================
 // 4. DEPÓSITOS (default minimal)
 // ============================================================
 
@@ -229,10 +286,11 @@ async function seedDepositos() {
 // ============================================================
 
 async function main() {
-  console.log("🌱 Iniciando seed (skeleton-only)...\n");
+  console.log("🌱 Iniciando seed (skeleton + analíticas base)...\n");
   await seedAdmin();
   await seedPeriodos();
   await seedCuentas();
+  await seedAnaliticasBase();
   await seedDepositos();
   console.log("\n✅ Seed completado. Sistema listo para auto-construir el plan analítico.");
 }
