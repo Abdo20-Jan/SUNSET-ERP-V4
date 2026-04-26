@@ -336,6 +336,15 @@ model Embarque {
   incoterm          Incoterm?
   lugarIncoterm     String?        // ej: "Shanghai", "Buenos Aires"
   pedidoCompraId    Int?           // link opcional a OC que originó el embarque
+  // Datos de transporte
+  nombreBuque             String?   // nombre del navío (ej: MSC GAYANE)
+  lineaMaritima           String?   // línea marítima (ej: MSC, Maersk, CMA CGM)
+  fechaEmpaque            DateTime? // fecha de empaque/parque
+  lugarTransbordo         String?   // si hay transbordo
+  fechaTransbordo         DateTime?
+  fechaSalida             DateTime? // salida del transporte desde origen
+  fechaLlegada            DateTime? // llegada del contenedor a destino
+  diasPagoDespuesLlegada  Int?      // ej: 120 días después de la llegada
   fobTotal          Decimal        @default(0) @db.Decimal(18, 2)
   cifTotal          Decimal        @default(0) @db.Decimal(18, 2)
   die               Decimal        @default(0) @db.Decimal(18, 2)
@@ -359,12 +368,11 @@ model Embarque {
   pedidoCompra    PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
 }
 
-// Una factura de un proveedor logístico (flete, despachante, operador
-// portuario, etc.) asociada al embarque. Cada factura agrupa N conceptos
-// (servicios) en sus EmbarqueCostoLinea, permitiendo que una sola
-// factura del operador portuario incluya p.ej. "balanza", "entrega de
-// contenedor", "almacenaje" — cada uno con su IVA/IIBB propio si
-// corresponde.
+// Factura de proveedor local (gastos de nacionalización: despachante,
+// operador portuario, fletes, almacenaje, etc.) asociada al embarque.
+// Cada factura agrupa N conceptos (gastos) en sus EmbarqueCostoLinea.
+// IVA/IIBB/otros son totales a nivel factura — se imputan a las
+// cuentas de crédito fiscal contra el proveedor, NO contra cada gasto.
 model EmbarqueCosto {
   id                Int            @id @default(autoincrement())
   embarqueId        String
@@ -375,6 +383,10 @@ model EmbarqueCosto {
   fechaFactura      DateTime?
   fechaVencimiento  DateTime?      // auto-calculada de fechaFactura + diasPagoDefault del proveedor; editable
   condicionPago     CondicionPago  @default(CUENTA_CORRIENTE)
+  // Totales fiscales a nivel factura (no por línea):
+  iva               Decimal        @default(0) @db.Decimal(18, 2)
+  iibb              Decimal        @default(0) @db.Decimal(18, 2)
+  otros             Decimal        @default(0) @db.Decimal(18, 2)
   notas             String?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
@@ -388,9 +400,9 @@ model EmbarqueCosto {
   @@index([fechaVencimiento])
 }
 
-// Línea individual dentro de una factura: un concepto, su cuenta
-// contable de gasto, su monto neto y los impuestos/retenciones que
-// aplican a esa línea específica.
+// Concepto/gasto individual dentro de una factura: su cuenta contable
+// de gasto y monto neto. Sin impuestos a nivel línea (IVA/IIBB van al
+// header de la factura).
 model EmbarqueCostoLinea {
   id                    Int               @id @default(autoincrement())
   embarqueCostoId       Int
@@ -398,9 +410,6 @@ model EmbarqueCostoLinea {
   cuentaContableGastoId Int
   descripcion           String?
   subtotal              Decimal           @db.Decimal(18, 2)
-  iva                   Decimal           @default(0) @db.Decimal(18, 2)
-  iibb                  Decimal           @default(0) @db.Decimal(18, 2)
-  otros                 Decimal           @default(0) @db.Decimal(18, 2)
 
   costo               EmbarqueCosto  @relation(fields: [embarqueCostoId], references: [id], onDelete: Cascade)
   cuentaContableGasto CuentaContable @relation("EmbarqueCostoLineaCuentaGasto", fields: [cuentaContableGastoId], references: [id])

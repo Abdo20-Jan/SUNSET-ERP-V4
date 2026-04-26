@@ -41,6 +41,7 @@ export type ProveedorFormState =
 const PAISES: Array<{ code: string; label: string }> = [
   { code: "AR", label: "Argentina" },
   { code: "BR", label: "Brasil" },
+  { code: "PY", label: "Paraguay" },
   { code: "CL", label: "Chile" },
   { code: "UY", label: "Uruguay" },
   { code: "US", label: "Estados Unidos" },

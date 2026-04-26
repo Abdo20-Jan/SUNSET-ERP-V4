@@ -147,9 +147,6 @@ export type EmbarqueCostoLineaDetalle = {
   cuentaContableGastoId: number;
   descripcion: string | null;
   subtotal: string;
-  iva: string;
-  iibb: string;
-  otros: string;
 };
 
 export type EmbarqueCostoDetalle = {
@@ -159,6 +156,9 @@ export type EmbarqueCostoDetalle = {
   tipoCambio: string;
   facturaNumero: string | null;
   fechaFactura: string | null;
+  iva: string;
+  iibb: string;
+  otros: string;
   notas: string | null;
   lineas: EmbarqueCostoLineaDetalle[];
 };
@@ -173,6 +173,14 @@ export type EmbarqueDetalle = {
   tipoCambio: string;
   incoterm: Incoterm | null;
   lugarIncoterm: string | null;
+  nombreBuque: string | null;
+  lineaMaritima: string | null;
+  fechaEmpaque: string | null;
+  lugarTransbordo: string | null;
+  fechaTransbordo: string | null;
+  fechaSalida: string | null;
+  fechaLlegada: string | null;
+  diasPagoDespuesLlegada: number | null;
   fobTotal: string;
   cifTotal: string;
   die: string;
@@ -224,6 +232,14 @@ export async function obtenerEmbarquePorId(
     tipoCambio: embarque.tipoCambio.toString(),
     incoterm: embarque.incoterm,
     lugarIncoterm: embarque.lugarIncoterm,
+    nombreBuque: embarque.nombreBuque,
+    lineaMaritima: embarque.lineaMaritima,
+    fechaEmpaque: embarque.fechaEmpaque?.toISOString() ?? null,
+    lugarTransbordo: embarque.lugarTransbordo,
+    fechaTransbordo: embarque.fechaTransbordo?.toISOString() ?? null,
+    fechaSalida: embarque.fechaSalida?.toISOString() ?? null,
+    fechaLlegada: embarque.fechaLlegada?.toISOString() ?? null,
+    diasPagoDespuesLlegada: embarque.diasPagoDespuesLlegada,
     fobTotal: embarque.fobTotal.toString(),
     cifTotal: embarque.cifTotal.toString(),
     die: embarque.die.toString(),
@@ -254,6 +270,9 @@ export async function obtenerEmbarquePorId(
       tipoCambio: c.tipoCambio.toString(),
       facturaNumero: c.facturaNumero,
       fechaFactura: c.fechaFactura?.toISOString() ?? null,
+      iva: c.iva.toString(),
+      iibb: c.iibb.toString(),
+      otros: c.otros.toString(),
       notas: c.notas,
       lineas: c.lineas.map((l) => ({
         id: l.id,
@@ -261,9 +280,6 @@ export async function obtenerEmbarquePorId(
         cuentaContableGastoId: l.cuentaContableGastoId,
         descripcion: l.descripcion,
         subtotal: l.subtotal.toString(),
-        iva: l.iva.toString(),
-        iibb: l.iibb.toString(),
-        otros: l.otros.toString(),
       })),
     })),
   };
@@ -301,9 +317,6 @@ const costoLineaSchema = z.object({
     .optional()
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
   subtotal: z.string().regex(moneyRegex, "Subtotal inválido"),
-  iva: z.string().regex(moneyRegex, "IVA inválido"),
-  iibb: z.string().regex(moneyRegex, "IIBB inválido"),
-  otros: z.string().regex(moneyRegex, "Otros inválido"),
 });
 
 const costoSchema = z.object({
@@ -323,12 +336,16 @@ const costoSchema = z.object({
       const d = new Date(v);
       return Number.isFinite(d.getTime()) ? d : null;
     }),
+  // IVA/IIBB/otros a nivel factura (no por línea)
+  iva: z.string().regex(moneyRegex, "IVA inválido").default("0"),
+  iibb: z.string().regex(moneyRegex, "IIBB inválido").default("0"),
+  otros: z.string().regex(moneyRegex, "Otros inválido").default("0"),
   notas: z
     .string()
     .max(500)
     .optional()
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-  lineas: z.array(costoLineaSchema).min(1, "Agregue al menos una línea"),
+  lineas: z.array(costoLineaSchema).min(1, "Agregue al menos un gasto"),
 });
 
 export type CostoEmbarqueLineaInput = z.input<typeof costoLineaSchema>;
@@ -352,6 +369,62 @@ const inputSchema = z
       .max(80)
       .optional()
       .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
+    // Datos de transporte
+    nombreBuque: z
+      .string()
+      .max(120)
+      .optional()
+      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
+    lineaMaritima: z
+      .string()
+      .max(120)
+      .optional()
+      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
+    lugarTransbordo: z
+      .string()
+      .max(120)
+      .optional()
+      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
+    fechaEmpaque: z
+      .string()
+      .optional()
+      .transform((v) => {
+        if (!v || v.trim().length === 0) return null;
+        const d = new Date(v);
+        return Number.isFinite(d.getTime()) ? d : null;
+      }),
+    fechaTransbordo: z
+      .string()
+      .optional()
+      .transform((v) => {
+        if (!v || v.trim().length === 0) return null;
+        const d = new Date(v);
+        return Number.isFinite(d.getTime()) ? d : null;
+      }),
+    fechaSalida: z
+      .string()
+      .optional()
+      .transform((v) => {
+        if (!v || v.trim().length === 0) return null;
+        const d = new Date(v);
+        return Number.isFinite(d.getTime()) ? d : null;
+      }),
+    fechaLlegada: z
+      .string()
+      .optional()
+      .transform((v) => {
+        if (!v || v.trim().length === 0) return null;
+        const d = new Date(v);
+        return Number.isFinite(d.getTime()) ? d : null;
+      }),
+    diasPagoDespuesLlegada: z
+      .union([z.number().int().min(0), z.string()])
+      .optional()
+      .transform((v) => {
+        if (v === undefined || v === null || v === "") return null;
+        const n = typeof v === "string" ? parseInt(v, 10) : v;
+        return Number.isFinite(n) && n >= 0 ? n : null;
+      }),
     estado: z.nativeEnum(EmbarqueEstado),
     die: z.string().regex(moneyRegex, "Valor inválido"),
     tasaEstadistica: z.string().regex(moneyRegex, "Valor inválido"),
@@ -467,6 +540,14 @@ export async function guardarEmbarqueAction(
     tipoCambio: new Prisma.Decimal(input.tipoCambio),
     incoterm: input.incoterm,
     lugarIncoterm: input.lugarIncoterm,
+    nombreBuque: input.nombreBuque,
+    lineaMaritima: input.lineaMaritima,
+    fechaEmpaque: input.fechaEmpaque,
+    lugarTransbordo: input.lugarTransbordo,
+    fechaTransbordo: input.fechaTransbordo,
+    fechaSalida: input.fechaSalida,
+    fechaLlegada: input.fechaLlegada,
+    diasPagoDespuesLlegada: input.diasPagoDespuesLlegada,
     fobTotal: money(fobTotal),
     cifTotal: money(cifTotalArs),
     die: money(input.die),
@@ -525,6 +606,9 @@ export async function guardarEmbarqueAction(
             tipoCambio: new Prisma.Decimal(factura.tipoCambio),
             facturaNumero: factura.facturaNumero,
             fechaFactura: factura.fechaFactura,
+            iva: money(factura.iva),
+            iibb: money(factura.iibb),
+            otros: money(factura.otros),
             notas: factura.notas,
           },
         });
@@ -536,9 +620,6 @@ export async function guardarEmbarqueAction(
               cuentaContableGastoId: l.cuentaContableGastoId,
               descripcion: l.descripcion,
               subtotal: money(l.subtotal),
-              iva: money(l.iva),
-              iibb: money(l.iibb),
-              otros: money(l.otros),
             })),
           });
         }

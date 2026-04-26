@@ -13,6 +13,7 @@ import { Alert02Icon, Calendar03Icon } from "@hugeicons/core-free-icons";
 import {
   crearPrestamoAction,
   type CuentaPrestamoOption,
+  type ProveedorPrestamistaOption,
 } from "@/lib/actions/prestamos";
 import type { CuentaBancariaOption } from "@/lib/actions/movimientos-tesoreria";
 import { Button } from "@/components/ui/button";
@@ -90,10 +91,12 @@ export function PrestamoForm({
   cuentasBancarias,
   cuentasCortoPlazo,
   cuentasLargoPlazo,
+  proveedoresExterior,
 }: {
   cuentasBancarias: CuentaBancariaOption[];
   cuentasCortoPlazo: CuentaPrestamoOption[];
   cuentasLargoPlazo: CuentaPrestamoOption[];
+  proveedoresExterior: ProveedorPrestamistaOption[];
 }) {
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
@@ -189,16 +192,43 @@ export function PrestamoForm({
         <CardContent className="flex flex-col gap-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="prestamista">Prestamista</Label>
-              <Input
-                id="prestamista"
-                placeholder="Nombre del prestamista"
-                aria-invalid={!!errors.prestamista}
-                {...register("prestamista")}
+              <Label>Prestamista</Label>
+              <Controller
+                control={control}
+                name="prestamista"
+                render={({ field }) => (
+                  <Select
+                    value={field.value || undefined}
+                    onValueChange={field.onChange}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Seleccione proveedor del exterior" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {proveedoresExterior.length === 0 ? (
+                        <SelectItem value="__none__" disabled>
+                          Sin proveedores del exterior — créelos en Maestros
+                        </SelectItem>
+                      ) : (
+                        proveedoresExterior.map((p) => (
+                          <SelectItem key={p.id} value={p.nombre}>
+                            {p.nombre}{" "}
+                            <span className="text-xs text-muted-foreground">
+                              · {p.pais}
+                            </span>
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
               />
               {errors.prestamista && (
                 <FieldError message={errors.prestamista.message} />
               )}
+              <p className="text-xs text-muted-foreground">
+                Solo proveedores con país ≠ Argentina (cargados en Maestros).
+              </p>
             </div>
 
             <div className="flex flex-col gap-2">

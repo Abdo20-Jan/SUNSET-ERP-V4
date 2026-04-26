@@ -1,16 +1,24 @@
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
-import { listarCuentasContablesParaPrestamo } from "@/lib/actions/prestamos";
+import {
+  listarCuentasContablesParaPrestamo,
+  listarProveedoresParaPrestamo,
+} from "@/lib/actions/prestamos";
 import { PrestamoClasificacion } from "@/generated/prisma/client";
 
 import { PrestamoForm } from "./prestamo-form";
 
 export default async function NuevoPrestamoPage() {
-  const [cuentasBancarias, cuentasCortoPlazo, cuentasLargoPlazo] =
-    await Promise.all([
-      listarCuentasBancariasParaMovimiento(),
-      listarCuentasContablesParaPrestamo(PrestamoClasificacion.CORTO_PLAZO),
-      listarCuentasContablesParaPrestamo(PrestamoClasificacion.LARGO_PLAZO),
-    ]);
+  const [
+    cuentasBancarias,
+    cuentasCortoPlazo,
+    cuentasLargoPlazo,
+    proveedoresExterior,
+  ] = await Promise.all([
+    listarCuentasBancariasParaMovimiento(),
+    listarCuentasContablesParaPrestamo(PrestamoClasificacion.CORTO_PLAZO),
+    listarCuentasContablesParaPrestamo(PrestamoClasificacion.LARGO_PLAZO),
+    listarProveedoresParaPrestamo(),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -25,6 +33,7 @@ export default async function NuevoPrestamoPage() {
         cuentasBancarias={cuentasBancarias}
         cuentasCortoPlazo={cuentasCortoPlazo}
         cuentasLargoPlazo={cuentasLargoPlazo}
+        proveedoresExterior={proveedoresExterior}
       />
     </div>
   );

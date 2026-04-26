@@ -930,9 +930,11 @@ export async function crearAsientoEmbarque(
       "Ganancias importación por pagar",
     );
 
-    // 3) Costos logísticos: por cada factura (proveedor) iteramos sus
-    //    líneas, generando una línea DEBE por concepto + IVA + IIBB
-    //    contra la cuenta del proveedor en HABER (consolidado de la factura).
+    // 3) Gastos de nacionalización: por cada factura (proveedor local)
+    //    iteramos sus líneas (gastos individuales) generando una línea
+    //    DEBE por concepto a su cuenta de gasto. Luego, IVA/IIBB/otros
+    //    a nivel factura van a las cuentas de crédito fiscal. Todo
+    //    contra la cuenta del proveedor en HABER (consolidado).
     for (const factura of embarque.costos) {
       if (factura.lineas.length === 0) continue;
 
@@ -944,48 +946,63 @@ export async function crearAsientoEmbarque(
       }
 
       const tc = toDecimal(factura.tipoCambio);
-      let totalFacturaArs = toDecimal(0);
+      const facturaLabel = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""}`;
 
+      // Subtotales por línea (cada gasto a su cuenta analítica)
+      let subtotalFacturaArs = toDecimal(0);
       for (const linea of factura.lineas) {
         const subtotalArs = toDecimal(linea.subtotal)
           .times(tc)
           .toDecimalPlaces(2);
-        const ivaArs = toDecimal(linea.iva).times(tc).toDecimalPlaces(2);
-        const iibbArs = toDecimal(linea.iibb).times(tc).toDecimalPlaces(2);
-        const otrosArs = toDecimal(linea.otros).times(tc).toDecimalPlaces(2);
-
-        const lineaTotalArs = subtotalArs
-          .plus(ivaArs)
-          .plus(iibbArs)
-          .plus(otrosArs);
-        if (!lineaTotalArs.gt(0)) continue;
-
-        totalFacturaArs = totalFacturaArs.plus(lineaTotalArs);
+        if (!subtotalArs.gt(0)) continue;
 
         const lineaLabel =
           linea.descripcion?.trim() ||
           linea.tipo.replace(/_/g, " ").toLowerCase();
-        const desc = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""} — ${lineaLabel}`;
-
-        pushDebe(linea.cuentaContableGastoId, subtotalArs, `${desc} — neto`);
         pushDebe(
-          porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS)!,
-          ivaArs,
-          `${desc} — IVA`,
+          linea.cuentaContableGastoId,
+          subtotalArs,
+          `${facturaLabel} — ${lineaLabel}`,
         );
-        pushDebe(
-          porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS)!,
-          iibbArs,
-          `${desc} — IIBB`,
-        );
-        pushDebe(linea.cuentaContableGastoId, otrosArs, `${desc} — otros`);
+        subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
       }
+
+      // IVA/IIBB/otros a nivel factura (no por línea)
+      const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
+      const iibbArs = toDecimal(factura.iibb).times(tc).toDecimalPlaces(2);
+      const otrosArs = toDecimal(factura.otros).times(tc).toDecimalPlaces(2);
+
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS)!,
+        ivaArs,
+        `${facturaLabel} — IVA crédito`,
+      );
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS)!,
+        iibbArs,
+        `${facturaLabel} — IIBB crédito`,
+      );
+      // "Otros" se imputa al primer gasto de la factura (cuenta analítica
+      // del primer line) por falta de una cuenta dedicada. Si quiere
+      // separar, abra una línea propia para otros.
+      if (otrosArs.gt(0) && factura.lineas.length > 0) {
+        pushDebe(
+          factura.lineas[0].cuentaContableGastoId,
+          otrosArs,
+          `${facturaLabel} — otros`,
+        );
+      }
+
+      const totalFacturaArs = subtotalFacturaArs
+        .plus(ivaArs)
+        .plus(iibbArs)
+        .plus(otrosArs);
 
       if (totalFacturaArs.gt(0)) {
         pushHaber(
           factura.proveedor.cuentaContableId,
           totalFacturaArs,
-          `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""} — total a pagar`,
+          `${facturaLabel} — total a pagar`,
         );
       }
     }

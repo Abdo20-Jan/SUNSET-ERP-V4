@@ -154,6 +154,14 @@ const formSchema = z
       .nullable()
       .optional(),
     lugarIncoterm: z.string().max(80).optional(),
+    nombreBuque: z.string().max(120).optional(),
+    lineaMaritima: z.string().max(120).optional(),
+    fechaEmpaque: z.string().optional(),
+    lugarTransbordo: z.string().max(120).optional(),
+    fechaTransbordo: z.string().optional(),
+    fechaSalida: z.string().optional(),
+    fechaLlegada: z.string().optional(),
+    diasPagoDespuesLlegada: z.string().optional(),
     estado: z.enum(ESTADO_VALUES),
     die: z.string().regex(moneyRegex, "Inválido"),
     tasaEstadistica: z.string().regex(moneyRegex, "Inválido"),
@@ -183,6 +191,10 @@ const formSchema = z
         tipoCambio: z.string().regex(rateRegex, "TC inválido"),
         facturaNumero: z.string().max(64).optional(),
         fechaFactura: z.string().optional(),
+        // IVA/IIBB/otros a nivel factura (no por línea)
+        iva: z.string().regex(moneyRegex, "IVA inválido"),
+        iibb: z.string().regex(moneyRegex, "IIBB inválido"),
+        otros: z.string().regex(moneyRegex, "Otros inválido"),
         notas: z.string().max(500).optional(),
         lineas: z
           .array(
@@ -194,12 +206,9 @@ const formSchema = z
                 .positive("Seleccione la cuenta"),
               descripcion: z.string().max(200).optional(),
               subtotal: z.string().regex(moneyRegex, "Subtotal inválido"),
-              iva: z.string().regex(moneyRegex, "IVA inválido"),
-              iibb: z.string().regex(moneyRegex, "IIBB inválido"),
-              otros: z.string().regex(moneyRegex, "Otros inválido"),
             }),
           )
-          .min(1, "Agregue al menos una línea"),
+          .min(1, "Agregue al menos un gasto"),
       }),
     ),
   })
@@ -283,6 +292,14 @@ export function EmbarqueForm(props: Props) {
           tipoCambio: "",
           incoterm: null,
           lugarIncoterm: "",
+          nombreBuque: "",
+          lineaMaritima: "",
+          fechaEmpaque: "",
+          lugarTransbordo: "",
+          fechaTransbordo: "",
+          fechaSalida: "",
+          fechaLlegada: "",
+          diasPagoDespuesLlegada: "",
           estado: "BORRADOR",
           die: "0",
           tasaEstadistica: "0",
@@ -302,6 +319,25 @@ export function EmbarqueForm(props: Props) {
           tipoCambio: props.initialData.tipoCambio,
           incoterm: props.initialData.incoterm,
           lugarIncoterm: props.initialData.lugarIncoterm ?? "",
+          nombreBuque: props.initialData.nombreBuque ?? "",
+          lineaMaritima: props.initialData.lineaMaritima ?? "",
+          fechaEmpaque: props.initialData.fechaEmpaque
+            ? props.initialData.fechaEmpaque.slice(0, 10)
+            : "",
+          lugarTransbordo: props.initialData.lugarTransbordo ?? "",
+          fechaTransbordo: props.initialData.fechaTransbordo
+            ? props.initialData.fechaTransbordo.slice(0, 10)
+            : "",
+          fechaSalida: props.initialData.fechaSalida
+            ? props.initialData.fechaSalida.slice(0, 10)
+            : "",
+          fechaLlegada: props.initialData.fechaLlegada
+            ? props.initialData.fechaLlegada.slice(0, 10)
+            : "",
+          diasPagoDespuesLlegada:
+            props.initialData.diasPagoDespuesLlegada != null
+              ? String(props.initialData.diasPagoDespuesLlegada)
+              : "",
           estado:
             props.initialData.estado === "CERRADO"
               ? "BORRADOR"
@@ -324,15 +360,15 @@ export function EmbarqueForm(props: Props) {
             tipoCambio: c.tipoCambio,
             facturaNumero: c.facturaNumero ?? "",
             fechaFactura: c.fechaFactura ? c.fechaFactura.slice(0, 10) : "",
+            iva: c.iva,
+            iibb: c.iibb,
+            otros: c.otros,
             notas: c.notas ?? "",
             lineas: c.lineas.map((l) => ({
               tipo: l.tipo as TipoCosto,
               cuentaContableGastoId: l.cuentaContableGastoId,
               descripcion: l.descripcion ?? "",
               subtotal: l.subtotal,
-              iva: l.iva,
-              iibb: l.iibb,
-              otros: l.otros,
             })),
           })),
         };
@@ -402,7 +438,7 @@ export function EmbarqueForm(props: Props) {
     return fobTotal.times(new Decimal(tc)).toDecimalPlaces(2);
   }, [fobTotal, tipoCambioEmbarque]);
 
-  // Subtotales de costos en ARS: por cada factura, suma todas sus líneas
+  // Subtotales de gastos en ARS: por cada factura, suma todas sus líneas
   // y multiplica por el TC de la factura.
   const costosSubtotalArs = useMemo(
     () =>
@@ -414,6 +450,21 @@ export function EmbarqueForm(props: Props) {
             new Decimal(0),
           );
           return subtotalFactura.times(tc);
+        }),
+      ),
+    [costos],
+  );
+
+  // IVA/IIBB/otros a nivel factura (créditos fiscales locales) × TC de la factura
+  const costosFiscalesArs = useMemo(
+    () =>
+      sumAs2dp(
+        costos.map((factura) => {
+          const tc = new Decimal(safeMoney(factura?.tipoCambio));
+          const total = new Decimal(safeMoney(factura?.iva))
+            .plus(new Decimal(safeMoney(factura?.iibb)))
+            .plus(new Decimal(safeMoney(factura?.otros)));
+          return total.times(tc);
         }),
       ),
     [costos],
@@ -460,8 +511,9 @@ export function EmbarqueForm(props: Props) {
   }, [die, tasaEstadistica, arancelSim, tipoCambioEmbarque]);
 
   const costoTotal = useMemo(
-    () => sumAs2dp([fobTotalArs, costosSubtotalArs, tributosArs]),
-    [fobTotalArs, costosSubtotalArs, tributosArs],
+    () =>
+      sumAs2dp([fobTotalArs, costosSubtotalArs, costosFiscalesArs, tributosArs]),
+    [fobTotalArs, costosSubtotalArs, costosFiscalesArs, tributosArs],
   );
 
   // ---------- Acciones ----------
@@ -747,6 +799,113 @@ export function EmbarqueForm(props: Props) {
               />
             </div>
           </div>
+
+          {/* Datos de transporte */}
+          <div className="rounded-md border bg-muted/20 p-3">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Datos de transporte
+            </h3>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="nombreBuque" className="text-xs">
+                  Nombre del buque
+                </Label>
+                <Input
+                  id="nombreBuque"
+                  placeholder="Ej: MSC GAYANE"
+                  disabled={readonly}
+                  {...register("nombreBuque")}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="lineaMaritima" className="text-xs">
+                  Línea marítima
+                </Label>
+                <Input
+                  id="lineaMaritima"
+                  placeholder="Ej: MSC, Maersk, CMA CGM"
+                  disabled={readonly}
+                  {...register("lineaMaritima")}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="fechaEmpaque" className="text-xs">
+                  Fecha de empaque
+                </Label>
+                <Input
+                  id="fechaEmpaque"
+                  type="date"
+                  disabled={readonly}
+                  {...register("fechaEmpaque")}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="fechaSalida" className="text-xs">
+                  Fecha de salida
+                </Label>
+                <Input
+                  id="fechaSalida"
+                  type="date"
+                  disabled={readonly}
+                  {...register("fechaSalida")}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="lugarTransbordo" className="text-xs">
+                  Lugar de transbordo
+                </Label>
+                <Input
+                  id="lugarTransbordo"
+                  placeholder="Opcional — si hay transbordo"
+                  disabled={readonly}
+                  {...register("lugarTransbordo")}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="fechaTransbordo" className="text-xs">
+                  Fecha de transbordo
+                </Label>
+                <Input
+                  id="fechaTransbordo"
+                  type="date"
+                  disabled={readonly}
+                  {...register("fechaTransbordo")}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="fechaLlegada" className="text-xs">
+                  Fecha de llegada del contenedor
+                </Label>
+                <Input
+                  id="fechaLlegada"
+                  type="date"
+                  disabled={readonly}
+                  {...register("fechaLlegada")}
+                />
+              </div>
+              <div className="flex flex-col gap-1 md:col-span-2">
+                <Label
+                  htmlFor="diasPagoDespuesLlegada"
+                  className="text-xs"
+                >
+                  Plazo de pago (días después de la llegada)
+                </Label>
+                <Input
+                  id="diasPagoDespuesLlegada"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="Ej: 120"
+                  disabled={readonly}
+                  {...register("diasPagoDespuesLlegada")}
+                />
+                <p className="text-xs text-muted-foreground">
+                  El vencimiento se calcula como{" "}
+                  <span className="font-mono">fecha de llegada + N días</span>.
+                </p>
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -830,12 +989,12 @@ export function EmbarqueForm(props: Props) {
         </CardContent>
       </Card>
 
-      {/* Sección 3: Facturas de proveedores logísticos */}
+      {/* Sección 3: Gastos de nacionalización (facturas de proveedores locales) */}
       <Card>
         <CardContent className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">
-              Facturas de proveedores logísticos
+              Gastos de nacionalización · Facturas de proveedores locales
             </h2>
             {!readonly && (
               <Button
@@ -845,20 +1004,20 @@ export function EmbarqueForm(props: Props) {
                 onClick={() =>
                   appendCosto({
                     proveedorId: "",
-                    moneda: "USD",
-                    tipoCambio: tipoCambioEmbarque || "1",
+                    moneda: "ARS",
+                    tipoCambio: "1",
                     facturaNumero: "",
                     fechaFactura: "",
+                    iva: "0",
+                    iibb: "0",
+                    otros: "0",
                     notas: "",
                     lineas: [
                       {
-                        tipo: "FLETE_INTERNACIONAL",
+                        tipo: "GASTOS_PORTUARIOS",
                         cuentaContableGastoId: 0,
                         descripcion: "",
                         subtotal: "0",
-                        iva: "0",
-                        iibb: "0",
-                        otros: "0",
                       },
                     ],
                   })
@@ -871,11 +1030,13 @@ export function EmbarqueForm(props: Props) {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Una <strong>factura por proveedor</strong> (flete, despachante,
-            operador, etc.). Dentro de cada factura agregue tantas líneas
-            como conceptos tenga (servicio de balanza, entrega contenedor,
-            IIBB, etc.). El sistema genera 1 cuenta a pagar al proveedor
-            por factura. CIF (FOB + flete intl + seguro marítimo) ={" "}
+            Una <strong>factura por proveedor local</strong> (despachante,
+            operador portuario, fletes, almacenaje, etc.). Dentro de cada
+            factura agregue tantos <strong>gastos</strong> como conceptos
+            tenga — cada uno con su <strong>cuenta analítica</strong>
+            propia. <strong>IVA, IIBB y otros</strong> se cargan a nivel
+            factura (van directo al proveedor — no son gastos). CIF (FOB +
+            flete intl + seguro marítimo) ={" "}
             <span className="font-mono font-medium">
               ARS {formatMoney(cifTotalArs.toString())}
             </span>
@@ -1224,14 +1385,14 @@ type FacturaErrors = {
   proveedorId?: { message?: string };
   moneda?: { message?: string };
   tipoCambio?: { message?: string };
+  iva?: { message?: string };
+  iibb?: { message?: string };
+  otros?: { message?: string };
   lineas?: Array<{
     tipo?: { message?: string };
     cuentaContableGastoId?: { message?: string };
     descripcion?: { message?: string };
     subtotal?: { message?: string };
-    iva?: { message?: string };
-    iibb?: { message?: string };
-    otros?: { message?: string };
   }>;
 };
 
@@ -1264,14 +1425,19 @@ function FacturaCard({
   const lineas = useWatch({
     control,
     name: `costos.${index}.lineas` as const,
-  }) as
-    | Array<{
-        subtotal?: string;
-        iva?: string;
-        iibb?: string;
-        otros?: string;
-      }>
-    | undefined;
+  }) as Array<{ subtotal?: string }> | undefined;
+  const facturaIva = useWatch({
+    control,
+    name: `costos.${index}.iva` as const,
+  });
+  const facturaIibb = useWatch({
+    control,
+    name: `costos.${index}.iibb` as const,
+  });
+  const facturaOtros = useWatch({
+    control,
+    name: `costos.${index}.otros` as const,
+  });
   const proveedorId = useWatch({
     control,
     name: `costos.${index}.proveedorId` as const,
@@ -1295,30 +1461,24 @@ function FacturaCard({
   }, [moneda, index, setValue]);
 
   const totales = useMemo(() => {
-    const cero = new Decimal(0);
-    const sums = (lineas ?? []).reduce(
-      (acc, l) => ({
-        subtotal: acc.subtotal.plus(new Decimal(safeMoney(l?.subtotal))),
-        iva: acc.iva.plus(new Decimal(safeMoney(l?.iva))),
-        iibb: acc.iibb.plus(new Decimal(safeMoney(l?.iibb))),
-        otros: acc.otros.plus(new Decimal(safeMoney(l?.otros))),
-      }),
-      { subtotal: cero, iva: cero, iibb: cero, otros: cero },
+    const subtotalSum = (lineas ?? []).reduce(
+      (acc, l) => acc.plus(new Decimal(safeMoney(l?.subtotal))),
+      new Decimal(0),
     );
-    const total = sums.subtotal
-      .plus(sums.iva)
-      .plus(sums.iibb)
-      .plus(sums.otros);
+    const ivaDec = new Decimal(safeMoney(facturaIva));
+    const iibbDec = new Decimal(safeMoney(facturaIibb));
+    const otrosDec = new Decimal(safeMoney(facturaOtros));
+    const total = subtotalSum.plus(ivaDec).plus(iibbDec).plus(otrosDec);
     const tcDec = new Decimal(safeMoney(tc));
     return {
-      subtotal: sums.subtotal.toDecimalPlaces(2),
-      iva: sums.iva.toDecimalPlaces(2),
-      iibb: sums.iibb.toDecimalPlaces(2),
-      otros: sums.otros.toDecimalPlaces(2),
+      subtotal: subtotalSum.toDecimalPlaces(2),
+      iva: ivaDec.toDecimalPlaces(2),
+      iibb: iibbDec.toDecimalPlaces(2),
+      otros: otrosDec.toDecimalPlaces(2),
       total: total.toDecimalPlaces(2),
       totalArs: total.times(tcDec).toDecimalPlaces(2),
     };
-  }, [lineas, tc]);
+  }, [lineas, tc, facturaIva, facturaIibb, facturaOtros]);
 
   const proveedorNombre = useMemo(
     () =>
@@ -1444,10 +1604,57 @@ function FacturaCard({
           </div>
         </div>
 
-        {/* Tabla de líneas */}
+        {/* Impuestos a nivel factura (no por línea) */}
+        <div className="grid grid-cols-3 gap-3 rounded-md border bg-muted/20 p-3">
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">
+              IVA ({moneda})
+              <span className="ml-1 text-muted-foreground">— factura</span>
+            </Label>
+            <Input
+              inputMode="decimal"
+              className="h-9 text-right tabular-nums"
+              disabled={disabled}
+              {...register(`costos.${index}.iva` as const)}
+            />
+            {errors?.iva?.message && <FieldError message={errors.iva.message} />}
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">
+              IIBB ({moneda})
+              <span className="ml-1 text-muted-foreground">— factura</span>
+            </Label>
+            <Input
+              inputMode="decimal"
+              className="h-9 text-right tabular-nums"
+              disabled={disabled}
+              {...register(`costos.${index}.iibb` as const)}
+            />
+            {errors?.iibb?.message && (
+              <FieldError message={errors.iibb.message} />
+            )}
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">
+              Otros ({moneda})
+              <span className="ml-1 text-muted-foreground">— factura</span>
+            </Label>
+            <Input
+              inputMode="decimal"
+              className="h-9 text-right tabular-nums"
+              disabled={disabled}
+              {...register(`costos.${index}.otros` as const)}
+            />
+            {errors?.otros?.message && (
+              <FieldError message={errors.otros.message} />
+            )}
+          </div>
+        </div>
+
+        {/* Tabla de gastos */}
         <div className="mt-1 flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Conceptos / líneas de la factura
+            Gastos de la factura — cada uno con su cuenta analítica
           </h3>
           {!disabled && (
             <Button
@@ -1460,14 +1667,11 @@ function FacturaCard({
                   cuentaContableGastoId: 0,
                   descripcion: "",
                   subtotal: "0",
-                  iva: "0",
-                  iibb: "0",
-                  otros: "0",
                 })
               }
             >
               <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-              Agregar línea
+              Agregar gasto
             </Button>
           )}
         </div>
@@ -1485,22 +1689,13 @@ function FacturaCard({
                     Tipo
                   </th>
                   <th className="py-2 px-2 text-left font-medium">
-                    Cuenta de gasto
+                    Cuenta analítica
                   </th>
-                  <th className="w-44 py-2 px-2 text-left font-medium">
+                  <th className="py-2 px-2 text-left font-medium">
                     Descripción
                   </th>
-                  <th className="w-28 py-2 px-2 text-right font-medium">
-                    Subtotal
-                  </th>
-                  <th className="w-24 py-2 px-2 text-right font-medium">
-                    IVA
-                  </th>
-                  <th className="w-24 py-2 px-2 text-right font-medium">
-                    IIBB
-                  </th>
-                  <th className="w-24 py-2 px-2 text-right font-medium">
-                    Otros
+                  <th className="w-32 py-2 px-2 text-right font-medium">
+                    Subtotal ({moneda})
                   </th>
                   {!disabled && <th className="w-10"></th>}
                 </tr>
@@ -1653,30 +1848,6 @@ function LineaRow({
         {errors?.subtotal?.message && (
           <FieldError message={errors.subtotal.message} />
         )}
-      </td>
-      <td className="py-2 px-2">
-        <Input
-          inputMode="decimal"
-          className="h-8 text-right text-xs tabular-nums"
-          disabled={disabled}
-          {...register(`${path}.iva` as const)}
-        />
-      </td>
-      <td className="py-2 px-2">
-        <Input
-          inputMode="decimal"
-          className="h-8 text-right text-xs tabular-nums"
-          disabled={disabled}
-          {...register(`${path}.iibb` as const)}
-        />
-      </td>
-      <td className="py-2 px-2">
-        <Input
-          inputMode="decimal"
-          className="h-8 text-right text-xs tabular-nums"
-          disabled={disabled}
-          {...register(`${path}.otros` as const)}
-        />
       </td>
       {!disabled && (
         <td className="py-2 pr-2 text-right">

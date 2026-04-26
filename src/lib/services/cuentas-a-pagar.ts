@@ -279,7 +279,10 @@ export async function getSaldosPorProveedorConAging(): Promise<
       tipoCambio: true,
       moneda: true,
       proveedorId: true,
-      lineas: { select: { subtotal: true, iva: true, iibb: true, otros: true } },
+      iva: true,
+      iibb: true,
+      otros: true,
+      lineas: { select: { subtotal: true } },
     },
   });
 
@@ -316,15 +319,14 @@ export async function getSaldosPorProveedorConAging(): Promise<
   }
 
   for (const c of costos) {
-    const totalMoneda = c.lineas.reduce(
-      (acc, l) =>
-        acc
-          .plus(toDecimal(l.subtotal))
-          .plus(toDecimal(l.iva))
-          .plus(toDecimal(l.iibb))
-          .plus(toDecimal(l.otros)),
+    const subtotalLineas = c.lineas.reduce(
+      (acc, l) => acc.plus(toDecimal(l.subtotal)),
       toDecimal(0),
     );
+    const totalMoneda = subtotalLineas
+      .plus(toDecimal(c.iva))
+      .plus(toDecimal(c.iibb))
+      .plus(toDecimal(c.otros));
     const totalArs = totalMoneda.times(toDecimal(c.tipoCambio));
     const { dias, bucket } = clasificar(c.fechaVencimiento);
     const arr = facturasPorProveedor.get(c.proveedorId) ?? [];

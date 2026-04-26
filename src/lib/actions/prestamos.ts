@@ -30,6 +30,27 @@ import {
 // Listados auxiliares para formularios
 // ============================================================
 
+export type ProveedorPrestamistaOption = {
+  id: string;
+  nombre: string;
+  pais: string;
+};
+
+/**
+ * Proveedores del exterior (pais != AR) — son los candidatos a prestamistas
+ * para préstamos externos.
+ */
+export async function listarProveedoresParaPrestamo(): Promise<
+  ProveedorPrestamistaOption[]
+> {
+  const rows = await db.proveedor.findMany({
+    where: { pais: { not: "AR" }, estado: "activo" },
+    orderBy: { nombre: "asc" },
+    select: { id: true, nombre: true, pais: true },
+  });
+  return rows;
+}
+
 export type CuentaPrestamoOption = {
   id: number;
   codigo: string;
