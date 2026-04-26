@@ -107,6 +107,20 @@ export async function importarExtractoAction(
     return { ok: false, error: `Falló el parseo del PDF: ${msg}` };
   }
 
+  // Validar banco parseado vs banco de la cuenta seleccionada
+  const bancoParseadoNorm = parseado.banco.toLowerCase().replace(/\s+/g, "");
+  const bancoCuentaNorm = cuentaBancaria.banco.toLowerCase().replace(/\s+/g, "");
+  if (
+    bancoParseadoNorm.length > 0 &&
+    !bancoParseadoNorm.includes(bancoCuentaNorm) &&
+    !bancoCuentaNorm.includes(bancoParseadoNorm)
+  ) {
+    return {
+      ok: false,
+      error: `El PDF parece ser de "${parseado.banco}" pero la cuenta seleccionada es "${cuentaBancaria.banco}". Cambiá la cuenta o subí el PDF correcto.`,
+    };
+  }
+
   const cuits = Array.from(
     new Set(
       parseado.lineas

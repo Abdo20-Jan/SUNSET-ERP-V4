@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { db } from "@/lib/db";
 import { getBalanceSumasYSaldos } from "@/lib/services/balance-sumas-saldos";
 import { PeriodoEstado } from "@/generated/prisma/client";
@@ -64,6 +66,26 @@ export default async function BalancePage({
           {balance
             ? `Período ${balance.periodo.codigo} · ${balance.periodo.nombre}`
             : "Seleccioná un período."}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Balancete (trial balance) — incluye{" "}
+          <strong>todas las cuentas (1 a 5)</strong> para verificar que el
+          Debe = Haber. Para el balance patrimonial (solo activo/pasivo/PN),
+          ver{" "}
+          <Link
+            href="/reportes/balance-general"
+            className="underline hover:text-foreground"
+          >
+            Balance General
+          </Link>
+          ; para resultados (cuentas 4-5), ver{" "}
+          <Link
+            href="/reportes/estado-resultados"
+            className="underline hover:text-foreground"
+          >
+            Estado de Resultados
+          </Link>
+          .
         </p>
       </div>
 
