@@ -59,23 +59,66 @@ const MESES_ES = [
 ];
 
 async function seedPeriodos() {
-  let count = 0;
-  for (let year = 2024; year <= 2027; year++) {
-    for (let month = 1; month <= 12; month++) {
-      const codigo = `${year}-${String(month).padStart(2, "0")}`;
-      const nombre = `${MESES_ES[month - 1]} ${year}`;
-      const fechaInicio = new Date(Date.UTC(year, month - 1, 1));
-      const fechaFin = new Date(Date.UTC(year, month, 0));
+  // Range exacto solicitado por el user: 12/2024 a 06/2026 (19 períodos).
+  const PERIODOS: Array<{ year: number; month: number }> = [];
+  PERIODOS.push({ year: 2024, month: 12 });
+  for (let m = 1; m <= 12; m++) PERIODOS.push({ year: 2025, month: m });
+  for (let m = 1; m <= 6; m++) PERIODOS.push({ year: 2026, month: m });
 
-      await prisma.periodoContable.upsert({
-        where: { codigo },
-        update: { nombre, fechaInicio, fechaFin },
-        create: { codigo, nombre, fechaInicio, fechaFin, estado: PeriodoEstado.ABIERTO },
-      });
-      count++;
+  const desiredCodes = new Set(
+    PERIODOS.map(
+      ({ year, month }) => `${year}-${String(month).padStart(2, "0")}`,
+    ),
+  );
+
+  // 1) Eliminar períodos fuera del rango — sólo si no tienen asientos.
+  const existentes = await prisma.periodoContable.findMany({
+    select: {
+      codigo: true,
+      _count: { select: { asientos: true } },
+    },
+  });
+  let deleted = 0;
+  let skippedDelete = 0;
+  for (const p of existentes) {
+    if (desiredCodes.has(p.codigo)) continue;
+    if (p._count.asientos > 0) {
+      console.log(
+        `  ⚠ skipping delete of ${p.codigo} (tiene ${p._count.asientos} asientos)`,
+      );
+      skippedDelete++;
+      continue;
     }
+    await prisma.periodoContable.delete({ where: { codigo: p.codigo } });
+    deleted++;
   }
-  console.log(`✓ ${count} períodos contábiles creados/actualizados (2024-01 a 2027-12)`);
+
+  // 2) Upsert los períodos del rango.
+  let upserted = 0;
+  for (const { year, month } of PERIODOS) {
+    const codigo = `${year}-${String(month).padStart(2, "0")}`;
+    const nombre = `${MESES_ES[month - 1]} ${year}`;
+    const fechaInicio = new Date(Date.UTC(year, month - 1, 1));
+    const fechaFin = new Date(Date.UTC(year, month, 0));
+
+    await prisma.periodoContable.upsert({
+      where: { codigo },
+      update: { nombre, fechaInicio, fechaFin },
+      create: {
+        codigo,
+        nombre,
+        fechaInicio,
+        fechaFin,
+        estado: PeriodoEstado.ABIERTO,
+      },
+    });
+    upserted++;
+  }
+
+  const extra = skippedDelete > 0 ? `, ${skippedDelete} fuera de rango mantenidos (tienen asientos)` : "";
+  console.log(
+    `✓ ${upserted} períodos en rango (12/2024 a 06/2026), ${deleted} fuera de rango eliminados${extra}`,
+  );
 }
 
 // ============================================================
