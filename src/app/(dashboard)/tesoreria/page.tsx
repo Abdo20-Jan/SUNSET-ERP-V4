@@ -7,6 +7,7 @@ import {
   ExchangeIcon,
   Invoice01Icon,
   ReceiptDollarIcon,
+  Calendar03Icon,
 } from "@hugeicons/core-free-icons";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -49,6 +50,13 @@ const SECTIONS = [
     title: "Cuentas a pagar",
     description:
       "Saldos pendientes a proveedores, despachante, Aduana e impuestos",
+  },
+  {
+    href: "/tesoreria/saldos-proveedores",
+    icon: Calendar03Icon,
+    title: "Saldos por proveedor",
+    description:
+      "Saldo individual + facturas vencidas, próximas a vencer y al día",
   },
 ] as const;
 
