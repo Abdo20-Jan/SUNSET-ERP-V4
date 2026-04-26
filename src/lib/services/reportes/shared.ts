@@ -171,15 +171,43 @@ export type BuildTreeResult = {
 };
 
 /**
+ * Filtro temporal: por `periodoId` (un mes contable) o por rango de
+ * fechas (desde/hasta). Para Balance General típicamente se usa fecha
+ * `hasta` sola (saldo acumulado al cierre del día). Para movimientos
+ * dentro de un período se usa `desde`+`hasta`.
+ */
+export type ReporteFilter =
+  | { periodoId: number }
+  | { fechaDesde?: Date; fechaHasta?: Date };
+
+/**
  * Carrega todas as contas do plano filtradas por `categorias` e agrega os totais
- * debe/haber vindos de `lineaAsiento` onde `asiento.estado = CONTABILIZADO` e
- * `asiento.periodoId = periodoId`. Monta a árvore com `padreCodigo` e faz roll-up
- * bottom-up em contas SINTETICAS usando `sumMoney` (decimal.js).
+ * debe/haber vindos de `lineaAsiento` onde `asiento.estado = CONTABILIZADO`.
+ * Aceita filtro por período contable ou por rango de fechas. Monta a árvore
+ * com `padreCodigo` e faz roll-up bottom-up em contas SINTETICAS.
  */
 export async function buildCuentaTree(
   categorias: CuentaCategoria[],
-  periodoId: number,
+  filter: ReporteFilter,
 ): Promise<BuildTreeResult> {
+  const asientoWhere =
+    "periodoId" in filter
+      ? {
+          estado: AsientoEstado.CONTABILIZADO,
+          periodoId: filter.periodoId,
+        }
+      : {
+          estado: AsientoEstado.CONTABILIZADO,
+          ...(filter.fechaDesde || filter.fechaHasta
+            ? {
+                fecha: {
+                  ...(filter.fechaDesde && { gte: filter.fechaDesde }),
+                  ...(filter.fechaHasta && { lte: filter.fechaHasta }),
+                },
+              }
+            : {}),
+        };
+
   const [cuentas, agregados] = await Promise.all([
     db.cuentaContable.findMany({
       where: { categoria: { in: categorias } },
@@ -197,10 +225,7 @@ export async function buildCuentaTree(
     db.lineaAsiento.groupBy({
       by: ["cuentaId"],
       where: {
-        asiento: {
-          estado: AsientoEstado.CONTABILIZADO,
-          periodoId,
-        },
+        asiento: asientoWhere,
         cuenta: { categoria: { in: categorias } },
       },
       _sum: { debe: true, haber: true },

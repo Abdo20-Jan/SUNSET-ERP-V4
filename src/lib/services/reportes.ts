@@ -18,8 +18,14 @@ export type {
   LibroMayorResult,
 } from "./reportes/libro-mayor";
 
-export { getBalanceGeneral } from "./reportes/balance-general";
-export type { BalanceGeneralResult } from "./reportes/balance-general";
+export {
+  getBalanceGeneral,
+  getBalanceGeneralByFecha,
+} from "./reportes/balance-general";
+export type {
+  BalanceGeneralResult,
+  BalanceGeneralContexto,
+} from "./reportes/balance-general";
 
 export { getEstadoResultados } from "./reportes/estado-resultados";
 export type { EstadoResultadosResult } from "./reportes/estado-resultados";

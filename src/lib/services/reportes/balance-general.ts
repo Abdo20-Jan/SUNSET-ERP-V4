@@ -3,10 +3,30 @@ import "server-only";
 import { db } from "@/lib/db";
 import { Decimal, eqMoney } from "@/lib/decimal";
 
-import { getEstadoResultados } from "./estado-resultados";
+import {
+  getEstadoResultados,
+  getEstadoResultadosByFecha,
+} from "./estado-resultados";
 import { buildCuentaTree, type CuentaTreeNode } from "./shared";
 
+export type BalanceGeneralContexto =
+  | {
+      tipo: "periodo";
+      periodoId: number;
+      codigo: string;
+      nombre: string;
+      fechaInicio: Date;
+      fechaFin: Date;
+    }
+  | {
+      tipo: "fecha";
+      fechaDesde: Date | null;
+      fechaHasta: Date | null;
+    };
+
 export type BalanceGeneralResult = {
+  // periodo se mantiene para compat con páginas existentes; cuando el
+  // filtro es por fecha, se llena con valores sintéticos.
   periodo: {
     id: number;
     codigo: string;
@@ -14,6 +34,7 @@ export type BalanceGeneralResult = {
     fechaInicio: Date;
     fechaFin: Date;
   };
+  contexto: BalanceGeneralContexto;
   activo: CuentaTreeNode[];
   pasivo: CuentaTreeNode[];
   patrimonio: CuentaTreeNode[];
@@ -45,10 +66,63 @@ export async function getBalanceGeneral(
   if (!periodo) return null;
 
   const [tree, estado] = await Promise.all([
-    buildCuentaTree(["ACTIVO", "PASIVO", "PATRIMONIO"], periodoId),
+    buildCuentaTree(["ACTIVO", "PASIVO", "PATRIMONIO"], { periodoId }),
     getEstadoResultados(periodoId),
   ]);
 
+  return ensamblar({
+    periodo,
+    contexto: {
+      tipo: "periodo",
+      periodoId: periodo.id,
+      codigo: periodo.codigo,
+      nombre: periodo.nombre,
+      fechaInicio: periodo.fechaInicio,
+      fechaFin: periodo.fechaFin,
+    },
+    tree,
+    resultadoEjercicio: estado?.resultado ?? new Decimal(0),
+  });
+}
+
+export async function getBalanceGeneralByFecha(filter: {
+  fechaDesde?: Date;
+  fechaHasta?: Date;
+}): Promise<BalanceGeneralResult> {
+  const [tree, estado] = await Promise.all([
+    buildCuentaTree(["ACTIVO", "PASIVO", "PATRIMONIO"], filter),
+    getEstadoResultadosByFecha(filter),
+  ]);
+
+  return ensamblar({
+    periodo: {
+      id: 0,
+      codigo: "—",
+      nombre: rangoLabel(filter.fechaDesde, filter.fechaHasta),
+      fechaInicio: filter.fechaDesde ?? new Date(0),
+      fechaFin: filter.fechaHasta ?? new Date(),
+    },
+    contexto: {
+      tipo: "fecha",
+      fechaDesde: filter.fechaDesde ?? null,
+      fechaHasta: filter.fechaHasta ?? null,
+    },
+    tree,
+    resultadoEjercicio: estado.resultado,
+  });
+}
+
+function ensamblar({
+  periodo,
+  contexto,
+  tree,
+  resultadoEjercicio,
+}: {
+  periodo: BalanceGeneralResult["periodo"];
+  contexto: BalanceGeneralContexto;
+  tree: Awaited<ReturnType<typeof buildCuentaTree>>;
+  resultadoEjercicio: Decimal;
+}): BalanceGeneralResult {
   const activo = tree.porCategoria.get("ACTIVO") ?? [];
   const pasivo = tree.porCategoria.get("PASIVO") ?? [];
   const patrimonio = tree.porCategoria.get("PATRIMONIO") ?? [];
@@ -58,11 +132,6 @@ export async function getBalanceGeneral(
   const totalPatrimonio =
     tree.totalPorCategoria.get("PATRIMONIO") ?? new Decimal(0);
 
-  const resultadoEjercicio = estado?.resultado ?? new Decimal(0);
-
-  // Se já existir conta "3.2.1.02 RESULTADO DEL EJERCICIO" com saldo no período,
-  // o saldo dela já está em `totalPatrimonio`. Senão, injetamos o resultado
-  // calculado (Ingresos - Egresos) para fechar a equação contábil.
   const cuentaResultadoYaMovida = patrimonio.some((root) =>
     containsCuentaComSaldo(root, CODIGO_RESULTADO_EJERCICIO),
   );
@@ -77,6 +146,7 @@ export async function getBalanceGeneral(
 
   return {
     periodo,
+    contexto,
     activo,
     pasivo,
     patrimonio,
@@ -88,6 +158,14 @@ export async function getBalanceGeneral(
     cuadra: eqMoney(totalActivo, somaPasivoPatrimonio),
     diferencia,
   };
+}
+
+function rangoLabel(desde: Date | undefined, hasta: Date | undefined): string {
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  if (desde && hasta) return `Del ${fmt(desde)} al ${fmt(hasta)}`;
+  if (hasta) return `Saldo al ${fmt(hasta)}`;
+  if (desde) return `Desde ${fmt(desde)}`;
+  return "Histórico completo";
 }
 
 function containsCuentaComSaldo(

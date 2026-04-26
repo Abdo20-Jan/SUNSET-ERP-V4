@@ -1,24 +1,32 @@
-import { db } from "@/lib/db";
-import { getBalanceGeneral } from "@/lib/services/reportes";
-import { PeriodoEstado } from "@/generated/prisma/client";
+import { getBalanceGeneralByFecha } from "@/lib/services/reportes";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-import {
-  PeriodoSelect,
-  type PeriodoOption,
-} from "../_components/periodo-select";
 import { fmtMoney } from "../_components/money";
 import { CuentaTreeTable } from "../_components/cuenta-tree-table";
 import { serializeTreeNode } from "../_components/cuenta-tree-node";
 
-type SearchParams = Promise<{ periodoId?: string }>;
+import { BalanceFechaFilter } from "./balance-fecha-filter";
 
-function parsePeriodoId(value: string | undefined): number | null {
-  if (!value) return null;
-  const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
+type SearchParams = Promise<{ desde?: string; hasta?: string }>;
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseDate(value: string | undefined): Date | undefined {
+  if (!value || !DATE_RE.test(value)) return undefined;
+  const d = new Date(value + "T00:00:00Z");
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function endOfDay(value: string | undefined): Date | undefined {
+  if (!value || !DATE_RE.test(value)) return undefined;
+  const d = new Date(value + "T23:59:59.999Z");
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 export default async function BalanceGeneralPage({
@@ -28,38 +36,23 @@ export default async function BalanceGeneralPage({
 }) {
   const params = await searchParams;
 
-  const periodos = await db.periodoContable.findMany({
-    orderBy: { codigo: "desc" },
-    select: {
-      id: true,
-      codigo: true,
-      estado: true,
-      fechaInicio: true,
-      fechaFin: true,
-    },
-  });
+  // Default: hasta = hoy, desde = vacío (saldo acumulado al día)
+  const hastaStr = params.hasta ?? todayIso();
+  const desdeStr = params.desde ?? "";
 
-  const now = new Date();
-  const periodoIdFromUrl = parsePeriodoId(params.periodoId);
-  const defaultPeriodo =
-    periodos.find(
-      (p) =>
-        p.estado === PeriodoEstado.ABIERTO &&
-        p.fechaInicio <= now &&
-        p.fechaFin >= now,
-    ) ??
-    periodos.find((p) => p.estado === PeriodoEstado.ABIERTO) ??
-    periodos[0] ??
-    null;
+  const fechaDesde = parseDate(desdeStr);
+  const fechaHasta = endOfDay(hastaStr);
 
-  const periodoId = periodoIdFromUrl ?? defaultPeriodo?.id ?? null;
-  const bg = periodoId ? await getBalanceGeneral(periodoId) : null;
+  const bg = await getBalanceGeneralByFecha({ fechaDesde, fechaHasta });
 
-  const periodoOptions: PeriodoOption[] = periodos.map((p) => ({
-    id: p.id,
-    codigo: p.codigo,
-    estado: p.estado,
-  }));
+  const titulo =
+    bg.contexto.tipo === "fecha"
+      ? bg.contexto.fechaDesde && bg.contexto.fechaHasta
+        ? `Del ${bg.contexto.fechaDesde.toISOString().slice(0, 10)} al ${bg.contexto.fechaHasta.toISOString().slice(0, 10)}`
+        : bg.contexto.fechaHasta
+          ? `Saldo al ${bg.contexto.fechaHasta.toISOString().slice(0, 10)}`
+          : "Histórico completo"
+      : "";
 
   return (
     <div className="flex flex-col gap-6">
@@ -68,109 +61,88 @@ export default async function BalanceGeneralPage({
           <h1 className="text-2xl font-semibold tracking-tight">
             Balance General
           </h1>
-          <p className="text-sm text-muted-foreground">
-            {bg
-              ? `Período ${bg.periodo.codigo} · ${bg.periodo.nombre}`
-              : "Seleccioná un período."}
-          </p>
+          <p className="text-sm text-muted-foreground">{titulo}</p>
         </div>
-        {bg ? (
-          bg.cuadra ? (
-            <Badge
-              variant="default"
-              className="bg-emerald-600 text-white hover:bg-emerald-600"
-            >
-              ✓ Cuadra
-            </Badge>
-          ) : (
-            <Badge variant="destructive">
-              ✗ No cuadra — diferencia {fmtMoney(bg.diferencia.toFixed(2))}
-            </Badge>
-          )
-        ) : null}
+        {bg.cuadra ? (
+          <Badge
+            variant="default"
+            className="bg-emerald-600 text-white hover:bg-emerald-600"
+          >
+            ✓ Cuadra
+          </Badge>
+        ) : (
+          <Badge variant="destructive">
+            ✗ No cuadra — diferencia {fmtMoney(bg.diferencia.toFixed(2))}
+          </Badge>
+        )}
       </div>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <PeriodoSelect
-          periodos={periodoOptions}
-          selectedPeriodoId={periodoId !== null ? String(periodoId) : ""}
+      <BalanceFechaFilter
+        initialDesde={desdeStr}
+        initialHasta={hastaStr}
+      />
+
+      <Card className="py-0">
+        <CardHeader className="border-b py-4">
+          <CardTitle className="text-base">Activo</CardTitle>
+        </CardHeader>
+        <CuentaTreeTable
+          data={bg.activo.map(serializeTreeNode)}
+          totalLabel="Total Activo"
+          totalValue={bg.totalActivo.toFixed(2)}
         />
-      </div>
+      </Card>
 
-      {bg ? (
-        <>
-          <Card className="py-0">
-            <CardHeader className="border-b py-4">
-              <CardTitle className="text-base">Activo</CardTitle>
-            </CardHeader>
-            <CuentaTreeTable
-              data={bg.activo.map(serializeTreeNode)}
-              periodoIdForLibroMayor={bg.periodo.id}
-              totalLabel="Total Activo"
-              totalValue={bg.totalActivo.toFixed(2)}
-            />
-          </Card>
+      <Card className="py-0">
+        <CardHeader className="border-b py-4">
+          <CardTitle className="text-base">Pasivo</CardTitle>
+        </CardHeader>
+        <CuentaTreeTable
+          data={bg.pasivo.map(serializeTreeNode)}
+          totalLabel="Total Pasivo"
+          totalValue={bg.totalPasivo.toFixed(2)}
+        />
+      </Card>
 
-          <Card className="py-0">
-            <CardHeader className="border-b py-4">
-              <CardTitle className="text-base">Pasivo</CardTitle>
-            </CardHeader>
-            <CuentaTreeTable
-              data={bg.pasivo.map(serializeTreeNode)}
-              periodoIdForLibroMayor={bg.periodo.id}
-              totalLabel="Total Pasivo"
-              totalValue={bg.totalPasivo.toFixed(2)}
-            />
-          </Card>
+      <Card className="py-0">
+        <CardHeader className="border-b py-4">
+          <CardTitle className="text-base">Patrimonio Neto</CardTitle>
+        </CardHeader>
+        <CuentaTreeTable
+          data={bg.patrimonio.map(serializeTreeNode)}
+          totalLabel="Total Patrimonio"
+          totalValue={bg.totalPatrimonio.toFixed(2)}
+        />
+      </Card>
 
-          <Card className="py-0">
-            <CardHeader className="border-b py-4">
-              <CardTitle className="text-base">Patrimonio Neto</CardTitle>
-            </CardHeader>
-            <CuentaTreeTable
-              data={bg.patrimonio.map(serializeTreeNode)}
-              periodoIdForLibroMayor={bg.periodo.id}
-              totalLabel="Total Patrimonio"
-              totalValue={bg.totalPatrimonio.toFixed(2)}
-            />
-          </Card>
-
-          <Card size="sm" className="px-6 py-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-              <Summary
-                label="Total Activo"
-                value={fmtMoney(bg.totalActivo.toFixed(2))}
-              />
-              <Summary
-                label="Total Pasivo"
-                value={fmtMoney(bg.totalPasivo.toFixed(2))}
-              />
-              <Summary
-                label="Patrimonio Ajustado"
-                value={fmtMoney(bg.totalPatrimonioAjustado.toFixed(2))}
-                hint={
-                  bg.resultadoEjercicio.isZero()
-                    ? undefined
-                    : `incluye resultado del ejercicio ${fmtMoney(bg.resultadoEjercicio.toFixed(2))}`
-                }
-              />
-              <Summary
-                label="Pasivo + Patrimonio"
-                value={fmtMoney(
-                  bg.totalPasivo.plus(bg.totalPatrimonioAjustado).toFixed(2),
-                )}
-                emphasis={bg.cuadra ? "positive" : "negative"}
-              />
-            </div>
-          </Card>
-        </>
-      ) : (
-        <Card className="py-12">
-          <p className="text-center text-sm text-muted-foreground">
-            No hay períodos contables disponibles.
-          </p>
-        </Card>
-      )}
+      <Card size="sm" className="px-6 py-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <Summary
+            label="Total Activo"
+            value={fmtMoney(bg.totalActivo.toFixed(2))}
+          />
+          <Summary
+            label="Total Pasivo"
+            value={fmtMoney(bg.totalPasivo.toFixed(2))}
+          />
+          <Summary
+            label="Patrimonio Ajustado"
+            value={fmtMoney(bg.totalPatrimonioAjustado.toFixed(2))}
+            hint={
+              bg.resultadoEjercicio.isZero()
+                ? undefined
+                : `incluye resultado del ejercicio ${fmtMoney(bg.resultadoEjercicio.toFixed(2))}`
+            }
+          />
+          <Summary
+            label="Pasivo + Patrimonio"
+            value={fmtMoney(
+              bg.totalPasivo.plus(bg.totalPatrimonioAjustado).toFixed(2),
+            )}
+            emphasis={bg.cuadra ? "positive" : "negative"}
+          />
+        </div>
+      </Card>
     </div>
   );
 }
