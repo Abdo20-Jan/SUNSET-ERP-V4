@@ -107,6 +107,24 @@ export function EmbarquesTable({ data }: { data: EmbarqueRow[] }) {
       ),
     },
     {
+      id: "incoterm",
+      header: "Incoterm",
+      cell: ({ row }) => {
+        const inc = row.original.incoterm;
+        if (!inc) return <span className="text-xs text-muted-foreground">—</span>;
+        return (
+          <span className="font-mono text-xs">
+            {inc}
+            {row.original.lugarIncoterm && (
+              <span className="ml-1 text-muted-foreground">
+                · {row.original.lugarIncoterm}
+              </span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
       id: "fobTotal",
       header: () => <span className="block text-right">FOB Total</span>,
       cell: ({ row }) => (

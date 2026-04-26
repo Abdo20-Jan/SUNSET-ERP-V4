@@ -19,6 +19,7 @@ import {
   CuentaCategoria,
   CuentaTipo,
   EmbarqueEstado,
+  Incoterm,
   Moneda,
   Prisma,
   TipoCostoEmbarque,
@@ -33,6 +34,8 @@ export type EmbarqueRow = {
   fobTotal: string;
   cifTotal: string;
   costoTotal: string;
+  incoterm: Incoterm | null;
+  lugarIncoterm: string | null;
   proveedor: {
     id: string;
     nombre: string;
@@ -74,6 +77,8 @@ export async function listarEmbarques(
     fobTotal: e.fobTotal.toString(),
     cifTotal: e.cifTotal.toString(),
     costoTotal: e.costoTotal.toString(),
+    incoterm: e.incoterm,
+    lugarIncoterm: e.lugarIncoterm,
     proveedor: e.proveedor,
     itemsCount: e._count.items,
     createdAt: e.createdAt.toISOString(),
@@ -166,6 +171,8 @@ export type EmbarqueDetalle = {
   estado: EmbarqueEstado;
   moneda: Moneda;
   tipoCambio: string;
+  incoterm: Incoterm | null;
+  lugarIncoterm: string | null;
   fobTotal: string;
   cifTotal: string;
   die: string;
@@ -215,6 +222,8 @@ export async function obtenerEmbarquePorId(
     estado: embarque.estado,
     moneda: embarque.moneda,
     tipoCambio: embarque.tipoCambio.toString(),
+    incoterm: embarque.incoterm,
+    lugarIncoterm: embarque.lugarIncoterm,
     fobTotal: embarque.fobTotal.toString(),
     cifTotal: embarque.cifTotal.toString(),
     die: embarque.die.toString(),
@@ -333,6 +342,16 @@ const inputSchema = z
     depositoDestinoId: z.string().uuid("Seleccione un depósito de destino"),
     moneda: z.nativeEnum(Moneda),
     tipoCambio: z.string().regex(rateRegex, "Tipo de cambio inválido"),
+    incoterm: z
+      .nativeEnum(Incoterm)
+      .nullable()
+      .optional()
+      .transform((v) => v ?? null),
+    lugarIncoterm: z
+      .string()
+      .max(80)
+      .optional()
+      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
     estado: z.nativeEnum(EmbarqueEstado),
     die: z.string().regex(moneyRegex, "Valor inválido"),
     tasaEstadistica: z.string().regex(moneyRegex, "Valor inválido"),
@@ -446,6 +465,8 @@ export async function guardarEmbarqueAction(
     estado: input.estado,
     moneda: input.moneda,
     tipoCambio: new Prisma.Decimal(input.tipoCambio),
+    incoterm: input.incoterm,
+    lugarIncoterm: input.lugarIncoterm,
     fobTotal: money(fobTotal),
     cifTotal: money(cifTotalArs),
     die: money(input.die),

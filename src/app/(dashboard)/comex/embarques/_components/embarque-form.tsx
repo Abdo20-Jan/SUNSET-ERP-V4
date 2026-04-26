@@ -137,6 +137,23 @@ const formSchema = z
     depositoDestinoId: z.string().uuid("Seleccione un depósito de destino"),
     moneda: z.enum(["ARS", "USD"]),
     tipoCambio: z.string().regex(rateRegex, "Tipo de cambio inválido"),
+    incoterm: z
+      .enum([
+        "EXW",
+        "FCA",
+        "FAS",
+        "FOB",
+        "CFR",
+        "CIF",
+        "CPT",
+        "CIP",
+        "DAP",
+        "DPU",
+        "DDP",
+      ])
+      .nullable()
+      .optional(),
+    lugarIncoterm: z.string().max(80).optional(),
     estado: z.enum(ESTADO_VALUES),
     die: z.string().regex(moneyRegex, "Inválido"),
     tasaEstadistica: z.string().regex(moneyRegex, "Inválido"),
@@ -264,6 +281,8 @@ export function EmbarqueForm(props: Props) {
           depositoDestinoId: "",
           moneda: "USD",
           tipoCambio: "",
+          incoterm: null,
+          lugarIncoterm: "",
           estado: "BORRADOR",
           die: "0",
           tasaEstadistica: "0",
@@ -281,6 +300,8 @@ export function EmbarqueForm(props: Props) {
           depositoDestinoId: props.initialData.depositoDestinoId ?? "",
           moneda: props.initialData.moneda,
           tipoCambio: props.initialData.tipoCambio,
+          incoterm: props.initialData.incoterm,
+          lugarIncoterm: props.initialData.lugarIncoterm ?? "",
           estado:
             props.initialData.estado === "CERRADO"
               ? "BORRADOR"
@@ -665,6 +686,65 @@ export function EmbarqueForm(props: Props) {
                 )}
               />
               {errors.estado && <FieldError message={errors.estado.message} />}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="flex flex-col gap-2">
+              <Label>Incoterm</Label>
+              <Controller
+                control={control}
+                name="incoterm"
+                render={({ field }) => (
+                  <Select
+                    value={field.value ?? "NONE"}
+                    onValueChange={(v) =>
+                      field.onChange(v === "NONE" ? null : v)
+                    }
+                    disabled={readonly}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Sin definir" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NONE">— Sin definir —</SelectItem>
+                      <SelectItem value="EXW">EXW — Ex Works</SelectItem>
+                      <SelectItem value="FCA">FCA — Free Carrier</SelectItem>
+                      <SelectItem value="FAS">
+                        FAS — Free Alongside Ship
+                      </SelectItem>
+                      <SelectItem value="FOB">FOB — Free On Board</SelectItem>
+                      <SelectItem value="CFR">CFR — Cost &amp; Freight</SelectItem>
+                      <SelectItem value="CIF">
+                        CIF — Cost, Insurance &amp; Freight
+                      </SelectItem>
+                      <SelectItem value="CPT">CPT — Carriage Paid To</SelectItem>
+                      <SelectItem value="CIP">
+                        CIP — Carriage &amp; Insurance Paid
+                      </SelectItem>
+                      <SelectItem value="DAP">
+                        DAP — Delivered At Place
+                      </SelectItem>
+                      <SelectItem value="DPU">
+                        DPU — Delivered At Place Unloaded
+                      </SelectItem>
+                      <SelectItem value="DDP">
+                        DDP — Delivered Duty Paid
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 md:col-span-2">
+              <Label htmlFor="lugarIncoterm">Lugar Incoterm</Label>
+              <Input
+                id="lugarIncoterm"
+                placeholder="Ej: Shanghai, Buenos Aires, Hamburg"
+                disabled={readonly}
+                {...register("lugarIncoterm")}
+              />
             </div>
           </div>
         </CardContent>
