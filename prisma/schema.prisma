@@ -157,6 +157,40 @@ enum CondicionIva {
   MONOTRIBUTO
   EXENTO
   CONSUMIDOR_FINAL
+  EXTERIOR
+}
+
+enum TipoCanal {
+  MAYORISTA
+  MINORISTA
+  REVENDEDOR_GOMERIA
+  TRANSPORTISTA
+  GRANDE_CUENTA
+  EXTERIOR
+  CONSUMIDOR_FINAL
+}
+
+enum TipoProveedor {
+  MERCADERIA_LOCAL
+  DESPACHANTE
+  LOGISTICA
+  ALMACENAJE
+  SERVICIOS_PROFESIONALES
+  ALQUILERES
+  IT_SOFTWARE
+  GASTOS_PORTUARIOS
+  MARKETING
+  OTRO
+  MERCADERIA_EXTERIOR
+  SERVICIOS_EXTERIOR
+}
+
+enum ConceptoRG830 {
+  BIENES_DE_CAMBIO
+  HONORARIOS
+  ALQUILERES
+  SERVICIOS_GENERALES
+  LOCACIONES_SERVICIOS
 }
 
 enum AuditAccion {
@@ -482,7 +516,11 @@ model Cliente {
   nombre            String
   cuit              String?        @unique
   tipo              String         @default("minorista")
+  tipoCanal         TipoCanal      @default(MINORISTA)
   condicionIva      CondicionIva   @default(RI)
+  agenteRetencionIva       Boolean @default(false)
+  agenteRetencionGanancias Boolean @default(false)
+  agenteIibb               Boolean @default(false)
   direccion         String?
   telefono          String?
   email             String?
@@ -503,6 +541,8 @@ model Proveedor {
   nombre               String
   cuit                 String?         @unique // opcional para extranjeros (puede ser ID fiscal de su país)
   tipo                 String          @default("otro")
+  tipoProveedor        TipoProveedor   @default(MERCADERIA_LOCAL)
+  conceptoRG830        ConceptoRG830?  // mapping para retención Ganancias
   pais                 String          @default("AR")
   direccion            String?
   telefono             String?

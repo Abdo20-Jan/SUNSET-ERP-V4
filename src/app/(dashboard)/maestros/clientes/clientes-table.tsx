@@ -68,6 +68,7 @@ const CONDICION_IVA_SHORT: Record<CondicionIva, string> = {
   MONOTRIBUTO: "Monotributo",
   EXENTO: "Exento",
   CONSUMIDOR_FINAL: "Cons. Final",
+  EXTERIOR: "Exterior",
 };
 
 export function ClientesTable({

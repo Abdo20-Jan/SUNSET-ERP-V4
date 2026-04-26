@@ -13,6 +13,7 @@ import {
   type CuentaContableOption,
   type ProveedorRow,
 } from "@/lib/actions/proveedores";
+import { ConceptoRG830, TipoProveedor } from "@/generated/prisma/client";
 import { Button } from "@/components/ui/button";
 import { CuentaCombobox } from "@/components/cuenta-combobox";
 import {
@@ -53,9 +54,55 @@ const PAISES: Array<{ code: string; label: string }> = [
   { code: "ES", label: "España" },
 ];
 
+const TIPO_PROVEEDOR_LABEL: Record<TipoProveedor, string> = {
+  MERCADERIA_LOCAL: "Mercadería local (compras reventa)",
+  DESPACHANTE: "Despachante de Aduana",
+  LOGISTICA: "Logística / Flete nacional",
+  ALMACENAJE: "Almacenaje / Depósito fiscal",
+  SERVICIOS_PROFESIONALES: "Servicios profesionales (contador, abogado)",
+  ALQUILERES: "Alquileres (oficina / depósito)",
+  IT_SOFTWARE: "IT / Software / SaaS",
+  GASTOS_PORTUARIOS: "Gastos portuarios",
+  MARKETING: "Publicidad / Marketing",
+  OTRO: "Otro (nacional)",
+  MERCADERIA_EXTERIOR: "Mercadería del exterior (USD)",
+  SERVICIOS_EXTERIOR: "Servicios del exterior (flete intl., seguros)",
+};
+
+const TIPO_PROVEEDOR_VALUES = Object.keys(
+  TIPO_PROVEEDOR_LABEL,
+) as TipoProveedor[];
+
+const TIPO_PROVEEDOR_EXTRANJEROS: TipoProveedor[] = [
+  "MERCADERIA_EXTERIOR",
+  "SERVICIOS_EXTERIOR",
+];
+
+function esTipoExtranjero(tipo: TipoProveedor): boolean {
+  return TIPO_PROVEEDOR_EXTRANJEROS.includes(tipo);
+}
+
+const CONCEPTO_RG830_LABEL: Record<ConceptoRG830, string> = {
+  BIENES_DE_CAMBIO: "Bienes de cambio (mercadería)",
+  HONORARIOS: "Honorarios profesionales",
+  ALQUILERES: "Alquileres",
+  SERVICIOS_GENERALES: "Servicios generales",
+  LOCACIONES_SERVICIOS: "Locaciones de servicios",
+};
+
+const CONCEPTO_RG830_VALUES = Object.keys(
+  CONCEPTO_RG830_LABEL,
+) as ConceptoRG830[];
+
 const formSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio."),
-  nacionalidad: z.enum(["NACIONAL", "EXTRANJERO"]),
+  tipoProveedor: z.enum(
+    TIPO_PROVEEDOR_VALUES as [TipoProveedor, ...TipoProveedor[]],
+  ),
+  conceptoRG830: z
+    .enum(CONCEPTO_RG830_VALUES as [ConceptoRG830, ...ConceptoRG830[]])
+    .nullable()
+    .optional(),
   cuit: z.string().trim().optional().or(z.literal("")),
   pais: z.string().trim().min(2).max(2),
   tipo: z.string().trim().optional().or(z.literal("")),
@@ -80,7 +127,8 @@ type FormValues = z.infer<typeof formSchema>;
 function emptyDefaults(): FormValues {
   return {
     nombre: "",
-    nacionalidad: "NACIONAL",
+    tipoProveedor: "MERCADERIA_LOCAL",
+    conceptoRG830: null,
     cuit: "",
     pais: "AR",
     tipo: "otro",
@@ -96,7 +144,8 @@ function emptyDefaults(): FormValues {
 function defaultsFromRow(row: ProveedorRow): FormValues {
   return {
     nombre: row.nombre,
-    nacionalidad: row.pais === "AR" ? "NACIONAL" : "EXTRANJERO",
+    tipoProveedor: row.tipoProveedor,
+    conceptoRG830: row.conceptoRG830,
     cuit: row.cuit ?? "",
     pais: row.pais,
     tipo: row.tipo,
@@ -105,7 +154,7 @@ function defaultsFromRow(row: ProveedorRow): FormValues {
     email: row.email ?? "",
     estado: row.estado === "inactivo" ? "inactivo" : "activo",
     cuentaContableId: row.cuentaContableId,
-    crearCuentaAuto: false, // editando: ya tiene cuenta o el usuario eligió no
+    crearCuentaAuto: false,
   };
 }
 
@@ -140,7 +189,10 @@ export function ProveedorFormDialog({
     reset(state.mode === "edit" ? defaultsFromRow(state.row) : emptyDefaults());
   }, [state, reset]);
 
-  const nacionalidad = useWatch({ control, name: "nacionalidad" });
+  const tipoProveedor = useWatch({ control, name: "tipoProveedor" });
+  const nacionalidad: "NACIONAL" | "EXTRANJERO" = esTipoExtranjero(tipoProveedor)
+    ? "EXTRANJERO"
+    : "NACIONAL";
   const pais = useWatch({ control, name: "pais" });
   const crearCuentaAuto = useWatch({ control, name: "crearCuentaAuto" });
 
@@ -159,6 +211,8 @@ export function ProveedorFormDialog({
     startTransition(async () => {
       const payload = {
         nombre: values.nombre,
+        tipoProveedor: values.tipoProveedor,
+        conceptoRG830: values.conceptoRG830 ?? null,
         cuit:
           values.cuit && values.cuit.trim().length > 0
             ? values.cuit
@@ -226,34 +280,42 @@ export function ProveedorFormDialog({
               <Label>Tipo de proveedor *</Label>
               <Controller
                 control={control}
-                name="nacionalidad"
+                name="tipoProveedor"
                 render={({ field }) => (
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => field.onChange("NACIONAL")}
-                      className={`flex-1 rounded-md border px-3 py-2 text-sm transition ${
-                        field.value === "NACIONAL"
-                          ? "border-primary bg-primary/10 font-medium"
-                          : "border-muted hover:bg-muted/50"
-                      }`}
-                    >
-                      Nacional (Argentina)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => field.onChange("EXTRANJERO")}
-                      className={`flex-1 rounded-md border px-3 py-2 text-sm transition ${
-                        field.value === "EXTRANJERO"
-                          ? "border-primary bg-primary/10 font-medium"
-                          : "border-muted hover:bg-muted/50"
-                      }`}
-                    >
-                      Extranjero (del exterior)
-                    </button>
-                  </div>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <div className="px-2 py-1 text-xs uppercase text-muted-foreground">
+                        Nacional
+                      </div>
+                      {TIPO_PROVEEDOR_VALUES.filter(
+                        (v) => !esTipoExtranjero(v),
+                      ).map((v) => (
+                        <SelectItem key={v} value={v}>
+                          {TIPO_PROVEEDOR_LABEL[v]}
+                        </SelectItem>
+                      ))}
+                      <div className="mt-1 px-2 py-1 text-xs uppercase text-muted-foreground">
+                        Exterior
+                      </div>
+                      {TIPO_PROVEEDOR_VALUES.filter(esTipoExtranjero).map(
+                        (v) => (
+                          <SelectItem key={v} value={v}>
+                            {TIPO_PROVEEDOR_LABEL[v]}
+                          </SelectItem>
+                        ),
+                      )}
+                    </SelectContent>
+                  </Select>
                 )}
               />
+              <p className="text-xs text-muted-foreground">
+                Determina cuenta analítica auto-creada (
+                {nacionalidad === "EXTRANJERO" ? "2.1.8.x" : "2.1.1.10–59"}) y
+                contrapartida natural en compras.
+              </p>
             </div>
 
             <div className="sm:col-span-2 flex flex-col gap-2">
@@ -264,6 +326,38 @@ export function ProveedorFormDialog({
                 {...register("nombre")}
               />
               {errors.nombre && <FieldError message={errors.nombre.message} />}
+            </div>
+
+            <div className="sm:col-span-2 flex flex-col gap-2">
+              <Label>Concepto RG 830 (retención Ganancias)</Label>
+              <Controller
+                control={control}
+                name="conceptoRG830"
+                render={({ field }) => (
+                  <Select
+                    value={field.value ?? "NONE"}
+                    onValueChange={(v) =>
+                      field.onChange(v === "NONE" ? null : (v as ConceptoRG830))
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="No aplica" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NONE">— No aplica —</SelectItem>
+                      {CONCEPTO_RG830_VALUES.map((v) => (
+                        <SelectItem key={v} value={v}>
+                          {CONCEPTO_RG830_LABEL[v]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              <p className="text-xs text-muted-foreground">
+                Si Sunset es agente de retención: define la alícuota a aplicar
+                al pagar (RG 830 Anexo VIII). Opcional.
+              </p>
             </div>
 
             <div className="flex flex-col gap-2">

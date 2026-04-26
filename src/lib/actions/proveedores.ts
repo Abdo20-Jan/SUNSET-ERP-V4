@@ -7,15 +7,22 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
   crearCuentaParaEntidad,
-  rangoProveedor,
+  rangoProveedorByTipo,
 } from "@/lib/services/cuenta-auto";
-import { CuentaTipo, Prisma } from "@/generated/prisma/client";
+import {
+  ConceptoRG830,
+  CuentaTipo,
+  Prisma,
+  TipoProveedor,
+} from "@/generated/prisma/client";
 
 export type ProveedorRow = {
   id: string;
   nombre: string;
   cuit: string | null;
   tipo: string;
+  tipoProveedor: TipoProveedor;
+  conceptoRG830: ConceptoRG830 | null;
   pais: string;
   direccion: string | null;
   telefono: string | null;
@@ -42,6 +49,8 @@ export async function listarProveedores(): Promise<ProveedorRow[]> {
       nombre: true,
       cuit: true,
       tipo: true,
+      tipoProveedor: true,
+      conceptoRG830: true,
       pais: true,
       direccion: true,
       telefono: true,
@@ -57,6 +66,8 @@ export async function listarProveedores(): Promise<ProveedorRow[]> {
     nombre: p.nombre,
     cuit: p.cuit,
     tipo: p.tipo,
+    tipoProveedor: p.tipoProveedor,
+    conceptoRG830: p.conceptoRG830,
     pais: p.pais,
     direccion: p.direccion,
     telefono: p.telefono,
@@ -99,6 +110,10 @@ const proveedorBaseSchema = z
       .string()
       .optional()
       .transform((v) => (v && v.trim().length > 0 ? v.trim() : "otro")),
+    tipoProveedor: z
+      .nativeEnum(TipoProveedor)
+      .default(TipoProveedor.MERCADERIA_LOCAL),
+    conceptoRG830: z.nativeEnum(ConceptoRG830).optional().nullable(),
     pais: z
       .string()
       .optional()
@@ -182,7 +197,7 @@ export async function crearProveedorAction(
       if (cuentaContableId === null && parsed.data.crearCuentaAuto) {
         const cuenta = await crearCuentaParaEntidad(
           tx,
-          rangoProveedor(parsed.data.pais),
+          rangoProveedorByTipo(parsed.data.tipoProveedor),
           parsed.data.nombre,
         );
         cuentaContableId = cuenta.id;

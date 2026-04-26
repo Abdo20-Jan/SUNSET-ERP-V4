@@ -85,27 +85,50 @@ export async function ensureCuentasMap<T extends Record<string, CuentaDef>>(
 }
 
 // ============================================================
-// Auto-creación de cuentas individuales (proveedor, cliente,
-// caja, banco, préstamo) — numeración automática en rango
+// Auto-creación de cuentas individuales — numeración automática
+// en rangos por categoría / tipo de entidad
 // ============================================================
 
+import type { TipoCanal, TipoProveedor } from "@/generated/prisma/client";
+
 /**
- * Crea o reutiliza una cuenta analítica individual para un proveedor o cliente
- * recién creado. La numeración va dentro de un prefijo padre de 3 segmentos
- * (ej. "2.1.1") con sufijo de 2 dígitos en un rango reservado para auto-creación,
- * para no chocar con las cuentas "genéricas" cargadas por seed (.01-.09).
+ * Rangos de auto-creación. Códigos `.01-.09` quedan reservados
+ * para cuentas genéricas creadas manualmente o por seed.
  *
- * Rangos:
- *  - Proveedor nacional   → 2.1.1.10..99
- *  - Proveedor extranjero → 2.1.1.50..99 (mismo padre, suffix más alto)
- *  - Cliente              → 1.1.3.10..99
+ * Cliente: por canal (`tipoCanal`).
+ * Proveedor: por tipo (`tipoProveedor`). Extranjeros viven en
+ * `2.1.8 PROVEEDORES DEL EXTERIOR` (sintetica nueva, separada
+ * de `2.1.1 DEUDAS COMERCIALES`).
  */
 const RANGES = {
-  PROVEEDOR_NACIONAL: { padre: "2.1.1", min: 10, max: 49, categoria: CuentaCategoria.PASIVO },
-  PROVEEDOR_EXTRANJERO: { padre: "2.1.1", min: 50, max: 99, categoria: CuentaCategoria.PASIVO },
-  CLIENTE: { padre: "1.1.3", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
-  CAJA: { padre: "1.1.1", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
-  BANCO: { padre: "1.1.2", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
+  // Cliente — por canal
+  CLIENTE_MAYORISTA:          { padre: "1.1.3", min: 10, max: 19, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_MINORISTA:          { padre: "1.1.3", min: 20, max: 29, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_REVENDEDOR_GOMERIA: { padre: "1.1.3", min: 30, max: 39, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_TRANSPORTISTA:      { padre: "1.1.3", min: 40, max: 49, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_GRANDE_CUENTA:      { padre: "1.1.3", min: 50, max: 59, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_EXTERIOR:           { padre: "1.1.3", min: 60, max: 69, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_CONSUMIDOR_FINAL:   { padre: "1.1.3", min: 99, max: 99, categoria: CuentaCategoria.ACTIVO },
+
+  // Proveedor nacional — por tipo, bajo 2.1.1
+  PROVEEDOR_MERCADERIA_LOCAL:    { padre: "2.1.1", min: 10, max: 14, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_DESPACHANTE:         { padre: "2.1.1", min: 15, max: 19, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_LOGISTICA:           { padre: "2.1.1", min: 20, max: 24, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_ALMACENAJE:          { padre: "2.1.1", min: 25, max: 29, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_SERVICIOS_PROFESIONALES: { padre: "2.1.1", min: 30, max: 34, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_ALQUILERES:          { padre: "2.1.1", min: 35, max: 39, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_IT_SOFTWARE:         { padre: "2.1.1", min: 40, max: 44, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_GASTOS_PORTUARIOS:   { padre: "2.1.1", min: 45, max: 49, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_MARKETING:           { padre: "2.1.1", min: 50, max: 54, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_OTRO:                { padre: "2.1.1", min: 55, max: 99, categoria: CuentaCategoria.PASIVO },
+
+  // Proveedor extranjero — bajo 2.1.8 PROVEEDORES DEL EXTERIOR
+  PROVEEDOR_MERCADERIA_EXTERIOR: { padre: "2.1.8", min: 10, max: 49, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_SERVICIOS_EXTERIOR:  { padre: "2.1.8", min: 50, max: 99, categoria: CuentaCategoria.PASIVO },
+
+  // Bancos / cajas / préstamos — sin desagregación por tipo
+  CAJA:        { padre: "1.1.1", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
+  BANCO:       { padre: "1.1.2", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
   PRESTAMO_CP: { padre: "2.1.7", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
   PRESTAMO_LP: { padre: "2.2.1", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
 } as const;
@@ -174,6 +197,44 @@ export async function crearCuentaParaEntidad(
   return created;
 }
 
+/**
+ * Mapeo desde el enum TipoProveedor al rango de cuenta correspondiente.
+ * Garantiza coherencia entre maestro y plan de cuentas.
+ */
+export function rangoProveedorByTipo(tipo: TipoProveedor): RangoCuentaAuto {
+  switch (tipo) {
+    case "MERCADERIA_LOCAL":         return "PROVEEDOR_MERCADERIA_LOCAL";
+    case "DESPACHANTE":              return "PROVEEDOR_DESPACHANTE";
+    case "LOGISTICA":                return "PROVEEDOR_LOGISTICA";
+    case "ALMACENAJE":               return "PROVEEDOR_ALMACENAJE";
+    case "SERVICIOS_PROFESIONALES":  return "PROVEEDOR_SERVICIOS_PROFESIONALES";
+    case "ALQUILERES":               return "PROVEEDOR_ALQUILERES";
+    case "IT_SOFTWARE":              return "PROVEEDOR_IT_SOFTWARE";
+    case "GASTOS_PORTUARIOS":        return "PROVEEDOR_GASTOS_PORTUARIOS";
+    case "MARKETING":                return "PROVEEDOR_MARKETING";
+    case "OTRO":                     return "PROVEEDOR_OTRO";
+    case "MERCADERIA_EXTERIOR":      return "PROVEEDOR_MERCADERIA_EXTERIOR";
+    case "SERVICIOS_EXTERIOR":       return "PROVEEDOR_SERVICIOS_EXTERIOR";
+  }
+}
+
+export function rangoClienteByCanal(canal: TipoCanal): RangoCuentaAuto {
+  switch (canal) {
+    case "MAYORISTA":          return "CLIENTE_MAYORISTA";
+    case "MINORISTA":          return "CLIENTE_MINORISTA";
+    case "REVENDEDOR_GOMERIA": return "CLIENTE_REVENDEDOR_GOMERIA";
+    case "TRANSPORTISTA":      return "CLIENTE_TRANSPORTISTA";
+    case "GRANDE_CUENTA":      return "CLIENTE_GRANDE_CUENTA";
+    case "EXTERIOR":           return "CLIENTE_EXTERIOR";
+    case "CONSUMIDOR_FINAL":   return "CLIENTE_CONSUMIDOR_FINAL";
+  }
+}
+
+export function esTipoProveedorExtranjero(tipo: TipoProveedor): boolean {
+  return tipo === "MERCADERIA_EXTERIOR" || tipo === "SERVICIOS_EXTERIOR";
+}
+
+/** @deprecated use rangoProveedorByTipo. Kept for backwards compat during refactor. */
 export function rangoProveedor(pais: string): RangoCuentaAuto {
-  return pais === "AR" ? "PROVEEDOR_NACIONAL" : "PROVEEDOR_EXTRANJERO";
+  return pais === "AR" ? "PROVEEDOR_MERCADERIA_LOCAL" : "PROVEEDOR_MERCADERIA_EXTERIOR";
 }

@@ -123,6 +123,7 @@ const CUENTAS_SINTETICAS: CuentaSeed[] = [
   { codigo: "2.1.5",  nombre: "IMPUESTOS NACIONALIZACIÓN",           categoria: CuentaCategoria.PASIVO, nivel: 3 },
   { codigo: "2.1.6",  nombre: "IMPUESTOS SOBRE VENTAS",              categoria: CuentaCategoria.PASIVO, nivel: 3 },
   { codigo: "2.1.7",  nombre: "PRÉSTAMOS CORTO PLAZO",               categoria: CuentaCategoria.PASIVO, nivel: 3 },
+  { codigo: "2.1.8",  nombre: "PROVEEDORES DEL EXTERIOR",            categoria: CuentaCategoria.PASIVO, nivel: 3 },
   { codigo: "2.2",    nombre: "PASIVO NO CORRIENTE",                 categoria: CuentaCategoria.PASIVO, nivel: 2 },
   { codigo: "2.2.1",  nombre: "PRÉSTAMOS LARGO PLAZO",               categoria: CuentaCategoria.PASIVO, nivel: 3 },
 

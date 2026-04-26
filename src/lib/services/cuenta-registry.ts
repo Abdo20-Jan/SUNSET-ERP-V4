@@ -174,3 +174,89 @@ export const TRANSFERENCIA_CODIGOS = {
     categoria: CuentaCategoria.EGRESO,
   },
 } as const satisfies Record<string, CuentaDef>;
+
+// ----- COSTOS FINANCIEROS (incluye impuesto al cheque) ------
+export const COSTOS_FINANCIEROS_CODIGOS = {
+  COMISIONES_BANCARIAS: {
+    codigo: "5.8.1.01",
+    nombre: "COMISIONES BANCARIAS",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  GASTOS_TRANSFERENCIA_EXTERIOR: {
+    codigo: "5.8.1.02",
+    nombre: "GASTOS TRANSFERENCIA EXTERIOR",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  IMPUESTO_AL_CHEQUE: {
+    codigo: "5.8.1.06",
+    nombre: "IMPUESTO LEY 25413 (DEB/CRED BANCARIOS)",
+    categoria: CuentaCategoria.EGRESO,
+  },
+} as const satisfies Record<string, CuentaDef>;
+
+// ----- GASTO CONTRAPARTIDA POR TIPO DE PROVEEDOR ------------
+// Mapa que crearAsientoCompra usa para elegir la cuenta de gasto
+// según proveedor.tipoProveedor. Garantiza contabilización correcta:
+// despachante → 5.1.1.03; almacenaje → 5.5.1.05; etc.
+export const GASTO_POR_TIPO_PROVEEDOR = {
+  MERCADERIA_LOCAL: {
+    codigo: "1.1.5.01",
+    nombre: "MERCADERÍAS",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+  MERCADERIA_EXTERIOR: {
+    codigo: "1.1.5.02",
+    nombre: "MERCADERÍAS EN TRÁNSITO",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+  DESPACHANTE: {
+    codigo: "5.1.1.03",
+    nombre: "HONORARIOS DESPACHANTE",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  LOGISTICA: {
+    codigo: "5.5.1.01",
+    nombre: "FLETE NACIONAL",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  ALMACENAJE: {
+    codigo: "5.5.1.05",
+    nombre: "ALMACENAJE Y WMS",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  SERVICIOS_PROFESIONALES: {
+    codigo: "5.1.1.01",
+    nombre: "HONORARIOS CONTABLES",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  ALQUILERES: {
+    codigo: "5.2.1.01",
+    nombre: "ALQUILER",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  IT_SOFTWARE: {
+    codigo: "5.3.1.02",
+    nombre: "SISTEMAS Y SOFTWARE",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  GASTOS_PORTUARIOS: {
+    codigo: "5.4.1.01",
+    nombre: "GASTOS PORTUARIOS",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  MARKETING: {
+    codigo: "5.3.1.05",
+    nombre: "PUBLICIDAD Y MARKETING",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  SERVICIOS_EXTERIOR: {
+    codigo: "5.5.1.02",
+    nombre: "FLETE INTERNACIONAL",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  OTRO: {
+    codigo: "5.3.1.99",
+    nombre: "OTROS GASTOS",
+    categoria: CuentaCategoria.EGRESO,
+  },
+} as const satisfies Record<string, CuentaDef>;

@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 
-import { CondicionIva } from "@/generated/prisma/client";
+import { CondicionIva, TipoCanal } from "@/generated/prisma/client";
 import {
   actualizarClienteAction,
   crearClienteAction,
@@ -44,14 +44,31 @@ const CONDICION_IVA_LABEL: Record<CondicionIva, string> = {
   MONOTRIBUTO: "Monotributista",
   EXENTO: "Exento",
   CONSUMIDOR_FINAL: "Consumidor Final",
+  EXTERIOR: "Exterior (exportación)",
 };
 
 const CONDICION_IVA_VALUES = Object.keys(CONDICION_IVA_LABEL) as CondicionIva[];
 
+const TIPO_CANAL_LABEL: Record<TipoCanal, string> = {
+  MAYORISTA: "Mayorista / Distribuidor",
+  MINORISTA: "Minorista / Punto de Venta",
+  REVENDEDOR_GOMERIA: "Revendedor / Gomería",
+  TRANSPORTISTA: "Transportista / Flota",
+  GRANDE_CUENTA: "Gran Cuenta / Concesionaria",
+  EXTERIOR: "Exterior (exportación)",
+  CONSUMIDOR_FINAL: "Consumidor Final ocasional",
+};
+
+const TIPO_CANAL_VALUES = Object.keys(TIPO_CANAL_LABEL) as TipoCanal[];
+
 const formSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio."),
   cuit: z.string().trim().optional().or(z.literal("")),
+  tipoCanal: z.enum(TIPO_CANAL_VALUES as [TipoCanal, ...TipoCanal[]]),
   condicionIva: z.enum(CONDICION_IVA_VALUES as [CondicionIva, ...CondicionIva[]]),
+  agenteRetencionIva: z.boolean(),
+  agenteRetencionGanancias: z.boolean(),
+  agenteIibb: z.boolean(),
   tipo: z.string().trim().optional().or(z.literal("")),
   direccion: z.string().trim().optional().or(z.literal("")),
   telefono: z.string().trim().optional().or(z.literal("")),
@@ -75,7 +92,11 @@ function emptyDefaults(): FormValues {
   return {
     nombre: "",
     cuit: "",
+    tipoCanal: "MINORISTA",
     condicionIva: "RI",
+    agenteRetencionIva: false,
+    agenteRetencionGanancias: false,
+    agenteIibb: false,
     tipo: "minorista",
     direccion: "",
     telefono: "",
@@ -90,7 +111,11 @@ function defaultsFromRow(row: ClienteRow): FormValues {
   return {
     nombre: row.nombre,
     cuit: row.cuit ?? "",
+    tipoCanal: row.tipoCanal,
     condicionIva: row.condicionIva,
+    agenteRetencionIva: row.agenteRetencionIva,
+    agenteRetencionGanancias: row.agenteRetencionGanancias,
+    agenteIibb: row.agenteIibb,
     tipo: row.tipo,
     direccion: row.direccion ?? "",
     telefono: row.telefono ?? "",
@@ -139,7 +164,11 @@ export function ClienteFormDialog({
       const payload = {
         nombre: values.nombre,
         cuit: values.cuit && values.cuit.length > 0 ? values.cuit : undefined,
+        tipoCanal: values.tipoCanal,
         condicionIva: values.condicionIva,
+        agenteRetencionIva: values.agenteRetencionIva,
+        agenteRetencionGanancias: values.agenteRetencionGanancias,
+        agenteIibb: values.agenteIibb,
         tipo: values.tipo && values.tipo.length > 0 ? values.tipo : undefined,
         direccion:
           values.direccion && values.direccion.length > 0
@@ -219,13 +248,30 @@ export function ClienteFormDialog({
               {errors.cuit && <FieldError message={errors.cuit.message} />}
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="tipo">Tipo</Label>
-              <Input
-                id="tipo"
-                placeholder="minorista"
-                {...register("tipo")}
+            <div className="flex flex-col gap-2 sm:col-span-2">
+              <Label>Tipo de canal *</Label>
+              <Controller
+                control={control}
+                name="tipoCanal"
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIPO_CANAL_VALUES.map((v) => (
+                        <SelectItem key={v} value={v}>
+                          {TIPO_CANAL_LABEL[v]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               />
+              <p className="text-xs text-muted-foreground">
+                Determina la cuenta analítica auto-creada (1.1.3.10–99 según
+                canal).
+              </p>
             </div>
 
             <div className="flex flex-col gap-2">
@@ -248,6 +294,37 @@ export function ClienteFormDialog({
                   </Select>
                 )}
               />
+            </div>
+
+            <div className="flex flex-col gap-2 sm:col-span-2">
+              <Label>Agente de retención (si aplica)</Label>
+              <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    {...register("agenteRetencionIva")}
+                  />
+                  <span>Agente de retención <strong>IVA</strong> (10,5% típico)</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    {...register("agenteRetencionGanancias")}
+                  />
+                  <span>Agente de retención <strong>Ganancias</strong> (RG 830, 2-6%)</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    {...register("agenteIibb")}
+                  />
+                  <span>Agente de recaudación <strong>IIBB</strong></span>
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  Marcá sólo si el cliente practica retenciones al pagar
+                  (Grandes Cuentas, concesionarias).
+                </p>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2">

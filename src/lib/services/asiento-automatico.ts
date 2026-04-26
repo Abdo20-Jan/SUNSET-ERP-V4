@@ -4,10 +4,11 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { eqMoney, gtZero, money, sumMoney, toDecimal } from "@/lib/decimal";
-import { ensureCuentasMap } from "@/lib/services/cuenta-auto";
+import { ensureCuentasMap, getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import {
   COMPRA_CODIGOS,
   EMBARQUE_CODIGOS,
+  GASTO_POR_TIPO_PROVEEDOR,
   TRANSFERENCIA_CODIGOS,
   VENTA_CODIGOS,
 } from "@/lib/services/cuenta-registry";
@@ -1114,7 +1115,12 @@ export async function crearAsientoCompra(
       where: { id: compraId },
       include: {
         proveedor: {
-          select: { id: true, nombre: true, cuentaContableId: true },
+          select: {
+            id: true,
+            nombre: true,
+            cuentaContableId: true,
+            tipoProveedor: true,
+          },
         },
       },
     });
@@ -1132,6 +1138,11 @@ export async function crearAsientoCompra(
     }
 
     const porCodigo = await ensureCuentasMap(inner, COMPRA_CODIGOS);
+
+    // Contrapartida (DEBE) según tipoProveedor — mercadería va a 1.1.5.01,
+    // honorarios a 5.1.1.x, alquileres a 5.2.1.01, etc.
+    const gastoDef = GASTO_POR_TIPO_PROVEEDOR[compra.proveedor.tipoProveedor];
+    const gastoCuentaId = await getOrCreateCuenta(inner, gastoDef);
 
     const tc = toDecimal(compra.tipoCambio);
     const subtotal = toDecimal(compra.subtotal).times(tc).toDecimalPlaces(2);
@@ -1154,10 +1165,10 @@ export async function crearAsientoCompra(
 
     const lineas: LineaInput[] = [
       {
-        cuentaId: porCodigo.get(COMPRA_CODIGOS.MERCADERIAS.codigo)!,
+        cuentaId: gastoCuentaId,
         debe: money(subtotal).toString(),
         haber: 0,
-        descripcion: `Compra ${compra.numero} — mercadería`,
+        descripcion: `Compra ${compra.numero} — ${gastoDef.nombre.toLowerCase()}`,
       },
     ];
     if (iva.gt(0)) {
@@ -1178,7 +1189,7 @@ export async function crearAsientoCompra(
     }
     if (otros.gt(0)) {
       lineas.push({
-        cuentaId: porCodigo.get(COMPRA_CODIGOS.MERCADERIAS.codigo)!,
+        cuentaId: gastoCuentaId,
         debe: money(otros).toString(),
         haber: 0,
         descripcion: `Compra ${compra.numero} — otros`,

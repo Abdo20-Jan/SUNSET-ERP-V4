@@ -5,11 +5,15 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { crearCuentaParaEntidad } from "@/lib/services/cuenta-auto";
+import {
+  crearCuentaParaEntidad,
+  rangoClienteByCanal,
+} from "@/lib/services/cuenta-auto";
 import {
   CondicionIva,
   CuentaTipo,
   Prisma,
+  TipoCanal,
 } from "@/generated/prisma/client";
 
 export type ClienteRow = {
@@ -17,7 +21,11 @@ export type ClienteRow = {
   nombre: string;
   cuit: string | null;
   tipo: string;
+  tipoCanal: TipoCanal;
   condicionIva: CondicionIva;
+  agenteRetencionIva: boolean;
+  agenteRetencionGanancias: boolean;
+  agenteIibb: boolean;
   direccion: string | null;
   telefono: string | null;
   email: string | null;
@@ -43,7 +51,11 @@ export async function listarClientes(): Promise<ClienteRow[]> {
       nombre: true,
       cuit: true,
       tipo: true,
+      tipoCanal: true,
       condicionIva: true,
+      agenteRetencionIva: true,
+      agenteRetencionGanancias: true,
+      agenteIibb: true,
       direccion: true,
       telefono: true,
       email: true,
@@ -58,7 +70,11 @@ export async function listarClientes(): Promise<ClienteRow[]> {
     nombre: c.nombre,
     cuit: c.cuit,
     tipo: c.tipo,
+    tipoCanal: c.tipoCanal,
     condicionIva: c.condicionIva,
+    agenteRetencionIva: c.agenteRetencionIva,
+    agenteRetencionGanancias: c.agenteRetencionGanancias,
+    agenteIibb: c.agenteIibb,
     direccion: c.direccion,
     telefono: c.telefono,
     email: c.email,
@@ -99,6 +115,10 @@ const clienteBaseSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : "minorista")),
+  tipoCanal: z.nativeEnum(TipoCanal).default(TipoCanal.MINORISTA),
+  agenteRetencionIva: z.boolean().optional().default(false),
+  agenteRetencionGanancias: z.boolean().optional().default(false),
+  agenteIibb: z.boolean().optional().default(false),
   condicionIva: z.nativeEnum(CondicionIva),
   direccion: nullableStr,
   telefono: nullableStr,
@@ -178,7 +198,7 @@ export async function crearClienteAction(
       if (cuentaContableId === null && parsed.data.crearCuentaAuto) {
         const cuenta = await crearCuentaParaEntidad(
           tx,
-          "CLIENTE",
+          rangoClienteByCanal(parsed.data.tipoCanal),
           parsed.data.nombre,
         );
         cuentaContableId = cuenta.id;
