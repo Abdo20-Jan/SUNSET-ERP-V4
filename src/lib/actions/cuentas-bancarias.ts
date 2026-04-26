@@ -6,6 +6,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { calcularSaldosCuentasBancarias } from "@/lib/services/cuenta-bancaria";
+import { crearCuentaParaEntidad } from "@/lib/services/cuenta-auto";
 import {
   CuentaCategoria,
   CuentaTipo,
@@ -93,7 +94,7 @@ export async function listarCuentasContablesDisponibles(): Promise<
 }
 
 const crearInputSchema = z.object({
-  banco: z.string().min(1, "El banco es obligatorio"),
+  banco: z.string().min(1, "El banco/caja es obligatorio"),
   tipo: z.nativeEnum(TipoCuentaBancaria),
   moneda: z.nativeEnum(Moneda),
   numero: z.string().min(1, "El número es obligatorio"),
@@ -105,7 +106,14 @@ const crearInputSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-  cuentaContableId: z.number().int().positive(),
+  /**
+   * Si se pasa, se vincula la cuenta contable existente.
+   * Si es null/omitido, el sistema crea automáticamente una cuenta
+   * analítica nueva en el rango correspondiente:
+   *   - tipo === CAJA_CHICA → 1.1.1.X (caja)
+   *   - otro                → 1.1.2.X (banco)
+   */
+  cuentaContableId: z.number().int().positive().nullable().optional(),
 });
 
 export type CrearCuentaBancariaInput = z.input<typeof crearInputSchema>;
@@ -131,57 +139,84 @@ export async function crearCuentaBancariaAction(
     };
   }
 
-  const cuenta = await db.cuentaContable.findUnique({
-    where: { id: parsed.data.cuentaContableId },
-    select: { id: true, tipo: true, categoria: true, activa: true, codigo: true },
-  });
+  const input = parsed.data;
+  const cuentaContableIdProvisto = input.cuentaContableId ?? null;
 
-  if (!cuenta) {
-    return { ok: false, error: "La cuenta contable seleccionada no existe." };
-  }
-  if (!cuenta.activa) {
-    return { ok: false, error: `La cuenta ${cuenta.codigo} está inactiva.` };
-  }
-  if (cuenta.tipo !== CuentaTipo.ANALITICA) {
-    return {
-      ok: false,
-      error: "La cuenta contable debe ser ANALITICA (no sintética).",
-    };
-  }
-  if (cuenta.categoria !== CuentaCategoria.ACTIVO) {
-    return {
-      ok: false,
-      error: "La cuenta contable debe ser de categoría ACTIVO.",
-    };
-  }
-
-  const yaUsada = await db.cuentaBancaria.findFirst({
-    where: { cuentaContableId: parsed.data.cuentaContableId },
-    select: { id: true },
-  });
-  if (yaUsada) {
-    return {
-      ok: false,
-      error: "Esa cuenta contable ya está vinculada a otra cuenta bancaria.",
-    };
+  // Validar cuenta existente si fue provista
+  if (cuentaContableIdProvisto !== null) {
+    const cuenta = await db.cuentaContable.findUnique({
+      where: { id: cuentaContableIdProvisto },
+      select: {
+        id: true,
+        tipo: true,
+        categoria: true,
+        activa: true,
+        codigo: true,
+      },
+    });
+    if (!cuenta) {
+      return { ok: false, error: "La cuenta contable seleccionada no existe." };
+    }
+    if (!cuenta.activa) {
+      return { ok: false, error: `La cuenta ${cuenta.codigo} está inactiva.` };
+    }
+    if (cuenta.tipo !== CuentaTipo.ANALITICA) {
+      return {
+        ok: false,
+        error: "La cuenta contable debe ser ANALITICA (no sintética).",
+      };
+    }
+    if (cuenta.categoria !== CuentaCategoria.ACTIVO) {
+      return {
+        ok: false,
+        error: "La cuenta contable debe ser de categoría ACTIVO.",
+      };
+    }
+    const yaUsada = await db.cuentaBancaria.findFirst({
+      where: { cuentaContableId: cuentaContableIdProvisto },
+      select: { id: true },
+    });
+    if (yaUsada) {
+      return {
+        ok: false,
+        error: "Esa cuenta contable ya está vinculada a otra cuenta bancaria.",
+      };
+    }
   }
 
   try {
-    const created = await db.cuentaBancaria.create({
-      data: {
-        banco: parsed.data.banco,
-        tipo: parsed.data.tipo,
-        moneda: parsed.data.moneda,
-        numero: parsed.data.numero,
-        cbu: parsed.data.cbu,
-        alias: parsed.data.alias,
-        cuentaContableId: parsed.data.cuentaContableId,
-      },
-      select: { id: true },
+    const created = await db.$transaction(async (tx) => {
+      let cuentaContableId = cuentaContableIdProvisto;
+      if (cuentaContableId === null) {
+        const esCaja = input.tipo === TipoCuentaBancaria.CAJA_CHICA;
+        const nombreCuenta = `${input.banco} ${input.moneda}`.trim();
+        const cuenta = await crearCuentaParaEntidad(
+          tx,
+          esCaja ? "CAJA" : "BANCO",
+          nombreCuenta,
+        );
+        cuentaContableId = cuenta.id;
+      }
+      return tx.cuentaBancaria.create({
+        data: {
+          banco: input.banco,
+          tipo: input.tipo,
+          moneda: input.moneda,
+          numero: input.numero,
+          cbu: input.cbu,
+          alias: input.alias,
+          cuentaContableId,
+        },
+        select: { id: true },
+      });
     });
     revalidatePath("/tesoreria/cuentas");
+    revalidatePath("/contabilidad/cuentas");
     return { ok: true, id: created.id };
   } catch (err) {
+    if (err instanceof Error && err.message.startsWith("No hay códigos")) {
+      return { ok: false, error: err.message };
+    }
     console.error("crearCuentaBancariaAction failed", err);
     return { ok: false, error: "Error inesperado al crear la cuenta bancaria." };
   }

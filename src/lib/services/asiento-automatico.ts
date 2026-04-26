@@ -4,6 +4,13 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { eqMoney, gtZero, money, sumMoney, toDecimal } from "@/lib/decimal";
+import { ensureCuentasMap } from "@/lib/services/cuenta-auto";
+import {
+  COMPRA_CODIGOS,
+  EMBARQUE_CODIGOS,
+  TRANSFERENCIA_CODIGOS,
+  VENTA_CODIGOS,
+} from "@/lib/services/cuenta-registry";
 import {
   AsientoEstado,
   AsientoOrigen,
@@ -525,11 +532,6 @@ export async function crearAsientoMovimientoTesoreria(
   return withNumeracionRetry(() => db.$transaction(run));
 }
 
-const TRANSFERENCIA_CODIGOS = {
-  DIF_CAMBIO_POSITIVA: "4.3.1.01",
-  DIF_CAMBIO_NEGATIVA: "5.8.2.01",
-} as const;
-
 export type CrearTransferenciaInput = {
   fecha: Date;
   cuentaBancariaOrigenId: string;
@@ -647,31 +649,14 @@ export async function crearAsientoTransferencia(
     ];
 
     if (!eqMoney(origenArs, destinoArs)) {
-      const codigo = diff.gt(0)
-        ? TRANSFERENCIA_CODIGOS.DIF_CAMBIO_POSITIVA
-        : TRANSFERENCIA_CODIGOS.DIF_CAMBIO_NEGATIVA;
-
-      const cuentaDif = await inner.cuentaContable.findUnique({
-        where: { codigo },
-        select: { id: true, activa: true },
-      });
-
-      if (!cuentaDif) {
-        throw new AsientoError(
-          "CUENTA_INVALIDA",
-          `Falta la cuenta contable ${codigo} (Diferencia de Cambio) en el plan de cuentas.`,
-        );
-      }
-      if (!cuentaDif.activa) {
-        throw new AsientoError(
-          "CUENTA_INACTIVA",
-          `La cuenta ${codigo} (Diferencia de Cambio) está inactiva.`,
-        );
-      }
+      const cuentasDif = await ensureCuentasMap(inner, TRANSFERENCIA_CODIGOS);
+      const cuentaDifId = diff.gt(0)
+        ? cuentasDif.get(TRANSFERENCIA_CODIGOS.DIF_CAMBIO_POSITIVA.codigo)!
+        : cuentasDif.get(TRANSFERENCIA_CODIGOS.DIF_CAMBIO_NEGATIVA.codigo)!;
 
       const absDiff = money(diff.abs()).toString();
       lineas.push({
-        cuentaId: cuentaDif.id,
+        cuentaId: cuentaDifId,
         debe: diff.gt(0) ? 0 : absDiff,
         haber: diff.gt(0) ? absDiff : 0,
         descripcion: diff.gt(0)
@@ -715,29 +700,6 @@ export async function crearAsientoTransferencia(
   return withNumeracionRetry(() => db.$transaction(run));
 }
 
-const EMBARQUE_CODIGOS = {
-  // DEBE — capitalización + créditos fiscales
-  MERCADERIAS_EN_TRANSITO: "1.1.5.02",
-  DIE_EGRESO: "5.7.1.01",
-  TASA_ESTADISTICA_EGRESO: "5.7.1.02",
-  ARANCEL_SIM_EGRESO: "5.7.1.03",
-  IVA_CREDITO_IMPORTACION: "1.1.4.04",
-  IVA_ADICIONAL_CREDITO: "1.1.4.05",
-  IIBB_CREDITO_IMPORTACION: "1.1.4.06",
-  GANANCIAS_CREDITO: "1.1.4.07",
-  // DEBE — créditos fiscales de costos logísticos (no importación)
-  IVA_CREDITO_COMPRAS: "1.1.4.01",
-  IIBB_CREDITO_COMPRAS: "1.1.4.11",
-  // HABER — proveedor de la mercadería + AFIP/Aduana
-  DIE_PASIVO: "2.1.5.01",
-  TASA_ESTADISTICA_PASIVO: "2.1.5.02",
-  ARANCEL_SIM_PASIVO: "2.1.5.03",
-  IVA_POR_PAGAR: "2.1.5.04",
-  IIBB_POR_PAGAR: "2.1.3.02",
-  GANANCIAS_POR_PAGAR: "2.1.3.03",
-  PROVEEDOR_EXTERIOR_FALLBACK: "2.1.1.02",
-} as const;
-
 export async function crearAsientoEmbarque(
   embarqueId: string,
   tx?: TxClient,
@@ -773,20 +735,7 @@ export async function crearAsientoEmbarque(
       );
     }
 
-    const codigos = Object.values(EMBARQUE_CODIGOS);
-    const cuentas = await inner.cuentaContable.findMany({
-      where: { codigo: { in: codigos } },
-      select: { id: true, codigo: true },
-    });
-    const porCodigo = new Map(cuentas.map((c) => [c.codigo, c.id]));
-    for (const codigo of codigos) {
-      if (!porCodigo.has(codigo)) {
-        throw new AsientoError(
-          "CUENTA_INVALIDA",
-          `Falta la cuenta contable ${codigo} en el plan de cuentas.`,
-        );
-      }
-    }
+    const porCodigo = await ensureCuentasMap(inner, EMBARQUE_CODIGOS);
 
     const tcEmb = toDecimal(embarque.tipoCambio);
     const fobArs = toDecimal(embarque.fobTotal).times(tcEmb).toDecimalPlaces(2);
@@ -850,9 +799,9 @@ export async function crearAsientoEmbarque(
     // 1) FOB → Mercadería en tránsito vs. proveedor del exterior
     const proveedorExteriorCuentaId =
       embarque.proveedor.cuentaContableId ??
-      porCodigo.get(EMBARQUE_CODIGOS.PROVEEDOR_EXTERIOR_FALLBACK)!;
+      porCodigo.get(EMBARQUE_CODIGOS.PROVEEDOR_EXTERIOR_FALLBACK.codigo)!;
     pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO)!,
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO.codigo)!,
       fobArs,
       `FOB embarque ${embarque.codigo} (${embarque.proveedor.nombre})`,
     );
@@ -863,69 +812,69 @@ export async function crearAsientoEmbarque(
     );
 
     // 2) Tributos aduaneros (DEBE gasto/crédito, HABER AFIP/Aduana por pagar)
-    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.DIE_EGRESO)!, die, "DIE");
+    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.DIE_EGRESO.codigo)!, die, "DIE");
     pushHaber(
-      porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO)!,
+      porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO.codigo)!,
       die,
       "DIE por pagar (Aduana)",
     );
 
     pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_EGRESO)!,
+      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_EGRESO.codigo)!,
       te,
       "Tasa estadística",
     );
     pushHaber(
-      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_PASIVO)!,
+      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_PASIVO.codigo)!,
       te,
       "Tasa estadística por pagar",
     );
 
     pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO)!,
+      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO.codigo)!,
       arancelSim,
       "Arancel SIM",
     );
     pushHaber(
-      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO)!,
+      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO.codigo)!,
       arancelSim,
       "Arancel SIM por pagar",
     );
 
     pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_IMPORTACION)!,
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_IMPORTACION.codigo)!,
       ivaAduana,
       "IVA crédito fiscal importación",
     );
     pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.IVA_ADICIONAL_CREDITO)!,
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_ADICIONAL_CREDITO.codigo)!,
       ivaAdicional,
       "IVA adicional importación",
     );
     pushHaber(
-      porCodigo.get(EMBARQUE_CODIGOS.IVA_POR_PAGAR)!,
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_POR_PAGAR.codigo)!,
       ivaAduana.plus(ivaAdicional),
       "IVA importación por pagar (IVA + adicional)",
     );
 
     pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_IMPORTACION)!,
+      porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_IMPORTACION.codigo)!,
       iibbAduana,
       "Percepción IIBB importación",
     );
     pushHaber(
-      porCodigo.get(EMBARQUE_CODIGOS.IIBB_POR_PAGAR)!,
+      porCodigo.get(EMBARQUE_CODIGOS.IIBB_POR_PAGAR.codigo)!,
       iibbAduana,
       "IIBB importación por pagar",
     );
 
     pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_CREDITO)!,
+      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_CREDITO.codigo)!,
       ganancias,
       "Percepción Ganancias importación",
     );
     pushHaber(
-      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_POR_PAGAR)!,
+      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_POR_PAGAR.codigo)!,
       ganancias,
       "Ganancias importación por pagar",
     );
@@ -973,12 +922,12 @@ export async function crearAsientoEmbarque(
       const otrosArs = toDecimal(factura.otros).times(tc).toDecimalPlaces(2);
 
       pushDebe(
-        porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS)!,
+        porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS.codigo)!,
         ivaArs,
         `${facturaLabel} — IVA crédito`,
       );
       pushDebe(
-        porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS)!,
+        porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS.codigo)!,
         iibbArs,
         `${facturaLabel} — IIBB crédito`,
       );
@@ -1053,14 +1002,6 @@ export async function crearAsientoEmbarque(
 // El cliente es la contraparte deudora; la venta genera la cuenta a cobrar.
 // Cada componente se redondea a 2dp ANTES de sumar para que DEBE = HABER exacto.
 
-const VENTA_CODIGOS = {
-  CLIENTE_FALLBACK: "1.1.3.01",
-  VENTAS: "4.1.1.01",
-  IVA_DEBITO: "2.1.6.01",
-  IIBB_POR_PAGAR: "2.1.3.02",
-  OTROS_IMPUESTOS: "2.1.3.04",
-} as const;
-
 export async function crearAsientoVenta(
   ventaId: string,
   tx?: TxClient,
@@ -1085,20 +1026,7 @@ export async function crearAsientoVenta(
       );
     }
 
-    const codigos = Object.values(VENTA_CODIGOS);
-    const cuentas = await inner.cuentaContable.findMany({
-      where: { codigo: { in: codigos } },
-      select: { id: true, codigo: true },
-    });
-    const porCodigo = new Map(cuentas.map((c) => [c.codigo, c.id]));
-    for (const c of codigos) {
-      if (!porCodigo.has(c)) {
-        throw new AsientoError(
-          "CUENTA_INVALIDA",
-          `Falta cuenta contable ${c} en el plan.`,
-        );
-      }
-    }
+    const porCodigo = await ensureCuentasMap(inner, VENTA_CODIGOS);
 
     const tc = toDecimal(venta.tipoCambio);
     const subtotal = toDecimal(venta.subtotal).times(tc).toDecimalPlaces(2);
@@ -1109,7 +1037,7 @@ export async function crearAsientoVenta(
 
     const clienteCuentaId =
       venta.cliente.cuentaContableId ??
-      porCodigo.get(VENTA_CODIGOS.CLIENTE_FALLBACK)!;
+      porCodigo.get(VENTA_CODIGOS.CLIENTE_FALLBACK.codigo)!;
 
     const lineas: LineaInput[] = [
       {
@@ -1119,7 +1047,7 @@ export async function crearAsientoVenta(
         descripcion: `Venta ${venta.numero} — ${venta.cliente.nombre}`,
       },
       {
-        cuentaId: porCodigo.get(VENTA_CODIGOS.VENTAS)!,
+        cuentaId: porCodigo.get(VENTA_CODIGOS.VENTAS.codigo)!,
         debe: 0,
         haber: money(subtotal).toString(),
         descripcion: `Venta ${venta.numero} — ingreso neto`,
@@ -1127,7 +1055,7 @@ export async function crearAsientoVenta(
     ];
     if (iva.gt(0)) {
       lineas.push({
-        cuentaId: porCodigo.get(VENTA_CODIGOS.IVA_DEBITO)!,
+        cuentaId: porCodigo.get(VENTA_CODIGOS.IVA_DEBITO.codigo)!,
         debe: 0,
         haber: money(iva).toString(),
         descripcion: `Venta ${venta.numero} — IVA débito`,
@@ -1135,7 +1063,7 @@ export async function crearAsientoVenta(
     }
     if (iibb.gt(0)) {
       lineas.push({
-        cuentaId: porCodigo.get(VENTA_CODIGOS.IIBB_POR_PAGAR)!,
+        cuentaId: porCodigo.get(VENTA_CODIGOS.IIBB_POR_PAGAR.codigo)!,
         debe: 0,
         haber: money(iibb).toString(),
         descripcion: `Venta ${venta.numero} — IIBB`,
@@ -1143,7 +1071,7 @@ export async function crearAsientoVenta(
     }
     if (otros.gt(0)) {
       lineas.push({
-        cuentaId: porCodigo.get(VENTA_CODIGOS.OTROS_IMPUESTOS)!,
+        cuentaId: porCodigo.get(VENTA_CODIGOS.OTROS_IMPUESTOS.codigo)!,
         debe: 0,
         haber: money(otros).toString(),
         descripcion: `Venta ${venta.numero} — otros`,
@@ -1177,14 +1105,6 @@ export async function crearAsientoVenta(
 // DEBE  1.1.4.11 Crédito IIBB Compras         iibb × TC (si > 0)
 // HABER proveedor.cuentaContableId (or 2.1.1.01)   total × TC
 
-const COMPRA_CODIGOS = {
-  MERCADERIAS: "1.1.5.01",
-  IVA_CREDITO: "1.1.4.08",
-  IIBB_CREDITO: "1.1.4.11",
-  PROVEEDOR_FALLBACK: "2.1.1.01",
-  OTROS_GASTOS: "5.3.1.99",
-} as const;
-
 export async function crearAsientoCompra(
   compraId: string,
   tx?: TxClient,
@@ -1211,31 +1131,7 @@ export async function crearAsientoCompra(
       );
     }
 
-    // Solo necesitamos las cuentas que SÍ usamos. El fallback PROVEEDOR_FALLBACK
-    // solo se busca si proveedor.cuentaContableId es null.
-    const codigos = [
-      COMPRA_CODIGOS.MERCADERIAS,
-      COMPRA_CODIGOS.IVA_CREDITO,
-      COMPRA_CODIGOS.IIBB_CREDITO,
-      COMPRA_CODIGOS.PROVEEDOR_FALLBACK,
-    ];
-    const cuentas = await inner.cuentaContable.findMany({
-      where: { codigo: { in: codigos } },
-      select: { id: true, codigo: true },
-    });
-    const porCodigo = new Map(cuentas.map((c) => [c.codigo, c.id]));
-    for (const c of [
-      COMPRA_CODIGOS.MERCADERIAS,
-      COMPRA_CODIGOS.IVA_CREDITO,
-      COMPRA_CODIGOS.IIBB_CREDITO,
-    ]) {
-      if (!porCodigo.has(c)) {
-        throw new AsientoError(
-          "CUENTA_INVALIDA",
-          `Falta cuenta contable ${c} en el plan.`,
-        );
-      }
-    }
+    const porCodigo = await ensureCuentasMap(inner, COMPRA_CODIGOS);
 
     const tc = toDecimal(compra.tipoCambio);
     const subtotal = toDecimal(compra.subtotal).times(tc).toDecimalPlaces(2);
@@ -1247,18 +1143,18 @@ export async function crearAsientoCompra(
     let proveedorCuentaId = compra.proveedor.cuentaContableId;
     if (!proveedorCuentaId) {
       proveedorCuentaId =
-        porCodigo.get(COMPRA_CODIGOS.PROVEEDOR_FALLBACK) ?? null;
+        porCodigo.get(COMPRA_CODIGOS.PROVEEDOR_FALLBACK.codigo) ?? null;
       if (!proveedorCuentaId) {
         throw new AsientoError(
           "CUENTA_INVALIDA",
-          `Proveedor ${compra.proveedor.nombre} sin cuenta contable y falta fallback ${COMPRA_CODIGOS.PROVEEDOR_FALLBACK}.`,
+          `Proveedor ${compra.proveedor.nombre} sin cuenta contable y falta fallback ${COMPRA_CODIGOS.PROVEEDOR_FALLBACK.codigo}.`,
         );
       }
     }
 
     const lineas: LineaInput[] = [
       {
-        cuentaId: porCodigo.get(COMPRA_CODIGOS.MERCADERIAS)!,
+        cuentaId: porCodigo.get(COMPRA_CODIGOS.MERCADERIAS.codigo)!,
         debe: money(subtotal).toString(),
         haber: 0,
         descripcion: `Compra ${compra.numero} — mercadería`,
@@ -1266,7 +1162,7 @@ export async function crearAsientoCompra(
     ];
     if (iva.gt(0)) {
       lineas.push({
-        cuentaId: porCodigo.get(COMPRA_CODIGOS.IVA_CREDITO)!,
+        cuentaId: porCodigo.get(COMPRA_CODIGOS.IVA_CREDITO.codigo)!,
         debe: money(iva).toString(),
         haber: 0,
         descripcion: `Compra ${compra.numero} — IVA crédito`,
@@ -1274,7 +1170,7 @@ export async function crearAsientoCompra(
     }
     if (iibb.gt(0)) {
       lineas.push({
-        cuentaId: porCodigo.get(COMPRA_CODIGOS.IIBB_CREDITO)!,
+        cuentaId: porCodigo.get(COMPRA_CODIGOS.IIBB_CREDITO.codigo)!,
         debe: money(iibb).toString(),
         haber: 0,
         descripcion: `Compra ${compra.numero} — IIBB crédito`,
@@ -1282,7 +1178,7 @@ export async function crearAsientoCompra(
     }
     if (otros.gt(0)) {
       lineas.push({
-        cuentaId: porCodigo.get(COMPRA_CODIGOS.MERCADERIAS)!,
+        cuentaId: porCodigo.get(COMPRA_CODIGOS.MERCADERIAS.codigo)!,
         debe: money(otros).toString(),
         haber: 0,
         descripcion: `Compra ${compra.numero} — otros`,

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -36,16 +36,14 @@ import {
 } from "@/components/ui/sheet";
 
 const formSchema = z.object({
-  banco: z.string().min(1, "El banco es obligatorio"),
+  banco: z.string().min(1, "El banco/caja es obligatorio"),
   tipo: z.enum(["CUENTA_CORRIENTE", "CAJA_AHORRO", "CAJA_CHICA"]),
   moneda: z.enum(["ARS", "USD"]),
   numero: z.string().min(1, "El número es obligatorio"),
   cbu: z.string().optional(),
   alias: z.string().optional(),
-  cuentaContableId: z
-    .number()
-    .int()
-    .positive({ message: "Seleccione una cuenta contable" }),
+  cuentaContableId: z.number().int().positive().nullable(),
+  crearCuentaAuto: z.boolean(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -106,9 +104,14 @@ function NuevaCuentaSheet({
       numero: "",
       cbu: "",
       alias: "",
-      cuentaContableId: 0,
+      cuentaContableId: null,
+      crearCuentaAuto: true,
     },
   });
+
+  const tipo = useWatch({ control, name: "tipo" });
+  const moneda = useWatch({ control, name: "moneda" });
+  const crearCuentaAuto = useWatch({ control, name: "crearCuentaAuto" });
 
   const onSubmit = handleSubmit((values) => {
     startTransition(async () => {
@@ -119,7 +122,9 @@ function NuevaCuentaSheet({
         numero: values.numero,
         cbu: values.cbu,
         alias: values.alias,
-        cuentaContableId: values.cuentaContableId,
+        cuentaContableId: values.crearCuentaAuto
+          ? null
+          : values.cuentaContableId,
       });
 
       if (result.ok) {
@@ -160,10 +165,16 @@ function NuevaCuentaSheet({
         <form onSubmit={onSubmit} className="flex flex-1 flex-col">
           <div className="flex flex-col gap-4 p-6">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="banco">Banco</Label>
+              <Label htmlFor="banco">
+                {tipo === "CAJA_CHICA" ? "Caja" : "Banco"}
+              </Label>
               <Input
                 id="banco"
-                placeholder="Banco Santander"
+                placeholder={
+                  tipo === "CAJA_CHICA"
+                    ? "Ej: Caja Abdo, Caja Principal"
+                    : "Banco Santander"
+                }
                 aria-invalid={!!errors.banco}
                 {...register("banco")}
               />
@@ -248,25 +259,40 @@ function NuevaCuentaSheet({
               </div>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label>Cuenta contable</Label>
-              <Controller
-                control={control}
-                name="cuentaContableId"
-                render={({ field }) => (
-                  <CuentaCombobox
-                    value={field.value}
-                    onChange={field.onChange}
-                    cuentas={cuentasContables}
-                  />
-                )}
-              />
-              {errors.cuentaContableId && (
-                <FieldError message={errors.cuentaContableId.message} />
+            <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+              <Label className="text-sm">Cuenta contable</Label>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  {...register("crearCuentaAuto")}
+                />
+                <span>
+                  <span className="font-medium">Crear automáticamente</span>{" "}
+                  una cuenta analítica
+                  <span className="ml-1 text-xs text-muted-foreground">
+                    (sugerido — código en{" "}
+                    {tipo === "CAJA_CHICA" ? "1.1.1.10–99" : "1.1.2.10–99"};
+                    nombre: <span className="font-mono">«banco/caja» {moneda}</span>)
+                  </span>
+                </span>
+              </label>
+              {!crearCuentaAuto && (
+                <Controller
+                  control={control}
+                  name="cuentaContableId"
+                  render={({ field }) => (
+                    <CuentaCombobox
+                      value={field.value}
+                      onChange={field.onChange}
+                      cuentas={cuentasContables}
+                    />
+                  )}
+                />
               )}
               <p className="text-xs text-muted-foreground">
-                Solo cuentas analíticas de activo que aún no estén vinculadas a
-                otra cuenta bancaria.
+                Si elige "Crear automáticamente", el sistema asigna el próximo
+                código disponible al guardar.
               </p>
             </div>
           </div>

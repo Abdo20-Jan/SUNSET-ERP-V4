@@ -55,10 +55,8 @@ const formSchema = z
     moneda: z.enum(["ARS", "USD"]),
     tipoCambio: z.string().regex(FX_RE, "Tipo de cambio inválido"),
     clasificacion: z.enum(["CORTO_PLAZO", "LARGO_PLAZO"]),
-    cuentaContableId: z
-      .number()
-      .int()
-      .positive({ message: "Seleccione la cuenta de pasivo" }),
+    cuentaContableId: z.number().int().positive().nullable(),
+    crearCuentaAuto: z.boolean(),
   })
   .superRefine((data, ctx) => {
     if (Number(data.principal) <= 0) {
@@ -81,6 +79,13 @@ const formSchema = z
         path: ["tipoCambio"],
         code: z.ZodIssueCode.custom,
         message: "TC debe ser mayor a cero",
+      });
+    }
+    if (!data.crearCuentaAuto && data.cuentaContableId === null) {
+      ctx.addIssue({
+        path: ["cuentaContableId"],
+        code: z.ZodIssueCode.custom,
+        message: "Seleccione la cuenta de pasivo o active auto-creación.",
       });
     }
   });
@@ -118,7 +123,8 @@ export function PrestamoForm({
       moneda: "ARS",
       tipoCambio: "1",
       clasificacion: "CORTO_PLAZO",
-      cuentaContableId: 0,
+      cuentaContableId: null,
+      crearCuentaAuto: true,
     },
   });
 
@@ -128,6 +134,7 @@ export function PrestamoForm({
   const tipoCambio = useWatch({ control, name: "tipoCambio" });
   const clasificacion = useWatch({ control, name: "clasificacion" });
   const cuentaContableId = useWatch({ control, name: "cuentaContableId" });
+  const crearCuentaAuto = useWatch({ control, name: "crearCuentaAuto" });
 
   const bancoSeleccionado = useMemo(
     () => cuentasBancarias.find((c) => c.id === cuentaBancariaId) ?? null,
@@ -152,7 +159,7 @@ export function PrestamoForm({
       cuentaContableId &&
       !cuentasPorClasificacion.some((c) => c.id === cuentaContableId)
     ) {
-      setValue("cuentaContableId", 0, { shouldValidate: false });
+      setValue("cuentaContableId", null, { shouldValidate: false });
     }
   }, [cuentasPorClasificacion, cuentaContableId, setValue]);
 
@@ -172,7 +179,9 @@ export function PrestamoForm({
         moneda: values.moneda,
         tipoCambio: values.tipoCambio,
         clasificacion: values.clasificacion,
-        cuentaContableId: values.cuentaContableId,
+        cuentaContableId: values.crearCuentaAuto
+          ? null
+          : values.cuentaContableId,
       });
 
       if (result.ok) {
@@ -366,21 +375,39 @@ export function PrestamoForm({
               />
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label>Cuenta de pasivo</Label>
-              <Controller
-                control={control}
-                name="cuentaContableId"
-                render={({ field }) => (
-                  <CuentaCombobox
-                    value={field.value || null}
-                    onChange={field.onChange}
-                    cuentas={cuentasPorClasificacion}
-                    placeholder="Seleccione la cuenta analítica de pasivo"
-                    emptyMessage="Sin cuentas disponibles para esta clasificación."
-                  />
-                )}
-              />
+            <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+              <Label className="text-sm">Cuenta de pasivo</Label>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  {...register("crearCuentaAuto")}
+                />
+                <span>
+                  <span className="font-medium">Crear automáticamente</span>{" "}
+                  una cuenta analítica para este préstamo
+                  <span className="ml-1 text-xs text-muted-foreground">
+                    (rango{" "}
+                    {clasificacion === "CORTO_PLAZO" ? "2.1.7.10–99" : "2.2.1.10–99"}
+                    )
+                  </span>
+                </span>
+              </label>
+              {!crearCuentaAuto && (
+                <Controller
+                  control={control}
+                  name="cuentaContableId"
+                  render={({ field }) => (
+                    <CuentaCombobox
+                      value={field.value || null}
+                      onChange={field.onChange}
+                      cuentas={cuentasPorClasificacion}
+                      placeholder="Seleccione la cuenta analítica de pasivo"
+                      emptyMessage="Sin cuentas disponibles para esta clasificación."
+                    />
+                  )}
+                />
+              )}
               {errors.cuentaContableId && (
                 <FieldError message={errors.cuentaContableId.message} />
               )}

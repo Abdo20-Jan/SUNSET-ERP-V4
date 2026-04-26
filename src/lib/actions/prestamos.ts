@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { crearCuentaParaEntidad } from "@/lib/services/cuenta-auto";
 import {
   AsientoError,
   anularAsiento,
@@ -395,7 +396,8 @@ const crearPrestamoSchema = z
       .string()
       .regex(FX_RE, "Tipo de cambio inválido (máx. 6 decimales)"),
     clasificacion: z.nativeEnum(PrestamoClasificacion),
-    cuentaContableId: z.number().int().positive(),
+    /** Si null/omitido, el sistema crea automáticamente la cuenta de pasivo */
+    cuentaContableId: z.number().int().positive().nullable().optional(),
   })
   .superRefine((data, ctx) => {
     if (Number(data.principal) <= 0) {
@@ -454,7 +456,7 @@ export async function crearPrestamoAction(
     moneda,
     tipoCambio,
     clasificacion,
-    cuentaContableId,
+    cuentaContableId: cuentaContableIdProvisto,
   } = parsed.data;
 
   const cuentaBancaria = await db.cuentaBancaria.findUnique({
@@ -466,73 +468,87 @@ export async function crearPrestamoAction(
     return { ok: false, error: "La cuenta bancaria seleccionada no existe." };
   }
 
-  if (cuentaBancaria.cuentaContableId === cuentaContableId) {
-    return {
-      ok: false,
-      error: "La cuenta del préstamo no puede ser la misma cuenta del banco.",
-    };
-  }
+  // Si se pasó una cuenta existente, validarla. Si no, se auto-creará.
+  if (cuentaContableIdProvisto != null) {
+    if (cuentaBancaria.cuentaContableId === cuentaContableIdProvisto) {
+      return {
+        ok: false,
+        error: "La cuenta del préstamo no puede ser la misma cuenta del banco.",
+      };
+    }
 
-  const cuentaContable = await db.cuentaContable.findUnique({
-    where: { id: cuentaContableId },
-    select: {
-      id: true,
-      codigo: true,
-      tipo: true,
-      categoria: true,
-      activa: true,
-    },
-  });
+    const cuentaContable = await db.cuentaContable.findUnique({
+      where: { id: cuentaContableIdProvisto },
+      select: {
+        id: true,
+        codigo: true,
+        tipo: true,
+        categoria: true,
+        activa: true,
+      },
+    });
 
-  if (!cuentaContable) {
-    return { ok: false, error: "La cuenta contable no existe." };
-  }
-  if (!cuentaContable.activa) {
-    return {
-      ok: false,
-      error: `La cuenta ${cuentaContable.codigo} está inactiva.`,
-    };
-  }
-  if (cuentaContable.tipo !== CuentaTipo.ANALITICA) {
-    return {
-      ok: false,
-      error: "La cuenta del préstamo debe ser ANALITICA.",
-    };
-  }
-  if (cuentaContable.categoria !== CuentaCategoria.PASIVO) {
-    return {
-      ok: false,
-      error: "La cuenta del préstamo debe ser de categoría PASIVO.",
-    };
-  }
-  const expectedPrefix = CLASIFICACION_PREFIX[clasificacion];
-  if (!cuentaContable.codigo.startsWith(expectedPrefix)) {
-    return {
-      ok: false,
-      error: `Para clasificación ${clasificacion} la cuenta debe comenzar con ${expectedPrefix}`,
-    };
-  }
+    if (!cuentaContable) {
+      return { ok: false, error: "La cuenta contable no existe." };
+    }
+    if (!cuentaContable.activa) {
+      return {
+        ok: false,
+        error: `La cuenta ${cuentaContable.codigo} está inactiva.`,
+      };
+    }
+    if (cuentaContable.tipo !== CuentaTipo.ANALITICA) {
+      return {
+        ok: false,
+        error: "La cuenta del préstamo debe ser ANALITICA.",
+      };
+    }
+    if (cuentaContable.categoria !== CuentaCategoria.PASIVO) {
+      return {
+        ok: false,
+        error: "La cuenta del préstamo debe ser de categoría PASIVO.",
+      };
+    }
+    const expectedPrefix = CLASIFICACION_PREFIX[clasificacion];
+    if (!cuentaContable.codigo.startsWith(expectedPrefix)) {
+      return {
+        ok: false,
+        error: `Para clasificación ${clasificacion} la cuenta debe comenzar con ${expectedPrefix}`,
+      };
+    }
 
-  const enUso = await db.prestamoExterno.findFirst({
-    where: {
-      cuentaContableId,
-      OR: [
-        { asiento: { estado: { not: AsientoEstado.ANULADO } } },
-        { asientoId: null },
-      ],
-    },
-    select: { id: true },
-  });
-  if (enUso) {
-    return {
-      ok: false,
-      error:
-        "Esta cuenta contable ya está asignada a otro préstamo activo. Seleccione otra o anule el préstamo existente.",
-    };
+    const enUso = await db.prestamoExterno.findFirst({
+      where: {
+        cuentaContableId: cuentaContableIdProvisto,
+        OR: [
+          { asiento: { estado: { not: AsientoEstado.ANULADO } } },
+          { asientoId: null },
+        ],
+      },
+      select: { id: true },
+    });
+    if (enUso) {
+      return {
+        ok: false,
+        error:
+          "Esta cuenta contable ya está asignada a otro préstamo activo. Seleccione otra o anule el préstamo existente.",
+      };
+    }
   }
 
   try {
     const result = await db.$transaction(async (tx) => {
+      let cuentaContableId = cuentaContableIdProvisto ?? null;
+      if (cuentaContableId === null) {
+        const rango =
+          clasificacion === PrestamoClasificacion.CORTO_PLAZO
+            ? "PRESTAMO_CP"
+            : "PRESTAMO_LP";
+        const nombre = `PRÉSTAMO ${prestamista.toUpperCase()} ${moneda}`;
+        const cuenta = await crearCuentaParaEntidad(tx, rango, nombre);
+        cuentaContableId = cuenta.id;
+      }
+
       const prestamo = await tx.prestamoExterno.create({
         data: {
           prestamista,
