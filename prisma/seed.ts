@@ -60,7 +60,7 @@ const MESES_ES = [
 
 async function seedPeriodos() {
   let count = 0;
-  for (let year = 2025; year <= 2027; year++) {
+  for (let year = 2024; year <= 2027; year++) {
     for (let month = 1; month <= 12; month++) {
       const codigo = `${year}-${String(month).padStart(2, "0")}`;
       const nombre = `${MESES_ES[month - 1]} ${year}`;
@@ -69,13 +69,13 @@ async function seedPeriodos() {
 
       await prisma.periodoContable.upsert({
         where: { codigo },
-        update: { nombre, fechaInicio, fechaFin, estado: PeriodoEstado.ABIERTO },
+        update: { nombre, fechaInicio, fechaFin },
         create: { codigo, nombre, fechaInicio, fechaFin, estado: PeriodoEstado.ABIERTO },
       });
       count++;
     }
   }
-  console.log(`✓ ${count} períodos contábiles creados/actualizados (ABIERTO)`);
+  console.log(`✓ ${count} períodos contábiles creados/actualizados (2024-01 a 2027-12)`);
 }
 
 // ============================================================
