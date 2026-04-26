@@ -7,6 +7,7 @@ export type SerializedTreeNode = {
   tipo: CuentaTipo;
   categoria: CuentaCategoria;
   nivel: number;
+  saldoInicial: string;
   debe: string;
   haber: string;
   saldo: string;
@@ -20,6 +21,7 @@ export function serializeTreeNode(node: {
   tipo: CuentaTipo;
   categoria: CuentaCategoria;
   nivel: number;
+  saldoInicial?: { toFixed: (n: number) => string };
   debe: { toFixed: (n: number) => string };
   haber: { toFixed: (n: number) => string };
   saldo: { toFixed: (n: number) => string };
@@ -32,6 +34,7 @@ export function serializeTreeNode(node: {
     tipo: node.tipo,
     categoria: node.categoria,
     nivel: node.nivel,
+    saldoInicial: node.saldoInicial?.toFixed(2) ?? "0.00",
     debe: node.debe.toFixed(2),
     haber: node.haber.toFixed(2),
     saldo: node.saldo.toFixed(2),

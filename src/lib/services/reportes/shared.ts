@@ -158,9 +158,10 @@ export type CuentaTreeNode = {
   tipo: CuentaTipo;
   categoria: CuentaCategoria;
   nivel: number;
-  debe: Decimal;
-  haber: Decimal;
-  saldo: Decimal;
+  saldoInicial: Decimal; // saldo acumulado anterior a fechaDesde (0 si no hay desde)
+  debe: Decimal; // movimientos del período (Debe)
+  haber: Decimal; // movimientos del período (Haber)
+  saldo: Decimal; // saldo final = saldoInicial + saldo del período (signado)
   children: CuentaTreeNode[];
 };
 
@@ -208,7 +209,13 @@ export async function buildCuentaTree(
             : {}),
         };
 
-  const [cuentas, agregados] = await Promise.all([
+  // Para Balance General con rango: si hay fechaDesde, calcular el saldo
+  // acumulado anterior a esa fecha (saldo inicial). Asientos con fecha
+  // estrictamente menor a fechaDesde.
+  const calcularInicial =
+    !("periodoId" in filter) && Boolean(filter.fechaDesde);
+
+  const [cuentas, agregados, agregadosInicial] = await Promise.all([
     db.cuentaContable.findMany({
       where: { categoria: { in: categorias } },
       orderBy: { codigo: "asc" },
@@ -230,6 +237,27 @@ export async function buildCuentaTree(
       },
       _sum: { debe: true, haber: true },
     }),
+    calcularInicial
+      ? db.lineaAsiento.groupBy({
+          by: ["cuentaId"],
+          where: {
+            asiento: {
+              estado: AsientoEstado.CONTABILIZADO,
+              fecha: { lt: (filter as { fechaDesde: Date }).fechaDesde },
+            },
+            cuenta: { categoria: { in: categorias } },
+          },
+          _sum: { debe: true, haber: true },
+        })
+      : Promise.resolve(
+          [] as Array<{
+            cuentaId: number;
+            _sum: {
+              debe: import("@/generated/prisma/client").Prisma.Decimal | null;
+              haber: import("@/generated/prisma/client").Prisma.Decimal | null;
+            };
+          }>,
+        ),
   ]);
 
   const agregadoPorCuenta = new Map<number, { debe: Decimal; haber: Decimal }>();
@@ -240,12 +268,35 @@ export async function buildCuentaTree(
     });
   }
 
+  const inicialPorCuenta = new Map<number, Decimal>();
+  for (const a of agregadosInicial) {
+    inicialPorCuenta.set(
+      a.cuentaId,
+      toDecimal(a._sum.debe ?? 0).minus(toDecimal(a._sum.haber ?? 0)),
+    );
+  }
+
   const byCodigo = new Map<string, CuentaTreeNode>();
   const padreByCodigo = new Map<string, string | null>();
   for (const c of cuentas) {
     const agg = agregadoPorCuenta.get(c.id);
     const debe = agg?.debe ?? new Decimal(0);
     const haber = agg?.haber ?? new Decimal(0);
+
+    // saldoInicial signado por categoría (ACTIVO/EGRESO=debe-haber; resto=haber-debe)
+    const inicialBruto = inicialPorCuenta.get(c.id) ?? new Decimal(0);
+    const saldoInicial =
+      c.tipo === "ANALITICA"
+        ? c.categoria === "ACTIVO" || c.categoria === "EGRESO"
+          ? inicialBruto
+          : inicialBruto.negated()
+        : new Decimal(0);
+
+    const saldoMov =
+      c.tipo === "ANALITICA"
+        ? saldoPorCategoria(debe, haber, c.categoria)
+        : new Decimal(0);
+
     byCodigo.set(c.codigo, {
       id: c.id,
       codigo: c.codigo,
@@ -253,12 +304,10 @@ export async function buildCuentaTree(
       tipo: c.tipo,
       categoria: c.categoria,
       nivel: c.nivel,
+      saldoInicial,
       debe,
       haber,
-      saldo:
-        c.tipo === "ANALITICA"
-          ? saldoPorCategoria(debe, haber, c.categoria)
-          : new Decimal(0),
+      saldo: saldoInicial.plus(saldoMov),
       children: [],
     });
     padreByCodigo.set(c.codigo, c.padreCodigo ?? null);
@@ -283,10 +332,14 @@ export async function buildCuentaTree(
   const rollUp = (node: CuentaTreeNode): void => {
     if (node.tipo === "SINTETICA" && node.children.length > 0) {
       for (const ch of node.children) rollUp(ch);
+      node.saldoInicial = sumMoney(
+        node.children.map((ch) => ch.saldoInicial),
+      );
       node.debe = sumMoney(node.children.map((ch) => ch.debe));
       node.haber = sumMoney(node.children.map((ch) => ch.haber));
       node.saldo = sumMoney(node.children.map((ch) => ch.saldo));
     } else {
+      node.saldoInicial = node.saldoInicial.toDecimalPlaces(2);
       node.saldo = node.saldo.toDecimalPlaces(2);
       node.debe = node.debe.toDecimalPlaces(2);
       node.haber = node.haber.toDecimalPlaces(2);

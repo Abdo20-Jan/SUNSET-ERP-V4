@@ -44,6 +44,7 @@ export default async function BalanceGeneralPage({
   const fechaHasta = endOfDay(hastaStr);
 
   const bg = await getBalanceGeneralByFecha({ fechaDesde, fechaHasta });
+  const showSaldoInicial = Boolean(fechaDesde);
 
   const titulo =
     bg.contexto.tipo === "fecha"
@@ -88,8 +89,10 @@ export default async function BalanceGeneralPage({
         </CardHeader>
         <CuentaTreeTable
           data={bg.activo.map(serializeTreeNode)}
+          showSaldoInicial={showSaldoInicial}
           totalLabel="Total Activo"
           totalValue={bg.totalActivo.toFixed(2)}
+          totalSaldoInicial={bg.totalSaldoInicialActivo.toFixed(2)}
         />
       </Card>
 
@@ -99,8 +102,10 @@ export default async function BalanceGeneralPage({
         </CardHeader>
         <CuentaTreeTable
           data={bg.pasivo.map(serializeTreeNode)}
+          showSaldoInicial={showSaldoInicial}
           totalLabel="Total Pasivo"
           totalValue={bg.totalPasivo.toFixed(2)}
+          totalSaldoInicial={bg.totalSaldoInicialPasivo.toFixed(2)}
         />
       </Card>
 
@@ -110,8 +115,10 @@ export default async function BalanceGeneralPage({
         </CardHeader>
         <CuentaTreeTable
           data={bg.patrimonio.map(serializeTreeNode)}
+          showSaldoInicial={showSaldoInicial}
           totalLabel="Total Patrimonio"
           totalValue={bg.totalPatrimonio.toFixed(2)}
+          totalSaldoInicial={bg.totalSaldoInicialPatrimonio.toFixed(2)}
         />
       </Card>
 

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { Decimal, eqMoney } from "@/lib/decimal";
+import { Decimal, eqMoney, sumMoney } from "@/lib/decimal";
 
 import {
   getEstadoResultados,
@@ -41,6 +41,9 @@ export type BalanceGeneralResult = {
   totalActivo: Decimal;
   totalPasivo: Decimal;
   totalPatrimonio: Decimal;
+  totalSaldoInicialActivo: Decimal;
+  totalSaldoInicialPasivo: Decimal;
+  totalSaldoInicialPatrimonio: Decimal;
   resultadoEjercicio: Decimal;
   totalPatrimonioAjustado: Decimal;
   cuadra: boolean;
@@ -132,6 +135,16 @@ function ensamblar({
   const totalPatrimonio =
     tree.totalPorCategoria.get("PATRIMONIO") ?? new Decimal(0);
 
+  const totalSaldoInicialActivo = sumMoney(
+    activo.map((n) => n.saldoInicial),
+  );
+  const totalSaldoInicialPasivo = sumMoney(
+    pasivo.map((n) => n.saldoInicial),
+  );
+  const totalSaldoInicialPatrimonio = sumMoney(
+    patrimonio.map((n) => n.saldoInicial),
+  );
+
   const cuentaResultadoYaMovida = patrimonio.some((root) =>
     containsCuentaComSaldo(root, CODIGO_RESULTADO_EJERCICIO),
   );
@@ -153,6 +166,9 @@ function ensamblar({
     totalActivo: totalActivo.toDecimalPlaces(2),
     totalPasivo: totalPasivo.toDecimalPlaces(2),
     totalPatrimonio: totalPatrimonio.toDecimalPlaces(2),
+    totalSaldoInicialActivo: totalSaldoInicialActivo.toDecimalPlaces(2),
+    totalSaldoInicialPasivo: totalSaldoInicialPasivo.toDecimalPlaces(2),
+    totalSaldoInicialPatrimonio: totalSaldoInicialPatrimonio.toDecimalPlaces(2),
     resultadoEjercicio,
     totalPatrimonioAjustado: totalPatrimonioAjustado.toDecimalPlaces(2),
     cuadra: eqMoney(totalActivo, somaPasivoPatrimonio),
