@@ -219,12 +219,25 @@ export const EXTRACTO_BANCARIO_CODIGOS = {
     nombre: "PERCEPCIÓN IIBB SIRCREB",
     categoria: CuentaCategoria.ACTIVO,
   },
+  // 33% del impuesto Ley 25413 (débitos y créditos) es computable
+  // como pago a cuenta de Ganancias para empresas no-PyME (Decreto
+  // 409/2018 + Ley 27743). El 67% restante queda como gasto en 5.8.1.06.
+  CREDITO_LEY_25413_GANANCIAS: {
+    codigo: "1.1.4.12",
+    nombre: "CRÉDITO LEY 25413 PAGO A CUENTA GANANCIAS",
+    categoria: CuentaCategoria.ACTIVO,
+  },
   INVERSIONES_FCI: {
     codigo: "1.1.6.01",
     nombre: "INVERSIONES EN FONDOS COMUNES",
     categoria: CuentaCategoria.ACTIVO,
   },
 } as const satisfies Record<string, CuentaDef>;
+
+// % computable de la Ley 25413 contra Ganancias.
+// Para PyMEs (cat. micro/pequeña) es 100%; para resto es 33%.
+// Tomamos 33% como default — ajustar acá si la empresa cambia categoría.
+export const PORCENTAJE_LEY_25413_COMPUTABLE = 0.33;
 
 // ----- GASTO CONTRAPARTIDA POR TIPO DE PROVEEDOR ------------
 // Mapa que crearAsientoCompra usa para elegir la cuenta de gasto

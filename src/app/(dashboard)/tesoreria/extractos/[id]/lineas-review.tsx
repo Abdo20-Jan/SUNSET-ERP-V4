@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  ArrowReloadHorizontalIcon,
   CheckmarkCircle02Icon,
   Edit02Icon,
-  EyeIcon,
+  MinusSignIcon,
   MultiplicationSignIcon,
 } from "@hugeicons/core-free-icons";
 
@@ -16,6 +17,7 @@ import {
   editarLineaAction,
   ignorarLineaAction,
   rechazarLineaAction,
+  revertirLineaAction,
 } from "@/lib/actions/extractos";
 import { fmtDate, fmtMoney } from "@/lib/format";
 
@@ -317,6 +319,7 @@ export function LineasReview({
                           size="sm"
                           variant="outline"
                           disabled={isPending}
+                          title="Editar sugerencia"
                           onClick={() => setEditingId(l.id)}
                         >
                           <HugeiconsIcon icon={Edit02Icon} strokeWidth={2} />
@@ -325,7 +328,7 @@ export function LineasReview({
                           size="sm"
                           variant="ghost"
                           disabled={isPending}
-                          title="Ignorar (no genera asiento)"
+                          title="Ignorar — no genera asiento (ej: línea ya conciliada o no contable)"
                           onClick={() =>
                             handleAction(
                               () => ignorarLineaAction(l.id),
@@ -333,13 +336,14 @@ export function LineasReview({
                             )
                           }
                         >
-                          <HugeiconsIcon icon={EyeIcon} strokeWidth={2} />
+                          <HugeiconsIcon icon={MinusSignIcon} strokeWidth={2} />
+                          Ignorar
                         </Button>
                         <Button
                           size="sm"
                           variant="ghost"
                           disabled={isPending}
-                          title="Rechazar"
+                          title="Rechazar — descartar sugerencia"
                           onClick={() =>
                             handleAction(
                               () => rechazarLineaAction(l.id),
@@ -350,6 +354,23 @@ export function LineasReview({
                           <HugeiconsIcon icon={MultiplicationSignIcon} strokeWidth={2} />
                         </Button>
                       </div>
+                    ) : l.status === LineaExtractoStatus.IGNORADA ||
+                      l.status === LineaExtractoStatus.RECHAZADA ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={isPending}
+                        title="Volver a pendiente"
+                        onClick={() =>
+                          handleAction(
+                            () => revertirLineaAction(l.id),
+                            "Línea reactivada — pendiente de revisión.",
+                          )
+                        }
+                      >
+                        <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={2} />
+                        Reactivar
+                      </Button>
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>
                     )}

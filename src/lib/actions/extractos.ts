@@ -8,14 +8,23 @@ import { db } from "@/lib/db";
 import {
   AsientoError,
   contabilizarAsiento,
+  crearAsientoManual,
   crearAsientoMovimientoTesoreria,
 } from "@/lib/services/asiento-automatico";
+import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import {
+  EXTRACTO_BANCARIO_CODIGOS,
+  PORCENTAJE_LEY_25413_COMPUTABLE,
+} from "@/lib/services/cuenta-registry";
+import {
+  AsientoOrigen,
   ImportacionExtractoStatus,
   LineaExtractoStatus,
   Moneda,
   MovimientoTesoreriaTipo,
 } from "@/generated/prisma/client";
+
+const CODIGO_IMPUESTO_LEY_25413 = "5.8.1.06";
 
 const editarLineaSchema = z.object({
   lineaId: z.string().uuid(),
@@ -83,7 +92,7 @@ export async function aprobarLineaAction(
           },
           proveedor: { select: { id: true, cuentaContableId: true } },
           cliente: { select: { id: true, cuentaContableId: true } },
-          cuentaSugerida: { select: { id: true } },
+          cuentaSugerida: { select: { id: true, codigo: true } },
         },
       });
 
@@ -93,8 +102,10 @@ export async function aprobarLineaAction(
       }
 
       let contrapartidaId: number | null = null;
+      let contrapartidaCodigo: string | null = null;
       if (linea.cuentaSugerida) {
         contrapartidaId = linea.cuentaSugerida.id;
+        contrapartidaCodigo = linea.cuentaSugerida.codigo;
       } else if (linea.proveedor?.cuentaContableId) {
         contrapartidaId = linea.proveedor.cuentaContableId;
       } else if (linea.cliente?.cuentaContableId) {
@@ -107,7 +118,8 @@ export async function aprobarLineaAction(
         );
       }
 
-      if (contrapartidaId === linea.importacion.cuentaBancaria.cuentaContableId) {
+      const bancoCuentaId = linea.importacion.cuentaBancaria.cuentaContableId;
+      if (contrapartidaId === bancoCuentaId) {
         throw new Error("La contrapartida no puede ser la cuenta contable del banco.");
       }
 
@@ -115,7 +127,8 @@ export async function aprobarLineaAction(
       if (!Number.isFinite(montoNum) || montoNum === 0) {
         throw new Error("Línea con monto inválido o cero — usá Ignorar en vez de Aprobar.");
       }
-      const montoAbsStr = Math.abs(montoNum).toFixed(2);
+      const montoAbs = Math.abs(montoNum);
+      const montoAbsStr = montoAbs.toFixed(2);
 
       const tipo = montoNum > 0
         ? MovimientoTesoreriaTipo.COBRO
@@ -140,8 +153,48 @@ export async function aprobarLineaAction(
         select: { id: true },
       });
 
-      const asiento = await crearAsientoMovimientoTesoreria(mov.id, tx);
-      await contabilizarAsiento(asiento.id, tx);
+      // Caso especial — Impuesto Ley 25413 (Imp. al cheque): 33% va como
+      // crédito fiscal pago a cuenta de Ganancias (1.1.4.12), 67% como
+      // gasto (5.8.1.06). Reemplaza el asiento auto de 2 lineas por uno
+      // de 3 lineas con la división.
+      const esImpuestoLey25413 =
+        contrapartidaCodigo === CODIGO_IMPUESTO_LEY_25413;
+
+      if (esImpuestoLey25413 && tipo === MovimientoTesoreriaTipo.PAGO) {
+        const creditoCuentaId = await getOrCreateCuenta(
+          tx,
+          EXTRACTO_BANCARIO_CODIGOS.CREDITO_LEY_25413_GANANCIAS,
+        );
+
+        // Round 33% to 2 decimals; resto va al gasto para evitar drift de centavos
+        const creditoMonto = Math.round(montoAbs * PORCENTAJE_LEY_25413_COMPUTABLE * 100) / 100;
+        const gastoMonto = Math.round((montoAbs - creditoMonto) * 100) / 100;
+
+        const asiento = await crearAsientoManual(
+          {
+            fecha: linea.fecha,
+            descripcion,
+            origen: AsientoOrigen.TESORERIA,
+            moneda,
+            tipoCambio,
+            lineas: [
+              { cuentaId: contrapartidaId, debe: gastoMonto.toFixed(2), haber: "0", descripcion: "Gasto no computable (67%)" },
+              { cuentaId: creditoCuentaId, debe: creditoMonto.toFixed(2), haber: "0", descripcion: "Pago a cuenta Ganancias (33%)" },
+              { cuentaId: bancoCuentaId, debe: "0", haber: montoAbsStr },
+            ],
+          },
+          tx,
+        );
+
+        await tx.movimientoTesoreria.update({
+          where: { id: mov.id },
+          data: { asientoId: asiento.id },
+        });
+        await contabilizarAsiento(asiento.id, tx);
+      } else {
+        const asiento = await crearAsientoMovimientoTesoreria(mov.id, tx);
+        await contabilizarAsiento(asiento.id, tx);
+      }
 
       await tx.lineaExtractoSugerencia.update({
         where: { id: lineaId },
@@ -245,6 +298,12 @@ export async function rechazarLineaAction(lineaId: string) {
 
 export async function ignorarLineaAction(lineaId: string) {
   return cambiarEstadoLinea(lineaId, LineaExtractoStatus.IGNORADA);
+}
+
+export async function revertirLineaAction(lineaId: string) {
+  // Solo permitido para IGNORADA / RECHAZADA — APROBADA tiene movimiento
+  // y debe anularse desde Tesorería.
+  return cambiarEstadoLinea(lineaId, LineaExtractoStatus.PENDIENTE);
 }
 
 export async function eliminarImportacionAction(
