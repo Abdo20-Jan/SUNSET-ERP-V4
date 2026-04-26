@@ -130,6 +130,31 @@ const TIPO_COSTO_LABELS: Record<TipoCosto, string> = {
   GASTOS_EXTRAS: "Gastos extras",
 };
 
+/**
+ * Mapeo del enum TipoProveedor (maestros) → TipoCostoEmbarque (categoría
+ * de gasto en el embarque). Sirve para auto-poblar la categoría al
+ * seleccionar un proveedor en una factura.
+ */
+function mapTipoProveedorACostoEmbarque(
+  tipoProveedor: string | null,
+): TipoCosto | null {
+  switch (tipoProveedor) {
+    case "DESPACHANTE":              return "HONORARIOS_DESPACHANTE";
+    case "LOGISTICA":                return "FLETE_NACIONAL";
+    case "ALMACENAJE":               return "ALMACENAJE";
+    case "GASTOS_PORTUARIOS":        return "GASTOS_PORTUARIOS";
+    case "SERVICIOS_EXTERIOR":       return "FLETE_INTERNACIONAL";
+    case "SERVICIOS_PROFESIONALES":  return "GASTOS_EXTRAS";
+    case "MERCADERIA_LOCAL":
+    case "MERCADERIA_EXTERIOR":
+    case "ALQUILERES":
+    case "IT_SOFTWARE":
+    case "MARKETING":
+    case "OTRO":
+    default:                         return "GASTOS_LOCALES";
+  }
+}
+
 const formSchema = z
   .object({
     codigo: z.string().trim().min(1, "Código requerido").max(32),
@@ -1459,6 +1484,44 @@ function FacturaCard({
       });
     }
   }, [moneda, index, setValue]);
+
+  // Auto-fill cuenta gasto + tipo de cada linea cuando se selecciona el
+  // proveedor. Solo sobreescribe lineas con cuentaContableGastoId=0
+  // (no toca lineas ya configuradas manualmente).
+  useEffect(() => {
+    if (!proveedorId) return;
+    const prov = proveedores.find((p) => p.id === proveedorId);
+    if (!prov) return;
+    const tipoDefault = mapTipoProveedorACostoEmbarque(
+      prov.tipoProveedor ?? null,
+    );
+    const lineasActuales = (lineas ?? []) as Array<{
+      cuentaContableGastoId?: number;
+      tipo?: string;
+    }>;
+    lineasActuales.forEach((l, i) => {
+      if (!l) return;
+      if (
+        (!l.cuentaContableGastoId || l.cuentaContableGastoId === 0) &&
+        prov.cuentaGastoContableId
+      ) {
+        setValue(
+          `costos.${index}.lineas.${i}.cuentaContableGastoId` as const,
+          prov.cuentaGastoContableId,
+          { shouldValidate: false },
+        );
+      }
+      if (tipoDefault) {
+        setValue(
+          `costos.${index}.lineas.${i}.tipo` as const,
+          tipoDefault,
+          { shouldValidate: false },
+        );
+      }
+    });
+    // Solo dispara cuando cambia el proveedorId — no en cada keystroke de lineas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proveedorId]);
 
   const totales = useMemo(() => {
     const subtotalSum = (lineas ?? []).reduce(

@@ -93,6 +93,7 @@ export async function listarProveedoresParaEmbarque(): Promise<ProveedorOption[]
       nombre: true,
       pais: true,
       cuentaGastoContableId: true,
+      tipoProveedor: true,
     },
   });
   return proveedores;

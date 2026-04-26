@@ -25,6 +25,21 @@ export type ProveedorOption = {
   pais: string;
   /** Cuenta de gasto/activo por defecto del proveedor — auto-fill en embarques. */
   cuentaGastoContableId?: number | null;
+  /** Tipo de proveedor — mapea a TipoCostoEmbarque por defecto en embarques. */
+  tipoProveedor?:
+    | "MERCADERIA_LOCAL"
+    | "DESPACHANTE"
+    | "LOGISTICA"
+    | "ALMACENAJE"
+    | "SERVICIOS_PROFESIONALES"
+    | "ALQUILERES"
+    | "IT_SOFTWARE"
+    | "GASTOS_PORTUARIOS"
+    | "MARKETING"
+    | "OTRO"
+    | "MERCADERIA_EXTERIOR"
+    | "SERVICIOS_EXTERIOR"
+    | null;
 };
 
 type Props = {
