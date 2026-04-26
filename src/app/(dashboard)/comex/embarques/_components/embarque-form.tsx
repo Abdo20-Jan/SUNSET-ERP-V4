@@ -976,35 +976,53 @@ export function EmbarqueForm(props: Props) {
         </CardContent>
       </Card>
 
-      {/* Botones */}
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => router.push("/comex/embarques")}
-          disabled={isSubmitting}
-        >
-          {readonly ? "Volver" : "Cancelar"}
-        </Button>
-        {!readonly && (
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting
-              ? "Guardando…"
-              : isEdit
-                ? "Guardar cambios"
-                : "Crear embarque"}
-          </Button>
-        )}
-        {!readonly &&
-          props.mode === "edit" &&
-          !props.initialData.asiento && (
-            <CerrarEmbarqueDialog
-              embarqueId={props.initialData.id}
-              embarqueCodigo={props.initialData.codigo}
-              previewTotalDebe={formatMoney(costoTotal.toString())}
+      {/* Spacer pra que el contenido no quede oculto detrás del action bar */}
+      <div className="h-16" aria-hidden />
+
+      {/* Sticky action bar */}
+      <div className="sticky bottom-0 -mx-4 mt-2 border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/75 md:-mx-6 md:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs text-muted-foreground">
+            <span className="text-muted-foreground">FOB:</span>{" "}
+            <span className="font-mono font-medium">
+              {formatMoney(fobTotal.toString())}
+            </span>
+            {" · "}
+            <span className="text-muted-foreground">Costo total:</span>{" "}
+            <span className="font-mono font-semibold">
+              ARS {formatMoney(costoTotal.toString())}
+            </span>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => router.push("/comex/embarques")}
               disabled={isSubmitting}
-            />
-          )}
+            >
+              {readonly ? "Volver" : "Cancelar"}
+            </Button>
+            {!readonly && (
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting
+                  ? "Guardando…"
+                  : isEdit
+                    ? "Guardar cambios"
+                    : "Crear embarque"}
+              </Button>
+            )}
+            {!readonly &&
+              props.mode === "edit" &&
+              !props.initialData.asiento && (
+                <CerrarEmbarqueDialog
+                  embarqueId={props.initialData.id}
+                  embarqueCodigo={props.initialData.codigo}
+                  previewTotalDebe={formatMoney(costoTotal.toString())}
+                  disabled={isSubmitting}
+                />
+              )}
+          </div>
+        </div>
       </div>
     </form>
   );
