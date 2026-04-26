@@ -187,10 +187,42 @@ export const COSTOS_FINANCIEROS_CODIGOS = {
     nombre: "GASTOS TRANSFERENCIA EXTERIOR",
     categoria: CuentaCategoria.EGRESO,
   },
+  IMPUESTO_DE_SELLOS: {
+    codigo: "5.8.1.04",
+    nombre: "IMPUESTO DE SELLOS",
+    categoria: CuentaCategoria.EGRESO,
+  },
   IMPUESTO_AL_CHEQUE: {
     codigo: "5.8.1.06",
     nombre: "IMPUESTO LEY 25413 (DEB/CRED BANCARIOS)",
     categoria: CuentaCategoria.EGRESO,
+  },
+  INTERESES_PAGADOS: {
+    codigo: "5.8.2.02",
+    nombre: "INTERESES PAGADOS",
+    categoria: CuentaCategoria.EGRESO,
+  },
+} as const satisfies Record<string, CuentaDef>;
+
+// ----- EXTRACTO BANCARIO: percepciones / retenciones / FCI ---
+// Cuentas usadas al importar extractos bancarios (Galicia, Santander).
+// Las percepciones bancarias son crédito fiscal computable contra
+// el impuesto correspondiente; los FCI son una inversión transitoria.
+export const EXTRACTO_BANCARIO_CODIGOS = {
+  PERCEPCION_IVA_BANCARIA: {
+    codigo: "1.1.4.02",
+    nombre: "PERCEPCIÓN IVA RG 2408 (BANCARIA)",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+  PERCEPCION_IIBB_SIRCREB: {
+    codigo: "1.1.4.10",
+    nombre: "PERCEPCIÓN IIBB SIRCREB",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+  INVERSIONES_FCI: {
+    codigo: "1.1.6.01",
+    nombre: "INVERSIONES EN FONDOS COMUNES",
+    categoria: CuentaCategoria.ACTIVO,
   },
 } as const satisfies Record<string, CuentaDef>;
 

@@ -115,10 +115,10 @@ enum Incoterm {
 // Estado de pedidos de compra/venta — flujo borrador hasta cierre.
 enum PedidoEstado {
   BORRADOR
-  ENVIADO     // Pedido emitido al proveedor / enviado al cliente
-  CONFIRMADO  // Confirmado por la contraparte
-  PARCIAL     // Facturado/recibido parcialmente
-  COMPLETADO  // Totalmente facturado/recibido
+  ENVIADO // Pedido emitido al proveedor / enviado al cliente
+  CONFIRMADO // Confirmado por la contraparte
+  PARCIAL // Facturado/recibido parcialmente
+  COMPLETADO // Totalmente facturado/recibido
   CANCELADO
 }
 
@@ -233,13 +233,14 @@ model CuentaContable {
   padre CuentaContable?  @relation("CuentaPadre", fields: [padreCodigo], references: [codigo])
   hijos CuentaContable[] @relation("CuentaPadre")
 
-  lineas           LineaAsiento[]
-  cuentasBancarias CuentaBancaria[]
-  clientes         Cliente[]
-  proveedores      Proveedor[]
-  prestamos        PrestamoExterno[]
-  movimientos      MovimientoTesoreria[]
-  embarqueCostoLineas EmbarqueCostoLinea[] @relation("EmbarqueCostoLineaCuentaGasto")
+  lineas              LineaAsiento[]
+  cuentasBancarias    CuentaBancaria[]
+  clientes            Cliente[]
+  proveedores         Proveedor[]
+  prestamos           PrestamoExterno[]
+  movimientos         MovimientoTesoreria[]
+  embarqueCostoLineas EmbarqueCostoLinea[]      @relation("EmbarqueCostoLineaCuentaGasto")
+  extractoLineas      LineaExtractoSugerencia[]
 }
 
 model PeriodoContable {
@@ -314,6 +315,7 @@ model CuentaBancaria {
   cuentaContable CuentaContable        @relation(fields: [cuentaContableId], references: [id])
   movimientos    MovimientoTesoreria[]
   prestamos      PrestamoExterno[]
+  importaciones  ImportacionExtracto[]
 }
 
 model MovimientoTesoreria {
@@ -331,9 +333,10 @@ model MovimientoTesoreria {
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @updatedAt
 
-  cuentaBancaria CuentaBancaria @relation(fields: [cuentaBancariaId], references: [id])
-  cuentaContable CuentaContable @relation(fields: [cuentaContableId], references: [id])
-  asiento        Asiento?       @relation(fields: [asientoId], references: [id])
+  cuentaBancaria CuentaBancaria           @relation(fields: [cuentaBancariaId], references: [id])
+  cuentaContable CuentaContable           @relation(fields: [cuentaContableId], references: [id])
+  asiento        Asiento?                 @relation(fields: [asientoId], references: [id])
+  lineaExtracto  LineaExtractoSugerencia?
 
   @@index([fecha])
 }
@@ -361,38 +364,38 @@ model PrestamoExterno {
 // ============================================================
 
 model Embarque {
-  id                String         @id @default(uuid())
-  codigo            String         @unique
-  proveedorId       String
-  estado            EmbarqueEstado @default(BORRADOR)
-  moneda            Moneda
-  tipoCambio        Decimal        @db.Decimal(18, 6)
-  incoterm          Incoterm?
-  lugarIncoterm     String?        // ej: "Shanghai", "Buenos Aires"
-  pedidoCompraId    Int?           // link opcional a OC que originó el embarque
+  id                     String         @id @default(uuid())
+  codigo                 String         @unique
+  proveedorId            String
+  estado                 EmbarqueEstado @default(BORRADOR)
+  moneda                 Moneda
+  tipoCambio             Decimal        @db.Decimal(18, 6)
+  incoterm               Incoterm?
+  lugarIncoterm          String? // ej: "Shanghai", "Buenos Aires"
+  pedidoCompraId         Int? // link opcional a OC que originó el embarque
   // Datos de transporte
-  nombreBuque             String?   // nombre del navío (ej: MSC GAYANE)
-  lineaMaritima           String?   // línea marítima (ej: MSC, Maersk, CMA CGM)
-  fechaEmpaque            DateTime? // fecha de empaque/parque
-  lugarTransbordo         String?   // si hay transbordo
-  fechaTransbordo         DateTime?
-  fechaSalida             DateTime? // salida del transporte desde origen
-  fechaLlegada            DateTime? // llegada del contenedor a destino
-  diasPagoDespuesLlegada  Int?      // ej: 120 días después de la llegada
-  fobTotal          Decimal        @default(0) @db.Decimal(18, 2)
-  cifTotal          Decimal        @default(0) @db.Decimal(18, 2)
-  die               Decimal        @default(0) @db.Decimal(18, 2)
-  tasaEstadistica   Decimal        @default(0) @db.Decimal(18, 2)
-  arancelSim        Decimal        @default(0) @db.Decimal(18, 2)
-  iva               Decimal        @default(0) @db.Decimal(18, 2)
-  ivaAdicional      Decimal        @default(0) @db.Decimal(18, 2)
-  ganancias         Decimal        @default(0) @db.Decimal(18, 2)
-  iibb              Decimal        @default(0) @db.Decimal(18, 2)
-  costoTotal        Decimal        @default(0) @db.Decimal(18, 2)
-  asientoId         String?        @unique
-  depositoDestinoId String?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  nombreBuque            String? // nombre del navío (ej: MSC GAYANE)
+  lineaMaritima          String? // línea marítima (ej: MSC, Maersk, CMA CGM)
+  fechaEmpaque           DateTime? // fecha de empaque/parque
+  lugarTransbordo        String? // si hay transbordo
+  fechaTransbordo        DateTime?
+  fechaSalida            DateTime? // salida del transporte desde origen
+  fechaLlegada           DateTime? // llegada del contenedor a destino
+  diasPagoDespuesLlegada Int? // ej: 120 días después de la llegada
+  fobTotal               Decimal        @default(0) @db.Decimal(18, 2)
+  cifTotal               Decimal        @default(0) @db.Decimal(18, 2)
+  die                    Decimal        @default(0) @db.Decimal(18, 2)
+  tasaEstadistica        Decimal        @default(0) @db.Decimal(18, 2)
+  arancelSim             Decimal        @default(0) @db.Decimal(18, 2)
+  iva                    Decimal        @default(0) @db.Decimal(18, 2)
+  ivaAdicional           Decimal        @default(0) @db.Decimal(18, 2)
+  ganancias              Decimal        @default(0) @db.Decimal(18, 2)
+  iibb                   Decimal        @default(0) @db.Decimal(18, 2)
+  costoTotal             Decimal        @default(0) @db.Decimal(18, 2)
+  asientoId              String?        @unique
+  depositoDestinoId      String?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
 
   proveedor       Proveedor       @relation(fields: [proveedorId], references: [id])
   items           ItemEmbarque[]
@@ -408,22 +411,22 @@ model Embarque {
 // IVA/IIBB/otros son totales a nivel factura — se imputan a las
 // cuentas de crédito fiscal contra el proveedor, NO contra cada gasto.
 model EmbarqueCosto {
-  id                Int            @id @default(autoincrement())
-  embarqueId        String
-  proveedorId       String
-  moneda            Moneda
-  tipoCambio        Decimal        @db.Decimal(18, 6)
-  facturaNumero     String?
-  fechaFactura      DateTime?
-  fechaVencimiento  DateTime?      // auto-calculada de fechaFactura + diasPagoDefault del proveedor; editable
-  condicionPago     CondicionPago  @default(CUENTA_CORRIENTE)
+  id               Int           @id @default(autoincrement())
+  embarqueId       String
+  proveedorId      String
+  moneda           Moneda
+  tipoCambio       Decimal       @db.Decimal(18, 6)
+  facturaNumero    String?
+  fechaFactura     DateTime?
+  fechaVencimiento DateTime? // auto-calculada de fechaFactura + diasPagoDefault del proveedor; editable
+  condicionPago    CondicionPago @default(CUENTA_CORRIENTE)
   // Totales fiscales a nivel factura (no por línea):
-  iva               Decimal        @default(0) @db.Decimal(18, 2)
-  iibb              Decimal        @default(0) @db.Decimal(18, 2)
-  otros             Decimal        @default(0) @db.Decimal(18, 2)
-  notas             String?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  iva              Decimal       @default(0) @db.Decimal(18, 2)
+  iibb             Decimal       @default(0) @db.Decimal(18, 2)
+  otros            Decimal       @default(0) @db.Decimal(18, 2)
+  notas            String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   embarque  Embarque             @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
   proveedor Proveedor            @relation(fields: [proveedorId], references: [id])
@@ -464,25 +467,25 @@ model ItemEmbarque {
 }
 
 model Compra {
-  id               String         @id @default(uuid())
-  numero           String         @unique
+  id               String        @id @default(uuid())
+  numero           String        @unique
   proveedorId      String
   fecha            DateTime
   fechaVencimiento DateTime?
-  condicionPago    CondicionPago  @default(CUENTA_CORRIENTE)
+  condicionPago    CondicionPago @default(CUENTA_CORRIENTE)
   moneda           Moneda
-  tipoCambio       Decimal        @default(1) @db.Decimal(18, 6)
-  subtotal         Decimal        @db.Decimal(18, 2)
-  iva              Decimal        @db.Decimal(18, 2)
-  iibb             Decimal        @default(0) @db.Decimal(18, 2)
-  otros            Decimal        @default(0) @db.Decimal(18, 2)
-  total            Decimal        @db.Decimal(18, 2)
-  estado           CompraEstado   @default(BORRADOR)
-  asientoId        String?        @unique
+  tipoCambio       Decimal       @default(1) @db.Decimal(18, 6)
+  subtotal         Decimal       @db.Decimal(18, 2)
+  iva              Decimal       @db.Decimal(18, 2)
+  iibb             Decimal       @default(0) @db.Decimal(18, 2)
+  otros            Decimal       @default(0) @db.Decimal(18, 2)
+  total            Decimal       @db.Decimal(18, 2)
+  estado           CompraEstado  @default(BORRADOR)
+  asientoId        String?       @unique
   pedidoCompraId   Int?
   notas            String?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   proveedor    Proveedor     @relation(fields: [proveedorId], references: [id])
   items        ItemCompra[]
@@ -512,53 +515,55 @@ model ItemCompra {
 // ============================================================
 
 model Cliente {
-  id                String         @id @default(uuid())
-  nombre            String
-  cuit              String?        @unique
-  tipo              String         @default("minorista")
-  tipoCanal         TipoCanal      @default(MINORISTA)
-  condicionIva      CondicionIva   @default(RI)
-  agenteRetencionIva       Boolean @default(false)
-  agenteRetencionGanancias Boolean @default(false)
-  agenteIibb               Boolean @default(false)
-  direccion         String?
-  telefono          String?
-  email             String?
-  estado            String         @default("activo")
-  cuentaContableId  Int?
-  diasPagoDefault   Int?           // 0 = contado, 30/60/90 = días corridos
-  condicionPagoDefault CondicionPago @default(CONTADO)
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  id                       String        @id @default(uuid())
+  nombre                   String
+  cuit                     String?       @unique
+  tipo                     String        @default("minorista")
+  tipoCanal                TipoCanal     @default(MINORISTA)
+  condicionIva             CondicionIva  @default(RI)
+  agenteRetencionIva       Boolean       @default(false)
+  agenteRetencionGanancias Boolean       @default(false)
+  agenteIibb               Boolean       @default(false)
+  direccion                String?
+  telefono                 String?
+  email                    String?
+  estado                   String        @default("activo")
+  cuentaContableId         Int?
+  diasPagoDefault          Int? // 0 = contado, 30/60/90 = días corridos
+  condicionPagoDefault     CondicionPago @default(CONTADO)
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
 
-  cuentaContable CuentaContable? @relation(fields: [cuentaContableId], references: [id])
+  cuentaContable CuentaContable?           @relation(fields: [cuentaContableId], references: [id])
   ventas         Venta[]
   pedidosVenta   PedidoVenta[]
+  extractoLineas LineaExtractoSugerencia[]
 }
 
 model Proveedor {
-  id                   String          @id @default(uuid())
+  id                   String         @id @default(uuid())
   nombre               String
-  cuit                 String?         @unique // opcional para extranjeros (puede ser ID fiscal de su país)
-  tipo                 String          @default("otro")
-  tipoProveedor        TipoProveedor   @default(MERCADERIA_LOCAL)
-  conceptoRG830        ConceptoRG830?  // mapping para retención Ganancias
-  pais                 String          @default("AR")
+  cuit                 String?        @unique // opcional para extranjeros (puede ser ID fiscal de su país)
+  tipo                 String         @default("otro")
+  tipoProveedor        TipoProveedor  @default(MERCADERIA_LOCAL)
+  conceptoRG830        ConceptoRG830? // mapping para retención Ganancias
+  pais                 String         @default("AR")
   direccion            String?
   telefono             String?
   email                String?
-  estado               String          @default("activo")
+  estado               String         @default("activo")
   cuentaContableId     Int?
-  diasPagoDefault      Int?            // 0 = contado, 30/60/90 = días corridos
-  condicionPagoDefault CondicionPago   @default(CONTADO)
-  createdAt            DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
+  diasPagoDefault      Int? // 0 = contado, 30/60/90 = días corridos
+  condicionPagoDefault CondicionPago  @default(CONTADO)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
-  cuentaContable  CuentaContable? @relation(fields: [cuentaContableId], references: [id])
-  embarques       Embarque[]
-  compras         Compra[]
-  costosEmbarque  EmbarqueCosto[]
-  pedidosCompra   PedidoCompra[]
+  cuentaContable CuentaContable?           @relation(fields: [cuentaContableId], references: [id])
+  embarques      Embarque[]
+  compras        Compra[]
+  costosEmbarque EmbarqueCosto[]
+  pedidosCompra  PedidoCompra[]
+  extractoLineas LineaExtractoSugerencia[]
 }
 
 model Producto {
@@ -580,10 +585,10 @@ model Producto {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  itemsEmbarque    ItemEmbarque[]
-  itemsCompra      ItemCompra[]
-  itemsVenta       ItemVenta[]
-  movimientosStock MovimientoStock[]
+  itemsEmbarque     ItemEmbarque[]
+  itemsCompra       ItemCompra[]
+  itemsVenta        ItemVenta[]
+  movimientosStock  MovimientoStock[]
   itemsPedidoCompra ItemPedidoCompra[]
   itemsPedidoVenta  ItemPedidoVenta[]
 }
@@ -618,25 +623,25 @@ model MovimientoStock {
 }
 
 model Venta {
-  id               String         @id @default(uuid())
-  numero           String         @unique
+  id               String        @id @default(uuid())
+  numero           String        @unique
   clienteId        String
   fecha            DateTime
   fechaVencimiento DateTime?
-  condicionPago    CondicionPago  @default(CUENTA_CORRIENTE)
+  condicionPago    CondicionPago @default(CUENTA_CORRIENTE)
   moneda           Moneda
-  tipoCambio       Decimal        @default(1) @db.Decimal(18, 6)
-  subtotal         Decimal        @db.Decimal(18, 2)
-  iva              Decimal        @db.Decimal(18, 2)
-  iibb             Decimal        @default(0) @db.Decimal(18, 2)
-  otros            Decimal        @default(0) @db.Decimal(18, 2)
-  total            Decimal        @db.Decimal(18, 2)
-  estado           VentaEstado    @default(BORRADOR)
-  asientoId        String?        @unique
+  tipoCambio       Decimal       @default(1) @db.Decimal(18, 6)
+  subtotal         Decimal       @db.Decimal(18, 2)
+  iva              Decimal       @db.Decimal(18, 2)
+  iibb             Decimal       @default(0) @db.Decimal(18, 2)
+  otros            Decimal       @default(0) @db.Decimal(18, 2)
+  total            Decimal       @db.Decimal(18, 2)
+  estado           VentaEstado   @default(BORRADOR)
+  asientoId        String?       @unique
   pedidoVentaId    Int?
   notas            String?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   cliente     Cliente      @relation(fields: [clienteId], references: [id])
   asiento     Asiento?     @relation(fields: [asientoId], references: [id])
@@ -766,4 +771,77 @@ model AuditLog {
 
   @@index([usuarioId])
   @@index([tabla, registroId])
+}
+
+// ============================================================
+// IMPORTACIÓN DE EXTRACTOS BANCARIOS (con sugerencias IA)
+// ============================================================
+
+enum ImportacionExtractoStatus {
+  PENDIENTE
+  PARCIAL
+  COMPLETADO
+  CANCELADO
+}
+
+enum LineaExtractoStatus {
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+  IGNORADA
+}
+
+model ImportacionExtracto {
+  id               String                    @id @default(uuid())
+  cuentaBancariaId String
+  periodoYear      Int
+  periodoMonth     Int
+  saldoInicial     Decimal                   @db.Decimal(18, 2)
+  saldoFinal       Decimal                   @db.Decimal(18, 2)
+  archivoNombre    String?
+  status           ImportacionExtractoStatus @default(PENDIENTE)
+  totalLineas      Int                       @default(0)
+  lineasAprobadas  Int                       @default(0)
+  modeloIA         String?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  cuentaBancaria CuentaBancaria            @relation(fields: [cuentaBancariaId], references: [id])
+  lineas         LineaExtractoSugerencia[]
+
+  @@unique([cuentaBancariaId, periodoYear, periodoMonth])
+  @@index([status])
+}
+
+model LineaExtractoSugerencia {
+  id            String   @id @default(uuid())
+  importacionId String
+  ordenLinea    Int
+  fecha         DateTime
+  descripcion   String
+  comprobante   String?
+  monto         Decimal  @db.Decimal(18, 2)
+  saldoExtracto Decimal? @db.Decimal(18, 2)
+
+  cuentaSugeridaId    Int?
+  proveedorSugeridoId String?
+  clienteSugeridoId   String?
+  descripcionAsiento  String?
+  confianza           String?
+  razonSugerencia     String?
+
+  status       LineaExtractoStatus @default(PENDIENTE)
+  movimientoId String?             @unique
+  notas        String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  importacion    ImportacionExtracto  @relation(fields: [importacionId], references: [id], onDelete: Cascade)
+  cuentaSugerida CuentaContable?      @relation(fields: [cuentaSugeridaId], references: [id])
+  proveedor      Proveedor?           @relation(fields: [proveedorSugeridoId], references: [id])
+  cliente        Cliente?             @relation(fields: [clienteSugeridoId], references: [id])
+  movimiento     MovimientoTesoreria? @relation(fields: [movimientoId], references: [id])
+
+  @@index([importacionId, ordenLinea])
+  @@index([status])
 }

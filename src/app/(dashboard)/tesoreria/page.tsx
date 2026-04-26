@@ -5,6 +5,7 @@ import {
   BankIcon,
   CreditCardIcon,
   ExchangeIcon,
+  FileImportIcon,
   Invoice01Icon,
   ReceiptDollarIcon,
   Calendar03Icon,
@@ -57,6 +58,13 @@ const SECTIONS = [
     title: "Saldos por proveedor",
     description:
       "Saldo individual + facturas vencidas, próximas a vencer y al día",
+  },
+  {
+    href: "/tesoreria/extractos",
+    icon: FileImportIcon,
+    title: "Importar extracto",
+    description:
+      "Subí el PDF del banco y aprobá las sugerencias de asiento generadas por IA",
   },
 ] as const;
 
