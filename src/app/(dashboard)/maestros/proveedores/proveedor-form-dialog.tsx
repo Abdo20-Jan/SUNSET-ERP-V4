@@ -121,6 +121,7 @@ const formSchema = z.object({
   cuentaContableId: z.number().int().positive().nullable(),
   cuentaGastoContableId: z.number().int().positive().nullable(),
   crearCuentaAuto: z.boolean(),
+  crearCuentaGastoAuto: z.boolean(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -140,6 +141,7 @@ function emptyDefaults(): FormValues {
     cuentaContableId: null,
     cuentaGastoContableId: null,
     crearCuentaAuto: true,
+    crearCuentaGastoAuto: true,
   };
 }
 
@@ -158,6 +160,7 @@ function defaultsFromRow(row: ProveedorRow): FormValues {
     cuentaContableId: row.cuentaContableId,
     cuentaGastoContableId: row.cuentaGastoContableId,
     crearCuentaAuto: false,
+    crearCuentaGastoAuto: false,
   };
 }
 
@@ -200,6 +203,13 @@ export function ProveedorFormDialog({
     : "NACIONAL";
   const pais = useWatch({ control, name: "pais" });
   const crearCuentaAuto = useWatch({ control, name: "crearCuentaAuto" });
+  const crearCuentaGastoAuto = useWatch({
+    control,
+    name: "crearCuentaGastoAuto",
+  });
+  const tipoSinGastoAuto =
+    tipoProveedor === "MERCADERIA_LOCAL" ||
+    tipoProveedor === "MERCADERIA_EXTERIOR";
 
   // Cuando cambian la nacionalidad, ajustar país y CUIT placeholder.
   useEffect(() => {
@@ -240,6 +250,9 @@ export function ProveedorFormDialog({
           state.mode === "create" &&
           values.crearCuentaAuto &&
           values.cuentaContableId === null,
+        crearCuentaGastoAuto:
+          values.crearCuentaGastoAuto &&
+          values.cuentaGastoContableId === null,
       };
 
       const result =
@@ -510,24 +523,51 @@ export function ProveedorFormDialog({
               <Label className="text-sm">
                 Cuenta de gasto / activo (contrapartida)
               </Label>
-              <Controller
-                control={control}
-                name="cuentaGastoContableId"
-                render={({ field }) => (
-                  <CuentaCombobox
-                    value={field.value}
-                    onChange={field.onChange}
-                    cuentas={cuentasGasto}
-                    placeholder="Auto-detectar por tipo de proveedor"
-                    emptyMessage="No hay cuentas disponibles."
+              {!tipoSinGastoAuto && (
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    {...register("crearCuentaGastoAuto")}
                   />
-                )}
-              />
+                  <span>
+                    <span className="font-medium">
+                      Crear automáticamente
+                    </span>{" "}
+                    una cuenta analítica de gasto para este proveedor
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      (rango por tipo: despachante → 5.1.1.10–29; almacenaje
+                      → 5.5.1.20–39; etc).
+                    </span>
+                  </span>
+                </label>
+              )}
+              {(state?.mode === "edit" ||
+                !crearCuentaGastoAuto ||
+                tipoSinGastoAuto) && (
+                <Controller
+                  control={control}
+                  name="cuentaGastoContableId"
+                  render={({ field }) => (
+                    <CuentaCombobox
+                      value={field.value}
+                      onChange={field.onChange}
+                      cuentas={cuentasGasto}
+                      placeholder={
+                        tipoSinGastoAuto
+                          ? "Default 1.1.5.01/02 — opcional override"
+                          : "Sin vincular — seleccione cuenta o use auto-creación"
+                      }
+                      emptyMessage="No hay cuentas disponibles."
+                    />
+                  )}
+                />
+              )}
               <p className="text-xs text-muted-foreground">
                 Cuenta que se debita al facturarle (DEBE en compras /
-                embarques). Si la dejás vacía, el sistema usa el default según
-                el tipo de proveedor (despachante → 5.1.1.03; almacenaje →
-                5.5.1.05; etc).
+                embarques). Si la dejás vacía y no auto-creás, el sistema usa
+                el default genérico por tipo (despachante → 5.1.1.03;
+                almacenaje → 5.5.1.05; etc).
               </p>
             </div>
           </div>

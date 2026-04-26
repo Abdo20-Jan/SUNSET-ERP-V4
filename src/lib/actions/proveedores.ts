@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
   crearCuentaParaEntidad,
+  rangoGastoByTipo,
   rangoProveedorByTipo,
 } from "@/lib/services/cuenta-auto";
 import {
@@ -178,6 +179,7 @@ const proveedorBaseSchema = z
       .optional()
       .transform((v) => v ?? null),
     crearCuentaAuto: z.boolean().optional().default(false),
+    crearCuentaGastoAuto: z.boolean().optional().default(false),
   });
   // CUIT siempre opcional — tanto para nacionales como extranjeros.
 
@@ -238,10 +240,27 @@ export async function crearProveedorAction(
         );
         cuentaContableId = cuenta.id;
       }
-      const { crearCuentaAuto: _ignore, ...rest } = parsed.data;
+      let cuentaGastoContableId = parsed.data.cuentaGastoContableId;
+      if (cuentaGastoContableId === null && parsed.data.crearCuentaGastoAuto) {
+        const rangoGasto = rangoGastoByTipo(parsed.data.tipoProveedor);
+        if (rangoGasto) {
+          const cuentaGasto = await crearCuentaParaEntidad(
+            tx,
+            rangoGasto,
+            parsed.data.nombre,
+          );
+          cuentaGastoContableId = cuentaGasto.id;
+        }
+      }
+      const {
+        crearCuentaAuto: _ignore,
+        crearCuentaGastoAuto: _ignore2,
+        ...rest
+      } = parsed.data;
       void _ignore;
+      void _ignore2;
       return tx.proveedor.create({
-        data: { ...rest, cuentaContableId },
+        data: { ...rest, cuentaContableId, cuentaGastoContableId },
         select: { id: true },
       });
     });
@@ -284,12 +303,31 @@ export async function actualizarProveedorAction(
   if (!gastoCheck.ok) return gastoCheck;
 
   try {
-    const { crearCuentaAuto: _ignore, ...rest } = parsed.data;
-    void _ignore;
-    const updated = await db.proveedor.update({
-      where: { id },
-      data: rest,
-      select: { id: true },
+    const updated = await db.$transaction(async (tx) => {
+      let cuentaGastoContableId = parsed.data.cuentaGastoContableId;
+      if (cuentaGastoContableId === null && parsed.data.crearCuentaGastoAuto) {
+        const rangoGasto = rangoGastoByTipo(parsed.data.tipoProveedor);
+        if (rangoGasto) {
+          const cuentaGasto = await crearCuentaParaEntidad(
+            tx,
+            rangoGasto,
+            parsed.data.nombre,
+          );
+          cuentaGastoContableId = cuentaGasto.id;
+        }
+      }
+      const {
+        crearCuentaAuto: _ignore,
+        crearCuentaGastoAuto: _ignore2,
+        ...rest
+      } = parsed.data;
+      void _ignore;
+      void _ignore2;
+      return tx.proveedor.update({
+        where: { id },
+        data: { ...rest, cuentaGastoContableId },
+        select: { id: true },
+      });
     });
     revalidatePath("/maestros/proveedores");
     revalidatePath("/maestros");
