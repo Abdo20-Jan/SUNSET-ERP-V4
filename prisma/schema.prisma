@@ -271,14 +271,15 @@ model Asiento {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  periodo           PeriodoContable      @relation(fields: [periodoId], references: [id])
-  lineas            LineaAsiento[]
-  movimiento        MovimientoTesoreria?
-  prestamo          PrestamoExterno?
-  venta             Venta?
-  compra            Compra?
-  embarque          Embarque?
-  gastoFijoRegistro GastoFijoRegistro?
+  periodo             PeriodoContable      @relation(fields: [periodoId], references: [id])
+  lineas              LineaAsiento[]
+  movimiento          MovimientoTesoreria?
+  prestamo            PrestamoExterno?
+  venta               Venta?
+  compra              Compra?
+  embarque            Embarque?
+  gastoFijoRegistro   GastoFijoRegistro?
+  chequeRecibidoCobro ChequeRecibido?
 
   @@unique([periodoId, numero])
   @@index([fecha])
@@ -649,13 +650,53 @@ model Venta {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
-  cliente     Cliente      @relation(fields: [clienteId], references: [id])
-  asiento     Asiento?     @relation(fields: [asientoId], references: [id])
-  items       ItemVenta[]
-  pedidoVenta PedidoVenta? @relation(fields: [pedidoVentaId], references: [id])
+  cliente          Cliente          @relation(fields: [clienteId], references: [id])
+  asiento          Asiento?         @relation(fields: [asientoId], references: [id])
+  items            ItemVenta[]
+  pedidoVenta      PedidoVenta?     @relation(fields: [pedidoVentaId], references: [id])
+  chequesRecibidos ChequeRecibido[]
 
   @@index([fechaVencimiento])
   @@index([clienteId])
+}
+
+// Cheques de terceros recibidos como medio de cobro de ventas. Quedan
+// en cartera (cuenta 1.1.4.20) hasta que se depositen / acrediten en
+// el banco. Cada cheque tiene su propia fecha de pago.
+enum ChequeRecibidoEstado {
+  EN_CARTERA // Recibido — esperando depósito o vencimiento
+  DEPOSITADO // En tránsito — depositado pero no acreditado
+  ACREDITADO // Acreditado en cuenta bancaria
+  RECHAZADO // Rechazado por falta de fondos
+  ANULADO // Cancelado / devuelto
+}
+
+model ChequeRecibido {
+  id             Int                  @id @default(autoincrement())
+  ventaId        String?
+  numero         String
+  // Tipo: ECHEQ (electrónico) o FISICO. ECHEQ tiene echeqId/CMC7.
+  tipo           String               @default("FISICO")
+  cmc7           String?
+  echeqId        String?
+  banco          String?
+  emisor         String? // razón social/nombre del que emite el cheque
+  cuitEmisor     String?
+  importe        Decimal              @db.Decimal(18, 2)
+  fechaEmision   DateTime
+  fechaPago      DateTime // fecha en que se hace efectivo el cheque
+  estado         ChequeRecibidoEstado @default(EN_CARTERA)
+  asientoCobroId String?              @unique // asiento al acreditar
+  notas          String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  venta   Venta?   @relation(fields: [ventaId], references: [id])
+  asiento Asiento? @relation(fields: [asientoCobroId], references: [id])
+
+  @@index([ventaId])
+  @@index([estado])
+  @@index([fechaPago])
 }
 
 model ItemVenta {

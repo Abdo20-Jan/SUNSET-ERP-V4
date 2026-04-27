@@ -65,6 +65,14 @@ export const VENTA_CODIGOS = {
     nombre: "PROVISIÓN IMPUESTO GANANCIAS POR PAGAR",
     categoria: CuentaCategoria.PASIVO,
   },
+  // Cheques de terceros recibidos como cobro de venta — quedan en
+  // cartera hasta acreditarse en cuenta bancaria. DEBE al recibir,
+  // HABER al acreditar (contra DEBE banco).
+  VALORES_A_COBRAR: {
+    codigo: "1.1.4.20",
+    nombre: "VALORES A COBRAR (CHEQUES DE TERCEROS)",
+    categoria: CuentaCategoria.ACTIVO,
+  },
 } as const satisfies Record<string, CuentaDef>;
 
 // Tasa de Impuesto a las Ganancias para sociedades en Argentina

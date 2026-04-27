@@ -1019,6 +1019,9 @@ export async function crearAsientoVenta(
             producto: { select: { costoPromedio: true } },
           },
         },
+        chequesRecibidos: {
+          select: { importe: true },
+        },
       },
     });
     if (!venta) {
@@ -1067,20 +1070,38 @@ export async function crearAsientoVenta(
       venta.cliente.cuentaContableId ??
       porCodigo.get(VENTA_CODIGOS.CLIENTE_FALLBACK.codigo)!;
 
-    const lineas: LineaInput[] = [
-      {
+    // Cheques recibidos como cobro: van a 1.1.4.20 VALORES A COBRAR.
+    // El residual (total - cheques) queda como saldo del cliente.
+    const totalCheques = venta.chequesRecibidos
+      .reduce((acc, c) => acc.plus(toDecimal(c.importe)), toDecimal(0))
+      .toDecimalPlaces(2);
+    const cuentaChequesId = porCodigo.get(VENTA_CODIGOS.VALORES_A_COBRAR.codigo)!;
+    const totalEnCheques = totalCheques.gt(total) ? total : totalCheques;
+    const totalEnCliente = total.minus(totalEnCheques);
+
+    const lineas: LineaInput[] = [];
+    if (totalEnCheques.gt(0)) {
+      lineas.push({
+        cuentaId: cuentaChequesId,
+        debe: money(totalEnCheques).toString(),
+        haber: 0,
+        descripcion: `Venta ${venta.numero} — cheques de terceros recibidos`,
+      });
+    }
+    if (totalEnCliente.gt(0)) {
+      lineas.push({
         cuentaId: clienteCuentaId,
-        debe: money(total).toString(),
+        debe: money(totalEnCliente).toString(),
         haber: 0,
         descripcion: `Venta ${venta.numero} — ${venta.cliente.nombre}`,
-      },
-      {
-        cuentaId: porCodigo.get(VENTA_CODIGOS.VENTAS.codigo)!,
-        debe: 0,
-        haber: money(subtotal).toString(),
-        descripcion: `Venta ${venta.numero} — ingreso neto`,
-      },
-    ];
+      });
+    }
+    lineas.push({
+      cuentaId: porCodigo.get(VENTA_CODIGOS.VENTAS.codigo)!,
+      debe: 0,
+      haber: money(subtotal).toString(),
+      descripcion: `Venta ${venta.numero} — ingreso neto`,
+    });
     if (iva.gt(0)) {
       lineas.push({
         cuentaId: porCodigo.get(VENTA_CODIGOS.IVA_DEBITO.codigo)!,

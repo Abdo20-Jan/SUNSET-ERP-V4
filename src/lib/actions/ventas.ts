@@ -139,6 +139,18 @@ export type VentaDetalle = {
     iva: string;
     total: string;
   }>;
+  chequesRecibidos: Array<{
+    id: number;
+    numero: string;
+    tipo: string;
+    banco: string | null;
+    emisor: string | null;
+    cuitEmisor: string | null;
+    importe: string;
+    fechaEmision: string;
+    fechaPago: string;
+    estado: string;
+  }>;
 };
 
 export async function obtenerVentaPorId(
@@ -146,7 +158,10 @@ export async function obtenerVentaPorId(
 ): Promise<VentaDetalle | null> {
   const v = await db.venta.findUnique({
     where: { id },
-    include: { items: { orderBy: { id: "asc" } } },
+    include: {
+      items: { orderBy: { id: "asc" } },
+      chequesRecibidos: { orderBy: { fechaPago: "asc" } },
+    },
   });
   if (!v) return null;
   return {
@@ -175,6 +190,18 @@ export async function obtenerVentaPorId(
       subtotal: it.subtotal.toString(),
       iva: it.iva.toString(),
       total: it.total.toString(),
+    })),
+    chequesRecibidos: v.chequesRecibidos.map((c) => ({
+      id: c.id,
+      numero: c.numero,
+      tipo: c.tipo,
+      banco: c.banco,
+      emisor: c.emisor,
+      cuitEmisor: c.cuitEmisor,
+      importe: c.importe.toString(),
+      fechaEmision: c.fechaEmision.toISOString(),
+      fechaPago: c.fechaPago.toISOString(),
+      estado: c.estado,
     })),
   };
 }
@@ -210,6 +237,24 @@ const itemSchema = z.object({
   ivaPorcentaje: z.string().regex(/^\d+(\.\d{1,2})?$/, "IVA% inválido"),
 });
 
+const chequeRecibidoSchema = z.object({
+  numero: z.string().trim().min(1).max(40),
+  tipo: z.enum(["FISICO", "ECHEQ"]).default("FISICO"),
+  cmc7: z.string().trim().max(40).optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
+  echeqId: z.string().trim().max(40).optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
+  banco: z.string().trim().max(80).optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
+  emisor: z.string().trim().max(120).optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
+  cuitEmisor: z.string().trim().max(20).optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
+  importe: z.string().regex(moneyRegex, "Importe inválido"),
+  fechaEmision: z.string().min(1, "Fecha emisión requerida"),
+  fechaPago: z.string().min(1, "Fecha pago requerida"),
+});
+
 const ventaInputSchema = z
   .object({
     id: z.string().uuid().optional(),
@@ -231,6 +276,7 @@ const ventaInputSchema = z
       .optional()
       .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
     items: z.array(itemSchema).min(1, "Al menos un ítem"),
+    cheques: z.array(chequeRecibidoSchema).optional().default([]),
   })
   .superRefine((data, ctx) => {
     if (data.moneda === Moneda.ARS && data.tipoCambio !== "1") {
@@ -342,6 +388,29 @@ export async function guardarVentaAction(
           total: money(it.total),
         })),
       });
+
+      // Cheques de terceros recibidos como cobro de la venta. Se borran
+      // los anteriores (en edición) y se recrean según el input. Solo
+      // permitido cuando la venta sigue en BORRADOR (los EN_CARTERA en
+      // ventas EMITIDAS deben gestionarse desde su entidad propia).
+      await tx.chequeRecibido.deleteMany({ where: { ventaId: id } });
+      if (input.cheques && input.cheques.length > 0) {
+        await tx.chequeRecibido.createMany({
+          data: input.cheques.map((c) => ({
+            ventaId: id,
+            numero: c.numero,
+            tipo: c.tipo,
+            cmc7: c.cmc7,
+            echeqId: c.echeqId,
+            banco: c.banco,
+            emisor: c.emisor,
+            cuitEmisor: c.cuitEmisor,
+            importe: money(c.importe),
+            fechaEmision: new Date(c.fechaEmision + "T12:00:00Z"),
+            fechaPago: new Date(c.fechaPago + "T12:00:00Z"),
+          })),
+        });
+      }
 
       return tx.venta.findUniqueOrThrow({
         where: { id },

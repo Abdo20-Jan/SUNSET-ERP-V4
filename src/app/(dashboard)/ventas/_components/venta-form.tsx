@@ -99,6 +99,20 @@ const formSchema = z
         }),
       )
       .min(1, "Agregue al menos un ítem"),
+    cheques: z
+      .array(
+        z.object({
+          numero: z.string().trim().min(1, "Nº de cheque requerido").max(40),
+          tipo: z.enum(["FISICO", "ECHEQ"]),
+          banco: z.string().trim().max(80).optional(),
+          emisor: z.string().trim().max(120).optional(),
+          cuitEmisor: z.string().trim().max(20).optional(),
+          importe: z.string().regex(moneyRegex, "Importe inválido"),
+          fechaEmision: z.string().min(1, "Fecha emisión requerida"),
+          fechaPago: z.string().min(1, "Fecha pago requerida"),
+        }),
+      )
+      .optional(),
   })
   .superRefine((data, ctx) => {
     if (data.moneda === "ARS" && data.tipoCambio !== "1") {
@@ -194,6 +208,16 @@ export function VentaForm({
             ivaPorcentaje: pct,
           };
         }),
+        cheques: (initialData!.chequesRecibidos ?? []).map((c) => ({
+          numero: c.numero,
+          tipo: c.tipo as "FISICO" | "ECHEQ",
+          banco: c.banco ?? "",
+          emisor: c.emisor ?? "",
+          cuitEmisor: c.cuitEmisor ?? "",
+          importe: c.importe,
+          fechaEmision: c.fechaEmision.slice(0, 10),
+          fechaPago: c.fechaPago.slice(0, 10),
+        })),
       }
     : {
         numero: numeroSugerido ?? "",
@@ -214,6 +238,7 @@ export function VentaForm({
             ivaPorcentaje: "21",
           },
         ],
+        cheques: [],
       };
 
   const {
@@ -230,6 +255,11 @@ export function VentaForm({
   });
 
   const { fields, append, remove } = useFieldArray({ control, name: "items" });
+  const {
+    fields: chequeFields,
+    append: appendCheque,
+    remove: removeCheque,
+  } = useFieldArray({ control, name: "cheques" });
 
   const moneda = useWatch({ control, name: "moneda" });
   const fecha = useWatch({ control, name: "fecha" });
@@ -334,6 +364,16 @@ export function VentaForm({
           precioUnitario: it.precioUnitario,
           ivaPorcentaje: it.ivaPorcentaje,
         })),
+        cheques: (values.cheques ?? []).map((c) => ({
+          numero: c.numero,
+          tipo: c.tipo,
+          banco: c.banco || undefined,
+          emisor: c.emisor || undefined,
+          cuitEmisor: c.cuitEmisor || undefined,
+          importe: c.importe,
+          fechaEmision: c.fechaEmision,
+          fechaPago: c.fechaPago,
+        })),
       });
       if (result.ok) {
         toast.success(`Venta ${result.numero} guardada (BORRADOR).`);
@@ -369,6 +409,16 @@ export function VentaForm({
           cantidad: Number(it.cantidad),
           precioUnitario: it.precioUnitario,
           ivaPorcentaje: it.ivaPorcentaje,
+        })),
+        cheques: (values.cheques ?? []).map((c) => ({
+          numero: c.numero,
+          tipo: c.tipo,
+          banco: c.banco || undefined,
+          emisor: c.emisor || undefined,
+          cuitEmisor: c.cuitEmisor || undefined,
+          importe: c.importe,
+          fechaEmision: c.fechaEmision,
+          fechaPago: c.fechaPago,
         })),
       });
       if (!saved.ok) {
@@ -540,6 +590,136 @@ export function VentaForm({
               />
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-col gap-0.5">
+              <h2 className="text-sm font-semibold">Cheques recibidos</h2>
+              <p className="text-xs text-muted-foreground">
+                Cheques de terceros (físicos o e-cheques) recibidos como
+                cobro. Quedan en cartera (cuenta 1.1.4.20) hasta que se
+                acrediten en el banco. Cada cheque puede tener su propia
+                fecha de pago.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                appendCheque({
+                  numero: "",
+                  tipo: "ECHEQ",
+                  banco: "",
+                  emisor: "",
+                  cuitEmisor: "",
+                  importe: "0",
+                  fechaEmision: todayISO(),
+                  fechaPago: todayISO(),
+                })
+              }
+            >
+              + Agregar cheque
+            </Button>
+          </div>
+
+          {chequeFields.length === 0 ? (
+            <p className="rounded-md border border-dashed bg-muted/20 p-3 text-center text-xs text-muted-foreground">
+              Sin cheques. Si recibís cheques de terceros, agregalos aquí —
+              el asiento debitará 1.1.4.20 VALORES A COBRAR en lugar del
+              cliente.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {chequeFields.map((f, idx) => (
+                <div
+                  key={f.id}
+                  className="grid grid-cols-1 items-end gap-2 rounded-lg border bg-muted/10 p-3 md:grid-cols-12"
+                >
+                  <div className="md:col-span-1">
+                    <Label className="text-[10px] uppercase">Tipo</Label>
+                    <select
+                      className="h-9 w-full rounded-md border bg-background px-2 text-xs"
+                      {...register(`cheques.${idx}.tipo` as const)}
+                    >
+                      <option value="ECHEQ">e-Cheq</option>
+                      <option value="FISICO">Físico</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label className="text-[10px] uppercase">Nº</Label>
+                    <Input
+                      className="h-9 text-xs"
+                      placeholder="11885210"
+                      {...register(`cheques.${idx}.numero` as const)}
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label className="text-[10px] uppercase">Banco</Label>
+                    <Input
+                      className="h-9 text-xs"
+                      placeholder="BCO Corrientes"
+                      {...register(`cheques.${idx}.banco` as const)}
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label className="text-[10px] uppercase">Emisor</Label>
+                    <Input
+                      className="h-9 text-xs"
+                      placeholder="Razón social"
+                      {...register(`cheques.${idx}.emisor` as const)}
+                    />
+                  </div>
+                  <div className="md:col-span-1">
+                    <Label className="text-[10px] uppercase">CUIT</Label>
+                    <Input
+                      className="h-9 text-xs"
+                      placeholder="20-..."
+                      {...register(`cheques.${idx}.cuitEmisor` as const)}
+                    />
+                  </div>
+                  <div className="md:col-span-1">
+                    <Label className="text-[10px] uppercase">F. emisión</Label>
+                    <Input
+                      type="date"
+                      className="h-9 text-xs"
+                      {...register(`cheques.${idx}.fechaEmision` as const)}
+                    />
+                  </div>
+                  <div className="md:col-span-1">
+                    <Label className="text-[10px] uppercase">F. pago</Label>
+                    <Input
+                      type="date"
+                      className="h-9 text-xs"
+                      {...register(`cheques.${idx}.fechaPago` as const)}
+                    />
+                  </div>
+                  <div className="md:col-span-1">
+                    <Label className="text-[10px] uppercase">Importe</Label>
+                    <Input
+                      inputMode="decimal"
+                      className="h-9 text-xs"
+                      {...register(`cheques.${idx}.importe` as const)}
+                    />
+                  </div>
+                  <div className="flex justify-end md:col-span-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => removeCheque(idx)}
+                      aria-label="Eliminar cheque"
+                    >
+                      <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
