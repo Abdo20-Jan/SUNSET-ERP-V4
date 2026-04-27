@@ -528,3 +528,135 @@ export async function getCuentasAPagarPorEmbarque(): Promise<
 
   return result;
 }
+
+// ============================================================
+// VEP / Despacho aduanero por embarque — todos los tributos
+// (DIE, Tasa, IVA imp, Arancel SIM, IIBB, Ganancias) que se
+// pagan en un único Volante Electrónico de Pago.
+// ============================================================
+
+const PREFIXES_TRIBUTOS_DESPACHO = ["2.1.5.", "2.1.3."] as const;
+
+export type CuentaVepLinea = {
+  cuentaId: number;
+  cuentaCodigo: string;
+  cuentaNombre: string;
+  monto: string; // ARS — monto del asiento del embarque (HABER en esa cuenta)
+};
+
+export type VepEmbarque = {
+  embarqueId: string;
+  embarqueCodigo: string;
+  asientoId: string | null;
+  asientoNumero: number | null;
+  fecha: string; // ISO
+  cuentas: CuentaVepLinea[];
+  totalArs: string;
+  pagado: boolean; // true si la suma de DEBEs posteriores cubre el HABER
+};
+
+export async function getVepEmbarques(): Promise<VepEmbarque[]> {
+  // Embarques CERRADOS con asiento contabilizado
+  const embarques = await db.embarque.findMany({
+    where: {
+      estado: EmbarqueEstado.CERRADO,
+      asientoId: { not: null },
+    },
+    select: {
+      id: true,
+      codigo: true,
+      asientoId: true,
+      asiento: {
+        select: {
+          id: true,
+          numero: true,
+          fecha: true,
+          lineas: {
+            where: {
+              cuenta: {
+                OR: PREFIXES_TRIBUTOS_DESPACHO.map((p) => ({
+                  codigo: { startsWith: p },
+                })),
+              },
+            },
+            select: {
+              haber: true,
+              debe: true,
+              cuenta: {
+                select: { id: true, codigo: true, nombre: true },
+              },
+            },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const result: VepEmbarque[] = [];
+
+  for (const e of embarques) {
+    if (!e.asiento) continue;
+
+    // Sumar HABER por cuenta (eso es el VEP del embarque)
+    const porCuenta = new Map<number, CuentaVepLinea>();
+    for (const l of e.asiento.lineas) {
+      const haber = toDecimal(l.haber);
+      if (haber.lte(0)) continue;
+      const existing = porCuenta.get(l.cuenta.id);
+      if (existing) {
+        existing.monto = toDecimal(existing.monto).plus(haber).toFixed(2);
+      } else {
+        porCuenta.set(l.cuenta.id, {
+          cuentaId: l.cuenta.id,
+          cuentaCodigo: l.cuenta.codigo,
+          cuentaNombre: l.cuenta.nombre,
+          monto: haber.toFixed(2),
+        });
+      }
+    }
+
+    if (porCuenta.size === 0) continue;
+
+    const cuentas = Array.from(porCuenta.values()).sort((a, b) =>
+      a.cuentaCodigo.localeCompare(b.cuentaCodigo),
+    );
+    const totalArs = cuentas
+      .reduce((acc, c) => acc.plus(toDecimal(c.monto)), toDecimal(0))
+      .toFixed(2);
+
+    // Detectar si ya fue pagado: buscar asientos posteriores con DEBE en
+    // las mismas cuentas con descripción que mencione el código del embarque.
+    const cuentaIds = cuentas.map((c) => c.cuentaId);
+    const debesPosteriores = await db.lineaAsiento.findMany({
+      where: {
+        cuentaId: { in: cuentaIds },
+        debe: { gt: 0 },
+        asiento: {
+          estado: AsientoEstado.CONTABILIZADO,
+          createdAt: { gt: e.asiento.fecha },
+          descripcion: { contains: e.codigo },
+        },
+      },
+      select: { debe: true },
+    });
+    const totalDebePosterior = debesPosteriores.reduce(
+      (acc, l) => acc.plus(toDecimal(l.debe)),
+      toDecimal(0),
+    );
+    const pagado = totalDebePosterior.gte(toDecimal(totalArs));
+
+    result.push({
+      embarqueId: e.id,
+      embarqueCodigo: e.codigo,
+      asientoId: e.asiento.id,
+      asientoNumero: e.asiento.numero,
+      fecha: e.asiento.fecha.toISOString(),
+      cuentas,
+      totalArs,
+      pagado,
+    });
+  }
+
+  return result;
+}

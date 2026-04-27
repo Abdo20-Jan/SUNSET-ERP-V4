@@ -59,5 +59,7 @@ prisma/wipe-extractos.ts
 prisma/seed-cbu-cuentas.ts
 prisma/backfill-gasto-cuentas.ts
 prisma/recompute-stock.ts
+prisma/diag-stock.ts
+prisma/fix-stock-anular.ts
 prisma/add-productos.ts
 prisma/*.bak

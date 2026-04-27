@@ -13,17 +13,24 @@ import { fmtMoney } from "../../reportes/_components/money";
 import {
   getCuentasAPagar,
   getCuentasAPagarPorEmbarque,
+  getVepEmbarques,
   type CuentaAPagarPorEmbarque,
   type CxPRow,
 } from "@/lib/services/cuentas-a-pagar";
+import { listarCuentasBancariasParaVep } from "@/lib/actions/vep-embarque";
+
+import { VepSection } from "./vep-section";
 
 export const dynamic = "force-dynamic";
 
 export default async function CuentasAPagarPage() {
-  const [data, porEmbarque] = await Promise.all([
-    getCuentasAPagar(),
-    getCuentasAPagarPorEmbarque(),
-  ]);
+  const [data, porEmbarque, vepEmbarques, cuentasBancariasArs] =
+    await Promise.all([
+      getCuentasAPagar(),
+      getCuentasAPagarPorEmbarque(),
+      getVepEmbarques(),
+      listarCuentasBancariasParaVep(),
+    ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -60,9 +67,11 @@ export default async function CuentasAPagarPage() {
         showProveedores
       />
 
+      <VepSection veps={vepEmbarques} cuentasBancarias={cuentasBancariasArs} />
+
       <Section
         title="Aduana / Nacionalización"
-        subtitle="Tributos por pagar a Aduana y AFIP por embarques importados (cuenta 2.1.5.x)."
+        subtitle="Tributos por pagar a Aduana y AFIP por embarques importados (cuenta 2.1.5.x). El pago se hace via VEP arriba — esta tabla muestra el saldo agregado por cuenta."
         rows={data.aduana}
       />
 
