@@ -34,10 +34,56 @@ function deriveNivel(codigo: string): number {
   return codigo.split(".").length;
 }
 
+// Nombres por defecto para SINTETICAs auto-creadas cuando un padre falta.
+// Son rúbricas de uso común; si la SINTETICA ya existe en seed con otro
+// nombre se respeta el existente (find-then-create).
+const SINTETICA_DEFAULTS: Record<string, string> = {
+  "1.1.6": "INVERSIONES",
+  "5.9.1": "PROVISIONES",
+  "5.7.1": "GASTOS NO OPERATIVOS",
+};
+
+/**
+ * Asegura que la SINTETICA padre existe (recursivamente) creándola si
+ * falta. Evita el error de FK al crear ANALITICAs cuyo padre no fue
+ * declarado en seed. Idempotente.
+ */
+async function ensurePadreSintetica(
+  tx: TxClient,
+  padreCodigo: string,
+  categoria: CuentaCategoria,
+): Promise<void> {
+  const existing = await tx.cuentaContable.findUnique({
+    where: { codigo: padreCodigo },
+    select: { codigo: true },
+  });
+  if (existing) return;
+
+  const abuelo = derivePadreCodigo(padreCodigo);
+  if (abuelo) {
+    await ensurePadreSintetica(tx, abuelo, categoria);
+  }
+
+  const nivel = deriveNivel(padreCodigo);
+  const nombre = SINTETICA_DEFAULTS[padreCodigo] ?? `RUBRO ${padreCodigo}`;
+  await tx.cuentaContable.create({
+    data: {
+      codigo: padreCodigo,
+      nombre,
+      tipo: CuentaTipo.SINTETICA,
+      categoria,
+      nivel,
+      padreCodigo: abuelo,
+      activa: true,
+    },
+  });
+}
+
 /**
  * Devuelve el id de la cuenta con el código dado; si no existe la crea
  * como ANALITICA. Idempotente — útil para asiento generators que ya no
- * dependen de un seed pre-poblado.
+ * dependen de un seed pre-poblado. Auto-crea SINTETICAs padre faltantes
+ * para evitar FK errors si la base de datos quedó atrás del registry.
  */
 export async function getOrCreateCuenta(
   tx: TxClient,
@@ -51,6 +97,9 @@ export async function getOrCreateCuenta(
 
   const padreCodigo = def.padreCodigo ?? derivePadreCodigo(def.codigo);
   const nivel = def.nivel ?? deriveNivel(def.codigo);
+  if (padreCodigo) {
+    await ensurePadreSintetica(tx, padreCodigo, def.categoria);
+  }
   const created = await tx.cuentaContable.create({
     data: {
       codigo: def.codigo,

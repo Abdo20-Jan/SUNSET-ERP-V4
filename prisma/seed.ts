@@ -153,6 +153,7 @@ const CUENTAS_SINTETICAS: CuentaSeed[] = [
   { codigo: "1.1.3",  nombre: "CRÉDITOS POR VENTAS",                 categoria: CuentaCategoria.ACTIVO, nivel: 3 },
   { codigo: "1.1.4",  nombre: "OTROS CRÉDITOS",                      categoria: CuentaCategoria.ACTIVO, nivel: 3 },
   { codigo: "1.1.5",  nombre: "BIENES DE CAMBIO",                    categoria: CuentaCategoria.ACTIVO, nivel: 3 },
+  { codigo: "1.1.6",  nombre: "INVERSIONES",                         categoria: CuentaCategoria.ACTIVO, nivel: 3 },
   { codigo: "1.2",    nombre: "ACTIVO NO CORRIENTE",                 categoria: CuentaCategoria.ACTIVO, nivel: 2 },
   { codigo: "1.2.1",  nombre: "BIENES DE USO",                       categoria: CuentaCategoria.ACTIVO, nivel: 3 },
 
@@ -206,6 +207,8 @@ const CUENTAS_SINTETICAS: CuentaSeed[] = [
   { codigo: "5.8",    nombre: "GASTOS FINANCIEROS",                  categoria: CuentaCategoria.EGRESO, nivel: 2 },
   { codigo: "5.8.1",  nombre: "COSTOS FINANCIEROS",                  categoria: CuentaCategoria.EGRESO, nivel: 3 },
   { codigo: "5.8.2",  nombre: "RESULTADOS FINANCIEROS NEGATIVOS",    categoria: CuentaCategoria.EGRESO, nivel: 3 },
+  { codigo: "5.9",    nombre: "PROVISIONES Y CONTINGENCIAS",         categoria: CuentaCategoria.EGRESO, nivel: 2 },
+  { codigo: "5.9.1",  nombre: "PROVISIONES",                         categoria: CuentaCategoria.EGRESO, nivel: 3 },
 ];
 
 function derivePadreCodigo(codigo: string): string | null {
