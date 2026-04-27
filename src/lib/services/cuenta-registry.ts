@@ -38,7 +38,39 @@ export const VENTA_CODIGOS = {
     nombre: "OTROS IMPUESTOS",
     categoria: CuentaCategoria.PASIVO,
   },
+  // Costo de Mercadería Vendida (CMV/COGS) — cuando se emite una venta
+  // se debita aquí el costo a precio promedio, equilibrando con HABER en
+  // 1.1.5.01 MERCADERÍAS. Esto hace que la utilidad bruta (ingreso - CMV)
+  // quede reflejada en Estado de Resultados.
+  CMV: {
+    codigo: "5.6.1.01",
+    nombre: "COSTO MERCADERÍA VENDIDA",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  MERCADERIAS: {
+    codigo: "1.1.5.01",
+    nombre: "MERCADERÍAS",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+  // Provisión Impuesto a las Ganancias — se devenga la tasa sobre la
+  // utilidad bruta de cada venta. El monto acumulado se paga al cierre
+  // del ejercicio fiscal (DDJJ anual de Ganancias).
+  PROVISION_GANANCIAS_GASTO: {
+    codigo: "5.9.1.01",
+    nombre: "PROVISIÓN IMPUESTO A LAS GANANCIAS",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  PROVISION_GANANCIAS_PASIVO: {
+    codigo: "2.1.3.06",
+    nombre: "PROVISIÓN IMPUESTO GANANCIAS POR PAGAR",
+    categoria: CuentaCategoria.PASIVO,
+  },
 } as const satisfies Record<string, CuentaDef>;
+
+// Tasa de Impuesto a las Ganancias para sociedades en Argentina
+// (Ley 27.430 + 27.541). Tasa proporcional para PyMEs sería 25/30/35
+// según escala. Por ahora 35% (no PyME / monto alto). Editable acá.
+export const TASA_PROVISION_GANANCIAS = 0.35;
 
 // ----- COMPRAS LOCALES ---------------------------------------
 export const COMPRA_CODIGOS = {

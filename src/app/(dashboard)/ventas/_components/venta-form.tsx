@@ -725,7 +725,9 @@ function ItemRow({
   const productoSel = productosFull.find((p) => p.id === productoId);
 
   // Rentabilidad: usa costo promedio del producto.
-  // ganancia = subtotal - (costo × cantidad). margen% = ganancia / subtotal × 100.
+  // ganancia bruta = subtotal - (costo × cantidad).
+  // ganancia neta = bruta × (1 - 0.35) (post-Provisión Ganancias 35%).
+  // margen% = ganancia / subtotal × 100.
   const rentabilidad = useMemo(() => {
     if (!productoSel) return null;
     const costo = new Decimal(productoSel.costoPromedio || "0");
@@ -733,13 +735,23 @@ function ItemRow({
     const qty = Number(cantidad ?? 0) || 0;
     if (qty <= 0) return null;
     const costoTotal = costo.times(qty);
-    const ganancia = subtotal.minus(costoTotal);
-    const margenPct = subtotal.gt(0)
-      ? ganancia.dividedBy(subtotal).times(100).toDecimalPlaces(2)
+    const gananciaBruta = subtotal.minus(costoTotal);
+    const provisionGanancias = gananciaBruta.gt(0)
+      ? gananciaBruta.times(0.35).toDecimalPlaces(2)
+      : new Decimal(0);
+    const gananciaNeta = gananciaBruta.minus(provisionGanancias);
+    const margenBrutoPct = subtotal.gt(0)
+      ? gananciaBruta.dividedBy(subtotal).times(100).toDecimalPlaces(2)
+      : new Decimal(0);
+    const margenNetoPct = subtotal.gt(0)
+      ? gananciaNeta.dividedBy(subtotal).times(100).toDecimalPlaces(2)
       : new Decimal(0);
     return {
-      ganancia: ganancia.toDecimalPlaces(2),
-      margenPct,
+      gananciaBruta: gananciaBruta.toDecimalPlaces(2),
+      gananciaNeta: gananciaNeta.toDecimalPlaces(2),
+      provisionGanancias,
+      margenBrutoPct,
+      margenNetoPct,
       costoTotal: costoTotal.toDecimalPlaces(2),
     };
   }, [productoSel, subtotal, cantidad]);
@@ -809,19 +821,32 @@ function ItemRow({
           {fmtMoney(subtotal.toString())} + IVA {fmtMoney(iva.toString())}
         </p>
         {rentabilidad ? (
-          <p
-            className={
-              "mt-1 font-mono text-xs tabular-nums " +
-              (rentabilidad.ganancia.gte(0)
-                ? "text-emerald-700 dark:text-emerald-400"
-                : "text-destructive")
-            }
-            title={`Costo total: ${fmtMoney(rentabilidad.costoTotal.toString())}`}
+          <div
+            className="mt-1 flex flex-col items-end gap-0"
+            title={`Costo total: ${fmtMoney(rentabilidad.costoTotal.toString())} · Provisión Ganancias 35%: ${fmtMoney(rentabilidad.provisionGanancias.toString())}`}
           >
-            Margen {rentabilidad.margenPct.toFixed(2)}% ·{" "}
-            {rentabilidad.ganancia.gte(0) ? "+" : ""}
-            {fmtMoney(rentabilidad.ganancia.toString())}
-          </p>
+            <p
+              className={
+                "font-mono text-[11px] tabular-nums text-muted-foreground"
+              }
+            >
+              Bruto {rentabilidad.margenBrutoPct.toFixed(2)}% ·{" "}
+              {rentabilidad.gananciaBruta.gte(0) ? "+" : ""}
+              {fmtMoney(rentabilidad.gananciaBruta.toString())}
+            </p>
+            <p
+              className={
+                "font-mono text-xs font-semibold tabular-nums " +
+                (rentabilidad.gananciaNeta.gte(0)
+                  ? "text-emerald-700 dark:text-emerald-400"
+                  : "text-destructive")
+              }
+            >
+              Neto {rentabilidad.margenNetoPct.toFixed(2)}% ·{" "}
+              {rentabilidad.gananciaNeta.gte(0) ? "+" : ""}
+              {fmtMoney(rentabilidad.gananciaNeta.toString())}
+            </p>
+          </div>
         ) : (
           <p className="mt-1 text-xs text-muted-foreground">
             Margen — (sin costo)

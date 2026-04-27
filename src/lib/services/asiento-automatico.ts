@@ -10,6 +10,7 @@ import {
   EMBARQUE_CODIGOS,
   GASTO_POR_TIPO_PROVEEDOR,
   TRANSFERENCIA_CODIGOS,
+  TASA_PROVISION_GANANCIAS,
   VENTA_CODIGOS,
 } from "@/lib/services/cuenta-registry";
 import {
@@ -1012,6 +1013,12 @@ export async function crearAsientoVenta(
       where: { id: ventaId },
       include: {
         cliente: { select: { id: true, nombre: true, cuentaContableId: true } },
+        items: {
+          select: {
+            cantidad: true,
+            producto: { select: { costoPromedio: true } },
+          },
+        },
       },
     });
     if (!venta) {
@@ -1035,6 +1042,26 @@ export async function crearAsientoVenta(
     const iibb = toDecimal(venta.iibb).times(tc).toDecimalPlaces(2);
     const otros = toDecimal(venta.otros).times(tc).toDecimalPlaces(2);
     const total = subtotal.plus(iva).plus(iibb).plus(otros);
+
+    // Costo de mercadería vendida (CMV) — usa costoPromedio del producto
+    // al momento de emitir la venta. En ARS porque costoPromedio se
+    // mantiene en pesos (capitalización post-rateio embarque).
+    const totalCosto = venta.items
+      .reduce(
+        (acc, it) =>
+          acc.plus(toDecimal(it.producto.costoPromedio).times(it.cantidad)),
+        toDecimal(0),
+      )
+      .toDecimalPlaces(2);
+
+    // Provisión Impuesto Ganancias sobre la utilidad bruta
+    // (subtotal_venta - costo). Solo si la utilidad es positiva.
+    const utilidadBruta = subtotal.minus(totalCosto);
+    const provisionGanancias = utilidadBruta.gt(0)
+      ? utilidadBruta
+          .times(TASA_PROVISION_GANANCIAS)
+          .toDecimalPlaces(2)
+      : toDecimal(0);
 
     const clienteCuentaId =
       venta.cliente.cuentaContableId ??
@@ -1076,6 +1103,38 @@ export async function crearAsientoVenta(
         debe: 0,
         haber: money(otros).toString(),
         descripcion: `Venta ${venta.numero} — otros`,
+      });
+    }
+
+    // CMV: DEBE costo / HABER mercaderías. Solo si hay costo registrado.
+    if (totalCosto.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.CMV.codigo)!,
+        debe: money(totalCosto).toString(),
+        haber: 0,
+        descripcion: `Venta ${venta.numero} — CMV (costo a promedio)`,
+      });
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.MERCADERIAS.codigo)!,
+        debe: 0,
+        haber: money(totalCosto).toString(),
+        descripcion: `Venta ${venta.numero} — egreso de stock`,
+      });
+    }
+
+    // Provisión Impuesto Ganancias sobre utilidad bruta.
+    if (provisionGanancias.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.PROVISION_GANANCIAS_GASTO.codigo)!,
+        debe: money(provisionGanancias).toString(),
+        haber: 0,
+        descripcion: `Venta ${venta.numero} — provisión Ganancias ${(TASA_PROVISION_GANANCIAS * 100).toFixed(0)}%`,
+      });
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.PROVISION_GANANCIAS_PASIVO.codigo)!,
+        debe: 0,
+        haber: money(provisionGanancias).toString(),
+        descripcion: `Venta ${venta.numero} — Ganancias por pagar (devengado)`,
       });
     }
 
