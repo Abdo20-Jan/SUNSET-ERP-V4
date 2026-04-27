@@ -9,6 +9,7 @@ const LineaParseadaSchema = z.object({
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   descripcion: z.string().min(1),
   comprobante: z.string().nullable(),
+  referenciaBanco: z.string().nullable(),
   monto: z.number(),
   saldoExtracto: z.number().nullable(),
   categoria: z.string(),
@@ -43,6 +44,12 @@ CONVENCIONES:
 - Saldo inicial / saldo final: extraerlos del header del PDF.
 - Solo parsear movimientos de la moneda solicitada (te indico cuál abajo). Ignorá movimientos de otras monedas.
 - NO inventes líneas. NO incluyas totales, encabezados, textos legales, ni filas vacías.
+
+CAMPOS DE IDENTIFICACIÓN DE LA LÍNEA — IMPORTANTE distinguir entre dos tipos de "número":
+
+- "comprobante": número de comprobante/documento del usuario (factura, número de cheque, recibo). Ej: "Cheque 12345678", "Factura A-0001-00001234", "ECheq 001-12345-7". Si no hay, null.
+
+- "referenciaBanco": código de referencia INTERNO del banco (también llamado "Cód. Op.", "Nº Operación", "Referencia", "ID Operación", "Origen" o similar). Es el identificador único de la transacción que asigna el banco. Suele ser una secuencia de 6-15 dígitos o alfanumérica que aparece en una columna propia o entre paréntesis junto a la descripción. Si el extracto muestra DOS números (ej: comprobante de cheque + referencia bancaria), poné cada uno en su campo. Si el banco solo provee un único identificador y no es claramente un comprobante de usuario (cheque/factura), tratalo como "referenciaBanco". Si no aparece, null.
 
 PLAN DE CUENTAS — REGLAS DE CLASIFICACIÓN (descripción → codigoCuentaSugerida):
 
@@ -96,7 +103,7 @@ function buildUserPrompt(banco: string | null, moneda: "ARS" | "USD"): string {
     : `Detectá el banco a partir del header del PDF.`;
   return `${hint} Moneda a parsear: ${moneda}.
 
-Devolvé el JSON con todas las líneas del extracto en orden cronológico, con las claves: banco, cbu, numeroCuenta, saldoInicial, saldoFinal, lineas[]. Cada línea: fecha (YYYY-MM-DD), descripcion (string), comprobante (string|null), monto (number signed), saldoExtracto (number|null), categoria (tag corto tipo "IMPUESTO_CHEQUE", "COMISION_BANCARIA", "TRANSFERENCIA_EMITIDA", etc), codigoCuentaSugerida (string|null), descripcionAsiento (string|null), confianza (ALTA|MEDIA|BAJA), razon (string|null), cuitDetectado (string sin guiones | null), tipoEntidad (CLIENTE|PROVEEDOR|NINGUNO|null).`;
+Devolvé el JSON con todas las líneas del extracto en orden cronológico, con las claves: banco, cbu, numeroCuenta, saldoInicial, saldoFinal, lineas[]. Cada línea: fecha (YYYY-MM-DD), descripcion (string), comprobante (string|null — número de cheque/factura/recibo del usuario), referenciaBanco (string|null — código interno del banco / "Cód. Op." / "Nº Operación" / "Referencia"), monto (number signed), saldoExtracto (number|null), categoria (tag corto tipo "IMPUESTO_CHEQUE", "COMISION_BANCARIA", "TRANSFERENCIA_EMITIDA", etc), codigoCuentaSugerida (string|null), descripcionAsiento (string|null), confianza (ALTA|MEDIA|BAJA), razon (string|null), cuitDetectado (string sin guiones | null), tipoEntidad (CLIENTE|PROVEEDOR|NINGUNO|null).`;
 }
 
 function extractJsonBlock(text: string): string {

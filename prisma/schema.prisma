@@ -334,6 +334,7 @@ model MovimientoTesoreria {
   asientoId        String?                 @unique
   descripcion      String?
   comprobante      String?
+  referenciaBanco  String?
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @updatedAt
 
@@ -927,11 +928,12 @@ model LineaExtractoSugerencia {
   id            String   @id @default(uuid())
   importacionId String
   ordenLinea    Int
-  fecha         DateTime
-  descripcion   String
-  comprobante   String?
-  monto         Decimal  @db.Decimal(18, 2)
-  saldoExtracto Decimal? @db.Decimal(18, 2)
+  fecha           DateTime
+  descripcion     String
+  comprobante     String?
+  referenciaBanco String?
+  monto           Decimal  @db.Decimal(18, 2)
+  saldoExtracto   Decimal? @db.Decimal(18, 2)
 
   cuentaSugeridaId    Int?
   proveedorSugeridoId String?

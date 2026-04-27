@@ -136,6 +136,10 @@ export function MovimientoDetalleSheet({
                   label="Comprobante"
                   value={movimiento.comprobante ?? "—"}
                 />
+                <InfoRow
+                  label="Ref. banco"
+                  value={movimiento.referenciaBanco ?? "—"}
+                />
                 {movimiento.asiento && (
                   <InfoRow
                     label="Período"

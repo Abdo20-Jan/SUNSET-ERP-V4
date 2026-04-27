@@ -60,6 +60,7 @@ const formSchema = z
       .positive({ message: "Seleccione la cuenta contrapartida" }),
     descripcion: z.string().trim().max(255).optional(),
     comprobante: z.string().trim().max(100).optional(),
+    referenciaBanco: z.string().trim().max(100).optional(),
   })
   .superRefine((data, ctx) => {
     if (Number(data.monto) <= 0) {
@@ -93,6 +94,7 @@ export type MovimientoFormInitial = {
   cuentaContableId?: number;
   descripcion?: string;
   comprobante?: string;
+  referenciaBanco?: string;
   monto?: string; // pre-fill monto (string con hasta 2 decimales)
 };
 
@@ -136,6 +138,7 @@ export function MovimientoForm({
       cuentaContableId: initial?.cuentaContableId ?? 0,
       descripcion: initial?.descripcion ?? "",
       comprobante: initial?.comprobante ?? "",
+      referenciaBanco: initial?.referenciaBanco ?? "",
     },
   });
 
@@ -206,6 +209,7 @@ export function MovimientoForm({
         cuentaContableId: values.cuentaContableId,
         descripcion: values.descripcion,
         comprobante: values.comprobante,
+        referenciaBanco: values.referenciaBanco,
       });
 
       if (result.ok) {
@@ -421,7 +425,7 @@ export function MovimientoForm({
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-[2fr_1fr]">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[2fr_1fr_1fr]">
             <div className="flex flex-col gap-2">
               <Label htmlFor="descripcion">Descripción (opcional)</Label>
               <Textarea
@@ -438,6 +442,20 @@ export function MovimientoForm({
                 placeholder="Factura A-00001234"
                 {...register("comprobante")}
               />
+              <p className="text-[11px] text-muted-foreground">
+                Nº de cheque, factura o recibo.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="referenciaBanco">Referencia banco (opcional)</Label>
+              <Input
+                id="referenciaBanco"
+                placeholder="Cód. Op. 12345678"
+                {...register("referenciaBanco")}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Código de operación / referencia interna del banco.
+              </p>
             </div>
           </div>
         </CardContent>

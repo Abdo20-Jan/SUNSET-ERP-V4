@@ -91,6 +91,7 @@ export default async function ExtractoDetallePage({
     fecha: l.fecha.toISOString(),
     descripcion: l.descripcion,
     comprobante: l.comprobante,
+    referenciaBanco: l.referenciaBanco,
     monto: l.monto.toString(),
     saldoExtracto: l.saldoExtracto?.toString() ?? null,
     cuentaSugeridaId: l.cuentaSugeridaId,

@@ -87,6 +87,7 @@ export type LineaRow = {
   fecha: string;
   descripcion: string;
   comprobante: string | null;
+  referenciaBanco: string | null;
   monto: string;
   saldoExtracto: string | null;
   cuentaSugeridaId: number | null;
@@ -226,6 +227,7 @@ export function LineasReview({
             <TableRow>
               <TableHead className="w-[90px]">Fecha</TableHead>
               <TableHead>Descripción</TableHead>
+              <TableHead className="w-[140px]">Referencia</TableHead>
               <TableHead>Sugerencia</TableHead>
               <TableHead className="text-right">Monto</TableHead>
               <TableHead>Estado</TableHead>
@@ -256,6 +258,15 @@ export function LineasReview({
                     {l.comprobante ? (
                       <p className="text-xs text-muted-foreground">Comp.: {l.comprobante}</p>
                     ) : null}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {l.referenciaBanco ? (
+                      <span title="Código de referencia del banco">
+                        {l.referenciaBanco}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="max-w-[260px]">
                     {sugerencia ? (

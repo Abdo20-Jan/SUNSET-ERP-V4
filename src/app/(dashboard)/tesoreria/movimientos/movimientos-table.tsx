@@ -66,6 +66,7 @@ export type MovimientoRow = {
   tipoCambio: string;
   descripcion: string | null;
   comprobante: string | null;
+  referenciaBanco: string | null;
   cuentaBancaria: {
     id: string;
     banco: string;

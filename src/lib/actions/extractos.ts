@@ -150,6 +150,7 @@ export async function aprobarLineaAction(
           cuentaContableId: contrapartidaId,
           descripcion,
           comprobante: linea.comprobante,
+          referenciaBanco: linea.referenciaBanco,
         },
         select: { id: true },
       });

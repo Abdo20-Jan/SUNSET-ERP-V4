@@ -113,6 +113,12 @@ const crearMovimientoSchema = z
       .max(100)
       .optional()
       .transform((v) => (v && v.length > 0 ? v : null)),
+    referenciaBanco: z
+      .string()
+      .trim()
+      .max(100)
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null)),
   })
   .superRefine((data, ctx) => {
     if (Number(data.monto) <= 0) {
@@ -173,6 +179,7 @@ export async function crearMovimientoTesoreriaAction(
     cuentaContableId,
     descripcion,
     comprobante,
+    referenciaBanco,
   } = parsed.data;
 
   const cuentaBancaria = await db.cuentaBancaria.findUnique({
@@ -257,6 +264,7 @@ export async function crearMovimientoTesoreriaAction(
           cuentaContableId,
           descripcion,
           comprobante,
+          referenciaBanco,
         },
         select: { id: true },
       });

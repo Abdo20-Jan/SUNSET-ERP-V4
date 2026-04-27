@@ -310,6 +310,7 @@ export async function importarExtractoAction(
               fecha: new Date(l.fecha + "T12:00:00Z"),
               descripcion: l.descripcion.slice(0, 500),
               comprobante: l.comprobante,
+              referenciaBanco: l.referenciaBanco?.slice(0, 100) ?? null,
               monto: l.monto.toFixed(2),
               saldoExtracto: l.saldoExtracto !== null ? l.saldoExtracto.toFixed(2) : null,
               cuentaSugeridaId,
