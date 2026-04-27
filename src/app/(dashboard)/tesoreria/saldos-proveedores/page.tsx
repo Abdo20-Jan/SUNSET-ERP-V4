@@ -230,7 +230,16 @@ function ProveedorRow({
         </TableCell>
         <TableCell className="text-right">
           <Link
-            href={`/tesoreria/movimientos/nuevo?proveedorId=${p.proveedorId}`}
+            href={
+              p.cuentaContableId
+                ? `/tesoreria/movimientos/nuevo?${new URLSearchParams({
+                    tipo: "PAGO",
+                    cuentaContableId: String(p.cuentaContableId),
+                    monto: p.saldoTotal,
+                    descripcion: `Pago a ${p.proveedorNombre}${p.facturas.length > 0 ? ` — ${p.facturas.length} factura(s)` : ""}`,
+                  }).toString()}`
+                : `/tesoreria/movimientos/nuevo?tipo=PAGO`
+            }
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             Pagar

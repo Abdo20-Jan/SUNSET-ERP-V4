@@ -93,6 +93,7 @@ export type MovimientoFormInitial = {
   cuentaContableId?: number;
   descripcion?: string;
   comprobante?: string;
+  monto?: string; // pre-fill monto (string con hasta 2 decimales)
 };
 
 export type ModoAmortizacion = "amortizacion" | "intereses";
@@ -129,7 +130,7 @@ export function MovimientoForm({
       tipo: initial?.tipo ?? "COBRO",
       cuentaBancariaId: "",
       fecha: new Date(),
-      monto: "0",
+      monto: initial?.monto ?? "0",
       moneda: "ARS",
       tipoCambio: "1",
       cuentaContableId: initial?.cuentaContableId ?? 0,

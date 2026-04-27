@@ -13,7 +13,10 @@ type SearchParams = Promise<{
   comprobante?: string;
   prestamoId?: string;
   modo?: string;
+  monto?: string;
 }>;
+
+const MONTO_RE = /^\d+(\.\d{1,2})?$/;
 
 function parseUuid(value: string | undefined): string | null {
   if (!value) return null;
@@ -77,6 +80,10 @@ export default async function NuevoMovimientoPage({
 
   if (params.comprobante) {
     initial.comprobante = params.comprobante.slice(0, 100);
+  }
+
+  if (params.monto && MONTO_RE.test(params.monto) && Number(params.monto) > 0) {
+    initial.monto = params.monto;
   }
 
   return (

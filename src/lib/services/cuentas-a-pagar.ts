@@ -203,6 +203,7 @@ export type SaldoProveedorAging = {
   proveedorNombre: string;
   cuit: string | null;
   pais: string;
+  cuentaContableId: number | null;
   saldoTotal: string; // contable, vía cuenta. Es la verdad.
   vencido: string;
   proximo: string; // ≤ 7 días
@@ -375,6 +376,7 @@ export async function getSaldosPorProveedorConAging(): Promise<
       proveedorNombre: p.nombre,
       cuit: p.cuit,
       pais: p.pais,
+      cuentaContableId: p.cuentaContableId,
       saldoTotal: saldoContable,
       vencido: vencido.toFixed(2),
       proximo: proximo.toFixed(2),
@@ -384,5 +386,145 @@ export async function getSaldosPorProveedorConAging(): Promise<
   }
 
   result.sort((a, b) => toDecimal(b.vencido).minus(toDecimal(a.vencido)).toNumber());
+  return result;
+}
+
+// ============================================================
+// Cuentas a pagar agrupadas por EMBARQUE — para "pagar todos los
+// costos de un embarque a un proveedor en un único movimiento".
+// ============================================================
+
+export type CuentaAPagarPorEmbarque = {
+  embarqueId: string;
+  embarqueCodigo: string;
+  proveedorId: string;
+  proveedorNombre: string;
+  proveedorCuentaContableId: number | null;
+  facturas: Array<{
+    id: number;
+    numero: string;
+    fecha: string;
+    fechaVencimiento: string | null;
+    totalArs: string;
+  }>;
+  totalArs: string;
+};
+
+export async function getCuentasAPagarPorEmbarque(): Promise<
+  CuentaAPagarPorEmbarque[]
+> {
+  // EmbarqueCostos cuyo embarque está CERRADO (asientos contabilizados)
+  const costos = await db.embarqueCosto.findMany({
+    where: { embarque: { estado: EmbarqueEstado.CERRADO } },
+    select: {
+      id: true,
+      facturaNumero: true,
+      fechaFactura: true,
+      fechaVencimiento: true,
+      tipoCambio: true,
+      moneda: true,
+      iva: true,
+      iibb: true,
+      otros: true,
+      lineas: { select: { subtotal: true } },
+      embarque: { select: { id: true, codigo: true } },
+      proveedor: {
+        select: { id: true, nombre: true, cuentaContableId: true },
+      },
+    },
+    orderBy: { fechaFactura: "desc" },
+  });
+
+  // Agrupar por (embarqueId + proveedorId)
+  type GroupKey = string;
+  const groups = new Map<GroupKey, CuentaAPagarPorEmbarque>();
+
+  for (const c of costos) {
+    const subtotalLineas = c.lineas.reduce(
+      (acc, l) => acc.plus(toDecimal(l.subtotal)),
+      toDecimal(0),
+    );
+    const totalMoneda = subtotalLineas
+      .plus(toDecimal(c.iva))
+      .plus(toDecimal(c.iibb))
+      .plus(toDecimal(c.otros));
+    const totalArs = totalMoneda.times(toDecimal(c.tipoCambio));
+
+    const key: GroupKey = `${c.embarque.id}::${c.proveedor.id}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        embarqueId: c.embarque.id,
+        embarqueCodigo: c.embarque.codigo,
+        proveedorId: c.proveedor.id,
+        proveedorNombre: c.proveedor.nombre,
+        proveedorCuentaContableId: c.proveedor.cuentaContableId,
+        facturas: [],
+        totalArs: "0",
+      };
+      groups.set(key, group);
+    }
+    group.facturas.push({
+      id: c.id,
+      numero: c.facturaNumero ?? `Factura #${c.id}`,
+      fecha: (c.fechaFactura ?? new Date()).toISOString(),
+      fechaVencimiento: c.fechaVencimiento?.toISOString() ?? null,
+      totalArs: totalArs.toFixed(2),
+    });
+  }
+
+  // Calcular total + filtrar grupos donde el saldo del proveedor en su
+  // cuenta es 0 (todo ya pagado vía algún movimiento previo).
+  const result: CuentaAPagarPorEmbarque[] = [];
+
+  // Saldos vivos por cuenta (haber - debe). Si <=0, el proveedor no
+  // debe nada — ese grupo ya está pagado.
+  const cuentaIds = Array.from(groups.values())
+    .map((g) => g.proveedorCuentaContableId)
+    .filter((id): id is number => id !== null);
+  const sums =
+    cuentaIds.length > 0
+      ? await db.lineaAsiento.groupBy({
+          by: ["cuentaId"],
+          where: {
+            cuentaId: { in: cuentaIds },
+            asiento: { estado: AsientoEstado.CONTABILIZADO },
+          },
+          _sum: { debe: true, haber: true },
+        })
+      : [];
+  const saldoVivoPorCuenta = new Map<number, string>(
+    sums.map((s) => {
+      const haber = toDecimal(s._sum.haber ?? 0);
+      const debe = toDecimal(s._sum.debe ?? 0);
+      return [s.cuentaId, haber.minus(debe).toFixed(2)];
+    }),
+  );
+
+  for (const g of groups.values()) {
+    const totalGrupo = g.facturas.reduce(
+      (acc, f) => acc.plus(toDecimal(f.totalArs)),
+      toDecimal(0),
+    );
+    g.totalArs = totalGrupo.toFixed(2);
+
+    // Si el saldo vivo del proveedor es <=0, todo ya está pagado: omitir
+    const saldoVivo = g.proveedorCuentaContableId
+      ? toDecimal(saldoVivoPorCuenta.get(g.proveedorCuentaContableId) ?? "0")
+      : toDecimal(0);
+    if (saldoVivo.lte(0)) continue;
+
+    g.facturas.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    result.push(g);
+  }
+
+  // Orden: embarque DESC, proveedor ASC
+  result.sort((a, b) => {
+    if (a.embarqueCodigo !== b.embarqueCodigo) {
+      return b.embarqueCodigo.localeCompare(a.embarqueCodigo);
+    }
+    return a.proveedorNombre.localeCompare(b.proveedorNombre);
+  });
+
   return result;
 }

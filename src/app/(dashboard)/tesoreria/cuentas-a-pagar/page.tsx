@@ -12,13 +12,18 @@ import {
 import { fmtMoney } from "../../reportes/_components/money";
 import {
   getCuentasAPagar,
+  getCuentasAPagarPorEmbarque,
+  type CuentaAPagarPorEmbarque,
   type CxPRow,
 } from "@/lib/services/cuentas-a-pagar";
 
 export const dynamic = "force-dynamic";
 
 export default async function CuentasAPagarPage() {
-  const data = await getCuentasAPagar();
+  const [data, porEmbarque] = await Promise.all([
+    getCuentasAPagar(),
+    getCuentasAPagarPorEmbarque(),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -66,7 +71,100 @@ export default async function CuentasAPagarPage() {
         subtitle="Retenciones y percepciones a depositar (cuenta 2.1.3.x)."
         rows={data.fiscales}
       />
+
+      <EmbarqueSection rows={porEmbarque} />
     </div>
+  );
+}
+
+function EmbarqueSection({ rows }: { rows: CuentaAPagarPorEmbarque[] }) {
+  if (rows.length === 0) return null;
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex flex-col gap-0.5">
+          <h2 className="text-sm font-semibold">Por embarque</h2>
+          <p className="text-xs text-muted-foreground">
+            Costos de nacionalización agrupados por embarque + proveedor —
+            pagá todas las facturas de un proveedor en un único movimiento
+            contable. La descripción del pago listará el embarque y las
+            facturas incluidas.
+          </p>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-32">Embarque</TableHead>
+              <TableHead>Proveedor</TableHead>
+              <TableHead className="text-right">Facturas</TableHead>
+              <TableHead className="text-right">Total (ARS)</TableHead>
+              <TableHead className="w-28 text-right"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((r) => {
+              const numerosFacturas = r.facturas
+                .map((f) => f.numero)
+                .join(", ")
+                .slice(0, 200);
+              const href = r.proveedorCuentaContableId
+                ? `/tesoreria/movimientos/nuevo?${new URLSearchParams({
+                    tipo: "PAGO",
+                    cuentaContableId: String(r.proveedorCuentaContableId),
+                    monto: r.totalArs,
+                    descripcion: `Pago embarque ${r.embarqueCodigo} — ${r.proveedorNombre} — Fact: ${numerosFacturas}`.slice(
+                      0,
+                      255,
+                    ),
+                  }).toString()}`
+                : null;
+              return (
+                <TableRow key={`${r.embarqueId}-${r.proveedorId}`}>
+                  <TableCell className="font-mono text-xs">
+                    {r.embarqueCodigo}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-col gap-0.5">
+                      <span>{r.proveedorNombre}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {r.facturas
+                          .map((f) => f.numero)
+                          .slice(0, 4)
+                          .join(", ")}
+                        {r.facturas.length > 4
+                          ? ` (+${r.facturas.length - 4})`
+                          : ""}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {r.facturas.length}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {fmtMoney(r.totalArs)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {href ? (
+                      <Link
+                        href={href}
+                        className="inline-flex h-8 items-center rounded-full border border-input bg-background px-3 text-xs font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+                      >
+                        Pagar todo
+                      </Link>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        sin cuenta
+                      </span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -155,10 +253,21 @@ function Section({
 }
 
 function buildPagarHref(row: CxPRow): string {
+  // Si la cuenta corresponde a un único proveedor activo, lo nombramos en
+  // la descripción para dar contexto del pago.
+  const proveedoresActivos = row.proveedores.filter(
+    (p) => p.estado === "activo",
+  );
+  const refProveedor =
+    proveedoresActivos.length === 1
+      ? proveedoresActivos[0].nombre
+      : row.cuentaNombre;
+
   const params = new URLSearchParams({
     tipo: "PAGO",
     cuentaContableId: String(row.cuentaId),
-    descripcion: `Pago ${row.cuentaCodigo} ${row.cuentaNombre}`,
+    monto: row.saldo,
+    descripcion: `Pago a ${refProveedor} (${row.cuentaCodigo})`,
   });
   return `/tesoreria/movimientos/nuevo?${params.toString()}`;
 }
