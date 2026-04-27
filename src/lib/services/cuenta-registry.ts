@@ -73,6 +73,19 @@ export const VENTA_CODIGOS = {
     nombre: "VALORES A COBRAR (CHEQUES DE TERCEROS)",
     categoria: CuentaCategoria.ACTIVO,
   },
+  // Flete sobre ventas — gasto cuando lo pagamos nosotros (no se cobra
+  // al cliente). Reduce el margen neto y la utilidad bruta sobre la que
+  // se devenga la provisión Ganancias.
+  FLETE_GASTO: {
+    codigo: "5.5.1.60",
+    nombre: "FLETE SOBRE VENTAS",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  FLETE_POR_PAGAR: {
+    codigo: "2.1.1.05",
+    nombre: "FLETES SOBRE VENTAS POR PAGAR",
+    categoria: CuentaCategoria.PASIVO,
+  },
 } as const satisfies Record<string, CuentaDef>;
 
 // Tasa de Impuesto a las Ganancias para sociedades en Argentina

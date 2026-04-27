@@ -125,6 +125,7 @@ export type VentaDetalle = {
   iva: string;
   iibb: string;
   otros: string;
+  flete: string;
   total: string;
   estado: VentaEstado;
   asientoId: string | null;
@@ -177,6 +178,7 @@ export async function obtenerVentaPorId(
     iva: v.iva.toString(),
     iibb: v.iibb.toString(),
     otros: v.otros.toString(),
+    flete: v.flete.toString(),
     total: v.total.toString(),
     estado: v.estado,
     asientoId: v.asientoId,
@@ -270,6 +272,7 @@ const ventaInputSchema = z
     tipoCambio: z.string().regex(rateRegex, "TC inválido"),
     iibb: z.string().regex(moneyRegex, "IIBB inválido").default("0"),
     otros: z.string().regex(moneyRegex, "Otros inválido").default("0"),
+    flete: z.string().regex(moneyRegex, "Flete inválido").default("0"),
     notas: z
       .string()
       .max(500)
@@ -353,6 +356,7 @@ export async function guardarVentaAction(
         iva: money(iva),
         iibb: money(input.iibb),
         otros: money(input.otros),
+        flete: money(input.flete),
         total: money(total),
         notas: input.notas,
       };

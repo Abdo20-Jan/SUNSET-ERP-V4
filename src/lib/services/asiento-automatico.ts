@@ -1011,7 +1011,17 @@ export async function crearAsientoVenta(
   const run = async (inner: TxClient) => {
     const venta = await inner.venta.findUnique({
       where: { id: ventaId },
-      include: {
+      select: {
+        id: true,
+        numero: true,
+        fecha: true,
+        tipoCambio: true,
+        subtotal: true,
+        iva: true,
+        iibb: true,
+        otros: true,
+        flete: true,
+        asientoId: true,
         cliente: { select: { id: true, nombre: true, cuentaContableId: true } },
         items: {
           select: {
@@ -1044,6 +1054,7 @@ export async function crearAsientoVenta(
     const iva = toDecimal(venta.iva).times(tc).toDecimalPlaces(2);
     const iibb = toDecimal(venta.iibb).times(tc).toDecimalPlaces(2);
     const otros = toDecimal(venta.otros).times(tc).toDecimalPlaces(2);
+    const flete = toDecimal(venta.flete).times(tc).toDecimalPlaces(2);
     const total = subtotal.plus(iva).plus(iibb).plus(otros);
 
     // Costo de mercadería vendida (CMV) — usa costoPromedio del producto
@@ -1058,8 +1069,9 @@ export async function crearAsientoVenta(
       .toDecimalPlaces(2);
 
     // Provisión Impuesto Ganancias sobre la utilidad bruta
-    // (subtotal_venta - costo). Solo si la utilidad es positiva.
-    const utilidadBruta = subtotal.minus(totalCosto);
+    // (subtotal_venta - costo - flete). El flete reduce la utilidad
+    // gravable porque es un gasto comercial deducible. Solo si > 0.
+    const utilidadBruta = subtotal.minus(totalCosto).minus(flete);
     const provisionGanancias = utilidadBruta.gt(0)
       ? utilidadBruta
           .times(TASA_PROVISION_GANANCIAS)
@@ -1140,6 +1152,24 @@ export async function crearAsientoVenta(
         debe: 0,
         haber: money(totalCosto).toString(),
         descripcion: `Venta ${venta.numero} — egreso de stock`,
+      });
+    }
+
+    // Flete sobre ventas — gasto pagado por nosotros (no facturado al
+    // cliente). Genera DEBE gasto / HABER cta a pagar; el pago efectivo
+    // se registra después por tesorería.
+    if (flete.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.FLETE_GASTO.codigo)!,
+        debe: money(flete).toString(),
+        haber: 0,
+        descripcion: `Venta ${venta.numero} — flete sobre venta`,
+      });
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.FLETE_POR_PAGAR.codigo)!,
+        debe: 0,
+        haber: money(flete).toString(),
+        descripcion: `Venta ${venta.numero} — flete por pagar`,
       });
     }
 

@@ -642,6 +642,9 @@ model Venta {
   iva              Decimal       @db.Decimal(18, 2)
   iibb             Decimal       @default(0) @db.Decimal(18, 2)
   otros            Decimal       @default(0) @db.Decimal(18, 2)
+  // Flete pagado por nosotros (no se cobra al cliente). No afecta `total`.
+  // Reduce el margen neto de la operación y se contabiliza como gasto.
+  flete            Decimal       @default(0) @db.Decimal(18, 2)
   total            Decimal       @db.Decimal(18, 2)
   estado           VentaEstado   @default(BORRADOR)
   asientoId        String?       @unique

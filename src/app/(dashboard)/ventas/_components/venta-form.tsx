@@ -84,6 +84,7 @@ const formSchema = z
     tipoCambio: z.string().regex(rateRegex, "TC inválido"),
     iibb: z.string().regex(moneyRegex, "IIBB inválido"),
     otros: z.string().regex(moneyRegex, "Otros inválido"),
+    flete: z.string().regex(moneyRegex, "Flete inválido"),
     notas: z.string().max(500).optional(),
     items: z
       .array(
@@ -194,6 +195,7 @@ export function VentaForm({
         tipoCambio: initialData!.tipoCambio,
         iibb: initialData!.iibb,
         otros: initialData!.otros,
+        flete: initialData!.flete,
         notas: initialData!.notas ?? "",
         items: initialData!.items.map((it) => {
           const sub = new Decimal(it.subtotal);
@@ -229,6 +231,7 @@ export function VentaForm({
         tipoCambio: "1",
         iibb: "0",
         otros: "0",
+        flete: "0",
         notas: "",
         items: [
           {
@@ -267,6 +270,7 @@ export function VentaForm({
   const items = useWatch({ control, name: "items" }) ?? [];
   const iibb = useWatch({ control, name: "iibb" }) ?? "0";
   const otros = useWatch({ control, name: "otros" }) ?? "0";
+  const flete = useWatch({ control, name: "flete" }) ?? "0";
 
   useEffect(() => {
     if (moneda === "ARS") {
@@ -302,6 +306,7 @@ export function VentaForm({
   const totals = useMemo(() => {
     let subtotal = new Decimal(0);
     let iva = new Decimal(0);
+    let costoTotal = new Decimal(0);
     for (const it of items) {
       const qty = Number(it?.cantidad ?? 0) || 0;
       const price = safe(it?.precioUnitario);
@@ -309,18 +314,44 @@ export function VentaForm({
       const pct = new Decimal(safe(it?.ivaPorcentaje)).dividedBy(100);
       subtotal = subtotal.plus(sub);
       iva = iva.plus(sub.times(pct));
+      const prod = productos.find((p) => p.id === it?.productoId);
+      if (prod) {
+        const costo = new Decimal(prod.costoPromedio || "0");
+        costoTotal = costoTotal.plus(costo.times(qty));
+      }
     }
     const i = new Decimal(safe(iibb));
     const o = new Decimal(safe(otros));
+    const f = new Decimal(safe(flete));
     const total = subtotal.plus(iva).plus(i).plus(o);
+
+    // Rentabilidad total de la operación (con flete deducido).
+    // Bruta = subtotal - costoTotal - flete.
+    // Neta = Bruta − Provisión Ganancias 35% (sólo si bruta > 0).
+    const utilidadBruta = subtotal.minus(costoTotal).minus(f);
+    const provisionGanancias = utilidadBruta.gt(0)
+      ? utilidadBruta.times(0.35).toDecimalPlaces(2)
+      : new Decimal(0);
+    const utilidadNeta = utilidadBruta.minus(provisionGanancias);
+    const margenNetoPct = subtotal.gt(0)
+      ? utilidadNeta.dividedBy(subtotal).times(100).toDecimalPlaces(2)
+      : new Decimal(0);
+
     return {
       subtotal: subtotal.toDecimalPlaces(2),
       iva: iva.toDecimalPlaces(2),
       iibb: i.toDecimalPlaces(2),
       otros: o.toDecimalPlaces(2),
+      flete: f.toDecimalPlaces(2),
       total: total.toDecimalPlaces(2),
+      costoTotal: costoTotal.toDecimalPlaces(2),
+      utilidadBruta: utilidadBruta.toDecimalPlaces(2),
+      utilidadNeta: utilidadNeta.toDecimalPlaces(2),
+      provisionGanancias,
+      margenNetoPct,
+      tieneCostos: costoTotal.gt(0),
     };
-  }, [items, iibb, otros]);
+  }, [items, iibb, otros, flete, productos]);
 
   // Warning si IVA total no coincide con 21% del subtotal
   const ivaWarning = useMemo(() => {
@@ -357,6 +388,7 @@ export function VentaForm({
         tipoCambio: values.tipoCambio,
         iibb: values.iibb,
         otros: values.otros,
+        flete: values.flete,
         notas: values.notas,
         items: values.items.map((it) => ({
           productoId: it.productoId,
@@ -403,6 +435,7 @@ export function VentaForm({
         tipoCambio: values.tipoCambio,
         iibb: values.iibb,
         otros: values.otros,
+        flete: values.flete,
         notas: values.notas,
         items: values.items.map((it) => ({
           productoId: it.productoId,
@@ -548,6 +581,14 @@ export function VentaForm({
 
           <Field label="Otros" error={errors.otros?.message}>
             <Input {...register("otros")} inputMode="decimal" />
+          </Field>
+
+          <Field
+            label="Flete"
+            error={errors.flete?.message}
+            hint="Pagado por nosotros. No se cobra al cliente; reduce el margen neto."
+          >
+            <Input {...register("flete")} inputMode="decimal" />
           </Field>
         </CardContent>
       </Card>
@@ -757,6 +798,13 @@ export function VentaForm({
             <Total label="IVA" value={totals.iva.toString()} />
             <Total label="IIBB" value={totals.iibb.toString()} />
             <Total label="Otros" value={totals.otros.toString()} />
+            {totals.flete.gt(0) ? (
+              <Total
+                label="Flete"
+                value={`-${totals.flete.toString()}`}
+                tone="negative"
+              />
+            ) : null}
             <div className="flex items-baseline gap-1">
               <span className="text-xs uppercase tracking-wide text-muted-foreground">
                 Total
@@ -765,6 +813,29 @@ export function VentaForm({
                 {fmtMoney(totals.total.toString())} {moneda}
               </span>
             </div>
+            {totals.tieneCostos ? (
+              <div
+                className="flex items-baseline gap-1"
+                title={`Costo: ${fmtMoney(totals.costoTotal.toString())} · Bruto: ${fmtMoney(totals.utilidadBruta.toString())} · Provisión Ganancias 35%: ${fmtMoney(totals.provisionGanancias.toString())}${totals.flete.gt(0) ? ` · Flete: -${fmtMoney(totals.flete.toString())}` : ""}`}
+              >
+                <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Margen neto
+                </span>
+                <span
+                  className={
+                    totals.utilidadNeta.gte(0)
+                      ? "font-mono text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-400"
+                      : "font-mono text-sm font-semibold tabular-nums text-rose-700 dark:text-rose-400"
+                  }
+                >
+                  {totals.utilidadNeta.gte(0) ? "+" : ""}
+                  {fmtMoney(totals.utilidadNeta.toString())}
+                  <span className="ml-1 text-xs text-muted-foreground">
+                    ({totals.margenNetoPct.toFixed(2)}%)
+                  </span>
+                </span>
+              </div>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -841,13 +912,29 @@ function Field({
   );
 }
 
-function Total({ label, value }: { label: string; value: string }) {
+function Total({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "negative";
+}) {
   return (
     <div className="flex items-baseline gap-1">
       <span className="text-xs uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
-      <span className="font-mono text-sm tabular-nums">{fmtMoney(value)}</span>
+      <span
+        className={
+          tone === "negative"
+            ? "font-mono text-sm tabular-nums text-rose-700 dark:text-rose-400"
+            : "font-mono text-sm tabular-nums"
+        }
+      >
+        {fmtMoney(value)}
+      </span>
     </div>
   );
 }

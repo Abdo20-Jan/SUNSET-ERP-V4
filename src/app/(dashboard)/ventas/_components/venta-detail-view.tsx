@@ -112,7 +112,7 @@ export function VentaDetailView({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
         <Stat label="Subtotal" value={`${fmtMoney(venta.subtotal)} ${venta.moneda}`} />
         <Stat label="IVA" value={`${fmtMoney(venta.iva)} ${venta.moneda}`} />
         <Stat
@@ -126,6 +126,12 @@ export function VentaDetailView({
           value={`${fmtMoney(venta.total)} ${venta.moneda}`}
           emphasis
         />
+        {Number(venta.flete) > 0 ? (
+          <Stat
+            label="Flete (gasto)"
+            value={`-${fmtMoney(venta.flete)} ${venta.moneda}`}
+          />
+        ) : null}
       </div>
 
       <Card>
