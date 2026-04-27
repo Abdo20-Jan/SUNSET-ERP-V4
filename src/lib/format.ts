@@ -35,6 +35,22 @@ export function fmtCredito(value: string): string {
   return `(${fmtAR.format(n)})`;
 }
 
+/**
+ * Convierte un monto en ARS (string serializado) a USD usando un TC dado.
+ * Si tc es null/0/undefined, devuelve el valor original sin tocar.
+ */
+export function convertirAUsd(
+  valueArs: string,
+  tc: string | null | undefined,
+): string {
+  if (!tc) return valueArs;
+  const tcN = Number.parseFloat(tc);
+  if (!Number.isFinite(tcN) || tcN <= 0) return valueArs;
+  const n = Number.parseFloat(valueArs);
+  if (!Number.isFinite(n)) return valueArs;
+  return (n / tcN).toFixed(2);
+}
+
 export function fmtSigno(value: string): "positive" | "negative" | "zero" {
   const n = Number.parseFloat(value);
   if (!Number.isFinite(n) || n === 0) return "zero";

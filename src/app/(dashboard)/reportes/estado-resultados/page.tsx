@@ -1,7 +1,9 @@
 import { db } from "@/lib/db";
 import { getEstadoResultados } from "@/lib/services/reportes";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { PeriodoEstado } from "@/generated/prisma/client";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { convertirAUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 import {
@@ -11,8 +13,9 @@ import {
 import { fmtMoney, fmtSigno } from "../_components/money";
 import { CuentaTreeTable } from "../_components/cuenta-tree-table";
 import { serializeTreeNode } from "../_components/cuenta-tree-node";
+import { MonedaToggle, type Moneda } from "../_components/moneda-toggle";
 
-type SearchParams = Promise<{ periodoId?: string }>;
+type SearchParams = Promise<{ periodoId?: string; moneda?: string }>;
 
 function parsePeriodoId(value: string | undefined): number | null {
   if (!value) return null;
@@ -54,6 +57,19 @@ export default async function EstadoResultadosPage({
   const periodoId = periodoIdFromUrl ?? defaultPeriodo?.id ?? null;
   const er = periodoId ? await getEstadoResultados(periodoId) : null;
 
+  const moneda: Moneda = params.moneda === "USD" ? "USD" : "ARS";
+  const fechaCorte = er?.periodo.fechaFin ?? new Date();
+  const cotizacion = await getCotizacionParaFecha(fechaCorte);
+  const tcParaUsd =
+    moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
+
   const periodoOptions: PeriodoOption[] = periodos.map((p) => ({
     id: p.id,
     codigo: p.codigo,
@@ -81,6 +97,7 @@ export default async function EstadoResultadosPage({
           periodos={periodoOptions}
           selectedPeriodoId={periodoId !== null ? String(periodoId) : ""}
         />
+        <MonedaToggle current={moneda} tcInfo={tcInfo} />
       </div>
 
       {er ? (
@@ -94,6 +111,7 @@ export default async function EstadoResultadosPage({
               periodoIdForLibroMayor={er.periodo.id}
               totalLabel="Total Ingresos"
               totalValue={er.totalIngresos.toFixed(2)}
+              tcParaUsd={tcParaUsd}
             />
           </Card>
 
@@ -106,6 +124,7 @@ export default async function EstadoResultadosPage({
               periodoIdForLibroMayor={er.periodo.id}
               totalLabel="Total Egresos"
               totalValue={er.totalEgresos.toFixed(2)}
+              tcParaUsd={tcParaUsd}
             />
           </Card>
 
@@ -127,7 +146,7 @@ export default async function EstadoResultadosPage({
                 signo === "zero" && "text-muted-foreground",
               )}
             >
-              {fmtMoney(resultadoStr)}
+              {fmtMoney(convertirAUsd(resultadoStr, tcParaUsd))}
             </span>
           </Card>
         </>

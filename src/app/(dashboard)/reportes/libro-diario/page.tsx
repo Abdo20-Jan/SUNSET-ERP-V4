@@ -1,14 +1,17 @@
 import { db } from "@/lib/db";
 import { getLibroDiario } from "@/lib/services/reportes";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { PeriodoEstado } from "@/generated/prisma/client";
 import { Card } from "@/components/ui/card";
+import { convertirAUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 import { PeriodoSelect, type PeriodoOption } from "../_components/periodo-select";
+import { MonedaToggle, type Moneda } from "../_components/moneda-toggle";
 import { fmtMoney } from "../_components/money";
 import { DiarioList, type SerializedAsientoDiario } from "./diario-list";
 
-type SearchParams = Promise<{ periodoId?: string }>;
+type SearchParams = Promise<{ periodoId?: string; moneda?: string }>;
 
 function parsePeriodoId(value: string | undefined): number | null {
   if (!value) return null;
@@ -49,6 +52,19 @@ export default async function LibroDiarioPage({
 
   const periodoId = periodoIdFromUrl ?? defaultPeriodo?.id ?? null;
   const diario = periodoId ? await getLibroDiario(periodoId) : null;
+
+  const moneda: Moneda = params.moneda === "USD" ? "USD" : "ARS";
+  const fechaCorte = diario?.periodo.fechaFin ?? new Date();
+  const cotizacion = await getCotizacionParaFecha(fechaCorte);
+  const tcParaUsd =
+    moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   const periodoOptions: PeriodoOption[] = periodos.map((p) => ({
     id: p.id,
@@ -96,6 +112,7 @@ export default async function LibroDiarioPage({
           periodos={periodoOptions}
           selectedPeriodoId={periodoId !== null ? String(periodoId) : ""}
         />
+        <MonedaToggle current={moneda} tcInfo={tcInfo} />
       </div>
 
       {diario ? (
@@ -115,7 +132,7 @@ export default async function LibroDiarioPage({
                   !cuadra && "text-destructive",
                 )}
               >
-                {fmtMoney(diario.totalDebe.toFixed(2))}
+                {fmtMoney(convertirAUsd(diario.totalDebe.toFixed(2), tcParaUsd))}
               </span>
             </div>
             <div className="flex flex-col gap-0.5">
@@ -126,7 +143,7 @@ export default async function LibroDiarioPage({
                   !cuadra && "text-destructive",
                 )}
               >
-                {fmtMoney(diario.totalHaber.toFixed(2))}
+                {fmtMoney(convertirAUsd(diario.totalHaber.toFixed(2), tcParaUsd))}
               </span>
             </div>
             <div className="ml-auto text-sm">
@@ -141,7 +158,7 @@ export default async function LibroDiarioPage({
               )}
             </div>
           </Card>
-          <DiarioList asientos={serializedAsientos} />
+          <DiarioList asientos={serializedAsientos} tcParaUsd={tcParaUsd} />
         </>
       ) : (
         <Card className="py-12">

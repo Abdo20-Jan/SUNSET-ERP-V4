@@ -19,6 +19,8 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
+import { convertirAUsd } from "@/lib/format";
+
 import { fmtMoney } from "../_components/money";
 
 export type SerializedLineaDiario = {
@@ -51,9 +53,16 @@ const ORIGEN_VARIANT: Record<AsientoOrigen, "default" | "secondary" | "outline">
     AJUSTE: "outline",
   };
 
-function AsientoCard({ asiento }: { asiento: SerializedAsientoDiario }) {
+function AsientoCard({
+  asiento,
+  tcParaUsd,
+}: {
+  asiento: SerializedAsientoDiario;
+  tcParaUsd?: string | null;
+}) {
   const [open, setOpen] = useState(false);
   const cuadra = asiento.totalDebe === asiento.totalHaber;
+  const fmt = (v: string) => fmtMoney(convertirAUsd(v, tcParaUsd));
 
   return (
     <Card size="sm" className="py-0">
@@ -84,7 +93,7 @@ function AsientoCard({ asiento }: { asiento: SerializedAsientoDiario }) {
             !cuadra && "text-destructive",
           )}
         >
-          {fmtMoney(asiento.totalDebe)}
+          {fmt(asiento.totalDebe)}
         </span>
         <span
           className={cn(
@@ -92,7 +101,7 @@ function AsientoCard({ asiento }: { asiento: SerializedAsientoDiario }) {
             !cuadra && "text-destructive",
           )}
         >
-          {fmtMoney(asiento.totalHaber)}
+          {fmt(asiento.totalHaber)}
         </span>
       </button>
       {open ? (
@@ -118,10 +127,10 @@ function AsientoCard({ asiento }: { asiento: SerializedAsientoDiario }) {
                     {l.descripcion ?? "—"}
                   </TableCell>
                   <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
-                    {fmtMoney(l.debe)}
+                    {fmt(l.debe)}
                   </TableCell>
                   <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
-                    {fmtMoney(l.haber)}
+                    {fmt(l.haber)}
                   </TableCell>
                 </TableRow>
               ))}
@@ -143,8 +152,10 @@ function AsientoCard({ asiento }: { asiento: SerializedAsientoDiario }) {
 
 export function DiarioList({
   asientos,
+  tcParaUsd,
 }: {
   asientos: SerializedAsientoDiario[];
+  tcParaUsd?: string | null;
 }) {
   if (asientos.length === 0) {
     return (
@@ -158,7 +169,7 @@ export function DiarioList({
   return (
     <div className="flex flex-col gap-2">
       {asientos.map((a) => (
-        <AsientoCard key={a.id} asiento={a} />
+        <AsientoCard key={a.id} asiento={a} tcParaUsd={tcParaUsd} />
       ))}
     </div>
   );

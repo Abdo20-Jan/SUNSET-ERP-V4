@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  ChartLineData01Icon,
   TireIcon,
   TruckDeliveryIcon,
   UserGroupIcon,
@@ -11,13 +12,19 @@ import { db } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
 
 export default async function MaestrosPage() {
-  const [clientesCount, proveedoresCount, productosCount, depositosCount] =
-    await Promise.all([
-      db.cliente.count(),
-      db.proveedor.count(),
-      db.producto.count(),
-      db.deposito.count(),
-    ]);
+  const [
+    clientesCount,
+    proveedoresCount,
+    productosCount,
+    depositosCount,
+    cotizacionesCount,
+  ] = await Promise.all([
+    db.cliente.count(),
+    db.proveedor.count(),
+    db.producto.count(),
+    db.deposito.count(),
+    db.cotizacion.count(),
+  ]);
 
   const sections = [
     {
@@ -47,6 +54,13 @@ export default async function MaestrosPage() {
       title: "Depósitos",
       description: "Ubicaciones físicas de inventario",
       count: depositosCount,
+    },
+    {
+      href: "/maestros/cotizaciones",
+      icon: ChartLineData01Icon,
+      title: "Cotizaciones USD",
+      description: "Tipo de cambio del día (1 USD = X ARS) para reportes",
+      count: cotizacionesCount,
     },
   ] as const;
 

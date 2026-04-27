@@ -3,9 +3,11 @@ import { format } from "date-fns";
 
 import { db } from "@/lib/db";
 import { getLibroMayor, LibroMayorError } from "@/lib/services/reportes";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { PeriodoEstado } from "@/generated/prisma/client";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { convertirAUsd } from "@/lib/format";
 import {
   Table,
   TableBody,
@@ -17,9 +19,14 @@ import {
 } from "@/components/ui/table";
 
 import { fmtMoney } from "../_components/money";
+import { MonedaToggle, type Moneda } from "../_components/moneda-toggle";
 import { MayorFilters, type PeriodoOption } from "./mayor-filters";
 
-type SearchParams = Promise<{ periodoId?: string; cuentaId?: string }>;
+type SearchParams = Promise<{
+  periodoId?: string;
+  cuentaId?: string;
+  moneda?: string;
+}>;
 
 function parseId(value: string | undefined): number | null {
   if (!value) return null;
@@ -86,6 +93,20 @@ export default async function LibroMayorPage({
     estado: p.estado,
   }));
 
+  const moneda: Moneda = params.moneda === "USD" ? "USD" : "ARS";
+  const fechaCorte = mayor?.periodo.fechaFin ?? new Date();
+  const cotizacion = await getCotizacionParaFecha(fechaCorte);
+  const tcParaUsd =
+    moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
+  const fmt = (v: string) => fmtMoney(convertirAUsd(v, tcParaUsd));
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
@@ -95,12 +116,15 @@ export default async function LibroMayorPage({
         </p>
       </div>
 
-      <MayorFilters
-        periodos={periodoOptions}
-        cuentas={cuentas}
-        selectedPeriodoId={periodoId !== null ? String(periodoId) : ""}
-        selectedCuentaId={cuentaId}
-      />
+      <div className="flex flex-col gap-3">
+        <MayorFilters
+          periodos={periodoOptions}
+          cuentas={cuentas}
+          selectedPeriodoId={periodoId !== null ? String(periodoId) : ""}
+          selectedCuentaId={cuentaId}
+        />
+        <MonedaToggle current={moneda} tcInfo={tcInfo} />
+      </div>
 
       {errorMessage ? (
         <Card className="py-6">
@@ -162,13 +186,13 @@ export default async function LibroMayorPage({
                       ) : null}
                     </TableCell>
                     <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
-                      {fmtMoney(l.debe.toFixed(2))}
+                      {fmt(l.debe.toFixed(2))}
                     </TableCell>
                     <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
-                      {fmtMoney(l.haber.toFixed(2))}
+                      {fmt(l.haber.toFixed(2))}
                     </TableCell>
                     <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
-                      {fmtMoney(l.saldoAcumulado.toFixed(2))}
+                      {fmt(l.saldoAcumulado.toFixed(2))}
                     </TableCell>
                   </TableRow>
                 ))
@@ -181,13 +205,13 @@ export default async function LibroMayorPage({
                     Totales
                   </TableCell>
                   <TableCell className="py-3 text-right font-mono text-sm tabular-nums">
-                    {fmtMoney(mayor.totalDebe.toFixed(2))}
+                    {fmt(mayor.totalDebe.toFixed(2))}
                   </TableCell>
                   <TableCell className="py-3 text-right font-mono text-sm tabular-nums">
-                    {fmtMoney(mayor.totalHaber.toFixed(2))}
+                    {fmt(mayor.totalHaber.toFixed(2))}
                   </TableCell>
                   <TableCell className="py-3 text-right font-mono text-sm font-bold tabular-nums">
-                    {fmtMoney(mayor.saldoFinal.toFixed(2))}
+                    {fmt(mayor.saldoFinal.toFixed(2))}
                   </TableCell>
                 </TableRow>
               </TableFooter>

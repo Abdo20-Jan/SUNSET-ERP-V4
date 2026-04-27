@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { convertirAUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 import { fmtMoney } from "./money";
@@ -40,7 +41,13 @@ type Props = {
   totalSaldoInicial?: string;
   /** Mostrar columna "Saldo Inicial" antes de Debe (para Balance General con rango) */
   showSaldoInicial?: boolean;
+  /** Si está presente, divide cada importe ARS por este TC para mostrar en USD. */
+  tcParaUsd?: string | null;
 };
+
+function fmt(value: string, tc: string | null | undefined): string {
+  return fmtMoney(convertirAUsd(value, tc));
+}
 
 const colCodigo: ColumnDef<SerializedTreeNode> = {
   id: "codigo",
@@ -101,55 +108,71 @@ const colNombre: ColumnDef<SerializedTreeNode> = {
   },
 };
 
-const colSaldoInicial: ColumnDef<SerializedTreeNode> = {
-  id: "saldoInicial",
-  header: () => <span className="block text-right">Saldo Inicial</span>,
-  cell: ({ row }) => (
-    <span
-      className={cn(
-        "block text-right font-mono text-xs tabular-nums",
-        row.original.tipo === "SINTETICA" && "font-semibold",
-      )}
-    >
-      {fmtMoney(row.original.saldoInicial)}
-    </span>
-  ),
-};
+function makeColSaldoInicial(
+  tc: string | null | undefined,
+): ColumnDef<SerializedTreeNode> {
+  return {
+    id: "saldoInicial",
+    header: () => <span className="block text-right">Saldo Inicial</span>,
+    cell: ({ row }) => (
+      <span
+        className={cn(
+          "block text-right font-mono text-xs tabular-nums",
+          row.original.tipo === "SINTETICA" && "font-semibold",
+        )}
+      >
+        {fmt(row.original.saldoInicial, tc)}
+      </span>
+    ),
+  };
+}
 
-const colDebe: ColumnDef<SerializedTreeNode> = {
-  id: "debe",
-  header: () => <span className="block text-right">Debe</span>,
-  cell: ({ row }) => (
-    <span className="block text-right font-mono text-xs tabular-nums">
-      {fmtMoney(row.original.debe)}
-    </span>
-  ),
-};
+function makeColDebe(
+  tc: string | null | undefined,
+): ColumnDef<SerializedTreeNode> {
+  return {
+    id: "debe",
+    header: () => <span className="block text-right">Debe</span>,
+    cell: ({ row }) => (
+      <span className="block text-right font-mono text-xs tabular-nums">
+        {fmt(row.original.debe, tc)}
+      </span>
+    ),
+  };
+}
 
-const colHaber: ColumnDef<SerializedTreeNode> = {
-  id: "haber",
-  header: () => <span className="block text-right">Haber</span>,
-  cell: ({ row }) => (
-    <span className="block text-right font-mono text-xs tabular-nums">
-      {fmtMoney(row.original.haber)}
-    </span>
-  ),
-};
+function makeColHaber(
+  tc: string | null | undefined,
+): ColumnDef<SerializedTreeNode> {
+  return {
+    id: "haber",
+    header: () => <span className="block text-right">Haber</span>,
+    cell: ({ row }) => (
+      <span className="block text-right font-mono text-xs tabular-nums">
+        {fmt(row.original.haber, tc)}
+      </span>
+    ),
+  };
+}
 
-const colSaldo: ColumnDef<SerializedTreeNode> = {
-  id: "saldo",
-  header: () => <span className="block text-right">Saldo</span>,
-  cell: ({ row }) => (
-    <span
-      className={cn(
-        "block text-right font-mono text-xs tabular-nums",
-        row.original.tipo === "SINTETICA" && "font-semibold",
-      )}
-    >
-      {fmtMoney(row.original.saldo)}
-    </span>
-  ),
-};
+function makeColSaldo(
+  tc: string | null | undefined,
+): ColumnDef<SerializedTreeNode> {
+  return {
+    id: "saldo",
+    header: () => <span className="block text-right">Saldo</span>,
+    cell: ({ row }) => (
+      <span
+        className={cn(
+          "block text-right font-mono text-xs tabular-nums",
+          row.original.tipo === "SINTETICA" && "font-semibold",
+        )}
+      >
+        {fmt(row.original.saldo, tc)}
+      </span>
+    ),
+  };
+}
 
 export function CuentaTreeTable({
   data,
@@ -158,7 +181,12 @@ export function CuentaTreeTable({
   totalValue,
   totalSaldoInicial,
   showSaldoInicial = false,
+  tcParaUsd,
 }: Props) {
+  const colSaldoInicial = makeColSaldoInicial(tcParaUsd);
+  const colDebe = makeColDebe(tcParaUsd);
+  const colHaber = makeColHaber(tcParaUsd);
+  const colSaldo = makeColSaldo(tcParaUsd);
   const columns = showSaldoInicial
     ? [colCodigo, colNombre, colSaldoInicial, colDebe, colHaber, colSaldo]
     : [colCodigo, colNombre, colDebe, colHaber, colSaldo];
@@ -226,12 +254,14 @@ export function CuentaTreeTable({
             </TableCell>
             {showSaldoInicial ? (
               <TableCell className="py-3 text-right font-mono text-sm font-bold tabular-nums">
-                {totalSaldoInicial != null ? fmtMoney(totalSaldoInicial) : ""}
+                {totalSaldoInicial != null
+                  ? fmt(totalSaldoInicial, tcParaUsd)
+                  : ""}
               </TableCell>
             ) : null}
             <TableCell colSpan={2} />
             <TableCell className="py-3 text-right font-mono text-sm font-bold tabular-nums">
-              {fmtMoney(totalValue)}
+              {fmt(totalValue, tcParaUsd)}
             </TableCell>
           </TableRow>
         ) : null}

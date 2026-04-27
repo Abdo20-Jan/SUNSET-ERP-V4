@@ -1,15 +1,22 @@
 import { getBalanceGeneralByFecha } from "@/lib/services/reportes";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { convertirAUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 import { fmtMoney } from "../_components/money";
 import { CuentaTreeTable } from "../_components/cuenta-tree-table";
 import { serializeTreeNode } from "../_components/cuenta-tree-node";
+import { MonedaToggle, type Moneda } from "../_components/moneda-toggle";
 
 import { BalanceFechaFilter } from "./balance-fecha-filter";
 
-type SearchParams = Promise<{ desde?: string; hasta?: string }>;
+type SearchParams = Promise<{
+  desde?: string;
+  hasta?: string;
+  moneda?: string;
+}>;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -43,8 +50,23 @@ export default async function BalanceGeneralPage({
   const fechaDesde = parseDate(desdeStr);
   const fechaHasta = endOfDay(hastaStr);
 
-  const bg = await getBalanceGeneralByFecha({ fechaDesde, fechaHasta });
+  const moneda: Moneda = params.moneda === "USD" ? "USD" : "ARS";
+
+  const [bg, cotizacion] = await Promise.all([
+    getBalanceGeneralByFecha({ fechaDesde, fechaHasta }),
+    getCotizacionParaFecha(fechaHasta ?? new Date()),
+  ]);
+
+  const tcParaUsd =
+    moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
   const showSaldoInicial = Boolean(fechaDesde);
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   const titulo =
     bg.contexto.tipo === "fecha"
@@ -78,10 +100,13 @@ export default async function BalanceGeneralPage({
         )}
       </div>
 
-      <BalanceFechaFilter
-        initialDesde={desdeStr}
-        initialHasta={hastaStr}
-      />
+      <div className="flex flex-col gap-3">
+        <BalanceFechaFilter
+          initialDesde={desdeStr}
+          initialHasta={hastaStr}
+        />
+        <MonedaToggle current={moneda} tcInfo={tcInfo} />
+      </div>
 
       <Card className="py-0">
         <CardHeader className="border-b py-4">
@@ -93,6 +118,7 @@ export default async function BalanceGeneralPage({
           totalLabel="Total Activo"
           totalValue={bg.totalActivo.toFixed(2)}
           totalSaldoInicial={bg.totalSaldoInicialActivo.toFixed(2)}
+          tcParaUsd={tcParaUsd}
         />
       </Card>
 
@@ -106,6 +132,7 @@ export default async function BalanceGeneralPage({
           totalLabel="Total Pasivo"
           totalValue={bg.totalPasivo.toFixed(2)}
           totalSaldoInicial={bg.totalSaldoInicialPasivo.toFixed(2)}
+          tcParaUsd={tcParaUsd}
         />
       </Card>
 
@@ -119,6 +146,7 @@ export default async function BalanceGeneralPage({
           totalLabel="Total Patrimonio"
           totalValue={bg.totalPatrimonio.toFixed(2)}
           totalSaldoInicial={bg.totalSaldoInicialPatrimonio.toFixed(2)}
+          tcParaUsd={tcParaUsd}
         />
       </Card>
 
@@ -126,25 +154,30 @@ export default async function BalanceGeneralPage({
         <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <Summary
             label="Total Activo"
-            value={fmtMoney(bg.totalActivo.toFixed(2))}
+            value={fmtMoney(convertirAUsd(bg.totalActivo.toFixed(2), tcParaUsd))}
           />
           <Summary
             label="Total Pasivo"
-            value={fmtMoney(bg.totalPasivo.toFixed(2))}
+            value={fmtMoney(convertirAUsd(bg.totalPasivo.toFixed(2), tcParaUsd))}
           />
           <Summary
             label="Patrimonio Ajustado"
-            value={fmtMoney(bg.totalPatrimonioAjustado.toFixed(2))}
+            value={fmtMoney(
+              convertirAUsd(bg.totalPatrimonioAjustado.toFixed(2), tcParaUsd),
+            )}
             hint={
               bg.resultadoEjercicio.isZero()
                 ? undefined
-                : `incluye resultado del ejercicio ${fmtMoney(bg.resultadoEjercicio.toFixed(2))}`
+                : `incluye resultado del ejercicio ${fmtMoney(convertirAUsd(bg.resultadoEjercicio.toFixed(2), tcParaUsd))}`
             }
           />
           <Summary
             label="Pasivo + Patrimonio"
             value={fmtMoney(
-              bg.totalPasivo.plus(bg.totalPatrimonioAjustado).toFixed(2),
+              convertirAUsd(
+                bg.totalPasivo.plus(bg.totalPatrimonioAjustado).toFixed(2),
+                tcParaUsd,
+              ),
             )}
             emphasis={bg.cuadra ? "positive" : "negative"}
           />
