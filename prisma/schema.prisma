@@ -663,7 +663,10 @@ model ItemVenta {
   ventaId        String
   productoId     String
   cantidad       Int
-  precioUnitario Decimal @db.Decimal(18, 2)
+  // Hasta 4 decimales — útil en mayoristas donde redondear el unitario
+  // a 2 decimales distorsiona el total final. subtotal/iva/total siguen
+  // en 2 decimales (ya redondeado al asentar contabilidad).
+  precioUnitario Decimal @db.Decimal(18, 4)
   subtotal       Decimal @db.Decimal(18, 2)
   iva            Decimal @db.Decimal(18, 2)
   total          Decimal @db.Decimal(18, 2)

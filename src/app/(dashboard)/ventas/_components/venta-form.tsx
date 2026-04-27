@@ -52,6 +52,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 const moneyRegex = /^\d+(\.\d{1,2})?$/;
+const precioUnitarioRegex = /^\d+(\.\d{1,4})?$/;
 const rateRegex = /^\d+(\.\d{1,6})?$/;
 
 const CONDICION_VALUES = [
@@ -89,7 +90,9 @@ const formSchema = z
         z.object({
           productoId: z.string().uuid("Seleccione un producto"),
           cantidad: z.coerce.number().positive("Cantidad > 0"),
-          precioUnitario: z.string().regex(moneyRegex, "Precio inválido"),
+          precioUnitario: z
+            .string()
+            .regex(precioUnitarioRegex, "Precio inválido (máx. 4 decimales)"),
           ivaPorcentaje: z
             .string()
             .regex(/^\d+(\.\d{1,2})?$/, "IVA% inválido"),
@@ -721,6 +724,26 @@ function ItemRow({
 
   const productoSel = productosFull.find((p) => p.id === productoId);
 
+  // Rentabilidad: usa costo promedio del producto.
+  // ganancia = subtotal - (costo × cantidad). margen% = ganancia / subtotal × 100.
+  const rentabilidad = useMemo(() => {
+    if (!productoSel) return null;
+    const costo = new Decimal(productoSel.costoPromedio || "0");
+    if (costo.lte(0)) return null;
+    const qty = Number(cantidad ?? 0) || 0;
+    if (qty <= 0) return null;
+    const costoTotal = costo.times(qty);
+    const ganancia = subtotal.minus(costoTotal);
+    const margenPct = subtotal.gt(0)
+      ? ganancia.dividedBy(subtotal).times(100).toDecimalPlaces(2)
+      : new Decimal(0);
+    return {
+      ganancia: ganancia.toDecimalPlaces(2),
+      margenPct,
+      costoTotal: costoTotal.toDecimalPlaces(2),
+    };
+  }, [productoSel, subtotal, cantidad]);
+
   return (
     <div className="grid grid-cols-1 items-end gap-3 rounded-lg border bg-muted/20 p-3 md:grid-cols-12">
       <div className="md:col-span-5">
@@ -785,6 +808,25 @@ function ItemRow({
         <p className="font-mono text-xs text-muted-foreground tabular-nums">
           {fmtMoney(subtotal.toString())} + IVA {fmtMoney(iva.toString())}
         </p>
+        {rentabilidad ? (
+          <p
+            className={
+              "mt-1 font-mono text-xs tabular-nums " +
+              (rentabilidad.ganancia.gte(0)
+                ? "text-emerald-700 dark:text-emerald-400"
+                : "text-destructive")
+            }
+            title={`Costo total: ${fmtMoney(rentabilidad.costoTotal.toString())}`}
+          >
+            Margen {rentabilidad.margenPct.toFixed(2)}% ·{" "}
+            {rentabilidad.ganancia.gte(0) ? "+" : ""}
+            {fmtMoney(rentabilidad.ganancia.toString())}
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Margen — (sin costo)
+          </p>
+        )}
       </div>
 
       <div className="flex justify-end md:col-span-1">

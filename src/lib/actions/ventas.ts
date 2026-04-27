@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { money, sumMoney, toDecimal } from "@/lib/decimal";
+import {
+  money,
+  precioUnitario as toPrecioUnitario,
+  sumMoney,
+  toDecimal,
+} from "@/lib/decimal";
 import {
   AsientoError,
   anularAsiento,
@@ -44,6 +49,7 @@ export type ProductoParaVenta = {
   codigo: string;
   nombre: string;
   precioVenta: string;
+  costoPromedio: string;
 };
 
 export async function listarVentas(): Promise<VentaRow[]> {
@@ -89,13 +95,20 @@ export async function listarProductosParaVenta(): Promise<ProductoParaVenta[]> {
   const rows = await db.producto.findMany({
     where: { activo: true },
     orderBy: { codigo: "asc" },
-    select: { id: true, codigo: true, nombre: true, precioVenta: true },
+    select: {
+      id: true,
+      codigo: true,
+      nombre: true,
+      precioVenta: true,
+      costoPromedio: true,
+    },
   });
   return rows.map((p) => ({
     id: p.id,
     codigo: p.codigo,
     nombre: p.nombre,
     precioVenta: p.precioVenta.toString(),
+    costoPromedio: p.costoPromedio.toString(),
   }));
 }
 
@@ -183,12 +196,17 @@ export async function generarNumeroVenta(): Promise<string> {
 }
 
 const moneyRegex = /^\d+(\.\d{1,2})?$/;
+// Precio unitario admite hasta 4 decimales — útil para ventas de gran
+// volumen donde el redondeo a 2 decimales del unitario distorsiona el
+// total final (ej: 295519.2313 × 250 = 73.879.807,82 vs 295519.23 × 250
+// = 73.879.807,50 — diferencia de 32 centavos por unidad).
+const precioUnitarioRegex = /^\d+(\.\d{1,4})?$/;
 const rateRegex = /^\d+(\.\d{1,6})?$/;
 
 const itemSchema = z.object({
   productoId: z.string().uuid("Seleccione un producto"),
   cantidad: z.number().int().positive("Cantidad > 0"),
-  precioUnitario: z.string().regex(moneyRegex, "Precio inválido"),
+  precioUnitario: z.string().regex(precioUnitarioRegex, "Precio inválido (máx. 4 decimales)"),
   ivaPorcentaje: z.string().regex(/^\d+(\.\d{1,2})?$/, "IVA% inválido"),
 });
 
@@ -318,7 +336,7 @@ export async function guardarVentaAction(
           ventaId: id,
           productoId: it.productoId,
           cantidad: it.cantidad,
-          precioUnitario: money(it.precioUnitario),
+          precioUnitario: toPrecioUnitario(it.precioUnitario),
           subtotal: money(it.subtotal),
           iva: money(it.iva),
           total: money(it.total),

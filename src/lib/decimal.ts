@@ -33,4 +33,11 @@ export function money(value: MoneyInput): Prisma.Decimal {
   );
 }
 
+/** Precio unitario con hasta 4 decimales (vs money() que redondea a 2). */
+export function precioUnitario(value: MoneyInput): Prisma.Decimal {
+  return new Prisma.Decimal(
+    toDecimal(value).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4),
+  );
+}
+
 export { Decimal };
