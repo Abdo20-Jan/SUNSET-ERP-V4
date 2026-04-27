@@ -27,7 +27,10 @@ export type {
   BalanceGeneralContexto,
 } from "./reportes/balance-general";
 
-export { getEstadoResultados } from "./reportes/estado-resultados";
+export {
+  getEstadoResultados,
+  getEstadoResultadosByFecha,
+} from "./reportes/estado-resultados";
 export type { EstadoResultadosResult } from "./reportes/estado-resultados";
 
 export { getFlujoCaja } from "./reportes/flujo-caja";

@@ -1,19 +1,39 @@
 import Link from "next/link";
 
-import { db } from "@/lib/db";
 import { getBalanceSumasYSaldos } from "@/lib/services/balance-sumas-saldos";
-import { PeriodoEstado } from "@/generated/prisma/client";
 import { Card } from "@/components/ui/card";
+import { DateRangeFilter } from "@/components/date-range-filter";
 
-import { BalanceFilters, type PeriodoOption } from "./balance-filters";
 import { BalanceTreeTable } from "./balance-tree-table";
 
-type SearchParams = Promise<{ periodoId?: string }>;
+type SearchParams = Promise<{
+  desde?: string;
+  hasta?: string;
+}>;
 
-function parsePeriodoId(value: string | undefined): number | null {
-  if (!value) return null;
-  const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseDate(value: string | undefined): Date | undefined {
+  if (!value || !DATE_RE.test(value)) return undefined;
+  const d = new Date(value + "T00:00:00Z");
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function endOfDay(value: string | undefined): Date | undefined {
+  if (!value || !DATE_RE.test(value)) return undefined;
+  const d = new Date(value + "T23:59:59.999Z");
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function firstOfMonthIso(): string {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1)
+    .toISOString()
+    .slice(0, 10);
 }
 
 export default async function BalancePage({
@@ -23,38 +43,21 @@ export default async function BalancePage({
 }) {
   const params = await searchParams;
 
-  const periodos = await db.periodoContable.findMany({
-    orderBy: { codigo: "desc" },
-    select: {
-      id: true,
-      codigo: true,
-      estado: true,
-      fechaInicio: true,
-      fechaFin: true,
-    },
-  });
+  const desdeStr = params.desde ?? firstOfMonthIso();
+  const hastaStr = params.hasta ?? todayIso();
+  const fechaDesde = parseDate(desdeStr);
+  const fechaHasta = endOfDay(hastaStr);
 
-  const now = new Date();
-  const periodoIdFromUrl = parsePeriodoId(params.periodoId);
-  const defaultPeriodo =
-    periodos.find(
-      (p) =>
-        p.estado === PeriodoEstado.ABIERTO &&
-        p.fechaInicio <= now &&
-        p.fechaFin >= now,
-    ) ??
-    periodos.find((p) => p.estado === PeriodoEstado.ABIERTO) ??
-    periodos[0] ??
-    null;
+  const balance = await getBalanceSumasYSaldos({ fechaDesde, fechaHasta });
 
-  const periodoId = periodoIdFromUrl ?? defaultPeriodo?.id ?? null;
-  const balance = periodoId ? await getBalanceSumasYSaldos(periodoId) : null;
-
-  const periodoOptions: PeriodoOption[] = periodos.map((p) => ({
-    id: p.id,
-    codigo: p.codigo,
-    estado: p.estado,
-  }));
+  const rangoLabel =
+    fechaDesde && fechaHasta
+      ? `Del ${desdeStr} al ${hastaStr}`
+      : fechaHasta
+        ? `Hasta ${hastaStr}`
+        : fechaDesde
+          ? `Desde ${desdeStr}`
+          : "Histórico completo";
 
   return (
     <div className="flex flex-col gap-6">
@@ -62,11 +65,7 @@ export default async function BalancePage({
         <h1 className="text-2xl font-semibold tracking-tight">
           Balance de Sumas y Saldos
         </h1>
-        <p className="text-sm text-muted-foreground">
-          {balance
-            ? `Período ${balance.periodo.codigo} · ${balance.periodo.nombre}`
-            : "Seleccioná un período."}
-        </p>
+        <p className="text-sm text-muted-foreground">{rangoLabel}</p>
         <p className="text-xs text-muted-foreground">
           Balancete (trial balance) — incluye{" "}
           <strong>todas las cuentas (1 a 5)</strong> para verificar que el
@@ -89,22 +88,11 @@ export default async function BalancePage({
         </p>
       </div>
 
-      <BalanceFilters
-        periodos={periodoOptions}
-        selectedPeriodoId={periodoId !== null ? String(periodoId) : ""}
-      />
+      <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
 
-      {balance ? (
-        <Card className="py-0">
-          <BalanceTreeTable root={balance.root} />
-        </Card>
-      ) : (
-        <Card className="py-12">
-          <p className="text-center text-sm text-muted-foreground">
-            No hay períodos contables disponibles.
-          </p>
-        </Card>
-      )}
+      <Card className="py-0">
+        <BalanceTreeTable root={balance.root} />
+      </Card>
     </div>
   );
 }

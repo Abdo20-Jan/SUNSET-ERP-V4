@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import type { Moneda, PeriodoEstado } from "@/generated/prisma/client";
+import type { Moneda } from "@/generated/prisma/client";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -21,12 +21,6 @@ const TIPO_LABELS: Record<string, string> = {
   TRANSFERENCIA: "TRANSFERENCIA",
 };
 
-export type PeriodoOption = {
-  id: number;
-  codigo: string;
-  estado: PeriodoEstado;
-};
-
 export type CuentaBancariaOption = {
   id: string;
   banco: string;
@@ -35,17 +29,13 @@ export type CuentaBancariaOption = {
 };
 
 type Props = {
-  periodos: PeriodoOption[];
   cuentas: CuentaBancariaOption[];
-  selectedPeriodoId: string;
   selectedCuentaId: string;
   selectedTipo: string;
 };
 
 export function MovimientosFilters({
-  periodos,
   cuentas,
-  selectedPeriodoId,
   selectedCuentaId,
   selectedTipo,
 }: Props) {
@@ -78,15 +68,10 @@ export function MovimientosFilters({
   };
 
   const hasFilters =
-    searchParams.has("periodoId") ||
+    searchParams.has("desde") ||
+    searchParams.has("hasta") ||
     searchParams.has("cuentaId") ||
     searchParams.has("tipo");
-
-  const periodoLabel = (v: string) => {
-    if (v === "all") return "Todos";
-    const p = periodos.find((p) => String(p.id) === v);
-    return p ? p.codigo : v;
-  };
 
   const cuentaLabel = (v: string) => {
     if (v === "all") return "Todas";
@@ -97,35 +82,10 @@ export function MovimientosFilters({
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs text-muted-foreground">Período</Label>
-        <Select
-          value={selectedPeriodoId}
-          onValueChange={(v) => updateParam("periodoId", v)}
-        >
-          <SelectTrigger className="min-w-40">
-            <SelectValue>{(value) => periodoLabel(value as string)}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            {periodos.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.codigo}
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {p.estado === "ABIERTO" ? "abierto" : "cerrado"}
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
         <Label className="text-xs text-muted-foreground">Cuenta bancaria</Label>
         <Select
           value={selectedCuentaId}
-          onValueChange={(v) =>
-            updateParam("cuentaId", v === "all" ? null : v)
-          }
+          onValueChange={(v) => updateParam("cuentaId", v === "all" ? null : v)}
         >
           <SelectTrigger className="min-w-56">
             <SelectValue>{(value) => cuentaLabel(value as string)}</SelectValue>
@@ -148,9 +108,7 @@ export function MovimientosFilters({
         <Label className="text-xs text-muted-foreground">Tipo</Label>
         <Select
           value={selectedTipo}
-          onValueChange={(v) =>
-            updateParam("tipo", v === "all" ? null : v)
-          }
+          onValueChange={(v) => updateParam("tipo", v === "all" ? null : v)}
         >
           <SelectTrigger className="min-w-44">
             <SelectValue>

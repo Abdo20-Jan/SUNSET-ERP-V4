@@ -32,12 +32,9 @@ export type LibroDiarioAsiento = {
 };
 
 export type LibroDiarioResult = {
-  periodo: {
-    id: number;
-    codigo: string;
-    nombre: string;
-    fechaInicio: Date;
-    fechaFin: Date;
+  rango: {
+    fechaDesde: Date | null;
+    fechaHasta: Date | null;
   };
   asientos: LibroDiarioAsiento[];
   totalAsientos: number;
@@ -45,25 +42,22 @@ export type LibroDiarioResult = {
   totalHaber: Decimal;
 };
 
-export async function getLibroDiario(
-  periodoId: number,
-): Promise<LibroDiarioResult | null> {
-  const periodo = await db.periodoContable.findUnique({
-    where: { id: periodoId },
-    select: {
-      id: true,
-      codigo: true,
-      nombre: true,
-      fechaInicio: true,
-      fechaFin: true,
-    },
-  });
-  if (!periodo) return null;
+export async function getLibroDiario(filter: {
+  fechaDesde?: Date;
+  fechaHasta?: Date;
+}): Promise<LibroDiarioResult> {
+  const fechaWhere =
+    filter.fechaDesde || filter.fechaHasta
+      ? {
+          ...(filter.fechaDesde && { gte: filter.fechaDesde }),
+          ...(filter.fechaHasta && { lte: filter.fechaHasta }),
+        }
+      : undefined;
 
   const asientos = await db.asiento.findMany({
     where: {
-      periodoId,
       estado: AsientoEstado.CONTABILIZADO,
+      ...(fechaWhere ? { fecha: fechaWhere } : {}),
     },
     orderBy: [{ fecha: "asc" }, { numero: "asc" }],
     select: {
@@ -122,7 +116,10 @@ export async function getLibroDiario(
   });
 
   return {
-    periodo,
+    rango: {
+      fechaDesde: filter.fechaDesde ?? null,
+      fechaHasta: filter.fechaHasta ?? null,
+    },
     asientos: out,
     totalAsientos: out.length,
     totalDebe: totalDebe.toDecimalPlaces(2),

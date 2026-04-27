@@ -1,26 +1,44 @@
-import { db } from "@/lib/db";
-import { getEstadoResultados } from "@/lib/services/reportes";
+import { getEstadoResultadosByFecha } from "@/lib/services/reportes";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
-import { PeriodoEstado } from "@/generated/prisma/client";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateRangeFilter } from "@/components/date-range-filter";
 import { convertirAUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-import {
-  PeriodoSelect,
-  type PeriodoOption,
-} from "../_components/periodo-select";
 import { fmtMoney, fmtSigno } from "../_components/money";
 import { CuentaTreeTable } from "../_components/cuenta-tree-table";
 import { serializeTreeNode } from "../_components/cuenta-tree-node";
 import { MonedaToggle, type Moneda } from "../_components/moneda-toggle";
 
-type SearchParams = Promise<{ periodoId?: string; moneda?: string }>;
+type SearchParams = Promise<{
+  desde?: string;
+  hasta?: string;
+  moneda?: string;
+}>;
 
-function parsePeriodoId(value: string | undefined): number | null {
-  if (!value) return null;
-  const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseDate(value: string | undefined): Date | undefined {
+  if (!value || !DATE_RE.test(value)) return undefined;
+  const d = new Date(value + "T00:00:00Z");
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function endOfDay(value: string | undefined): Date | undefined {
+  if (!value || !DATE_RE.test(value)) return undefined;
+  const d = new Date(value + "T23:59:59.999Z");
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function firstOfMonthIso(): string {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1)
+    .toISOString()
+    .slice(0, 10);
 }
 
 export default async function EstadoResultadosPage({
@@ -30,35 +48,15 @@ export default async function EstadoResultadosPage({
 }) {
   const params = await searchParams;
 
-  const periodos = await db.periodoContable.findMany({
-    orderBy: { codigo: "desc" },
-    select: {
-      id: true,
-      codigo: true,
-      estado: true,
-      fechaInicio: true,
-      fechaFin: true,
-    },
-  });
+  const desdeStr = params.desde ?? firstOfMonthIso();
+  const hastaStr = params.hasta ?? todayIso();
+  const fechaDesde = parseDate(desdeStr);
+  const fechaHasta = endOfDay(hastaStr);
 
-  const now = new Date();
-  const periodoIdFromUrl = parsePeriodoId(params.periodoId);
-  const defaultPeriodo =
-    periodos.find(
-      (p) =>
-        p.estado === PeriodoEstado.ABIERTO &&
-        p.fechaInicio <= now &&
-        p.fechaFin >= now,
-    ) ??
-    periodos.find((p) => p.estado === PeriodoEstado.ABIERTO) ??
-    periodos[0] ??
-    null;
-
-  const periodoId = periodoIdFromUrl ?? defaultPeriodo?.id ?? null;
-  const er = periodoId ? await getEstadoResultados(periodoId) : null;
+  const er = await getEstadoResultadosByFecha({ fechaDesde, fechaHasta });
 
   const moneda: Moneda = params.moneda === "USD" ? "USD" : "ARS";
-  const fechaCorte = er?.periodo.fechaFin ?? new Date();
+  const fechaCorte = fechaHasta ?? new Date();
   const cotizacion = await getCotizacionParaFecha(fechaCorte);
   const tcParaUsd =
     moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
@@ -70,14 +68,17 @@ export default async function EstadoResultadosPage({
       }
     : null;
 
-  const periodoOptions: PeriodoOption[] = periodos.map((p) => ({
-    id: p.id,
-    codigo: p.codigo,
-    estado: p.estado,
-  }));
-
-  const resultadoStr = er?.resultado.toFixed(2) ?? "0.00";
+  const resultadoStr = er.resultado.toFixed(2);
   const signo = fmtSigno(resultadoStr);
+
+  const rangoLabel =
+    fechaDesde && fechaHasta
+      ? `Del ${desdeStr} al ${hastaStr}`
+      : fechaHasta
+        ? `Hasta ${hastaStr}`
+        : fechaDesde
+          ? `Desde ${desdeStr}`
+          : "Histórico completo";
 
   return (
     <div className="flex flex-col gap-6">
@@ -85,78 +86,61 @@ export default async function EstadoResultadosPage({
         <h1 className="text-2xl font-semibold tracking-tight">
           Estado de Resultados
         </h1>
-        <p className="text-sm text-muted-foreground">
-          {er
-            ? `Período ${er.periodo.codigo} · ${er.periodo.nombre}`
-            : "Seleccioná un período."}
-        </p>
+        <p className="text-sm text-muted-foreground">{rangoLabel}</p>
       </div>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <PeriodoSelect
-          periodos={periodoOptions}
-          selectedPeriodoId={periodoId !== null ? String(periodoId) : ""}
+      <div className="flex flex-col gap-3">
+        <DateRangeFilter
+          initialDesde={desdeStr}
+          initialHasta={hastaStr}
         />
         <MonedaToggle current={moneda} tcInfo={tcInfo} />
       </div>
 
-      {er ? (
-        <>
-          <Card className="py-0">
-            <CardHeader className="border-b py-4">
-              <CardTitle className="text-base">Ingresos</CardTitle>
-            </CardHeader>
-            <CuentaTreeTable
-              data={er.ingresos.map(serializeTreeNode)}
-              periodoIdForLibroMayor={er.periodo.id}
-              totalLabel="Total Ingresos"
-              totalValue={er.totalIngresos.toFixed(2)}
-              tcParaUsd={tcParaUsd}
-            />
-          </Card>
+      <Card className="py-0">
+        <CardHeader className="border-b py-4">
+          <CardTitle className="text-base">Ingresos</CardTitle>
+        </CardHeader>
+        <CuentaTreeTable
+          data={er.ingresos.map(serializeTreeNode)}
+          totalLabel="Total Ingresos"
+          totalValue={er.totalIngresos.toFixed(2)}
+          tcParaUsd={tcParaUsd}
+        />
+      </Card>
 
-          <Card className="py-0">
-            <CardHeader className="border-b py-4">
-              <CardTitle className="text-base">Egresos</CardTitle>
-            </CardHeader>
-            <CuentaTreeTable
-              data={er.egresos.map(serializeTreeNode)}
-              periodoIdForLibroMayor={er.periodo.id}
-              totalLabel="Total Egresos"
-              totalValue={er.totalEgresos.toFixed(2)}
-              tcParaUsd={tcParaUsd}
-            />
-          </Card>
+      <Card className="py-0">
+        <CardHeader className="border-b py-4">
+          <CardTitle className="text-base">Egresos</CardTitle>
+        </CardHeader>
+        <CuentaTreeTable
+          data={er.egresos.map(serializeTreeNode)}
+          totalLabel="Total Egresos"
+          totalValue={er.totalEgresos.toFixed(2)}
+          tcParaUsd={tcParaUsd}
+        />
+      </Card>
 
-          <Card className="flex-row items-center gap-6 px-6 py-6">
-            <div className="flex flex-col gap-1">
-              <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                Resultado del Período
-              </span>
-              <span className="text-xs text-muted-foreground">
-                Ingresos − Egresos
-              </span>
-            </div>
-            <span
-              className={cn(
-                "ml-auto font-mono text-3xl font-bold tabular-nums",
-                signo === "positive" &&
-                  "text-emerald-700 dark:text-emerald-400",
-                signo === "negative" && "text-destructive",
-                signo === "zero" && "text-muted-foreground",
-              )}
-            >
-              {fmtMoney(convertirAUsd(resultadoStr, tcParaUsd))}
-            </span>
-          </Card>
-        </>
-      ) : (
-        <Card className="py-12">
-          <p className="text-center text-sm text-muted-foreground">
-            No hay períodos contables disponibles.
-          </p>
-        </Card>
-      )}
+      <Card className="flex-row items-center gap-6 px-6 py-6">
+        <div className="flex flex-col gap-1">
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">
+            Resultado del Período
+          </span>
+          <span className="text-xs text-muted-foreground">
+            Ingresos − Egresos
+          </span>
+        </div>
+        <span
+          className={cn(
+            "ml-auto font-mono text-3xl font-bold tabular-nums",
+            signo === "positive" && "text-emerald-700 dark:text-emerald-400",
+            signo === "negative" && "text-destructive",
+            signo === "zero" && "text-muted-foreground",
+          )}
+        >
+          {fmtMoney(convertirAUsd(resultadoStr, tcParaUsd))}
+        </span>
+      </Card>
     </div>
   );
 }

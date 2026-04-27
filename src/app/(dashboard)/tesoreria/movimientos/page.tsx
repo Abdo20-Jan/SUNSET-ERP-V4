@@ -4,29 +4,24 @@ import { Add01Icon } from "@hugeicons/core-free-icons";
 
 import { db } from "@/lib/db";
 import { listarPrestamosPorCuentaContable } from "@/lib/services/prestamo";
-import {
-  MovimientoTesoreriaTipo,
-  PeriodoEstado,
-  Prisma,
-} from "@/generated/prisma/client";
+import { MovimientoTesoreriaTipo, Prisma } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DateRangeFilter } from "@/components/date-range-filter";
 
 import {
   MovimientosFilters,
   type CuentaBancariaOption,
-  type PeriodoOption,
 } from "./movimientos-filters";
-import {
-  MovimientosTable,
-  type MovimientoRow,
-} from "./movimientos-table";
+import { MovimientosTable, type MovimientoRow } from "./movimientos-table";
 
 const TIPO_VALUES = new Set<MovimientoTesoreriaTipo>([
   MovimientoTesoreriaTipo.COBRO,
   MovimientoTesoreriaTipo.PAGO,
   MovimientoTesoreriaTipo.TRANSFERENCIA,
 ]);
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseTipo(value: string | undefined): MovimientoTesoreriaTipo | null {
   if (!value) return null;
@@ -35,20 +30,38 @@ function parseTipo(value: string | undefined): MovimientoTesoreriaTipo | null {
     : null;
 }
 
-function parsePeriodoId(value: string | undefined): number | null {
-  if (!value) return null;
-  const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 function parseUuid(value: string | undefined): string | null {
   if (!value) return null;
   return /^[0-9a-f-]{36}$/i.test(value) ? value : null;
 }
 
+function parseDate(value: string | undefined): Date | undefined {
+  if (!value || !DATE_RE.test(value)) return undefined;
+  const d = new Date(value + "T00:00:00Z");
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function endOfDay(value: string | undefined): Date | undefined {
+  if (!value || !DATE_RE.test(value)) return undefined;
+  const d = new Date(value + "T23:59:59.999Z");
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function firstOfMonthIso(): string {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1)
+    .toISOString()
+    .slice(0, 10);
+}
+
 type SearchParams = Promise<{
   cuentaId?: string;
-  periodoId?: string;
+  desde?: string;
+  hasta?: string;
   tipo?: string;
 }>;
 
@@ -59,60 +72,34 @@ export default async function MovimientosPage({
 }) {
   const params = await searchParams;
 
-  const [periodos, cuentasBancarias] = await Promise.all([
-    db.periodoContable.findMany({
-      orderBy: { codigo: "desc" },
-      select: {
-        id: true,
-        codigo: true,
-        estado: true,
-        fechaInicio: true,
-        fechaFin: true,
-      },
-    }),
-    db.cuentaBancaria.findMany({
-      orderBy: [{ banco: "asc" }, { moneda: "asc" }],
-      select: {
-        id: true,
-        banco: true,
-        moneda: true,
-        numero: true,
-      },
-    }),
-  ]);
+  const cuentasBancarias = await db.cuentaBancaria.findMany({
+    orderBy: [{ banco: "asc" }, { moneda: "asc" }],
+    select: {
+      id: true,
+      banco: true,
+      moneda: true,
+      numero: true,
+    },
+  });
 
   const tipoFilter = parseTipo(params.tipo);
-  const periodoIdFromUrl = parsePeriodoId(params.periodoId);
   const cuentaIdFromUrl = parseUuid(params.cuentaId);
 
-  const now = new Date();
-  const defaultPeriodo =
-    periodos.find(
-      (p) =>
-        p.estado === PeriodoEstado.ABIERTO &&
-        p.fechaInicio <= now &&
-        p.fechaFin >= now,
-    ) ??
-    periodos.find((p) => p.estado === PeriodoEstado.ABIERTO) ??
-    periodos[0] ??
-    null;
-
-  let periodoIdFilter: number | null;
-  if (params.periodoId === "all") {
-    periodoIdFilter = null;
-  } else if (periodoIdFromUrl !== null) {
-    periodoIdFilter = periodoIdFromUrl;
-  } else {
-    periodoIdFilter = defaultPeriodo?.id ?? null;
-  }
+  const desdeStr = params.desde ?? firstOfMonthIso();
+  const hastaStr = params.hasta ?? todayIso();
+  const fechaDesde = parseDate(desdeStr);
+  const fechaHasta = endOfDay(hastaStr);
 
   const cuentaIdFilter = params.cuentaId === "all" ? null : cuentaIdFromUrl;
 
   const where: Prisma.MovimientoTesoreriaWhereInput = {};
   if (tipoFilter) where.tipo = tipoFilter;
   if (cuentaIdFilter) where.cuentaBancariaId = cuentaIdFilter;
-  if (periodoIdFilter !== null) {
-    where.asiento = { periodoId: periodoIdFilter };
+  if (fechaDesde || fechaHasta) {
+    where.fecha = {
+      ...(fechaDesde && { gte: fechaDesde }),
+      ...(fechaHasta && { lte: fechaHasta }),
+    };
   }
 
   const movimientos = await db.movimientoTesoreria.findMany({
@@ -127,6 +114,7 @@ export default async function MovimientosPage({
       tipoCambio: true,
       descripcion: true,
       comprobante: true,
+      referenciaBanco: true,
       cuentaContableId: true,
       cuentaBancaria: {
         select: {
@@ -167,6 +155,7 @@ export default async function MovimientosPage({
       tipoCambio: m.tipoCambio.toString(),
       descripcion: m.descripcion,
       comprobante: m.comprobante,
+      referenciaBanco: m.referenciaBanco,
       cuentaBancaria: {
         id: m.cuentaBancaria.id,
         banco: m.cuentaBancaria.banco,
@@ -191,12 +180,6 @@ export default async function MovimientosPage({
     };
   });
 
-  const periodoOptions: PeriodoOption[] = periodos.map((p) => ({
-    id: p.id,
-    codigo: p.codigo,
-    estado: p.estado,
-  }));
-
   const cuentaOptions: CuentaBancariaOption[] = cuentasBancarias.map((c) => ({
     id: c.id,
     banco: c.banco,
@@ -204,10 +187,14 @@ export default async function MovimientosPage({
     numero: c.numero,
   }));
 
-  const periodoCodigo =
-    periodoIdFilter !== null
-      ? periodos.find((p) => p.id === periodoIdFilter)?.codigo
-      : null;
+  const rangoLabel =
+    fechaDesde && fechaHasta
+      ? `del ${desdeStr} al ${hastaStr}`
+      : fechaHasta
+        ? `hasta ${hastaStr}`
+        : fechaDesde
+          ? `desde ${desdeStr}`
+          : "histórico completo";
 
   return (
     <div className="flex flex-col gap-6">
@@ -215,10 +202,7 @@ export default async function MovimientosPage({
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight">Movimientos</h1>
           <p className="text-sm text-muted-foreground">
-            {rows.length} movimiento{rows.length === 1 ? "" : "s"}
-            {periodoCodigo
-              ? ` · período ${periodoCodigo}`
-              : " · todos los períodos"}
+            {rows.length} movimiento{rows.length === 1 ? "" : "s"} · {rangoLabel}
           </p>
         </div>
         <Link
@@ -230,15 +214,14 @@ export default async function MovimientosPage({
         </Link>
       </div>
 
-      <MovimientosFilters
-        periodos={periodoOptions}
-        cuentas={cuentaOptions}
-        selectedPeriodoId={
-          periodoIdFilter !== null ? String(periodoIdFilter) : "all"
-        }
-        selectedCuentaId={cuentaIdFilter ?? "all"}
-        selectedTipo={tipoFilter ?? "all"}
-      />
+      <div className="flex flex-col gap-3">
+        <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
+        <MovimientosFilters
+          cuentas={cuentaOptions}
+          selectedCuentaId={cuentaIdFilter ?? "all"}
+          selectedTipo={tipoFilter ?? "all"}
+        />
+      </div>
 
       <Card className="py-0">
         <MovimientosTable data={rows} />

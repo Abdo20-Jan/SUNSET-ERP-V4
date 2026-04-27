@@ -35,12 +35,9 @@ export type BalanceNode = {
 };
 
 export type BalanceResult = {
-  periodo: {
-    id: number;
-    codigo: string;
-    nombre: string;
-    fechaInicio: Date;
-    fechaFin: Date;
+  rango: {
+    fechaDesde: Date | null;
+    fechaHasta: Date | null;
   };
   root: BalanceNode[];
 };
@@ -57,38 +54,45 @@ function naturalSaldo(
   return haber.minus(debe);
 }
 
-export async function getBalanceSumasYSaldos(
-  periodoId: number,
-): Promise<BalanceResult | null> {
-  const periodo = await db.periodoContable.findUnique({
-    where: { id: periodoId },
-    select: {
-      id: true,
-      codigo: true,
-      nombre: true,
-      fechaInicio: true,
-      fechaFin: true,
-    },
-  });
-  if (!periodo) return null;
+export async function getBalanceSumasYSaldos(filter: {
+  fechaDesde?: Date;
+  fechaHasta?: Date;
+}): Promise<BalanceResult> {
+  const fechaWhere =
+    filter.fechaDesde || filter.fechaHasta
+      ? {
+          ...(filter.fechaDesde && { gte: filter.fechaDesde }),
+          ...(filter.fechaHasta && { lte: filter.fechaHasta }),
+        }
+      : undefined;
 
   const [cuentas, saldosPrev, lineasPeriodo] = await Promise.all([
     db.cuentaContable.findMany({ orderBy: { codigo: "asc" } }),
-    db.lineaAsiento.groupBy({
-      by: ["cuentaId"],
-      _sum: { debe: true, haber: true },
-      where: {
-        asiento: {
-          estado: AsientoEstado.CONTABILIZADO,
-          fecha: { lt: periodo.fechaInicio },
-        },
-      },
-    }),
+    filter.fechaDesde
+      ? db.lineaAsiento.groupBy({
+          by: ["cuentaId"],
+          _sum: { debe: true, haber: true },
+          where: {
+            asiento: {
+              estado: AsientoEstado.CONTABILIZADO,
+              fecha: { lt: filter.fechaDesde },
+            },
+          },
+        })
+      : Promise.resolve(
+          [] as Array<{
+            cuentaId: number;
+            _sum: {
+              debe: import("@/generated/prisma/client").Prisma.Decimal | null;
+              haber: import("@/generated/prisma/client").Prisma.Decimal | null;
+            };
+          }>,
+        ),
     db.lineaAsiento.findMany({
       where: {
         asiento: {
-          periodoId: periodo.id,
           estado: AsientoEstado.CONTABILIZADO,
+          ...(fechaWhere ? { fecha: fechaWhere } : {}),
         },
       },
       orderBy: [
@@ -226,5 +230,11 @@ export async function getBalanceSumasYSaldos(
   };
   for (const r of roots) rollUp(r);
 
-  return { periodo, root: roots };
+  return {
+    rango: {
+      fechaDesde: filter.fechaDesde ?? null,
+      fechaHasta: filter.fechaHasta ?? null,
+    },
+    root: roots,
+  };
 }

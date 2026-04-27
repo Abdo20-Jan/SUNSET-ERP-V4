@@ -31,8 +31,6 @@ export type { SerializedTreeNode } from "./cuenta-tree-node";
 
 type Props = {
   data: SerializedTreeNode[];
-  /** Si está presente, cuentas analíticas linkan a /reportes/libro-mayor?cuentaId=X&periodoId=N */
-  periodoIdForLibroMayor?: number;
   /** Etiqueta del total final ("Total Activo", "Total Ingresos", etc.) */
   totalLabel?: string;
   /** Total precalculado (suma de los roots en el nivel superior) */
@@ -84,16 +82,12 @@ const colCodigo: ColumnDef<SerializedTreeNode> = {
 const colNombre: ColumnDef<SerializedTreeNode> = {
   id: "nombre",
   header: "Cuenta",
-  cell: ({ row, table }) => {
+  cell: ({ row }) => {
     const r = row.original;
-    const opts = table.options.meta as
-      | { periodoIdForLibroMayor?: number }
-      | undefined;
-    const periodoId = opts?.periodoIdForLibroMayor;
-    if (r.tipo === "ANALITICA" && periodoId != null) {
+    if (r.tipo === "ANALITICA") {
       return (
         <Link
-          href={`/reportes/libro-mayor?cuentaId=${r.id}&periodoId=${periodoId}`}
+          href={`/reportes/libro-mayor?cuentaId=${r.id}`}
           className="text-primary underline-offset-2 hover:underline"
         >
           {r.nombre}
@@ -176,7 +170,6 @@ function makeColSaldo(
 
 export function CuentaTreeTable({
   data,
-  periodoIdForLibroMayor,
   totalLabel,
   totalValue,
   totalSaldoInicial,
@@ -207,7 +200,6 @@ export function CuentaTreeTable({
     getRowCanExpand: (row) => row.original.children.length > 0,
     getCoreRowModel: getCoreRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
-    meta: { periodoIdForLibroMayor },
   });
 
   return (

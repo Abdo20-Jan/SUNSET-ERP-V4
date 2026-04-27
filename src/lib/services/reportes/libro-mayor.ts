@@ -30,13 +30,11 @@ export type LibroMayorResult = {
     tipo: CuentaTipo;
     categoria: CuentaCategoria;
   };
-  periodo: {
-    id: number;
-    codigo: string;
-    nombre: string;
-    fechaInicio: Date;
-    fechaFin: Date;
+  rango: {
+    fechaDesde: Date | null;
+    fechaHasta: Date | null;
   };
+  saldoInicial: Decimal;
   lineas: LibroMayorLinea[];
   totalDebe: Decimal;
   totalHaber: Decimal;
@@ -45,7 +43,7 @@ export type LibroMayorResult = {
 
 export class LibroMayorError extends Error {
   constructor(
-    public code: "CUENTA_NO_ENCONTRADA" | "CUENTA_NO_ANALITICA" | "PERIODO_NO_ENCONTRADO",
+    public code: "CUENTA_NO_ENCONTRADA" | "CUENTA_NO_ANALITICA",
     message: string,
   ) {
     super(message);
@@ -55,30 +53,18 @@ export class LibroMayorError extends Error {
 
 export async function getLibroMayor(
   cuentaId: number,
-  periodoId: number,
+  filter: { fechaDesde?: Date; fechaHasta?: Date },
 ): Promise<LibroMayorResult> {
-  const [cuenta, periodo] = await Promise.all([
-    db.cuentaContable.findUnique({
-      where: { id: cuentaId },
-      select: {
-        id: true,
-        codigo: true,
-        nombre: true,
-        tipo: true,
-        categoria: true,
-      },
-    }),
-    db.periodoContable.findUnique({
-      where: { id: periodoId },
-      select: {
-        id: true,
-        codigo: true,
-        nombre: true,
-        fechaInicio: true,
-        fechaFin: true,
-      },
-    }),
-  ]);
+  const cuenta = await db.cuentaContable.findUnique({
+    where: { id: cuentaId },
+    select: {
+      id: true,
+      codigo: true,
+      nombre: true,
+      tipo: true,
+      categoria: true,
+    },
+  });
 
   if (!cuenta) {
     throw new LibroMayorError(
@@ -92,19 +78,39 @@ export async function getLibroMayor(
       `La cuenta ${cuenta.codigo} es sintética; solo cuentas analíticas tienen movimientos`,
     );
   }
-  if (!periodo) {
-    throw new LibroMayorError(
-      "PERIODO_NO_ENCONTRADO",
-      `Período ${periodoId} no existe`,
-    );
+
+  const fechaWhere =
+    filter.fechaDesde || filter.fechaHasta
+      ? {
+          ...(filter.fechaDesde && { gte: filter.fechaDesde }),
+          ...(filter.fechaHasta && { lte: filter.fechaHasta }),
+        }
+      : undefined;
+
+  // Saldo inicial: acumulado de líneas con asiento.fecha < fechaDesde.
+  let saldoInicial = new Decimal(0);
+  if (filter.fechaDesde) {
+    const previas = await db.lineaAsiento.aggregate({
+      where: {
+        cuentaId,
+        asiento: {
+          estado: AsientoEstado.CONTABILIZADO,
+          fecha: { lt: filter.fechaDesde },
+        },
+      },
+      _sum: { debe: true, haber: true },
+    });
+    const debePrev = toDecimal(previas._sum.debe ?? 0);
+    const haberPrev = toDecimal(previas._sum.haber ?? 0);
+    saldoInicial = saldoPorCategoria(debePrev, haberPrev, cuenta.categoria);
   }
 
   const rows = await db.lineaAsiento.findMany({
     where: {
       cuentaId,
       asiento: {
-        periodoId,
         estado: AsientoEstado.CONTABILIZADO,
+        ...(fechaWhere ? { fecha: fechaWhere } : {}),
       },
     },
     orderBy: [
@@ -128,7 +134,7 @@ export async function getLibroMayor(
     },
   });
 
-  let acumulado = new Decimal(0);
+  let acumulado = saldoInicial;
   let totalDebe = new Decimal(0);
   let totalHaber = new Decimal(0);
 
@@ -153,7 +159,11 @@ export async function getLibroMayor(
 
   return {
     cuenta,
-    periodo,
+    rango: {
+      fechaDesde: filter.fechaDesde ?? null,
+      fechaHasta: filter.fechaHasta ?? null,
+    },
+    saldoInicial: saldoInicial.toDecimalPlaces(2),
     lineas,
     totalDebe: totalDebe.toDecimalPlaces(2),
     totalHaber: totalHaber.toDecimalPlaces(2),

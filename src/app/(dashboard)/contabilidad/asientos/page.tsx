@@ -3,15 +3,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon } from "@hugeicons/core-free-icons";
 
 import { db } from "@/lib/db";
-import {
-  AsientoEstado,
-  PeriodoEstado,
-  Prisma,
-} from "@/generated/prisma/client";
+import { AsientoEstado, Prisma } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DateRangeFilter } from "@/components/date-range-filter";
 
-import { AsientosFilters, type PeriodoOption } from "./asientos-filters";
+import { AsientosFilters } from "./asientos-filters";
 import { AsientosTable, type AsientoRow } from "./asientos-table";
 
 const ESTADO_VALUES = new Set<AsientoEstado>([
@@ -20,6 +17,8 @@ const ESTADO_VALUES = new Set<AsientoEstado>([
   AsientoEstado.ANULADO,
 ]);
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 function parseEstado(value: string | undefined): AsientoEstado | null {
   if (!value) return null;
   return ESTADO_VALUES.has(value as AsientoEstado)
@@ -27,14 +26,32 @@ function parseEstado(value: string | undefined): AsientoEstado | null {
     : null;
 }
 
-function parsePeriodoId(value: string | undefined): number | null {
-  if (!value) return null;
-  const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
+function parseDate(value: string | undefined): Date | undefined {
+  if (!value || !DATE_RE.test(value)) return undefined;
+  const d = new Date(value + "T00:00:00Z");
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function endOfDay(value: string | undefined): Date | undefined {
+  if (!value || !DATE_RE.test(value)) return undefined;
+  const d = new Date(value + "T23:59:59.999Z");
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function firstOfMonthIso(): string {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1)
+    .toISOString()
+    .slice(0, 10);
 }
 
 type SearchParams = Promise<{
-  periodoId?: string;
+  desde?: string;
+  hasta?: string;
   estado?: string;
   q?: string;
 }>;
@@ -46,44 +63,21 @@ export default async function AsientosPage({
 }) {
   const params = await searchParams;
 
-  const periodos = await db.periodoContable.findMany({
-    orderBy: { codigo: "desc" },
-    select: {
-      id: true,
-      codigo: true,
-      estado: true,
-      fechaInicio: true,
-      fechaFin: true,
-    },
-  });
-
   const estadoFilter = parseEstado(params.estado);
   const qFilter = params.q?.trim() ?? "";
-  const periodoIdFromUrl = parsePeriodoId(params.periodoId);
 
-  const now = new Date();
-  const defaultPeriodo =
-    periodos.find(
-      (p) =>
-        p.estado === PeriodoEstado.ABIERTO &&
-        p.fechaInicio <= now &&
-        p.fechaFin >= now,
-    ) ??
-    periodos.find((p) => p.estado === PeriodoEstado.ABIERTO) ??
-    periodos[0] ??
-    null;
-
-  let periodoIdFilter: number | null;
-  if (params.periodoId === "all") {
-    periodoIdFilter = null;
-  } else if (periodoIdFromUrl !== null) {
-    periodoIdFilter = periodoIdFromUrl;
-  } else {
-    periodoIdFilter = defaultPeriodo?.id ?? null;
-  }
+  const desdeStr = params.desde ?? firstOfMonthIso();
+  const hastaStr = params.hasta ?? todayIso();
+  const fechaDesde = parseDate(desdeStr);
+  const fechaHasta = endOfDay(hastaStr);
 
   const where: Prisma.AsientoWhereInput = {};
-  if (periodoIdFilter !== null) where.periodoId = periodoIdFilter;
+  if (fechaDesde || fechaHasta) {
+    where.fecha = {
+      ...(fechaDesde && { gte: fechaDesde }),
+      ...(fechaHasta && { lte: fechaHasta }),
+    };
+  }
   if (estadoFilter) where.estado = estadoFilter;
   if (qFilter.length > 0) {
     where.descripcion = { contains: qFilter, mode: "insensitive" };
@@ -119,11 +113,14 @@ export default async function AsientosPage({
     periodoCodigo: a.periodo.codigo,
   }));
 
-  const periodoOptions: PeriodoOption[] = periodos.map((p) => ({
-    id: p.id,
-    codigo: p.codigo,
-    estado: p.estado,
-  }));
+  const rangoLabel =
+    fechaDesde && fechaHasta
+      ? `del ${desdeStr} al ${hastaStr}`
+      : fechaHasta
+        ? `hasta ${hastaStr}`
+        : fechaDesde
+          ? `desde ${desdeStr}`
+          : "histórico completo";
 
   return (
     <div className="flex flex-col gap-6">
@@ -131,12 +128,7 @@ export default async function AsientosPage({
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight">Asientos</h1>
           <p className="text-sm text-muted-foreground">
-            {rows.length} asiento{rows.length === 1 ? "" : "s"}
-            {periodoIdFilter !== null
-              ? ` · período ${
-                  periodos.find((p) => p.id === periodoIdFilter)?.codigo ?? ""
-                }`
-              : " · todos los períodos"}
+            {rows.length} asiento{rows.length === 1 ? "" : "s"} · {rangoLabel}
           </p>
         </div>
         <Link
@@ -148,14 +140,13 @@ export default async function AsientosPage({
         </Link>
       </div>
 
-      <AsientosFilters
-        periodos={periodoOptions}
-        selectedPeriodoId={
-          periodoIdFilter !== null ? String(periodoIdFilter) : "all"
-        }
-        selectedEstado={estadoFilter ?? "all"}
-        query={qFilter}
-      />
+      <div className="flex flex-col gap-3">
+        <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
+        <AsientosFilters
+          selectedEstado={estadoFilter ?? "all"}
+          query={qFilter}
+        />
+      </div>
 
       <Card className="py-0">
         <AsientosTable data={rows} />
