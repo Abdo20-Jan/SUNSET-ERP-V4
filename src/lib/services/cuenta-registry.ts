@@ -175,6 +175,24 @@ export const TRANSFERENCIA_CODIGOS = {
   },
 } as const satisfies Record<string, CuentaDef>;
 
+// ----- VEP / DESPACHO ADUANERO (diferencia cambiaria) -------
+// El VEP se paga al despachar provisorio (TC del día); cuando se
+// oficializa con TC distinto, puede generarse un crédito a favor de
+// Aduana (pago > liquidación) o un saldo pendiente (pago <
+// liquidación) que requiere un VEP de refuerzo.
+export const VEP_ADUANA_CODIGOS = {
+  CREDITO_ADUANA: {
+    codigo: "1.1.4.13",
+    nombre: "CRÉDITO A FAVOR ADUANA (DIFERENCIA CAMBIARIA)",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+  SALDO_PENDIENTE_ADUANA: {
+    codigo: "2.1.5.99",
+    nombre: "SALDO PENDIENTE ADUANA (REFUERZO VEP)",
+    categoria: CuentaCategoria.PASIVO,
+  },
+} as const satisfies Record<string, CuentaDef>;
+
 // ----- COSTOS FINANCIEROS (incluye impuesto al cheque) ------
 export const COSTOS_FINANCIEROS_CODIGOS = {
   COMISIONES_BANCARIAS: {

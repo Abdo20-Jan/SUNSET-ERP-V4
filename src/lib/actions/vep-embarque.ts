@@ -10,23 +10,39 @@ import {
   contabilizarAsiento,
   crearAsientoManual,
 } from "@/lib/services/asiento-automatico";
+import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
+import { VEP_ADUANA_CODIGOS } from "@/lib/services/cuenta-registry";
 import { getVepEmbarques } from "@/lib/services/cuentas-a-pagar";
 import {
   AsientoOrigen,
   Moneda,
 } from "@/generated/prisma/client";
 
+const MONEY_RE = /^\d+(\.\d{1,2})?$/;
+
 const inputSchema = z.object({
   embarqueId: z.string().uuid(),
   cuentaBancariaId: z.string().uuid(),
   fecha: z.coerce.date(),
   comprobante: z.string().trim().max(100).optional(),
+  /** Monto efectivamente pagado al banco — puede diferir del total VEP
+   *  por diferencia cambiaria entre cierre y despacho oficializado.
+   *  Si vacío, se asume igual al total VEP. */
+  montoPagado: z.string().regex(MONEY_RE, "Monto inválido.").optional(),
 });
 
 export type PagarVepInput = z.input<typeof inputSchema>;
 
 export type PagarVepResult =
-  | { ok: true; asientoId: string; asientoNumero: number; total: string }
+  | {
+      ok: true;
+      asientoId: string;
+      asientoNumero: number;
+      totalVep: string;
+      montoPagado: string;
+      diferencia: string;
+      tipoDiferencia: "credito" | "deuda" | "exacto";
+    }
   | { ok: false; error: string };
 
 export async function pagarVepEmbarqueAction(
@@ -43,7 +59,8 @@ export async function pagarVepEmbarqueAction(
     };
   }
 
-  const { embarqueId, cuentaBancariaId, fecha, comprobante } = parsed.data;
+  const { embarqueId, cuentaBancariaId, fecha, comprobante, montoPagado: montoPagadoInput } =
+    parsed.data;
 
   const cuentaBancaria = await db.cuentaBancaria.findUnique({
     where: { id: cuentaBancariaId },
@@ -75,18 +92,64 @@ export async function pagarVepEmbarqueAction(
     };
   }
 
+  // Computar montos: total VEP (calculado al cierre) vs monto pagado (real)
+  const totalVepNum = Number(vep.totalArs);
+  const montoPagadoNum =
+    montoPagadoInput && Number(montoPagadoInput) > 0
+      ? Number(montoPagadoInput)
+      : totalVepNum;
+  const diferenciaNum = montoPagadoNum - totalVepNum;
+  const tipoDiferencia: "credito" | "deuda" | "exacto" =
+    Math.abs(diferenciaNum) < 0.005
+      ? "exacto"
+      : diferenciaNum > 0
+        ? "credito"
+        : "deuda";
+
   try {
     const result = await db.$transaction(async (tx) => {
-      const lineas = vep.cuentas.map((c) => ({
+      const lineas: Array<{
+        cuentaId: number;
+        debe: string;
+        haber: string;
+        descripcion?: string;
+      }> = vep.cuentas.map((c) => ({
         cuentaId: c.cuentaId,
         debe: c.monto,
         haber: "0",
         descripcion: `Pago VEP ${vep.embarqueCodigo} — ${c.cuentaNombre}`,
       }));
+
+      // Línea de ajuste por diferencia cambiaria entre cierre y despacho
+      if (tipoDiferencia === "credito") {
+        const creditoCuentaId = await getOrCreateCuenta(
+          tx,
+          VEP_ADUANA_CODIGOS.CREDITO_ADUANA,
+        );
+        lineas.push({
+          cuentaId: creditoCuentaId,
+          debe: Math.abs(diferenciaNum).toFixed(2),
+          haber: "0",
+          descripcion: `Crédito a favor Aduana — diferencia cambiaria VEP ${vep.embarqueCodigo}`,
+        });
+      } else if (tipoDiferencia === "deuda") {
+        const deudaCuentaId = await getOrCreateCuenta(
+          tx,
+          VEP_ADUANA_CODIGOS.SALDO_PENDIENTE_ADUANA,
+        );
+        lineas.push({
+          cuentaId: deudaCuentaId,
+          debe: "0",
+          haber: Math.abs(diferenciaNum).toFixed(2),
+          descripcion: `Saldo pendiente Aduana — pagar VEP refuerzo embarque ${vep.embarqueCodigo}`,
+        });
+      }
+
+      // HABER del banco con el monto efectivamente pagado
       lineas.push({
         cuentaId: cuentaBancaria.cuentaContableId,
         debe: "0",
-        haber: vep.totalArs,
+        haber: montoPagadoNum.toFixed(2),
         descripcion: `Pago VEP ${vep.embarqueCodigo} — ${cuentaBancaria.banco}`,
       });
 
@@ -109,7 +172,10 @@ export async function pagarVepEmbarqueAction(
       return {
         asientoId: asiento.id,
         asientoNumero: asiento.numero,
-        total: vep.totalArs,
+        totalVep: vep.totalArs,
+        montoPagado: montoPagadoNum.toFixed(2),
+        diferencia: Math.abs(diferenciaNum).toFixed(2),
+        tipoDiferencia,
       };
     });
 
