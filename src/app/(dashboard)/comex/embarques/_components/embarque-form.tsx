@@ -29,6 +29,7 @@ import {
 import {
   AsientoEmbarqueLink,
   CerrarEmbarqueDialog,
+  ConfirmarZonaPrimariaDialog,
 } from "./cerrar-embarque-dialog";
 import {
   ProveedorCombobox,
@@ -61,6 +62,7 @@ type EmbarqueEstado =
   | "BORRADOR"
   | "EN_TRANSITO"
   | "EN_PUERTO"
+  | "EN_ZONA_PRIMARIA"
   | "EN_ADUANA"
   | "DESPACHADO"
   | "EN_DEPOSITO"
@@ -72,6 +74,7 @@ const ESTADO_VALUES = [
   "BORRADOR",
   "EN_TRANSITO",
   "EN_PUERTO",
+  "EN_ZONA_PRIMARIA",
   "EN_ADUANA",
   "DESPACHADO",
   "EN_DEPOSITO",
@@ -94,6 +97,7 @@ const ESTADO_LABELS: Record<EmbarqueEstado, string> = {
   BORRADOR: "Borrador",
   EN_TRANSITO: "En tránsito",
   EN_PUERTO: "En puerto",
+  EN_ZONA_PRIMARIA: "En zona primaria",
   EN_ADUANA: "En aduana",
   DESPACHADO: "Despachado",
   EN_DEPOSITO: "En depósito",
@@ -230,6 +234,7 @@ const formSchema = z
         tipoCambio: z.string().regex(rateRegex, "TC inválido"),
         facturaNumero: z.string().max(64).optional(),
         fechaFactura: z.string().optional(),
+        momento: z.enum(["ZONA_PRIMARIA", "DESPACHO"]),
         // IVA/IIBB/otros a nivel factura (no por línea)
         iva: z.string().regex(moneyRegex, "IVA inválido"),
         iibb: z.string().regex(moneyRegex, "IIBB inválido"),
@@ -403,6 +408,7 @@ export function EmbarqueForm(props: Props) {
             tipoCambio: c.tipoCambio,
             facturaNumero: c.facturaNumero ?? "",
             fechaFactura: c.fechaFactura ? c.fechaFactura.slice(0, 10) : "",
+            momento: (c.momento ?? "DESPACHO") as "ZONA_PRIMARIA" | "DESPACHO",
             iva: c.iva,
             iibb: c.iibb,
             otros: c.otros,
@@ -1115,6 +1121,7 @@ export function EmbarqueForm(props: Props) {
                       tipoCambio: "1",
                       facturaNumero: "",
                       fechaFactura: "",
+                      momento: "DESPACHO",
                       iva: "0",
                       iibb: "0",
                       otros: "0",
@@ -1361,6 +1368,22 @@ export function EmbarqueForm(props: Props) {
                     : "Crear embarque"}
               </Button>
             )}
+            {!readonly &&
+              props.mode === "edit" &&
+              !props.initialData.asientoZonaPrimaria &&
+              !props.initialData.asiento && (
+                <ConfirmarZonaPrimariaDialog
+                  embarqueId={props.initialData.id}
+                  embarqueCodigo={props.initialData.codigo}
+                  totalProveedorExterior={formatMoney(
+                    fobTotalArs.toString(),
+                  )}
+                  cantFacturasZP={
+                    costos.filter((f) => f.momento === "ZONA_PRIMARIA").length
+                  }
+                  disabled={isSubmitting}
+                />
+              )}
             {!readonly &&
               props.mode === "edit" &&
               !props.initialData.asiento && (
@@ -1798,7 +1821,7 @@ const FacturaCard = memo(function FacturaCard({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <div className="flex flex-col gap-1">
             <Label className="text-xs">Fecha factura</Label>
             <Input
@@ -1806,6 +1829,32 @@ const FacturaCard = memo(function FacturaCard({
               className="h-9"
               disabled={disabled}
               {...register(`costos.${index}.fechaFactura` as const)}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">Momento</Label>
+            <Controller
+              control={control}
+              name={`costos.${index}.momento` as const}
+              render={({ field }) => (
+                <Select
+                  value={field.value ?? "DESPACHO"}
+                  onValueChange={field.onChange}
+                  disabled={disabled}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Seleccione momento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ZONA_PRIMARIA">
+                      Zona primaria (puerto, frete, op. log., línea marítima)
+                    </SelectItem>
+                    <SelectItem value="DESPACHO">
+                      Despacho (despachante, DIA, op. log.)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             />
           </div>
           <div className="flex flex-col gap-1">

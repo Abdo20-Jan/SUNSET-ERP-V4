@@ -24,6 +24,7 @@ const ESTADO_LABELS: Record<EmbarqueEstado, string> = {
   BORRADOR: "Borrador",
   EN_TRANSITO: "En tránsito",
   EN_PUERTO: "En puerto",
+  EN_ZONA_PRIMARIA: "En zona primaria",
   EN_ADUANA: "En aduana",
   DESPACHADO: "Despachado",
   EN_DEPOSITO: "En depósito",

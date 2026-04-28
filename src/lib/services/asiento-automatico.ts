@@ -823,25 +823,28 @@ export async function crearAsientoEmbarque(
     };
 
     // 1) FOB (+ flete/seguro origen si CIF/CFR) → Mercadería en tránsito
-    //    vs. proveedor del exterior. Suma todo lo facturado por el
-    //    proveedor de origen en una sola línea consolidada.
+    //    vs. proveedor del exterior. Si ya hay asiento de Zona Primaria,
+    //    el FOB ya fue contabilizado allí — saltar acá.
     const proveedorExteriorCuentaId =
       embarque.proveedor.cuentaContableId ??
       porCodigo.get(EMBARQUE_CODIGOS.PROVEEDOR_EXTERIOR_FALLBACK.codigo)!;
+    const tieneZonaPrimaria = !!embarque.asientoZonaPrimariaId;
     const detalleOrigen =
       fleteOrigenArs.gt(0) || seguroOrigenArs.gt(0)
         ? ` (FOB + flete${seguroOrigenArs.gt(0) ? " + seguro" : ""} origen)`
         : "";
-    pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO.codigo)!,
-      totalProveedorExteriorArs,
-      `Embarque ${embarque.codigo} (${embarque.proveedor.nombre})${detalleOrigen}`,
-    );
-    pushHaber(
-      proveedorExteriorCuentaId,
-      totalProveedorExteriorArs,
-      `Proveedor exterior (${embarque.proveedor.nombre})${detalleOrigen}`,
-    );
+    if (!tieneZonaPrimaria) {
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO.codigo)!,
+        totalProveedorExteriorArs,
+        `Embarque ${embarque.codigo} (${embarque.proveedor.nombre})${detalleOrigen}`,
+      );
+      pushHaber(
+        proveedorExteriorCuentaId,
+        totalProveedorExteriorArs,
+        `Proveedor exterior (${embarque.proveedor.nombre})${detalleOrigen}`,
+      );
+    }
 
     // 2) Tributos aduaneros (DEBE gasto/crédito, HABER AFIP/Aduana por pagar)
     pushDebe(porCodigo.get(EMBARQUE_CODIGOS.DIE_EGRESO.codigo)!, die, "DIE");
@@ -916,7 +919,14 @@ export async function crearAsientoEmbarque(
     //    DEBE por concepto a su cuenta de gasto. Luego, IVA/IIBB/otros
     //    a nivel factura van a las cuentas de crédito fiscal. Todo
     //    contra la cuenta del proveedor en HABER (consolidado).
-    for (const factura of embarque.costos) {
+    //
+    //    Si ya hay asiento de Zona Primaria, sólo procesamos facturas
+    //    con momento === DESPACHO (las de ZONA_PRIMARIA ya están en
+    //    el asiento de ZP).
+    const facturasParaCierre = tieneZonaPrimaria
+      ? embarque.costos.filter((f) => f.momento !== "ZONA_PRIMARIA")
+      : embarque.costos;
+    for (const factura of facturasParaCierre) {
       if (factura.lineas.length === 0) continue;
 
       if (!factura.proveedor.cuentaContableId) {
@@ -1012,6 +1022,211 @@ export async function crearAsientoEmbarque(
     await inner.embarque.update({
       where: { id: embarqueId },
       data: { asientoId: asiento.id },
+    });
+
+    return asiento;
+  };
+
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
+// Embarque — Confirmación de Zona Primaria
+// ============================================================
+//
+// Genera asiento parcial cuando la mercadería llegó al puerto / zona
+// primaria aduanera. Contabiliza FOB (+ flete/seguro origen si CIF/CFR)
+// contra el proveedor exterior + facturas con momento === ZONA_PRIMARIA
+// (puerto, frete terrestre, op. logístico, gastos línea marítima).
+//
+// La mercadería NO se nacionaliza acá — queda en 1.1.5.02 MERCADERÍAS EN
+// TRÁNSITO sin disponibilidad de stock. El despacho posterior (cierre)
+// transfiere a 1.1.5.01 MERCADERÍAS y aplica el ingreso al depósito.
+
+export async function crearAsientoZonaPrimaria(
+  embarqueId: string,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const embarque = await inner.embarque.findUnique({
+      where: { id: embarqueId },
+      include: {
+        proveedor: { select: { id: true, nombre: true, cuentaContableId: true } },
+        costos: {
+          include: {
+            proveedor: {
+              select: { id: true, nombre: true, cuentaContableId: true },
+            },
+            lineas: { orderBy: { id: "asc" } },
+          },
+          orderBy: { id: "asc" },
+        },
+      },
+    });
+
+    if (!embarque) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarqueId} no existe.`,
+      );
+    }
+
+    if (embarque.asientoZonaPrimariaId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarque.codigo} ya tiene un asiento de Zona Primaria (${embarque.asientoZonaPrimariaId}).`,
+      );
+    }
+
+    if (embarque.asientoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarque.codigo} ya está cerrado/despachado — no se puede registrar Zona Primaria después.`,
+      );
+    }
+
+    const porCodigo = await ensureCuentasMap(inner, EMBARQUE_CODIGOS);
+
+    const tcEmb = toDecimal(embarque.tipoCambio);
+    const fobArs = toDecimal(embarque.fobTotal).times(tcEmb).toDecimalPlaces(2);
+    const fleteOrigenArs = embarque.valorFleteOrigen
+      ? toDecimal(embarque.valorFleteOrigen).times(tcEmb).toDecimalPlaces(2)
+      : toDecimal(0);
+    const seguroOrigenArs = embarque.valorSeguroOrigen
+      ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
+      : toDecimal(0);
+    const totalProveedorExteriorArs = fobArs
+      .plus(fleteOrigenArs)
+      .plus(seguroOrigenArs);
+
+    type Linea = {
+      cuentaId: number;
+      debe: import("decimal.js").Decimal;
+      haber: import("decimal.js").Decimal;
+      descripcion: string;
+    };
+    const lineas: Linea[] = [];
+    const pushDebe = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: valor, haber: toDecimal(0), descripcion });
+    };
+    const pushHaber = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: toDecimal(0), haber: valor, descripcion });
+    };
+
+    // 1) FOB (+ flete/seguro origen) → Mercadería en tránsito vs proveedor exterior
+    const proveedorExteriorCuentaId =
+      embarque.proveedor.cuentaContableId ??
+      porCodigo.get(EMBARQUE_CODIGOS.PROVEEDOR_EXTERIOR_FALLBACK.codigo)!;
+    const detalleOrigen =
+      fleteOrigenArs.gt(0) || seguroOrigenArs.gt(0)
+        ? ` (FOB + flete${seguroOrigenArs.gt(0) ? " + seguro" : ""} origen)`
+        : "";
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO.codigo)!,
+      totalProveedorExteriorArs,
+      `Embarque ${embarque.codigo} (${embarque.proveedor.nombre})${detalleOrigen}`,
+    );
+    pushHaber(
+      proveedorExteriorCuentaId,
+      totalProveedorExteriorArs,
+      `Proveedor exterior (${embarque.proveedor.nombre})${detalleOrigen}`,
+    );
+
+    // 2) Facturas con momento === ZONA_PRIMARIA (puerto, frete terrestre,
+    //    op. logístico, gastos línea marítima local).
+    const facturasZP = embarque.costos.filter((f) => f.momento === "ZONA_PRIMARIA");
+    for (const factura of facturasZP) {
+      if (factura.lineas.length === 0) continue;
+      if (!factura.proveedor.cuentaContableId) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `El proveedor ${factura.proveedor.nombre} no tiene cuenta contable asociada.`,
+        );
+      }
+
+      const tc = toDecimal(factura.tipoCambio);
+      const facturaLabel = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""}`;
+
+      let subtotalFacturaArs = toDecimal(0);
+      for (const linea of factura.lineas) {
+        const subtotalArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
+        if (!subtotalArs.gt(0)) continue;
+        const lineaLabel =
+          linea.descripcion?.trim() || linea.tipo.replace(/_/g, " ").toLowerCase();
+        pushDebe(linea.cuentaContableGastoId, subtotalArs, `${facturaLabel} — ${lineaLabel} (ZP)`);
+        subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
+      }
+
+      const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
+      const iibbArs = toDecimal(factura.iibb).times(tc).toDecimalPlaces(2);
+      const otrosArs = toDecimal(factura.otros).times(tc).toDecimalPlaces(2);
+
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS.codigo)!,
+        ivaArs,
+        `${facturaLabel} — IVA crédito (ZP)`,
+      );
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS.codigo)!,
+        iibbArs,
+        `${facturaLabel} — IIBB crédito (ZP)`,
+      );
+      if (otrosArs.gt(0) && factura.lineas.length > 0) {
+        pushDebe(
+          factura.lineas[0].cuentaContableGastoId,
+          otrosArs,
+          `${facturaLabel} — otros (ZP)`,
+        );
+      }
+
+      const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+      if (totalFacturaArs.gt(0)) {
+        pushHaber(
+          factura.proveedor.cuentaContableId,
+          totalFacturaArs,
+          `${facturaLabel} — total a pagar (ZP)`,
+        );
+      }
+    }
+
+    if (lineas.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarque.codigo}: no hay FOB ni facturas de Zona Primaria para contabilizar.`,
+      );
+    }
+
+    const lineasInput: LineaInput[] = lineas.map((l) => ({
+      cuentaId: l.cuentaId,
+      debe: money(l.debe).toString(),
+      haber: money(l.haber).toString(),
+      descripcion: l.descripcion,
+    }));
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: new Date(),
+      descripcion: `Zona primaria embarque ${embarque.codigo}`,
+      origen: AsientoOrigen.COMEX,
+      lineas: lineasInput,
+    });
+
+    await inner.embarque.update({
+      where: { id: embarqueId },
+      data: {
+        asientoZonaPrimariaId: asiento.id,
+        estado: "EN_ZONA_PRIMARIA",
+      },
     });
 
     return asiento;

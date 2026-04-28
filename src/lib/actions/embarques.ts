@@ -10,6 +10,7 @@ import {
   AsientoError,
   contabilizarAsiento,
   crearAsientoEmbarque,
+  crearAsientoZonaPrimaria,
 } from "@/lib/services/asiento-automatico";
 import { aplicarIngresoEmbarque } from "@/lib/services/stock";
 import type { ProveedorOption } from "@/components/proveedor-combobox";
@@ -162,6 +163,7 @@ export type EmbarqueCostoDetalle = {
   tipoCambio: string;
   facturaNumero: string | null;
   fechaFactura: string | null;
+  momento: "ZONA_PRIMARIA" | "DESPACHO";
   iva: string;
   iibb: string;
   otros: string;
@@ -204,6 +206,11 @@ export type EmbarqueDetalle = {
     numero: number;
     estado: string;
   } | null;
+  asientoZonaPrimaria: {
+    id: string;
+    numero: number;
+    estado: string;
+  } | null;
   items: Array<{
     id: number;
     productoId: string;
@@ -225,6 +232,7 @@ export async function obtenerEmbarquePorId(
         include: { lineas: { orderBy: { id: "asc" } } },
       },
       asiento: { select: { id: true, numero: true, estado: true } },
+      asientoZonaPrimaria: { select: { id: true, numero: true, estado: true } },
     },
   });
 
@@ -273,6 +281,13 @@ export async function obtenerEmbarquePorId(
           estado: embarque.asiento.estado,
         }
       : null,
+    asientoZonaPrimaria: embarque.asientoZonaPrimaria
+      ? {
+          id: embarque.asientoZonaPrimaria.id,
+          numero: embarque.asientoZonaPrimaria.numero,
+          estado: embarque.asientoZonaPrimaria.estado,
+        }
+      : null,
     items: embarque.items.map((it) => ({
       id: it.id,
       productoId: it.productoId,
@@ -286,6 +301,7 @@ export async function obtenerEmbarquePorId(
       tipoCambio: c.tipoCambio.toString(),
       facturaNumero: c.facturaNumero,
       fechaFactura: c.fechaFactura?.toISOString() ?? null,
+      momento: c.momento,
       iva: c.iva.toString(),
       iibb: c.iibb.toString(),
       otros: c.otros.toString(),
@@ -352,6 +368,7 @@ const costoSchema = z.object({
       const d = new Date(v);
       return Number.isFinite(d.getTime()) ? d : null;
     }),
+  momento: z.enum(["ZONA_PRIMARIA", "DESPACHO"]).default("DESPACHO"),
   // IVA/IIBB/otros a nivel factura (no por línea)
   iva: z.string().regex(moneyRegex, "IVA inválido").default("0"),
   iibb: z.string().regex(moneyRegex, "IIBB inválido").default("0"),
@@ -666,6 +683,7 @@ export async function guardarEmbarqueAction(
             tipoCambio: new Prisma.Decimal(factura.tipoCambio),
             facturaNumero: factura.facturaNumero,
             fechaFactura: factura.fechaFactura,
+            momento: factura.momento,
             iva: money(factura.iva),
             iibb: money(factura.iibb),
             otros: money(factura.otros),
@@ -713,6 +731,85 @@ export async function guardarEmbarqueAction(
       ok: false,
       error: "No se pudo guardar el embarque. Intente nuevamente.",
     };
+  }
+}
+
+// ============================================================
+// Confirmación de Zona Primaria (PASO 3.5)
+// ============================================================
+//
+// Genera asiento parcial: FOB + facturas con momento === ZONA_PRIMARIA.
+// La mercadería queda en 1.1.5.02 MERCADERÍAS EN TRÁNSITO sin
+// disponibilidad de stock. El despacho posterior (cierre) sigue.
+
+export type ConfirmarZonaPrimariaResult =
+  | { ok: true; asientoId: string; asientoNumero: number }
+  | { ok: false; error: string };
+
+export async function confirmarZonaPrimariaAction(
+  embarqueId: string,
+): Promise<ConfirmarZonaPrimariaResult> {
+  if (!embarqueId || typeof embarqueId !== "string") {
+    return { ok: false, error: "ID de embarque inválido." };
+  }
+
+  try {
+    const result = await db.$transaction(async (tx) => {
+      const embarque = await tx.embarque.findUnique({
+        where: { id: embarqueId },
+        include: {
+          costos: {
+            orderBy: { id: "asc" },
+            include: { lineas: { orderBy: { id: "asc" } } },
+          },
+        },
+      });
+
+      if (!embarque) {
+        throw new AsientoError("DOMINIO_INVALIDO", "El embarque no existe.");
+      }
+      if (embarque.asientoZonaPrimariaId) {
+        throw new AsientoError(
+          "ESTADO_INVALIDO",
+          `El embarque ${embarque.codigo} ya tiene zona primaria confirmada.`,
+        );
+      }
+      if (embarque.asientoId) {
+        throw new AsientoError(
+          "ESTADO_INVALIDO",
+          `El embarque ${embarque.codigo} ya está cerrado/despachado.`,
+        );
+      }
+
+      const tieneFacturasZP = embarque.costos.some((f) => f.momento === "ZONA_PRIMARIA");
+      const tieneFob = Number(embarque.fobTotal) > 0;
+      if (!tieneFob && !tieneFacturasZP) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `El embarque ${embarque.codigo}: no hay FOB ni facturas marcadas como Zona Primaria.`,
+        );
+      }
+
+      const asiento = await crearAsientoZonaPrimaria(embarqueId, tx);
+      const contabilizado = await contabilizarAsiento(asiento.id, tx);
+
+      return {
+        asientoId: contabilizado.id,
+        asientoNumero: contabilizado.numero,
+      };
+    });
+
+    revalidatePath("/comex/embarques");
+    revalidatePath(`/comex/embarques/${embarqueId}`);
+    revalidatePath("/contabilidad/asientos");
+
+    return { ok: true, ...result };
+  } catch (err) {
+    if (err instanceof AsientoError) {
+      return { ok: false, error: mapAsientoErrorMessage(err) };
+    }
+    console.error("confirmarZonaPrimariaAction failed", err);
+    return { ok: false, error: "Error inesperado al confirmar zona primaria." };
   }
 }
 

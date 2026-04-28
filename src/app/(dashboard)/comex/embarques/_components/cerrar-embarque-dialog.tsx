@@ -7,7 +7,10 @@ import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CheckmarkCircle02Icon, LockIcon } from "@hugeicons/core-free-icons";
 
-import { cerrarYContabilizarEmbarqueAction } from "@/lib/actions/embarques";
+import {
+  cerrarYContabilizarEmbarqueAction,
+  confirmarZonaPrimariaAction,
+} from "@/lib/actions/embarques";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -130,5 +133,106 @@ export function AsientoEmbarqueLink({ asiento }: AsientoLinkProps) {
     >
       Asiento #{asiento.numero} ({asiento.estado})
     </Link>
+  );
+}
+
+// ---------- Confirmar Zona Primaria ----------
+//
+// Genera asiento parcial: FOB (+ flete/seguro origen) + facturas con
+// momento === ZONA_PRIMARIA. La mercadería NO se nacionaliza acá; queda
+// en 1.1.5.02 sin disponibilidad de stock hasta el despacho final.
+
+type ZPProps = {
+  embarqueId: string;
+  embarqueCodigo: string;
+  disabled?: boolean;
+  totalProveedorExterior: string; // FOB + flete/seguro origen, en ARS
+  cantFacturasZP: number;
+};
+
+export function ConfirmarZonaPrimariaDialog({
+  embarqueId,
+  embarqueCodigo,
+  disabled,
+  totalProveedorExterior,
+  cantFacturasZP,
+}: ZPProps) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  const handleConfirm = () => {
+    startTransition(async () => {
+      const result = await confirmarZonaPrimariaAction(embarqueId);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(
+        `Zona primaria de ${embarqueCodigo} confirmada. Asiento #${result.asientoNumero} contabilizado.`,
+      );
+      setOpen(false);
+      router.refresh();
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button type="button" variant="secondary" disabled={disabled}>
+            Confirmar zona primaria
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            Confirmar zona primaria — {embarqueCodigo}
+          </DialogTitle>
+          <DialogDescription>
+            Genera el asiento de la mercadería en{" "}
+            <strong>1.1.5.02 Mercaderías en Tránsito</strong> (FOB + facturas
+            de zona primaria). La mercadería <strong>NO</strong> queda
+            disponible para venta — eso requiere el despacho final.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="rounded-md border bg-muted/40 p-4 text-[13px]">
+          <p className="font-medium">Asiento parcial:</p>
+          <ul className="mt-2 space-y-1 text-muted-foreground">
+            <li>
+              <span className="inline-block w-24 font-mono">DEBE</span>
+              1.1.5.02 Mercaderías en tránsito (FOB ARS{" "}
+              {totalProveedorExterior})
+            </li>
+            <li>
+              <span className="inline-block w-24 font-mono">HABER</span>
+              Proveedor exterior + {cantFacturasZP} factura
+              {cantFacturasZP === 1 ? "" : "s"} de zona primaria
+            </li>
+          </ul>
+        </div>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setOpen(false)}
+            disabled={pending}
+          >
+            Cancelar
+          </Button>
+          <Button type="button" onClick={handleConfirm} disabled={pending}>
+            <HugeiconsIcon
+              icon={CheckmarkCircle02Icon}
+              strokeWidth={2}
+              className="size-4"
+            />
+            {pending ? "Contabilizando…" : "Confirmar zona primaria"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

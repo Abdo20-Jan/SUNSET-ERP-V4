@@ -76,10 +76,21 @@ enum EmbarqueEstado {
   BORRADOR
   EN_TRANSITO
   EN_PUERTO
+  EN_ZONA_PRIMARIA // mercadería llegó al puerto / zona primaria aduanera; costos ZP cerrados; aún NO disponible para venta
   EN_ADUANA
   DESPACHADO
   EN_DEPOSITO
   CERRADO
+}
+
+// Momento del costo dentro del flujo de importación.
+// - ZONA_PRIMARIA: costos previos al despacho (puerto, flete terrestre,
+//   operador logístico, gastos locales línea marítima).
+// - DESPACHO: costos del despacho aduanero (despachante, DIA, operador
+//   logístico) — cuando la mercadería se nacionaliza.
+enum MomentoCosto {
+  ZONA_PRIMARIA
+  DESPACHO
 }
 
 enum TipoCostoEmbarque {
@@ -277,7 +288,8 @@ model Asiento {
   prestamo            PrestamoExterno?
   venta               Venta?
   compra              Compra?
-  embarque            Embarque?
+  embarqueCierre      Embarque?            @relation("EmbarqueAsientoCierre")
+  embarqueZonaPrimaria Embarque?           @relation("EmbarqueAsientoZP")
   gastoFijoRegistro   GastoFijoRegistro?
   chequeRecibidoCobro ChequeRecibido?
 
@@ -404,16 +416,20 @@ model Embarque {
   iibb                   Decimal        @default(0) @db.Decimal(18, 2)
   costoTotal             Decimal        @default(0) @db.Decimal(18, 2)
   asientoId              String?        @unique
+  // Asiento generado al confirmar zona primaria (DEBE 1.1.5.02 MERC. EN
+  // TRÁNSITO contra proveedor exterior + facturas locales con momento=ZONA_PRIMARIA).
+  asientoZonaPrimariaId  String?        @unique
   depositoDestinoId      String?
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 
-  proveedor       Proveedor       @relation(fields: [proveedorId], references: [id])
-  items           ItemEmbarque[]
-  costos          EmbarqueCosto[]
-  asiento         Asiento?        @relation(fields: [asientoId], references: [id])
-  depositoDestino Deposito?       @relation(fields: [depositoDestinoId], references: [id])
-  pedidoCompra    PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
+  proveedor          Proveedor       @relation(fields: [proveedorId], references: [id])
+  items              ItemEmbarque[]
+  costos             EmbarqueCosto[]
+  asiento            Asiento?        @relation("EmbarqueAsientoCierre", fields: [asientoId], references: [id])
+  asientoZonaPrimaria Asiento?       @relation("EmbarqueAsientoZP", fields: [asientoZonaPrimariaId], references: [id])
+  depositoDestino    Deposito?       @relation(fields: [depositoDestinoId], references: [id])
+  pedidoCompra       PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
 }
 
 // Factura de proveedor local (gastos de nacionalización: despachante,
@@ -431,6 +447,10 @@ model EmbarqueCosto {
   fechaFactura     DateTime?
   fechaVencimiento DateTime? // auto-calculada de fechaFactura + diasPagoDefault del proveedor; editable
   condicionPago    CondicionPago @default(CUENTA_CORRIENTE)
+  // Momento del flujo de importación: ZONA_PRIMARIA (puerto, frete
+  // terrestre, op. logístico, gastos línea marítima — antes del despacho)
+  // o DESPACHO (despachante, DIA, op. logístico — al nacionalizar).
+  momento          MomentoCosto  @default(DESPACHO)
   // Totales fiscales a nivel factura (no por línea):
   iva              Decimal       @default(0) @db.Decimal(18, 2)
   iibb             Decimal       @default(0) @db.Decimal(18, 2)

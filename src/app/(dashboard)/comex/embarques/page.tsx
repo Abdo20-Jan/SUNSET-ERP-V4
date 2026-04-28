@@ -37,6 +37,7 @@ const ESTADO_SHORT: Record<EmbarqueEstado, string> = {
   BORRADOR: "borrador",
   EN_TRANSITO: "en tránsito",
   EN_PUERTO: "en puerto",
+  EN_ZONA_PRIMARIA: "en zona primaria",
   EN_ADUANA: "en aduana",
   DESPACHADO: "despachado",
   EN_DEPOSITO: "en depósito",
