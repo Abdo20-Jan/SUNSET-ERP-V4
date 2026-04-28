@@ -93,6 +93,15 @@ enum MomentoCosto {
   DESPACHO
 }
 
+// Estado de un despacho aduanero (oficialización parcial o total de un
+// embarque). Un embarque puede tener 1..N despachos cuando la
+// nacionalización ocurre en tandas.
+enum DespachoEstado {
+  BORRADOR
+  CONTABILIZADO
+  ANULADO
+}
+
 enum TipoCostoEmbarque {
   FLETE_INTERNACIONAL
   FLETE_NACIONAL
@@ -290,6 +299,7 @@ model Asiento {
   compra              Compra?
   embarqueCierre      Embarque?            @relation("EmbarqueAsientoCierre")
   embarqueZonaPrimaria Embarque?           @relation("EmbarqueAsientoZP")
+  despacho            Despacho?
   gastoFijoRegistro   GastoFijoRegistro?
   chequeRecibidoCobro ChequeRecibido?
 
@@ -430,6 +440,7 @@ model Embarque {
   asientoZonaPrimaria Asiento?       @relation("EmbarqueAsientoZP", fields: [asientoZonaPrimariaId], references: [id])
   depositoDestino    Deposito?       @relation(fields: [depositoDestinoId], references: [id])
   pedidoCompra       PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
+  despachos          Despacho[]
 }
 
 // Factura de proveedor local (gastos de nacionalización: despachante,
@@ -459,13 +470,21 @@ model EmbarqueCosto {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
+  // FK opcional al despacho que consume esta factura. Sólo seteado para
+  // facturas con momento === DESPACHO cuando el embarque tiene N
+  // despachos parciales. En flujo monolítico (sin Despacho records) o
+  // facturas ZP queda en NULL.
+  despachoId       String?
+
   embarque  Embarque             @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
   proveedor Proveedor            @relation(fields: [proveedorId], references: [id])
+  despacho  Despacho?            @relation(fields: [despachoId], references: [id], onDelete: SetNull)
   lineas    EmbarqueCostoLinea[]
 
   @@index([embarqueId])
   @@index([proveedorId])
   @@index([fechaVencimiento])
+  @@index([despachoId])
 }
 
 // Concepto/gasto individual dentro de una factura: su cuenta contable
@@ -496,6 +515,69 @@ model ItemEmbarque {
   embarque         Embarque          @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
   producto         Producto          @relation(fields: [productoId], references: [id])
   movimientosStock MovimientoStock[]
+  itemsDespacho    ItemDespacho[]
+}
+
+// Despacho aduanero — un embarque puede tener 1..N despachos parciales.
+// Cada despacho es la nacionalización de una porción del contenido del
+// embarque, con sus propios tributos aduaneros y facturas DESPACHO.
+//
+// Reglas:
+//  - El embarque NO debe tener `asientoId` (cierre monolítico legacy)
+//    para crear despachos. Despacho parcial reemplaza el flujo de cierre.
+//  - Cada `ItemDespacho` consume `cantidad` del `ItemEmbarque` referenciado.
+//    Σ ItemDespacho.cantidad por (embarqueId, productoId) ≤ ItemEmbarque.cantidad.
+//  - Al contabilizar: genera asiento (transferencia 1.1.5.02 → 1.1.5.01
+//    por la porción correspondiente + tributos + facturas DESPACHO de
+//    este despacho) y aplica MovimientoStock por ItemDespacho.
+model Despacho {
+  id              String         @id @default(uuid())
+  codigo          String         @unique // ej: AR-250915-006-D1
+  embarqueId      String
+  fecha           DateTime
+  estado          DespachoEstado @default(BORRADOR)
+  numeroOM        String? // Nº de Despacho oficializado (Sufiche/OM34)
+  // TC oficializado del despacho (puede diferir del provisorio del embarque).
+  tipoCambio      Decimal        @default(1) @db.Decimal(18, 6)
+  // Tributos aduaneros de este despacho (en moneda del embarque).
+  // Convertidos a ARS con `tipoCambio` al contabilizar.
+  die             Decimal        @default(0) @db.Decimal(18, 2)
+  tasaEstadistica Decimal        @default(0) @db.Decimal(18, 2)
+  arancelSim      Decimal        @default(0) @db.Decimal(18, 2)
+  iva             Decimal        @default(0) @db.Decimal(18, 2)
+  ivaAdicional    Decimal        @default(0) @db.Decimal(18, 2)
+  iibb            Decimal        @default(0) @db.Decimal(18, 2)
+  ganancias       Decimal        @default(0) @db.Decimal(18, 2)
+  asientoId       String?        @unique
+  notas           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  embarque Embarque        @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
+  asiento  Asiento?        @relation(fields: [asientoId], references: [id])
+  items    ItemDespacho[]
+  costos   EmbarqueCosto[]
+
+  @@index([embarqueId])
+  @@index([estado])
+}
+
+model ItemDespacho {
+  id             Int     @id @default(autoincrement())
+  despachoId     String
+  itemEmbarqueId Int
+  cantidad       Int
+  // Costo unitario calculado al contabilizar: porción rateada del costo
+  // en tránsito del embarque (FOB+origen+ZP) por unidad. Se setea en el
+  // contabilizar y queda como referencia.
+  costoUnitario  Decimal @default(0) @db.Decimal(18, 2)
+
+  despacho         Despacho          @relation(fields: [despachoId], references: [id], onDelete: Cascade)
+  itemEmbarque     ItemEmbarque      @relation(fields: [itemEmbarqueId], references: [id])
+  movimientosStock MovimientoStock[]
+
+  @@unique([despachoId, itemEmbarqueId])
+  @@index([itemEmbarqueId])
 }
 
 model Compra {
@@ -652,15 +734,21 @@ model MovimientoStock {
   fecha         DateTime            @default(now())
   // FK opcional al ítem de embarque que originó el ingreso (para poder
   // revertir limpiamente en una anulación). Sólo seteado cuando el
-  // movimiento viene de cerrar y contabilizar un embarque.
+  // movimiento viene de cerrar y contabilizar un embarque (flujo legacy
+  // monolítico).
   itemEmbarqueId Int?
+  // FK opcional al ítem de despacho que originó el ingreso. Sólo seteado
+  // cuando el movimiento viene de contabilizar un Despacho parcial.
+  itemDespachoId Int?
 
   producto     Producto      @relation(fields: [productoId], references: [id])
   deposito     Deposito      @relation(fields: [depositoId], references: [id])
   itemEmbarque ItemEmbarque? @relation(fields: [itemEmbarqueId], references: [id], onDelete: SetNull)
+  itemDespacho ItemDespacho? @relation(fields: [itemDespachoId], references: [id], onDelete: SetNull)
 
   @@index([productoId])
   @@index([itemEmbarqueId])
+  @@index([itemDespachoId])
 }
 
 model Venta {

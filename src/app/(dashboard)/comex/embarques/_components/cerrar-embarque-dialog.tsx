@@ -5,11 +5,16 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { CheckmarkCircle02Icon, LockIcon } from "@hugeicons/core-free-icons";
+import {
+  ArrowReloadHorizontalIcon,
+  CheckmarkCircle02Icon,
+  LockIcon,
+} from "@hugeicons/core-free-icons";
 
 import {
   cerrarYContabilizarEmbarqueAction,
   confirmarZonaPrimariaAction,
+  revertirZonaPrimariaAction,
 } from "@/lib/actions/embarques";
 import { Button } from "@/components/ui/button";
 import {
@@ -114,6 +119,93 @@ export function CerrarEmbarqueDialog({
               className="size-4"
             />
             {pending ? "Contabilizando…" : "Confirmar cierre"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type RevertirZPProps = {
+  embarqueId: string;
+  embarqueCodigo: string;
+  asientoZpNumero: number;
+  disabled?: boolean;
+};
+
+export function RevertirZonaPrimariaDialog({
+  embarqueId,
+  embarqueCodigo,
+  asientoZpNumero,
+  disabled,
+}: RevertirZPProps) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  const handleConfirm = () => {
+    startTransition(async () => {
+      const result = await revertirZonaPrimariaAction(embarqueId);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(
+        `Zona primaria de ${embarqueCodigo} revertida. Asiento #${asientoZpNumero} anulado.`,
+      );
+      setOpen(false);
+      router.refresh();
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button type="button" variant="outline" disabled={disabled}>
+            <HugeiconsIcon
+              icon={ArrowReloadHorizontalIcon}
+              strokeWidth={2}
+              className="size-4"
+            />
+            Revertir zona primaria
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Revertir zona primaria — {embarqueCodigo}</DialogTitle>
+          <DialogDescription>
+            Anula el asiento #{asientoZpNumero} de zona primaria y deja el
+            embarque editable nuevamente. Útil si detectaste un error en una
+            factura ZP o en el FOB. <strong>No</strong> afecta stock — en zona
+            primaria no se generan movimientos de stock.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="rounded-md border border-amber-300/60 bg-amber-50/60 p-3 text-[13px] dark:border-amber-700/50 dark:bg-amber-950/20">
+          <p className="text-amber-900 dark:text-amber-200">
+            Sólo permitido si el embarque <strong>no</strong> tiene cierre
+            contabilizado. Si ya cerraste, anulá primero el asiento de cierre.
+          </p>
+        </div>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setOpen(false)}
+            disabled={pending}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleConfirm}
+            disabled={pending}
+          >
+            {pending ? "Revirtiendo…" : "Sí, revertir"}
           </Button>
         </DialogFooter>
       </DialogContent>

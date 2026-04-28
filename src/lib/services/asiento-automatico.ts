@@ -1237,6 +1237,445 @@ export async function crearAsientoZonaPrimaria(
 }
 
 // ============================================================
+// Despacho parcial — asiento automático
+// ============================================================
+//
+// Modelo: 1 embarque puede tener N despachos. Cada despacho oficializa
+// una porción de la mercadería + sus tributos + sus facturas DESPACHO.
+//
+// Pre-requisito: el embarque DEBE tener Zona Primaria confirmada
+// (`asientoZonaPrimariaId` no nulo). Sin ZP, la mercadería no está en
+// 1.1.5.02 todavía y no hay nada para transferir.
+// Restricción: el embarque NO puede tener `asientoId` (cierre legacy
+// monolítico) — ambos flujos son mutuamente excluyentes.
+//
+// Asiento del despacho:
+//
+//   DEBE  1.1.5.01 MERCADERÍAS                    cant_dsp × costoUnit_enTransito
+//   HABER 1.1.5.02 MERCADERÍAS EN TRÁNSITO         mismo
+//
+//   DEBE  5.4.1.40 DIE EGRESO                      die × tc_dsp
+//   HABER 2.1.5.10 ARCA tributos por pagar         mismo (consolidado)
+//   ...idem Tasa Estadística, Arancel SIM
+//
+//   DEBE  1.1.4.05 IVA Crédito Importación         iva × tc_dsp
+//   DEBE  1.1.4.06 IVA Adicional Importación       ivaAdicional × tc_dsp
+//   HABER 2.1.6.10 IVA Importación por pagar       (iva + ivaAdicional)
+//
+//   DEBE  1.1.4.07 IIBB Crédito Importación        iibb × tc_dsp
+//   HABER 2.1.5.20 IIBB Importación por pagar      iibb
+//
+//   DEBE  1.1.4.11 Ganancias Crédito Importación   ganancias × tc_dsp
+//   HABER 2.1.5.21 Ganancias Importación por pagar ganancias
+//
+//   Por cada factura linkada (despachoId === este despacho):
+//     DEBE  cuenta_gasto_línea  subtotal × tc_factura
+//     DEBE  IVA crédito         factura.iva × tc
+//     DEBE  IIBB crédito        factura.iibb × tc
+//     HABER proveedor.cuenta    total factura
+//
+// `costoUnit_enTransito` = (FOB + flete origen + seguro origen + Σ
+// facturas ZP) ARS / cantidad_TOTAL_embarque, prorateado FOB-proporcional
+// por ItemEmbarque.
+
+export async function crearAsientoDespacho(
+  despachoId: string,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const despacho = await inner.despacho.findUnique({
+      where: { id: despachoId },
+      include: {
+        embarque: {
+          include: {
+            proveedor: { select: { nombre: true } },
+            items: { orderBy: { id: "asc" } },
+            costos: {
+              include: {
+                proveedor: {
+                  select: { id: true, nombre: true, cuentaContableId: true },
+                },
+                lineas: { orderBy: { id: "asc" } },
+              },
+              orderBy: { id: "asc" },
+            },
+          },
+        },
+        items: {
+          include: {
+            itemEmbarque: {
+              select: {
+                id: true,
+                cantidad: true,
+                precioUnitarioFob: true,
+                productoId: true,
+              },
+            },
+          },
+          orderBy: { id: "asc" },
+        },
+      },
+    });
+
+    if (!despacho) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Despacho ${despachoId} no existe.`,
+      );
+    }
+    if (despacho.estado !== "BORRADOR") {
+      throw new AsientoError(
+        "ESTADO_INVALIDO",
+        `Despacho ${despacho.codigo} no está en BORRADOR (${despacho.estado}).`,
+      );
+    }
+    if (despacho.asientoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Despacho ${despacho.codigo} ya tiene un asiento.`,
+      );
+    }
+    if (despacho.items.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Despacho ${despacho.codigo}: agregue al menos un ítem.`,
+      );
+    }
+
+    const embarque = despacho.embarque;
+    if (!embarque.asientoZonaPrimariaId) {
+      throw new AsientoError(
+        "ESTADO_INVALIDO",
+        `Embarque ${embarque.codigo}: debe confirmar zona primaria antes de despachar.`,
+      );
+    }
+    if (embarque.asientoId) {
+      throw new AsientoError(
+        "ESTADO_INVALIDO",
+        `Embarque ${embarque.codigo}: ya tiene cierre monolítico — no admite despachos parciales.`,
+      );
+    }
+
+    // Validar cantidades: cada ItemDespacho.cantidad ≤ remanente del
+    // ItemEmbarque (cantidad total - lo ya despachado en otros despachos
+    // CONTABILIZADO o BORRADOR del mismo embarque, excluyendo este).
+    const otrosDespachos = await inner.despacho.findMany({
+      where: {
+        embarqueId: embarque.id,
+        id: { not: despacho.id },
+        estado: { not: "ANULADO" },
+      },
+      include: { items: true },
+    });
+    for (const item of despacho.items) {
+      if (item.cantidad <= 0) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `Despacho ${despacho.codigo}: cantidad debe ser > 0.`,
+        );
+      }
+      const yaDespachado = otrosDespachos
+        .flatMap((d) => d.items)
+        .filter((i) => i.itemEmbarqueId === item.itemEmbarqueId)
+        .reduce((s, i) => s + i.cantidad, 0);
+      const remanente = item.itemEmbarque.cantidad - yaDespachado;
+      if (item.cantidad > remanente) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `Despacho ${despacho.codigo}: cantidad ${item.cantidad} excede remanente ${remanente} del ítem.`,
+        );
+      }
+    }
+
+    const porCodigo = await ensureCuentasMap(inner, EMBARQUE_CODIGOS);
+    const tcEmb = toDecimal(embarque.tipoCambio);
+    const tcDsp = toDecimal(despacho.tipoCambio);
+
+    // Costo en tránsito total del embarque (lo que cargó 1.1.5.02 entre
+    // FOB+origen y facturas ZP). Convertido a ARS.
+    const fobArs = toDecimal(embarque.fobTotal).times(tcEmb).toDecimalPlaces(2);
+    const fleteOrigenArs = embarque.valorFleteOrigen
+      ? toDecimal(embarque.valorFleteOrigen).times(tcEmb).toDecimalPlaces(2)
+      : toDecimal(0);
+    const seguroOrigenArs = embarque.valorSeguroOrigen
+      ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
+      : toDecimal(0);
+    const facturasZP = embarque.costos.filter(
+      (f) => f.momento === "ZONA_PRIMARIA",
+    );
+    let zpFacturasArs = toDecimal(0);
+    for (const f of facturasZP) {
+      const tc = toDecimal(f.tipoCambio);
+      const subtot = f.lineas.reduce(
+        (s, l) => s.plus(toDecimal(l.subtotal).times(tc).toDecimalPlaces(2)),
+        toDecimal(0),
+      );
+      const iva = toDecimal(f.iva).times(tc).toDecimalPlaces(2);
+      const iibb = toDecimal(f.iibb).times(tc).toDecimalPlaces(2);
+      const otros = toDecimal(f.otros).times(tc).toDecimalPlaces(2);
+      // Sólo subtotal + otros entran al costo del inventario; IVA/IIBB
+      // son créditos fiscales (Activo) — no se ratean al costo.
+      zpFacturasArs = zpFacturasArs.plus(subtot).plus(otros);
+    }
+    const costoEnTransitoTotalArs = fobArs
+      .plus(fleteOrigenArs)
+      .plus(seguroOrigenArs)
+      .plus(zpFacturasArs);
+
+    // Per-ItemEmbarque costoUnit_enTransito (ARS), FOB-proporcional.
+    const fobTotalUsd = toDecimal(embarque.fobTotal);
+    const itemEmbCostoUnit = new Map<number, import("decimal.js").Decimal>();
+    for (const ie of embarque.items) {
+      if (ie.cantidad <= 0) {
+        itemEmbCostoUnit.set(ie.id, toDecimal(0));
+        continue;
+      }
+      const fobItemUsd = toDecimal(ie.precioUnitarioFob).times(ie.cantidad);
+      const proporcion = fobTotalUsd.gt(0)
+        ? fobItemUsd.dividedBy(fobTotalUsd)
+        : toDecimal(ie.cantidad).dividedBy(
+            embarque.items.reduce((s, x) => s + x.cantidad, 0) || 1,
+          );
+      const costoItemArs = costoEnTransitoTotalArs.times(proporcion);
+      const costoUnit = costoItemArs
+        .dividedBy(ie.cantidad)
+        .toDecimalPlaces(2);
+      itemEmbCostoUnit.set(ie.id, costoUnit);
+    }
+
+    type Linea = {
+      cuentaId: number;
+      debe: import("decimal.js").Decimal;
+      haber: import("decimal.js").Decimal;
+      descripcion: string;
+    };
+    const lineas: Linea[] = [];
+    const pushDebe = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: valor, haber: toDecimal(0), descripcion });
+    };
+    const pushHaber = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: toDecimal(0), haber: valor, descripcion });
+    };
+
+    // 1) Transferencia 1.1.5.02 → 1.1.5.01 por la porción del despacho.
+    let transferidoArs = toDecimal(0);
+    const itemDespachoCostoUnit = new Map<number, import("decimal.js").Decimal>();
+    for (const id of despacho.items) {
+      const costoUnit = itemEmbCostoUnit.get(id.itemEmbarqueId) ?? toDecimal(0);
+      itemDespachoCostoUnit.set(id.id, costoUnit);
+      const valor = costoUnit.times(id.cantidad).toDecimalPlaces(2);
+      transferidoArs = transferidoArs.plus(valor);
+    }
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS.codigo)!,
+      transferidoArs,
+      `Despacho ${despacho.codigo} — nacionalización (${despacho.items.length} ítem${despacho.items.length === 1 ? "" : "s"})`,
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO.codigo)!,
+      transferidoArs,
+      `Despacho ${despacho.codigo} — sale de tránsito`,
+    );
+
+    // 2) Tributos aduaneros del despacho (mismo patrón que cierre legacy).
+    const die = toDecimal(despacho.die).times(tcDsp).toDecimalPlaces(2);
+    const te = toDecimal(despacho.tasaEstadistica)
+      .times(tcDsp)
+      .toDecimalPlaces(2);
+    const arancelSim = toDecimal(despacho.arancelSim)
+      .times(tcDsp)
+      .toDecimalPlaces(2);
+    const ivaAduana = toDecimal(despacho.iva).times(tcDsp).toDecimalPlaces(2);
+    const ivaAdicional = toDecimal(despacho.ivaAdicional)
+      .times(tcDsp)
+      .toDecimalPlaces(2);
+    const iibbAduana = toDecimal(despacho.iibb).times(tcDsp).toDecimalPlaces(2);
+    const ganancias = toDecimal(despacho.ganancias)
+      .times(tcDsp)
+      .toDecimalPlaces(2);
+
+    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.DIE_EGRESO.codigo)!, die, "DIE");
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO.codigo)!,
+      die,
+      "DIE por pagar (Aduana)",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_EGRESO.codigo)!,
+      te,
+      "Tasa estadística",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_PASIVO.codigo)!,
+      te,
+      "Tasa estadística por pagar",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO.codigo)!,
+      arancelSim,
+      "Arancel SIM",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO.codigo)!,
+      arancelSim,
+      "Arancel SIM por pagar",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_IMPORTACION.codigo)!,
+      ivaAduana,
+      "IVA crédito fiscal importación",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_ADICIONAL_CREDITO.codigo)!,
+      ivaAdicional,
+      "IVA adicional importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_POR_PAGAR.codigo)!,
+      ivaAduana.plus(ivaAdicional),
+      "IVA importación por pagar (IVA + adicional)",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_IMPORTACION.codigo)!,
+      iibbAduana,
+      "Percepción IIBB importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.IIBB_POR_PAGAR.codigo)!,
+      iibbAduana,
+      "IIBB importación por pagar",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_CREDITO.codigo)!,
+      ganancias,
+      "Percepción Ganancias importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_POR_PAGAR.codigo)!,
+      ganancias,
+      "Ganancias importación por pagar",
+    );
+
+    // 3) Facturas linkadas a este despacho (DESPACHO).
+    const facturasDespacho = embarque.costos.filter(
+      (f) => f.despachoId === despacho.id && f.momento !== "ZONA_PRIMARIA",
+    );
+    for (const factura of facturasDespacho) {
+      if (factura.lineas.length === 0) continue;
+      if (!factura.proveedor.cuentaContableId) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `El proveedor ${factura.proveedor.nombre} no tiene cuenta contable asociada.`,
+        );
+      }
+      const tc = toDecimal(factura.tipoCambio);
+      const facturaLabel = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""}`;
+
+      let subtotalFacturaArs = toDecimal(0);
+      for (const linea of factura.lineas) {
+        const subtotalArs = toDecimal(linea.subtotal)
+          .times(tc)
+          .toDecimalPlaces(2);
+        if (!subtotalArs.gt(0)) continue;
+        const lineaLabel =
+          linea.descripcion?.trim() ||
+          linea.tipo.replace(/_/g, " ").toLowerCase();
+        pushDebe(
+          linea.cuentaContableGastoId,
+          subtotalArs,
+          `${facturaLabel} — ${lineaLabel}`,
+        );
+        subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
+      }
+      const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
+      const iibbArs = toDecimal(factura.iibb).times(tc).toDecimalPlaces(2);
+      const otrosArs = toDecimal(factura.otros).times(tc).toDecimalPlaces(2);
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS.codigo)!,
+        ivaArs,
+        `${facturaLabel} — IVA crédito`,
+      );
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS.codigo)!,
+        iibbArs,
+        `${facturaLabel} — IIBB crédito`,
+      );
+      if (otrosArs.gt(0) && factura.lineas.length > 0) {
+        pushDebe(
+          factura.lineas[0].cuentaContableGastoId,
+          otrosArs,
+          `${facturaLabel} — otros`,
+        );
+      }
+      const totalFacturaArs = subtotalFacturaArs
+        .plus(ivaArs)
+        .plus(iibbArs)
+        .plus(otrosArs);
+      if (totalFacturaArs.gt(0)) {
+        pushHaber(
+          factura.proveedor.cuentaContableId,
+          totalFacturaArs,
+          `${facturaLabel} — total a pagar`,
+        );
+      }
+    }
+
+    if (lineas.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Despacho ${despacho.codigo}: no hay montos para contabilizar.`,
+      );
+    }
+
+    const lineasInput: LineaInput[] = lineas.map((l) => ({
+      cuentaId: l.cuentaId,
+      debe: money(l.debe).toString(),
+      haber: money(l.haber).toString(),
+      descripcion: l.descripcion,
+    }));
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: despacho.fecha,
+      descripcion: `Despacho ${despacho.codigo} — embarque ${embarque.codigo}`,
+      origen: AsientoOrigen.COMEX,
+      lineas: lineasInput,
+    });
+
+    // Persist costoUnitario por ItemDespacho (referencial; el real se
+    // setea en aplicarIngresoDespacho durante la action).
+    for (const id of despacho.items) {
+      const cu = itemDespachoCostoUnit.get(id.id);
+      if (cu) {
+        await inner.itemDespacho.update({
+          where: { id: id.id },
+          data: { costoUnitario: money(cu) },
+        });
+      }
+    }
+
+    await inner.despacho.update({
+      where: { id: despacho.id },
+      data: { asientoId: asiento.id },
+    });
+
+    return asiento;
+  };
+
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
 // Ventas — asiento automático
 // ============================================================
 //

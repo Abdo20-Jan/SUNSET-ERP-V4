@@ -30,6 +30,7 @@ import {
   AsientoEmbarqueLink,
   CerrarEmbarqueDialog,
   ConfirmarZonaPrimariaDialog,
+  RevertirZonaPrimariaDialog,
 } from "./cerrar-embarque-dialog";
 import {
   ProveedorCombobox,
@@ -1383,6 +1384,33 @@ export function EmbarqueForm(props: Props) {
                   }
                   disabled={isSubmitting}
                 />
+              )}
+            {!readonly &&
+              props.mode === "edit" &&
+              props.initialData.asientoZonaPrimaria &&
+              !props.initialData.asiento && (
+                <>
+                  <RevertirZonaPrimariaDialog
+                    embarqueId={props.initialData.id}
+                    embarqueCodigo={props.initialData.codigo}
+                    asientoZpNumero={
+                      props.initialData.asientoZonaPrimaria.numero
+                    }
+                    disabled={isSubmitting}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      router.push(
+                        `/comex/embarques/${props.initialData.id}/despachos`,
+                      )
+                    }
+                    disabled={isSubmitting}
+                  >
+                    Despachos parciales
+                  </Button>
+                </>
               )}
             {!readonly &&
               props.mode === "edit" &&

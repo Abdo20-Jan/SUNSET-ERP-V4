@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { money, sumMoney, toDecimal } from "@/lib/decimal";
 import { calcularRateioEmbarque } from "@/lib/services/comex";
 import {
+  anularAsiento,
   AsientoError,
   contabilizarAsiento,
   crearAsientoEmbarque,
@@ -810,6 +811,78 @@ export async function confirmarZonaPrimariaAction(
     }
     console.error("confirmarZonaPrimariaAction failed", err);
     return { ok: false, error: "Error inesperado al confirmar zona primaria." };
+  }
+}
+
+// Revertir zona primaria — anula el asiento ZP y deja el embarque
+// disponible para corregir facturas/FOB y volver a confirmar. NO toca
+// stock (en ZP no se generan MovimientoStock). Sólo permitido si el
+// embarque NO tiene cierre (asientoId) — primero anular el cierre.
+
+export type RevertirZonaPrimariaResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+export async function revertirZonaPrimariaAction(
+  embarqueId: string,
+): Promise<RevertirZonaPrimariaResult> {
+  if (!embarqueId || typeof embarqueId !== "string") {
+    return { ok: false, error: "ID de embarque inválido." };
+  }
+
+  try {
+    await db.$transaction(async (tx) => {
+      const embarque = await tx.embarque.findUnique({
+        where: { id: embarqueId },
+        select: {
+          id: true,
+          codigo: true,
+          asientoZonaPrimariaId: true,
+          asientoId: true,
+        },
+      });
+
+      if (!embarque) {
+        throw new AsientoError("DOMINIO_INVALIDO", "El embarque no existe.");
+      }
+      if (!embarque.asientoZonaPrimariaId) {
+        throw new AsientoError(
+          "ESTADO_INVALIDO",
+          `El embarque ${embarque.codigo} no tiene zona primaria confirmada.`,
+        );
+      }
+      if (embarque.asientoId) {
+        throw new AsientoError(
+          "ESTADO_INVALIDO",
+          `El embarque ${embarque.codigo} ya tiene cierre — anule primero el asiento de cierre.`,
+        );
+      }
+
+      await anularAsiento(embarque.asientoZonaPrimariaId, tx);
+
+      await tx.embarque.update({
+        where: { id: embarqueId },
+        data: {
+          asientoZonaPrimariaId: null,
+          estado: EmbarqueEstado.EN_PUERTO,
+        },
+      });
+    });
+
+    revalidatePath("/comex/embarques");
+    revalidatePath(`/comex/embarques/${embarqueId}`);
+    revalidatePath("/contabilidad/asientos");
+
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof AsientoError) {
+      return { ok: false, error: mapAsientoErrorMessage(err) };
+    }
+    console.error("revertirZonaPrimariaAction failed", err);
+    return {
+      ok: false,
+      error: "Error inesperado al revertir zona primaria.",
+    };
   }
 }
 

@@ -125,6 +125,11 @@ export const COMPRA_CODIGOS = {
 // ----- EMBARQUE / IMPORTACIÓN --------------------------------
 export const EMBARQUE_CODIGOS = {
   // Activos: capitalización + créditos fiscales importación
+  MERCADERIAS: {
+    codigo: "1.1.5.01",
+    nombre: "MERCADERÍAS",
+    categoria: CuentaCategoria.ACTIVO,
+  },
   MERCADERIAS_EN_TRANSITO: {
     codigo: "1.1.5.02",
     nombre: "MERCADERÍAS EN TRÁNSITO",

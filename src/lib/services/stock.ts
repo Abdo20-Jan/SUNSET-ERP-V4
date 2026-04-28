@@ -111,6 +111,106 @@ async function aplicarIngresoProducto(
   });
 }
 
+type IngresoDespachoItem = {
+  itemDespachoId: number;
+  productoId: string;
+  cantidad: number;
+  costoUnitario: Decimal;
+};
+
+/**
+ * Aplica el ingreso de stock generado por contabilizar un Despacho
+ * parcial. Idéntico a `aplicarIngresoEmbarque` pero linkando los
+ * `MovimientoStock` al `itemDespachoId` (no a `itemEmbarqueId`) para
+ * permitir reversión limpia al anular el despacho.
+ */
+export async function aplicarIngresoDespacho(
+  tx: TxClient,
+  params: {
+    depositoDestinoId: string;
+    fecha: Date;
+    items: readonly IngresoDespachoItem[];
+  },
+): Promise<void> {
+  const deposito = await tx.deposito.findUnique({
+    where: { id: params.depositoDestinoId },
+    select: { id: true, activo: true },
+  });
+  if (!deposito) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      "El depósito de destino del despacho no existe.",
+    );
+  }
+  if (!deposito.activo) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      "El depósito de destino está inactivo.",
+    );
+  }
+
+  for (const item of params.items) {
+    await tx.itemDespacho.update({
+      where: { id: item.itemDespachoId },
+      data: { costoUnitario: money(item.costoUnitario) },
+    });
+
+    await tx.movimientoStock.create({
+      data: {
+        productoId: item.productoId,
+        depositoId: params.depositoDestinoId,
+        tipo: MovimientoStockTipo.INGRESO,
+        cantidad: item.cantidad,
+        costoUnitario: money(item.costoUnitario),
+        fecha: params.fecha,
+        itemDespachoId: item.itemDespachoId,
+      },
+    });
+
+    await aplicarIngresoProducto(
+      tx,
+      item.productoId,
+      item.cantidad,
+      item.costoUnitario,
+    );
+  }
+}
+
+/**
+ * Revierte los ingresos de stock generados al contabilizar un despacho
+ * parcial. Borra los `MovimientoStock` ligados a sus `ItemDespacho`,
+ * resetea `ItemDespacho.costoUnitario` y replays el resto de movimientos
+ * para reconstruir `Producto.stockActual` + `costoPromedio`.
+ */
+export async function revertirIngresoDespacho(
+  tx: TxClient,
+  despachoId: string,
+): Promise<void> {
+  const items = await tx.itemDespacho.findMany({
+    where: { despachoId },
+    select: { id: true, itemEmbarque: { select: { productoId: true } } },
+  });
+  if (items.length === 0) return;
+
+  const itemIds = items.map((i) => i.id);
+  const productoIds = Array.from(
+    new Set(items.map((i) => i.itemEmbarque.productoId)),
+  );
+
+  await tx.movimientoStock.deleteMany({
+    where: { itemDespachoId: { in: itemIds } },
+  });
+
+  await tx.itemDespacho.updateMany({
+    where: { id: { in: itemIds } },
+    data: { costoUnitario: money(new Decimal(0)) },
+  });
+
+  for (const productoId of productoIds) {
+    await recalcularStockYCostoPromedio(tx, productoId);
+  }
+}
+
 /**
  * Revierte los ingresos de stock generados al cerrar un embarque.
  * Borra los `MovimientoStock` ligados a sus `ItemEmbarque` y recalcula
