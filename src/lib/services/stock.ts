@@ -57,6 +57,7 @@ export async function aplicarIngresoEmbarque(
         cantidad: item.cantidad,
         costoUnitario: money(item.costoUnitario),
         fecha: params.fecha,
+        itemEmbarqueId: item.itemEmbarqueId,
       },
     });
 
@@ -106,6 +107,95 @@ async function aplicarIngresoProducto(
     data: {
       stockActual: nuevoStock,
       costoPromedio: money(nuevoCostoPromedio),
+    },
+  });
+}
+
+/**
+ * Revierte los ingresos de stock generados al cerrar un embarque.
+ * Borra los `MovimientoStock` ligados a sus `ItemEmbarque` y recalcula
+ * `Producto.stockActual` + `Producto.costoPromedio` desde cero usando
+ * el resto de los movimientos de stock (replay del weighted average).
+ *
+ * Reset también `ItemEmbarque.costoUnitario` a 0 para que un re-cierre
+ * recompute todo limpio.
+ */
+export async function revertirIngresoEmbarque(
+  tx: TxClient,
+  embarqueId: string,
+): Promise<void> {
+  const items = await tx.itemEmbarque.findMany({
+    where: { embarqueId },
+    select: { id: true, productoId: true },
+  });
+  if (items.length === 0) return;
+
+  const itemIds = items.map((i) => i.id);
+  const productoIds = Array.from(new Set(items.map((i) => i.productoId)));
+
+  await tx.movimientoStock.deleteMany({
+    where: { itemEmbarqueId: { in: itemIds } },
+  });
+
+  await tx.itemEmbarque.updateMany({
+    where: { id: { in: itemIds } },
+    data: { costoUnitario: money(new Decimal(0)) },
+  });
+
+  for (const productoId of productoIds) {
+    await recalcularStockYCostoPromedio(tx, productoId);
+  }
+}
+
+/**
+ * Replays todos los `MovimientoStock` del producto en orden cronológico
+ * para reconstruir `stockActual` y `costoPromedio` desde cero. Usa la
+ * misma fórmula de promedio ponderado que `aplicarIngresoProducto`.
+ *
+ * INGRESO suma cantidad y promedia costo. EGRESO/AJUSTE/TRANSFERENCIA
+ * sólo afectan stock; el costo medio se mantiene (FIFO/AVCO clásico).
+ */
+export async function recalcularStockYCostoPromedio(
+  tx: TxClient,
+  productoId: string,
+): Promise<void> {
+  const movimientos = await tx.movimientoStock.findMany({
+    where: { productoId },
+    orderBy: [{ fecha: "asc" }, { id: "asc" }],
+    select: { tipo: true, cantidad: true, costoUnitario: true },
+  });
+
+  let stock = 0;
+  let promedio = new Decimal(0);
+
+  for (const m of movimientos) {
+    if (m.tipo === MovimientoStockTipo.INGRESO) {
+      const costoIngreso = toDecimal(m.costoUnitario);
+      const nuevoStock = stock + m.cantidad;
+      if (stock <= 0 || nuevoStock <= 0) {
+        promedio = costoIngreso;
+      } else {
+        const valorAnterior = promedio.times(stock);
+        const valorIngreso = costoIngreso.times(m.cantidad);
+        promedio = valorAnterior.plus(valorIngreso).dividedBy(nuevoStock);
+      }
+      stock = nuevoStock;
+    } else if (m.tipo === MovimientoStockTipo.EGRESO) {
+      stock -= m.cantidad;
+    } else if (m.tipo === MovimientoStockTipo.AJUSTE) {
+      // AJUSTE: cantidad signada (positiva o negativa según convención
+      // del registro). Mantiene costo medio.
+      stock += m.cantidad;
+    } else if (m.tipo === MovimientoStockTipo.TRANSFERENCIA) {
+      // Transferencia entre depósitos: no afecta stock total ni costo.
+    }
+  }
+
+  await tx.producto.update({
+    where: { id: productoId },
+    data: {
+      stockActual: stock,
+      costoPromedio: money(promedio),
     },
   });
 }

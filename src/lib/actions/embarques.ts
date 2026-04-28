@@ -179,6 +179,8 @@ export type EmbarqueDetalle = {
   tipoCambio: string;
   incoterm: Incoterm | null;
   lugarIncoterm: string | null;
+  valorFleteOrigen: string | null;
+  valorSeguroOrigen: string | null;
   nombreBuque: string | null;
   lineaMaritima: string | null;
   fechaEmpaque: string | null;
@@ -238,6 +240,14 @@ export async function obtenerEmbarquePorId(
     tipoCambio: embarque.tipoCambio.toString(),
     incoterm: embarque.incoterm,
     lugarIncoterm: embarque.lugarIncoterm,
+    valorFleteOrigen:
+      embarque.valorFleteOrigen !== null
+        ? embarque.valorFleteOrigen.toString()
+        : null,
+    valorSeguroOrigen:
+      embarque.valorSeguroOrigen !== null
+        ? embarque.valorSeguroOrigen.toString()
+        : null,
     nombreBuque: embarque.nombreBuque,
     lineaMaritima: embarque.lineaMaritima,
     fechaEmpaque: embarque.fechaEmpaque?.toISOString() ?? null,
@@ -375,6 +385,24 @@ const inputSchema = z
       .max(80)
       .optional()
       .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
+    // Valores informativos cuando incoterm = CIF (flete + seguro contratados
+    // por el proveedor) o CFR (sólo flete). Vacíos = null.
+    valorFleteOrigen: z
+      .string()
+      .optional()
+      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
+      .refine(
+        (v) => v === null || moneyRegex.test(v),
+        "Valor de flete inválido",
+      ),
+    valorSeguroOrigen: z
+      .string()
+      .optional()
+      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
+      .refine(
+        (v) => v === null || moneyRegex.test(v),
+        "Valor de seguro inválido",
+      ),
     // Datos de transporte
     nombreBuque: z
       .string()
@@ -502,11 +530,18 @@ export async function guardarEmbarqueAction(
     ),
   );
 
-  // costoTotal del embarque (en ARS) = FOB×TC + Σ (subtotal de cada
-  // línea ×TC de su factura) + tributos aduaneros×TC. Despacho llega en
-  // moneda del embarque, AFIP cobra en pesos al cierre.
+  // costoTotal del embarque (en ARS) = FOB×TC + flete/seguro origen×TC
+  // (CIF/CFR) + Σ (subtotal de cada línea ×TC de su factura) + tributos
+  // aduaneros×TC. Despacho llega en moneda del embarque, AFIP cobra en
+  // pesos al cierre.
   const tcEmb = toDecimal(input.tipoCambio);
   const fobArs = toDecimal(fobTotal).times(tcEmb);
+  const fleteOrigenArs = input.valorFleteOrigen
+    ? toDecimal(input.valorFleteOrigen).times(tcEmb)
+    : toDecimal(0);
+  const seguroOrigenArs = input.valorSeguroOrigen
+    ? toDecimal(input.valorSeguroOrigen).times(tcEmb)
+    : toDecimal(0);
   const costosSubtotalArs = input.costos.reduce((acc, factura) => {
     const tc = toDecimal(factura.tipoCambio);
     const subtotalFactura = factura.lineas.reduce(
@@ -520,10 +555,17 @@ export async function guardarEmbarqueAction(
     toDecimal(input.tasaEstadistica).times(tcEmb),
     toDecimal(input.arancelSim).times(tcEmb),
   ]);
-  const costoTotal = sumMoney([fobArs, costosSubtotalArs, tributosArs]);
+  const costoTotal = sumMoney([
+    fobArs,
+    fleteOrigenArs,
+    seguroOrigenArs,
+    costosSubtotalArs,
+    tributosArs,
+  ]);
 
-  // CIF lo mantenemos para retrocompat: FOB + flete_internacional + seguro
-  // marítimo (líneas con esos tipos, sumadas y convertidas a ARS).
+  // CIF: FOB + flete + seguro contratados en origen (CIF/CFR del proveedor)
+  // + líneas locales tipo FLETE_INTERNACIONAL / SEGURO_MARITIMO. Es la base
+  // imponible aduanera (sin tributos).
   function sumLineasPorTipo(tipo: TipoCostoEmbarque) {
     return input.costos.reduce((acc, factura) => {
       const tc = toDecimal(factura.tipoCambio);
@@ -535,7 +577,11 @@ export async function guardarEmbarqueAction(
   }
   const fleteIntlArs = sumLineasPorTipo(TipoCostoEmbarque.FLETE_INTERNACIONAL);
   const seguroIntlArs = sumLineasPorTipo(TipoCostoEmbarque.SEGURO_MARITIMO);
-  const cifTotalArs = fobArs.plus(fleteIntlArs).plus(seguroIntlArs);
+  const cifTotalArs = fobArs
+    .plus(fleteOrigenArs)
+    .plus(seguroOrigenArs)
+    .plus(fleteIntlArs)
+    .plus(seguroIntlArs);
 
   const data = {
     codigo: input.codigo,
@@ -546,6 +592,14 @@ export async function guardarEmbarqueAction(
     tipoCambio: new Prisma.Decimal(input.tipoCambio),
     incoterm: input.incoterm,
     lugarIncoterm: input.lugarIncoterm,
+    valorFleteOrigen:
+      input.valorFleteOrigen !== null
+        ? new Prisma.Decimal(input.valorFleteOrigen)
+        : null,
+    valorSeguroOrigen:
+      input.valorSeguroOrigen !== null
+        ? new Prisma.Decimal(input.valorSeguroOrigen)
+        : null,
     nombreBuque: input.nombreBuque,
     lineaMaritima: input.lineaMaritima,
     fechaEmpaque: input.fechaEmpaque,
@@ -737,6 +791,8 @@ export async function cerrarYContabilizarEmbarqueAction(
           die: embarque.die,
           tasaEstadistica: embarque.tasaEstadistica,
           arancelSim: embarque.arancelSim,
+          valorFleteOrigen: embarque.valorFleteOrigen,
+          valorSeguroOrigen: embarque.valorSeguroOrigen,
         },
         embarque.items.map((it) => ({
           id: it.id,

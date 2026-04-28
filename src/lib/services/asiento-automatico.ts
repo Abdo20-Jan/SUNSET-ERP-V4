@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { eqMoney, gtZero, money, sumMoney, toDecimal } from "@/lib/decimal";
 import { ensureCuentasMap, getOrCreateCuenta } from "@/lib/services/cuenta-auto";
+import { revertirIngresoEmbarque } from "@/lib/services/stock";
 import {
   COMPRA_CODIGOS,
   EMBARQUE_CODIGOS,
@@ -359,6 +360,17 @@ async function anularEnTx(tx: TxClient, asientoId: string): Promise<Asiento> {
   // editable / re-postable. The accounting trail still shows the asiento
   // as ANULADO; this just unlocks the source document (embarque,
   // movimiento, préstamo, venta).
+  //
+  // Embarques además requieren revertir el ingreso de stock (borrar
+  // MovimientoStock + recalcular costoPromedio/stockActual) — si no, el
+  // costo medio de los productos quedaría inflado fantásmicamente.
+  const embarquesAnulados = await tx.embarque.findMany({
+    where: { asientoId },
+    select: { id: true },
+  });
+  for (const e of embarquesAnulados) {
+    await revertirIngresoEmbarque(tx, e.id);
+  }
   await tx.embarque.updateMany({
     where: { asientoId },
     data: {
@@ -741,6 +753,18 @@ export async function crearAsientoEmbarque(
 
     const tcEmb = toDecimal(embarque.tipoCambio);
     const fobArs = toDecimal(embarque.fobTotal).times(tcEmb).toDecimalPlaces(2);
+    // Flete/seguro contratados por el proveedor en origen (CIF/CFR): se
+    // suman al monto adeudado al proveedor del exterior (van en la misma
+    // factura) y al costo de la mercadería en tránsito.
+    const fleteOrigenArs = embarque.valorFleteOrigen
+      ? toDecimal(embarque.valorFleteOrigen).times(tcEmb).toDecimalPlaces(2)
+      : toDecimal(0);
+    const seguroOrigenArs = embarque.valorSeguroOrigen
+      ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
+      : toDecimal(0);
+    const totalProveedorExteriorArs = fobArs
+      .plus(fleteOrigenArs)
+      .plus(seguroOrigenArs);
 
     // Tributos vienen en moneda del embarque (despacho en USD); se convierten
     // a ARS aplicando el TC del embarque. Cada uno se redondea a 2dp ANTES
@@ -798,19 +822,25 @@ export async function crearAsientoEmbarque(
       });
     };
 
-    // 1) FOB → Mercadería en tránsito vs. proveedor del exterior
+    // 1) FOB (+ flete/seguro origen si CIF/CFR) → Mercadería en tránsito
+    //    vs. proveedor del exterior. Suma todo lo facturado por el
+    //    proveedor de origen en una sola línea consolidada.
     const proveedorExteriorCuentaId =
       embarque.proveedor.cuentaContableId ??
       porCodigo.get(EMBARQUE_CODIGOS.PROVEEDOR_EXTERIOR_FALLBACK.codigo)!;
+    const detalleOrigen =
+      fleteOrigenArs.gt(0) || seguroOrigenArs.gt(0)
+        ? ` (FOB + flete${seguroOrigenArs.gt(0) ? " + seguro" : ""} origen)`
+        : "";
     pushDebe(
       porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO.codigo)!,
-      fobArs,
-      `FOB embarque ${embarque.codigo} (${embarque.proveedor.nombre})`,
+      totalProveedorExteriorArs,
+      `Embarque ${embarque.codigo} (${embarque.proveedor.nombre})${detalleOrigen}`,
     );
     pushHaber(
       proveedorExteriorCuentaId,
-      fobArs,
-      `Proveedor exterior (${embarque.proveedor.nombre}) — FOB`,
+      totalProveedorExteriorArs,
+      `Proveedor exterior (${embarque.proveedor.nombre})${detalleOrigen}`,
     );
 
     // 2) Tributos aduaneros (DEBE gasto/crédito, HABER AFIP/Aduana por pagar)

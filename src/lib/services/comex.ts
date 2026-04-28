@@ -93,6 +93,11 @@ export type EmbarqueRateio = {
   die: DineroInput;
   tasaEstadistica: DineroInput;
   arancelSim: DineroInput;
+  // Flete/seguro contratados por el proveedor en origen (CIF/CFR).
+  // Vienen en la moneda del embarque (mismo TC que FOB). Suman al
+  // costo rateable como una "extensión" del FOB.
+  valorFleteOrigen?: DineroInput | null;
+  valorSeguroOrigen?: DineroInput | null;
 };
 
 export type ItemRateioInput = {
@@ -107,11 +112,11 @@ export type ItemRateioResult<T> = T & {
 };
 
 // La base rateable (que se incorpora al costo del producto) incluye:
-//   FOB + Σ subtotal de cada costo logístico + DIE + Tasa + Arancel SIM
+//   FOB + flete/seguro origen (CIF/CFR) + Σ costos logísticos + DIE + Tasa + Arancel SIM
 // IVA, IIBB y Ganancias son créditos fiscales (Activo) y NO se ratean.
-// Todo se convierte a ARS antes de ratear: FOB y tributos aduaneros usan
-// el TC del embarque (el despacho viene en USD); cada costo logístico
-// usa su propio TC (puede pagar el flete en una fecha con otro TC).
+// Todo se convierte a ARS antes de ratear: FOB, flete/seguro origen y
+// tributos aduaneros usan el TC del embarque (el despacho viene en USD);
+// cada costo logístico local usa su propio TC.
 export function calcularRateioEmbarque<T extends ItemRateioInput>(
   embarque: EmbarqueRateio,
   items: readonly T[],
@@ -126,6 +131,13 @@ export function calcularRateioEmbarque<T extends ItemRateioInput>(
   const embarqueTC = toDecimal(embarque.embarqueTipoCambio);
   const fobTotalArs = round2(fobTotal.times(embarqueTC));
 
+  const fleteOrigenArs = embarque.valorFleteOrigen
+    ? round2(toDecimal(embarque.valorFleteOrigen).times(embarqueTC))
+    : new Decimal(0);
+  const seguroOrigenArs = embarque.valorSeguroOrigen
+    ? round2(toDecimal(embarque.valorSeguroOrigen).times(embarqueTC))
+    : new Decimal(0);
+
   const costosArs = embarque.costos.reduce((acc, c) => {
     const ars = round2(toDecimal(c.subtotal).times(toDecimal(c.tipoCambio)));
     return acc.plus(ars);
@@ -138,7 +150,13 @@ export function calcularRateioEmbarque<T extends ItemRateioInput>(
   );
 
   const costoRateable = round2(
-    fobTotalArs.plus(costosArs).plus(dieArs).plus(teArs).plus(arancelArs),
+    fobTotalArs
+      .plus(fleteOrigenArs)
+      .plus(seguroOrigenArs)
+      .plus(costosArs)
+      .plus(dieArs)
+      .plus(teArs)
+      .plus(arancelArs),
   );
 
   const lastIdx = items.length - 1;

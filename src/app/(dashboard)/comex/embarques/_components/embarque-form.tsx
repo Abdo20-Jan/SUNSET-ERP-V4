@@ -179,6 +179,20 @@ const formSchema = z
       .nullable()
       .optional(),
     lugarIncoterm: z.string().max(80).optional(),
+    valorFleteOrigen: z
+      .string()
+      .optional()
+      .refine(
+        (v) => !v || v.length === 0 || moneyRegex.test(v),
+        "Valor de flete inválido",
+      ),
+    valorSeguroOrigen: z
+      .string()
+      .optional()
+      .refine(
+        (v) => !v || v.length === 0 || moneyRegex.test(v),
+        "Valor de seguro inválido",
+      ),
     nombreBuque: z.string().max(120).optional(),
     lineaMaritima: z.string().max(120).optional(),
     fechaEmpaque: z.string().optional(),
@@ -317,6 +331,8 @@ export function EmbarqueForm(props: Props) {
           tipoCambio: "",
           incoterm: null,
           lugarIncoterm: "",
+          valorFleteOrigen: "",
+          valorSeguroOrigen: "",
           nombreBuque: "",
           lineaMaritima: "",
           fechaEmpaque: "",
@@ -344,6 +360,8 @@ export function EmbarqueForm(props: Props) {
           tipoCambio: props.initialData.tipoCambio,
           incoterm: props.initialData.incoterm,
           lugarIncoterm: props.initialData.lugarIncoterm ?? "",
+          valorFleteOrigen: props.initialData.valorFleteOrigen ?? "",
+          valorSeguroOrigen: props.initialData.valorSeguroOrigen ?? "",
           nombreBuque: props.initialData.nombreBuque ?? "",
           lineaMaritima: props.initialData.lineaMaritima ?? "",
           fechaEmpaque: props.initialData.fechaEmpaque
@@ -427,12 +445,24 @@ export function EmbarqueForm(props: Props) {
   const moneda = useWatch({ control, name: "moneda" });
   const tipoCambioEmbarque =
     useWatch({ control, name: "tipoCambio" }) ?? "0";
+  const incotermSelected = useWatch({ control, name: "incoterm" });
 
   useEffect(() => {
     if (moneda === "ARS") {
       setValue("tipoCambio", "1", { shouldValidate: true });
     }
   }, [moneda, setValue]);
+
+  // Limpar valores de origen cuando el incoterm no los aplica.
+  // CIF: usa flete + seguro. CFR: sólo flete. Otros: ninguno.
+  useEffect(() => {
+    if (incotermSelected !== "CIF" && incotermSelected !== "CFR") {
+      setValue("valorFleteOrigen", "");
+    }
+    if (incotermSelected !== "CIF") {
+      setValue("valorSeguroOrigen", "");
+    }
+  }, [incotermSelected, setValue]);
 
   // ---------- Cálculos en tiempo real ----------
   const items = useWatch({ control, name: "items" }) ?? [];
@@ -824,6 +854,54 @@ export function EmbarqueForm(props: Props) {
               />
             </div>
           </div>
+
+          {(incotermSelected === "CIF" || incotermSelected === "CFR") && (
+            <div className="rounded-md border border-dashed bg-muted/10 p-3">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Valores en origen incluidos en el precio{" "}
+                {incotermSelected}
+              </h3>
+              <p className="mb-3 text-xs text-muted-foreground">
+                {incotermSelected === "CIF"
+                  ? "Bajo CIF, el proveedor contrata el flete y el seguro hasta destino. Estos importes están incluidos en el precio facturado y se registran acá como informativos."
+                  : "Bajo CFR, el proveedor contrata el flete hasta destino (el seguro corre por cuenta del comprador). El monto está incluido en el precio facturado y se registra acá como informativo."}
+              </p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="valorFleteOrigen" className="text-xs">
+                    Valor del flete ({moneda})
+                  </Label>
+                  <Input
+                    id="valorFleteOrigen"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    disabled={readonly}
+                    {...register("valorFleteOrigen")}
+                  />
+                  {errors.valorFleteOrigen && (
+                    <FieldError message={errors.valorFleteOrigen.message} />
+                  )}
+                </div>
+                {incotermSelected === "CIF" && (
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="valorSeguroOrigen" className="text-xs">
+                      Valor del seguro ({moneda})
+                    </Label>
+                    <Input
+                      id="valorSeguroOrigen"
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      disabled={readonly}
+                      {...register("valorSeguroOrigen")}
+                    />
+                    {errors.valorSeguroOrigen && (
+                      <FieldError message={errors.valorSeguroOrigen.message} />
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Datos de transporte */}
           <div className="rounded-md border bg-muted/20 p-3">
