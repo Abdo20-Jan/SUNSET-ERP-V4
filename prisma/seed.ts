@@ -168,6 +168,7 @@ const CUENTAS_SINTETICAS: CuentaSeed[] = [
   { codigo: "2.1.6",  nombre: "IMPUESTOS SOBRE VENTAS",              categoria: CuentaCategoria.PASIVO, nivel: 3 },
   { codigo: "2.1.7",  nombre: "PRÉSTAMOS CORTO PLAZO",               categoria: CuentaCategoria.PASIVO, nivel: 3 },
   { codigo: "2.1.8",  nombre: "PROVEEDORES DEL EXTERIOR",            categoria: CuentaCategoria.PASIVO, nivel: 3 },
+  { codigo: "2.1.9",  nombre: "DIVIDENDOS A PAGAR",                  categoria: CuentaCategoria.PASIVO, nivel: 3 },
   { codigo: "2.2",    nombre: "PASIVO NO CORRIENTE",                 categoria: CuentaCategoria.PASIVO, nivel: 2 },
   { codigo: "2.2.1",  nombre: "PRÉSTAMOS LARGO PLAZO",               categoria: CuentaCategoria.PASIVO, nivel: 3 },
 
@@ -175,8 +176,11 @@ const CUENTAS_SINTETICAS: CuentaSeed[] = [
   { codigo: "3",      nombre: "PATRIMONIO NETO",                     categoria: CuentaCategoria.PATRIMONIO, nivel: 1 },
   { codigo: "3.1",    nombre: "CAPITAL",                             categoria: CuentaCategoria.PATRIMONIO, nivel: 2 },
   { codigo: "3.1.1",  nombre: "APORTES",                             categoria: CuentaCategoria.PATRIMONIO, nivel: 3 },
+  { codigo: "3.1.2",  nombre: "AJUSTES DE CAPITAL",                  categoria: CuentaCategoria.PATRIMONIO, nivel: 3 },
   { codigo: "3.2",    nombre: "RESULTADOS",                          categoria: CuentaCategoria.PATRIMONIO, nivel: 2 },
   { codigo: "3.2.1",  nombre: "RESULTADOS ACUMULADOS",               categoria: CuentaCategoria.PATRIMONIO, nivel: 3 },
+  { codigo: "3.3",    nombre: "RESERVAS",                            categoria: CuentaCategoria.PATRIMONIO, nivel: 2 },
+  { codigo: "3.3.1",  nombre: "RESERVAS DE UTILIDADES",              categoria: CuentaCategoria.PATRIMONIO, nivel: 3 },
 
   // INGRESOS
   { codigo: "4",      nombre: "INGRESOS",                            categoria: CuentaCategoria.INGRESO, nivel: 1 },
@@ -261,8 +265,21 @@ const ANALITICAS_BASE: AnaliticaBaseSeed[] = [
   // Patrimônio (necesario para aportes y cierres)
   { codigo: "3.1.1.01", nombre: "CAPITAL SOCIAL",                      categoria: CuentaCategoria.PATRIMONIO },
   { codigo: "3.1.1.02", nombre: "APORTES IRREVOCABLES",                categoria: CuentaCategoria.PATRIMONIO },
+  { codigo: "3.1.2.01", nombre: "AJUSTE INTEGRAL DE CAPITAL",          categoria: CuentaCategoria.PATRIMONIO },
+  { codigo: "3.1.2.02", nombre: "PRIMA DE EMISIÓN",                    categoria: CuentaCategoria.PATRIMONIO },
   { codigo: "3.2.1.01", nombre: "RESULTADOS EJERCICIOS ANTERIORES",    categoria: CuentaCategoria.PATRIMONIO },
   { codigo: "3.2.1.02", nombre: "RESULTADO DEL EJERCICIO",             categoria: CuentaCategoria.PATRIMONIO },
+  { codigo: "3.2.1.03", nombre: "DIVIDENDOS DECLARADOS",               categoria: CuentaCategoria.PATRIMONIO },
+  // Reservas (Ley 19.550 — RT 8/9). RESERVA LEGAL es obligatoria: 5%
+  // de la utilidad neta hasta alcanzar 20% del capital social.
+  { codigo: "3.3.1.01", nombre: "RESERVA LEGAL",                       categoria: CuentaCategoria.PATRIMONIO },
+  { codigo: "3.3.1.02", nombre: "RESERVA FACULTATIVA",                 categoria: CuentaCategoria.PATRIMONIO },
+  { codigo: "3.3.1.03", nombre: "RESERVA ESTATUTARIA",                 categoria: CuentaCategoria.PATRIMONIO },
+  { codigo: "3.3.1.04", nombre: "RESERVA POR REVALÚO TÉCNICO",         categoria: CuentaCategoria.PATRIMONIO },
+
+  // Pasivo — provisión de dividendos a pagar (contrapartida del DEBE
+  // 3.2.1.03 al declarar dividendos antes del pago efectivo).
+  { codigo: "2.1.9.01", nombre: "DIVIDENDOS A PAGAR",                  categoria: CuentaCategoria.PASIVO },
 
   // Ingresos no operativos
   { codigo: "4.2.1.01", nombre: "DESCUENTOS OBTENIDOS",                categoria: CuentaCategoria.INGRESO },
