@@ -5,6 +5,7 @@ import { useState } from "react";
 import {
   type ColumnDef,
   type ExpandedState,
+  type Row,
   flexRender,
   getCoreRowModel,
   getExpandedRowModel,
@@ -31,20 +32,48 @@ export type { SerializedTreeNode } from "./cuenta-tree-node";
 
 type Props = {
   data: SerializedTreeNode[];
-  /** Etiqueta del total final ("Total Activo", "Total Ingresos", etc.) */
   totalLabel?: string;
-  /** Total precalculado (suma de los roots en el nivel superior) */
   totalValue?: string;
-  /** Total de saldo inicial (suma de los roots) — para la fila total */
   totalSaldoInicial?: string;
-  /** Mostrar columna "Saldo Inicial" antes de Debe (para Balance General con rango) */
   showSaldoInicial?: boolean;
-  /** Si está presente, divide cada importe ARS por este TC para mostrar en USD. */
   tcParaUsd?: string | null;
 };
 
+// Format con paréntesis y signo coloreado para saldos.
+function renderSigned(value: string, tc: string | null | undefined) {
+  const converted = convertirAUsd(value, tc);
+  const num = Number(converted);
+  if (!Number.isFinite(num) || num === 0) {
+    return <span className="text-muted-foreground">{fmtMoney(converted)}</span>;
+  }
+  const abs = fmtMoney(Math.abs(num).toFixed(2));
+  if (num < 0) {
+    return <span className="text-rose-600 dark:text-rose-400">({abs})</span>;
+  }
+  return <span className="text-emerald-700 dark:text-emerald-400">{abs}</span>;
+}
+
 function fmt(value: string, tc: string | null | undefined): string {
   return fmtMoney(convertirAUsd(value, tc));
+}
+
+// Niveles → estilo de fila. Profundidad 0 = raíz (sintética máxima).
+function rowClasses(row: Row<SerializedTreeNode>): string {
+  const r = row.original;
+  const depth = row.depth;
+  if (r.tipo === "SINTETICA" && depth === 0) {
+    return "bg-slate-900 text-slate-50 hover:bg-slate-900 dark:bg-slate-800";
+  }
+  if (r.tipo === "SINTETICA" && depth === 1) {
+    return "bg-muted/60 hover:bg-muted/70 font-semibold";
+  }
+  if (r.tipo === "SINTETICA") {
+    return "bg-muted/30 hover:bg-muted/40";
+  }
+  // Analítica con zebra suave (alterna por índice de fila)
+  return row.index % 2 === 0
+    ? "hover:bg-muted/40"
+    : "bg-muted/10 hover:bg-muted/40";
 }
 
 const colCodigo: ColumnDef<SerializedTreeNode> = {
@@ -55,14 +84,17 @@ const colCodigo: ColumnDef<SerializedTreeNode> = {
     const r = row.original;
     return (
       <div
-        className="flex items-center gap-1 font-mono text-xs"
-        style={{ paddingLeft: `${row.depth * 16}px` }}
+        className={cn(
+          "flex items-center gap-1 font-mono text-xs",
+          row.depth === 0 && r.tipo === "SINTETICA" && "text-sm font-bold",
+        )}
+        style={{ paddingLeft: `${row.depth * 18}px` }}
       >
         {canExpand ? (
           <button
             type="button"
             onClick={row.getToggleExpandedHandler()}
-            className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-muted"
+            className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-background/30"
             aria-label={row.getIsExpanded() ? "Recolher" : "Expandir"}
           >
             <HugeiconsIcon
@@ -84,18 +116,25 @@ const colNombre: ColumnDef<SerializedTreeNode> = {
   header: "Cuenta",
   cell: ({ row }) => {
     const r = row.original;
+    const isRoot = row.depth === 0 && r.tipo === "SINTETICA";
     if (r.tipo === "ANALITICA") {
       return (
         <Link
           href={`/reportes/libro-mayor?cuentaId=${r.id}`}
-          className="text-primary underline-offset-2 hover:underline"
+          className="text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
         >
           {r.nombre}
         </Link>
       );
     }
     return (
-      <span className={cn(r.tipo === "SINTETICA" && "font-semibold")}>
+      <span
+        className={cn(
+          "font-medium",
+          isRoot ? "text-sm font-bold uppercase tracking-wide" : "",
+          r.tipo === "SINTETICA" && row.depth >= 1 ? "font-semibold" : "",
+        )}
+      >
         {r.nombre}
       </span>
     );
@@ -115,7 +154,7 @@ function makeColSaldoInicial(
           row.original.tipo === "SINTETICA" && "font-semibold",
         )}
       >
-        {fmt(row.original.saldoInicial, tc)}
+        {renderSigned(row.original.saldoInicial, tc)}
       </span>
     ),
   };
@@ -128,7 +167,7 @@ function makeColDebe(
     id: "debe",
     header: () => <span className="block text-right">Debe</span>,
     cell: ({ row }) => (
-      <span className="block text-right font-mono text-xs tabular-nums">
+      <span className="block text-right font-mono text-xs tabular-nums text-muted-foreground">
         {fmt(row.original.debe, tc)}
       </span>
     ),
@@ -142,7 +181,7 @@ function makeColHaber(
     id: "haber",
     header: () => <span className="block text-right">Haber</span>,
     cell: ({ row }) => (
-      <span className="block text-right font-mono text-xs tabular-nums">
+      <span className="block text-right font-mono text-xs tabular-nums text-muted-foreground">
         {fmt(row.original.haber, tc)}
       </span>
     ),
@@ -160,9 +199,10 @@ function makeColSaldo(
         className={cn(
           "block text-right font-mono text-xs tabular-nums",
           row.original.tipo === "SINTETICA" && "font-semibold",
+          row.depth === 0 && row.original.tipo === "SINTETICA" && "text-sm",
         )}
       >
-        {fmt(row.original.saldo, tc)}
+        {renderSigned(row.original.saldo, tc)}
       </span>
     ),
   };
@@ -206,9 +246,12 @@ export function CuentaTreeTable({
     <Table>
       <TableHeader>
         {table.getHeaderGroups().map((headerGroup) => (
-          <TableRow key={headerGroup.id}>
+          <TableRow key={headerGroup.id} className="border-b-2">
             {headerGroup.headers.map((header) => (
-              <TableHead key={header.id}>
+              <TableHead
+                key={header.id}
+                className="text-xs font-semibold uppercase tracking-wide"
+              >
                 {flexRender(
                   header.column.columnDef.header,
                   header.getContext(),
@@ -230,9 +273,9 @@ export function CuentaTreeTable({
           </TableRow>
         ) : (
           table.getRowModel().rows.map((row) => (
-            <TableRow key={row.id}>
+            <TableRow key={row.id} className={rowClasses(row)}>
               {row.getVisibleCells().map((cell) => (
-                <TableCell key={cell.id} className="py-2">
+                <TableCell key={cell.id} className="py-1.5">
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </TableCell>
               ))}
@@ -240,20 +283,20 @@ export function CuentaTreeTable({
           ))
         )}
         {totalLabel && totalValue != null ? (
-          <TableRow className="border-t-2 bg-muted/50 hover:bg-muted/50">
-            <TableCell colSpan={2} className="py-3 font-semibold">
+          <TableRow className="border-t-4 border-double bg-slate-900 text-slate-50 hover:bg-slate-900 dark:bg-slate-800">
+            <TableCell colSpan={2} className="py-3 text-sm font-bold uppercase tracking-wide">
               {totalLabel}
             </TableCell>
             {showSaldoInicial ? (
               <TableCell className="py-3 text-right font-mono text-sm font-bold tabular-nums">
                 {totalSaldoInicial != null
-                  ? fmt(totalSaldoInicial, tcParaUsd)
+                  ? renderSigned(totalSaldoInicial, tcParaUsd)
                   : ""}
               </TableCell>
             ) : null}
             <TableCell colSpan={2} />
             <TableCell className="py-3 text-right font-mono text-sm font-bold tabular-nums">
-              {fmt(totalValue, tcParaUsd)}
+              {renderSigned(totalValue, tcParaUsd)}
             </TableCell>
           </TableRow>
         ) : null}
@@ -261,4 +304,3 @@ export function CuentaTreeTable({
     </Table>
   );
 }
-
