@@ -400,6 +400,7 @@ export type CuentaAPagarPorEmbarque = {
   proveedorId: string;
   proveedorNombre: string;
   proveedorCuentaContableId: number | null;
+  proveedorCuentaCodigo: string | null;
   facturas: Array<{
     id: number;
     numero: string;
@@ -408,6 +409,16 @@ export type CuentaAPagarPorEmbarque = {
     totalArs: string;
   }>;
   totalArs: string;
+  // Saldo vivo de la cuenta del proveedor (haber − debe a través de
+  // todos los asientos contabilizados). Si la cuenta está en cero, el
+  // grupo se omite — todo está pagado. Si > 0, ese monto es la deuda
+  // real (puede cubrir N embarques pendientes del mismo proveedor).
+  saldoVivoProveedorArs: string;
+  // Monto sugerido para pagar este grupo: min(totalArs, saldoVivo).
+  // Si totalArs > saldoVivo, indica que ya hubo pagos parciales
+  // (probablemente de otros embarques del mismo proveedor) reduciendo
+  // la deuda viva.
+  pendienteArs: string;
 };
 
 export async function getCuentasAPagarPorEmbarque(): Promise<
@@ -429,7 +440,12 @@ export async function getCuentasAPagarPorEmbarque(): Promise<
       lineas: { select: { subtotal: true } },
       embarque: { select: { id: true, codigo: true } },
       proveedor: {
-        select: { id: true, nombre: true, cuentaContableId: true },
+        select: {
+          id: true,
+          nombre: true,
+          cuentaContableId: true,
+          cuentaContable: { select: { codigo: true } },
+        },
       },
     },
     orderBy: { fechaFactura: "desc" },
@@ -459,8 +475,11 @@ export async function getCuentasAPagarPorEmbarque(): Promise<
         proveedorId: c.proveedor.id,
         proveedorNombre: c.proveedor.nombre,
         proveedorCuentaContableId: c.proveedor.cuentaContableId,
+        proveedorCuentaCodigo: c.proveedor.cuentaContable?.codigo ?? null,
         facturas: [],
         totalArs: "0",
+        saldoVivoProveedorArs: "0",
+        pendienteArs: "0",
       };
       groups.set(key, group);
     }
@@ -508,11 +527,17 @@ export async function getCuentasAPagarPorEmbarque(): Promise<
     );
     g.totalArs = totalGrupo.toFixed(2);
 
-    // Si el saldo vivo del proveedor es <=0, todo ya está pagado: omitir
     const saldoVivo = g.proveedorCuentaContableId
       ? toDecimal(saldoVivoPorCuenta.get(g.proveedorCuentaContableId) ?? "0")
       : toDecimal(0);
+    g.saldoVivoProveedorArs = saldoVivo.toFixed(2);
+
+    // Pendiente = min(totalGrupo, saldoVivo). Si saldoVivo <= 0, el
+    // proveedor ya no debe nada (todos los embarques con él pagados):
+    // omitir grupo.
     if (saldoVivo.lte(0)) continue;
+    const pendiente = saldoVivo.gt(totalGrupo) ? totalGrupo : saldoVivo;
+    g.pendienteArs = pendiente.toFixed(2);
 
     g.facturas.sort((a, b) => a.fecha.localeCompare(b.fecha));
     result.push(g);

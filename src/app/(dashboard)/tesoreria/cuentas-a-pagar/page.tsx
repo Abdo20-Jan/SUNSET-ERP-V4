@@ -101,13 +101,22 @@ function EmbarqueSection({ rows }: { rows: CuentaAPagarPorEmbarque[] }) {
             facturas incluidas.
           </p>
         </div>
+        <div className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
+          <strong>¿Ya pagaste y la línea sigue acá?</strong> Verificá que el
+          asiento del pago haya usado la <strong>cuenta del proveedor</strong>{" "}
+          (2.1.x) como contrapartida. Si elegiste una cuenta de gasto (5.x.x.x)
+          el saldo del proveedor no se reduce. La columna "Saldo proveedor"
+          muestra la deuda viva real.
+        </div>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-32">Embarque</TableHead>
               <TableHead>Proveedor</TableHead>
               <TableHead className="text-right">Facturas</TableHead>
-              <TableHead className="text-right">Total (ARS)</TableHead>
+              <TableHead className="text-right">Total facturado</TableHead>
+              <TableHead className="text-right">Saldo proveedor</TableHead>
+              <TableHead className="text-right">A pagar</TableHead>
               <TableHead className="w-28 text-right"></TableHead>
             </TableRow>
           </TableHeader>
@@ -121,13 +130,17 @@ function EmbarqueSection({ rows }: { rows: CuentaAPagarPorEmbarque[] }) {
                 ? `/tesoreria/movimientos/nuevo?${new URLSearchParams({
                     tipo: "PAGO",
                     cuentaContableId: String(r.proveedorCuentaContableId),
-                    monto: r.totalArs,
+                    monto: r.pendienteArs,
                     descripcion: `Pago embarque ${r.embarqueCodigo} — ${r.proveedorNombre} — Fact: ${numerosFacturas}`.slice(
                       0,
                       255,
                     ),
                   }).toString()}`
                 : null;
+              const totalNum = Number(r.totalArs);
+              const saldoNum = Number(r.saldoVivoProveedorArs);
+              const partial = saldoNum > 0 && saldoNum < totalNum - 0.01;
+              const saldoMatchTotal = Math.abs(saldoNum - totalNum) < 0.01;
               return (
                 <TableRow key={`${r.embarqueId}-${r.proveedorId}`}>
                   <TableCell className="font-mono text-xs">
@@ -137,6 +150,11 @@ function EmbarqueSection({ rows }: { rows: CuentaAPagarPorEmbarque[] }) {
                     <div className="flex flex-col gap-0.5">
                       <span>{r.proveedorNombre}</span>
                       <span className="text-xs text-muted-foreground">
+                        {r.proveedorCuentaCodigo && (
+                          <span className="font-mono">
+                            {r.proveedorCuentaCodigo} ·{" "}
+                          </span>
+                        )}
                         {r.facturas
                           .map((f) => f.numero)
                           .slice(0, 4)
@@ -153,13 +171,39 @@ function EmbarqueSection({ rows }: { rows: CuentaAPagarPorEmbarque[] }) {
                   <TableCell className="text-right font-mono tabular-nums">
                     {fmtMoney(r.totalArs)}
                   </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    <span
+                      className={
+                        saldoMatchTotal
+                          ? "text-rose-700 dark:text-rose-400"
+                          : partial
+                            ? "text-amber-700 dark:text-amber-400"
+                            : ""
+                      }
+                    >
+                      {fmtMoney(r.saldoVivoProveedorArs)}
+                    </span>
+                    {saldoMatchTotal && (
+                      <div className="text-[10px] font-normal text-muted-foreground">
+                        (sin pago registrado)
+                      </div>
+                    )}
+                    {partial && (
+                      <div className="text-[10px] font-normal text-muted-foreground">
+                        (parcial)
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right font-mono font-semibold tabular-nums">
+                    {fmtMoney(r.pendienteArs)}
+                  </TableCell>
                   <TableCell className="text-right">
                     {href ? (
                       <Link
                         href={href}
                         className="inline-flex h-8 items-center rounded-full border border-input bg-background px-3 text-xs font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
                       >
-                        Pagar todo
+                        Pagar
                       </Link>
                     ) : (
                       <span className="text-xs text-muted-foreground">
