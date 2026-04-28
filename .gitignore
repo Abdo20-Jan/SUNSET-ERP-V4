@@ -63,3 +63,9 @@ prisma/diag-stock.ts
 prisma/fix-stock-anular.ts
 prisma/add-productos.ts
 prisma/*.bak
+prisma/backup-*.sql
+prisma/backup-*.sql.gz
+*.sql.tmp
+diag-*.sql
+fix-*.sql
+cleanup-*.sql

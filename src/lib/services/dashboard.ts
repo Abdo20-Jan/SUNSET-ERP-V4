@@ -29,6 +29,14 @@ export type KpisSecundarios = {
   cuentasBancariasActivas: number;
 };
 
+export type IngresoEgresoMensual = {
+  mes: string; // "2026-04"
+  label: string; // "abr 26"
+  ingresos: number;
+  egresos: number;
+  resultado: number;
+};
+
 export type SaldoBancario = {
   cuentaId: number;
   codigo: string;
@@ -379,4 +387,90 @@ export async function getAlertasDashboard(): Promise<Alerta[]> {
   }
 
   return alertas;
+}
+
+/**
+ * Ingresos y egresos mensuales agregados (últimos 6 meses) para gráficos
+ * del dashboard. Suma los saldos signados por categoría:
+ *   INGRESO → haber − debe (positivo = ingreso)
+ *   EGRESO  → debe − haber (positivo = gasto)
+ */
+export async function getIngresosEgresosUltimos6m(): Promise<IngresoEgresoMensual[]> {
+  const ahora = new Date();
+  const desde = new Date(
+    Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth() - 5, 1, 0, 0, 0),
+  );
+
+  const lineas = await db.lineaAsiento.findMany({
+    where: {
+      asiento: {
+        estado: AsientoEstado.CONTABILIZADO,
+        fecha: { gte: desde },
+      },
+      cuenta: {
+        categoria: { in: [CuentaCategoria.INGRESO, CuentaCategoria.EGRESO] },
+      },
+    },
+    select: {
+      debe: true,
+      haber: true,
+      asiento: { select: { fecha: true } },
+      cuenta: { select: { categoria: true } },
+    },
+  });
+
+  // Inicializar 6 meses (incluindo o atual) com 0.
+  const buckets = new Map<
+    string,
+    { ingresos: Decimal; egresos: Decimal }
+  >();
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(
+      Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth() - i, 1),
+    );
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    buckets.set(key, { ingresos: new Decimal(0), egresos: new Decimal(0) });
+  }
+
+  for (const l of lineas) {
+    const f = l.asiento.fecha;
+    const key = `${f.getUTCFullYear()}-${String(f.getUTCMonth() + 1).padStart(2, "0")}`;
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+    const debe = toDecimal(l.debe);
+    const haber = toDecimal(l.haber);
+    if (l.cuenta.categoria === CuentaCategoria.INGRESO) {
+      bucket.ingresos = bucket.ingresos.plus(haber).minus(debe);
+    } else {
+      bucket.egresos = bucket.egresos.plus(debe).minus(haber);
+    }
+  }
+
+  const MES_LABEL = [
+    "ene",
+    "feb",
+    "mar",
+    "abr",
+    "may",
+    "jun",
+    "jul",
+    "ago",
+    "sep",
+    "oct",
+    "nov",
+    "dic",
+  ];
+
+  return Array.from(buckets.entries()).map(([mes, vals]) => {
+    const [yStr, mStr] = mes.split("-");
+    const monthIdx = Number(mStr) - 1;
+    const yearShort = yStr.slice(-2);
+    return {
+      mes,
+      label: `${MES_LABEL[monthIdx]} ${yearShort}`,
+      ingresos: Number(vals.ingresos.toFixed(2)),
+      egresos: Number(vals.egresos.toFixed(2)),
+      resultado: Number(vals.ingresos.minus(vals.egresos).toFixed(2)),
+    };
+  });
 }

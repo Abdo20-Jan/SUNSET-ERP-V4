@@ -15,6 +15,7 @@ import { fmtInt, fmtMoney } from "@/lib/format";
 import {
   getAlertasDashboard,
   getEmbarquesRecientes,
+  getIngresosEgresosUltimos6m,
   getKpisPrincipales,
   getKpisSecundarios,
   getPrestamosActivos,
@@ -26,6 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import { AlertasCard } from "./_components/alertas-card";
 import { EmbarquesRecientesCard } from "./_components/embarques-recientes-card";
+import { IngresosEgresosChart } from "./_components/ingresos-egresos-chart";
 import { KpiCard } from "./_components/kpi-card";
 import { PrestamosActivosCard } from "./_components/prestamos-activos-card";
 import { SaldosBancosCard } from "./_components/saldos-bancos-card";
@@ -90,6 +92,7 @@ async function KpisPrincipales() {
         label="Total Pasivo"
         value={fmtMoney(kpis.totalPasivo.toString())}
         icon={CreditCardIcon}
+        accent="warning"
         hint="Categoría PASIVO"
       />
       <KpiCard
@@ -103,10 +106,16 @@ async function KpisPrincipales() {
         label="Asientos Contabilizados"
         value={fmtInt(kpis.asientosContabilizados)}
         icon={BookOpen01Icon}
+        accent="info"
         hint="Total acumulado"
       />
     </>
   );
+}
+
+async function IngresosEgresosSection() {
+  const data = await getIngresosEgresosUltimos6m();
+  return <IngresosEgresosChart data={data} />;
 }
 
 async function SaldosSection() {
@@ -188,6 +197,10 @@ export default async function DashboardPage() {
           <KpisPrincipales />
         </Suspense>
       </section>
+
+      <Suspense fallback={<CardSkeleton rows={6} />}>
+        <IngresosEgresosSection />
+      </Suspense>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="flex flex-col gap-4">
