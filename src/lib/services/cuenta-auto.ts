@@ -205,7 +205,7 @@ function siguienteCodigo(
   padre: string,
   min: number,
   max: number,
-): string {
+): string | null {
   const prefix = `${padre}.`;
   const usados = new Set<number>();
   for (const c of existentes) {
@@ -218,9 +218,7 @@ function siguienteCodigo(
   for (let n = min; n <= max; n++) {
     if (!usados.has(n)) return `${prefix}${String(n).padStart(2, "0")}`;
   }
-  throw new Error(
-    `No hay códigos disponibles en ${prefix}${min}-${max}. Cree la cuenta manualmente.`,
-  );
+  return null;
 }
 
 /**
@@ -241,12 +239,27 @@ export async function crearCuentaParaEntidad(
     where: { codigo: { startsWith: `${cfg.padre}.` } },
     select: { codigo: true },
   });
-  const codigo = siguienteCodigo(
-    existentes.map((c) => c.codigo),
+  const codigosExistentes = existentes.map((c) => c.codigo);
+  // 1) Intenta el rango específico del tipo. Si está lleno (ej. el user
+  //    cargó >5 proveedores LOGISTICA), cae al rango completo del padre
+  //    (10-99) — agarra cualquier slot libre, mezclando tipos. La
+  //    distinción de tipo queda en `Proveedor.tipoProveedor` (no en el
+  //    código de cuenta), así que no rompe nada — sólo deja de agrupar
+  //    visualmente más allá de los 5 primeros.
+  let codigo = siguienteCodigo(
+    codigosExistentes,
     cfg.padre,
     cfg.min,
     cfg.max,
   );
+  if (!codigo) {
+    codigo = siguienteCodigo(codigosExistentes, cfg.padre, 10, 99);
+  }
+  if (!codigo) {
+    throw new Error(
+      `No hay códigos disponibles bajo ${cfg.padre}.10-99. Cree la cuenta manualmente.`,
+    );
+  }
   const created = await tx.cuentaContable.create({
     data: {
       codigo,
