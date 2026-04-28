@@ -9,7 +9,7 @@ import {
   type Moneda,
 } from "@/generated/prisma/client";
 
-import { listarMeses, mesKey, saldoPorCategoria } from "./shared";
+import { listarMeses, mesKey } from "./shared";
 
 export type FlujoOrigen = "REALIZADO" | "PROYECTADO";
 
@@ -20,7 +20,11 @@ export type FlujoCelula = {
 
 /**
  * Nó de árvore para o flujo de caja. Cada nó representa uma cuenta del
- * plan de cuentas (SINTETICA o ANALITICA) com colunas mensales de monto.
+ * plan de cuentas (SINTETICA o ANALITICA) con cashflow mensal signado:
+ *   - Positivo: entrada de cash al banco/caja (la cuenta fue HABER del
+ *     asiento — ej. cliente cobrado, préstamo recibido, ingreso operativo)
+ *   - Negativo: salida de cash (la cuenta fue DEBE — ej. proveedor pagado,
+ *     gasto, percepción fiscal, pago préstamo)
  */
 export type FlujoNode = {
   cuentaId: number;
@@ -39,8 +43,15 @@ export type FlujoCajaResult = {
   desde: Date;
   hasta: Date;
   meses: string[];
-  ingresos: FlujoNode[];
-  egresos: FlujoNode[];
+  // Cuentas que recibieron flujo de caja en el período, organizadas por
+  // su rama natural del plan de cuentas (ACTIVO/PASIVO/PATRIMONIO/INGRESO/
+  // EGRESO). Excluye 1.1.1.* y 1.1.2.* (bancos/cajas) — esas son la
+  // contrapartida del flujo, no su clasificación.
+  contrapartidas: FlujoNode[];
+  // Asientos puros de transferencia entre cuentas propias (≥2 líneas en
+  // banco/caja, 0 contrapartidas externas). Cada banco aparece con su
+  // movimiento neto signado. Total por mes = 0 por construcción.
+  transferencias: FlujoNode[];
   totales: {
     totalIngresosPorMes: Record<string, Decimal>;
     totalEgresosPorMes: Record<string, Decimal>;
@@ -51,17 +62,26 @@ export type FlujoCajaResult = {
   advertencias: string[];
 };
 
+const BANCO_CAJA_PREFIXES = ["1.1.1.", "1.1.2."];
+
+function esBancoCaja(codigo: string): boolean {
+  return BANCO_CAJA_PREFIXES.some((p) => codigo.startsWith(p));
+}
+
 /**
- * Flujo de Caja iterando a árvore do plano de contas.
+ * Flujo de Caja real: itera todos los movimientos que tocan banco/caja
+ * y atribuye el flujo a cada cuenta contrapartida (proveedor, cliente,
+ * préstamo, impuesto, gasto, crédito fiscal, capital, etc.).
  *
- * Cada cuenta INGRESO o EGRESO genera uma fila; SINTETICAs agregam o
- * total de seus filhos. Colunas: meses do `desde` ao `hasta`.
+ * Por construcción: Σ flujo contrapartidas = (saldo final bancos) −
+ * (saldo inicial bancos). Bate con extracto bancario.
  *
- * - Saldo inicial: soma de bancos+caja (cuentas 1.1.1.* y 1.1.2.*) com
- *   asiento.fecha < `desde` (acumulado anterior).
- * - Realizado: linhas con asiento.estado = CONTABILIZADO no rango.
- * - No incluye proyección (embarques/compras pendientes) nesta iteração;
- *   pode ser agregado depois marcando o `origen` como PROYECTADO.
+ * Sign convention por cuenta:
+ *   cashFlow = línea.haber − línea.debe
+ *   - HABER (cuenta acreditada) → cash llegó al banco a través de esta
+ *     cuenta → flujo positivo (ingreso)
+ *   - DEBE  (cuenta debitada) → cash salió del banco hacia esta cuenta
+ *     → flujo negativo (egreso)
  */
 export async function getFlujoCaja(
   desde: Date,
@@ -71,97 +91,174 @@ export async function getFlujoCaja(
   const meses = listarMeses(desde, hasta);
   const advertencias: string[] = [];
 
-  // 1) Cuentas relevantes + saldo inicial dos bancos
-  const [cuentas, saldoInicialAgg] = await Promise.all([
-    db.cuentaContable.findMany({
-      where: { categoria: { in: ["INGRESO", "EGRESO"] } },
-      orderBy: { codigo: "asc" },
-      select: {
-        id: true,
-        codigo: true,
-        nombre: true,
-        tipo: true,
-        categoria: true,
-        nivel: true,
-        padreCodigo: true,
+  // 1) Saldo inicial: suma debe − haber de bancos+caja con asientos antes
+  //    del rango (acumulado neto que bancos tenían al iniciar `desde`).
+  const saldoInicialAgg = await db.lineaAsiento.aggregate({
+    where: {
+      asiento: {
+        estado: AsientoEstado.CONTABILIZADO,
+        fecha: { lt: desde },
+        moneda,
       },
-    }),
-    db.lineaAsiento.aggregate({
-      where: {
-        asiento: {
-          estado: AsientoEstado.CONTABILIZADO,
-          fecha: { lt: desde },
-          moneda,
-        },
-        cuenta: {
-          OR: [
-            { codigo: { startsWith: "1.1.1." } },
-            { codigo: { startsWith: "1.1.2." } },
-          ],
-        },
+      cuenta: {
+        OR: BANCO_CAJA_PREFIXES.map((p) => ({ codigo: { startsWith: p } })),
       },
-      _sum: { debe: true, haber: true },
-    }),
-  ]);
-
+    },
+    _sum: { debe: true, haber: true },
+  });
   const saldoInicial = toDecimal(saldoInicialAgg._sum.debe ?? 0)
     .minus(toDecimal(saldoInicialAgg._sum.haber ?? 0))
     .toDecimalPlaces(2);
 
-  // 2) Lineas no range, agrupadas por (cuentaId, mes)
-  const cuentaIds = cuentas.map((c) => c.id);
-  if (cuentaIds.length === 0) {
-    return emptyResult(moneda, desde, hasta, meses, saldoInicial);
-  }
-
-  const lineas = await db.lineaAsiento.findMany({
+  // 2) Cargar todos los asientos del período que tocan banco/caja, con
+  //    sus líneas y los códigos de cuenta de cada línea.
+  const asientos = await db.asiento.findMany({
     where: {
-      cuentaId: { in: cuentaIds },
-      asiento: {
-        estado: AsientoEstado.CONTABILIZADO,
-        fecha: { gte: desde, lte: hasta },
-        moneda,
+      estado: AsientoEstado.CONTABILIZADO,
+      fecha: { gte: desde, lte: hasta },
+      moneda,
+      lineas: {
+        some: {
+          cuenta: {
+            OR: BANCO_CAJA_PREFIXES.map((p) => ({
+              codigo: { startsWith: p },
+            })),
+          },
+        },
       },
     },
     select: {
-      cuentaId: true,
-      debe: true,
-      haber: true,
-      asiento: { select: { fecha: true } },
+      id: true,
+      fecha: true,
+      lineas: {
+        select: {
+          cuentaId: true,
+          debe: true,
+          haber: true,
+          cuenta: { select: { codigo: true } },
+        },
+      },
     },
   });
 
-  // 3) Agregação: cuentaId → mes → monto
-  const cuentaMap = new Map(cuentas.map((c) => [c.id, c]));
-  const agg = new Map<number, Map<string, Decimal>>();
-  for (const l of lineas) {
-    const cuenta = cuentaMap.get(l.cuentaId);
-    if (!cuenta) continue;
-    const mes = mesKey(l.asiento.fecha);
-    const monto = saldoPorCategoria(
-      toDecimal(l.debe),
-      toDecimal(l.haber),
-      cuenta.categoria,
-    );
-    let porMes = agg.get(l.cuentaId);
-    if (!porMes) {
-      porMes = new Map();
-      agg.set(l.cuentaId, porMes);
+  // 3) Atribuir flujo a cada cuenta contrapartida (no banco/caja).
+  //    Pure transfers (≥2 banco lines, 0 non-banco) → tabla aparte.
+  const flujoPorCuenta = new Map<number, Map<string, Decimal>>();
+  const transferenciasPorBanco = new Map<number, Map<string, Decimal>>();
+
+  for (const a of asientos) {
+    const mes = mesKey(a.fecha);
+    const bancoLines = a.lineas.filter((l) => esBancoCaja(l.cuenta.codigo));
+    const otrasLines = a.lineas.filter((l) => !esBancoCaja(l.cuenta.codigo));
+
+    if (otrasLines.length === 0 && bancoLines.length >= 2) {
+      // Transferencia entre cuentas propias.
+      for (const b of bancoLines) {
+        const flow = toDecimal(b.debe).minus(toDecimal(b.haber));
+        if (flow.abs().lt(0.01)) continue;
+        let porMes = transferenciasPorBanco.get(b.cuentaId);
+        if (!porMes) {
+          porMes = new Map();
+          transferenciasPorBanco.set(b.cuentaId, porMes);
+        }
+        porMes.set(mes, (porMes.get(mes) ?? new Decimal(0)).plus(flow));
+      }
+      continue;
     }
-    porMes.set(mes, (porMes.get(mes) ?? new Decimal(0)).plus(monto));
+
+    for (const l of otrasLines) {
+      const flow = toDecimal(l.haber).minus(toDecimal(l.debe));
+      if (flow.abs().lt(0.01)) continue;
+      let porMes = flujoPorCuenta.get(l.cuentaId);
+      if (!porMes) {
+        porMes = new Map();
+        flujoPorCuenta.set(l.cuentaId, porMes);
+      }
+      porMes.set(mes, (porMes.get(mes) ?? new Decimal(0)).plus(flow));
+    }
   }
 
-  // 4) Construir nodos (incluindo SINTETICAs com 0)
+  // 4) Cargar info de las cuentas contrapartida + sus ancestros para
+  //    poder armar el árbol completo.
+  const cuentaIdsConFlujo = Array.from(flujoPorCuenta.keys());
+  const bancoIdsTransfer = Array.from(transferenciasPorBanco.keys());
+
+  const [cuentasFlujo, bancosTransfer] = await Promise.all([
+    cuentaIdsConFlujo.length > 0
+      ? db.cuentaContable.findMany({
+          where: { id: { in: cuentaIdsConFlujo } },
+          select: {
+            id: true,
+            codigo: true,
+            nombre: true,
+            tipo: true,
+            categoria: true,
+            nivel: true,
+            padreCodigo: true,
+          },
+        })
+      : Promise.resolve([]),
+    bancoIdsTransfer.length > 0
+      ? db.cuentaContable.findMany({
+          where: { id: { in: bancoIdsTransfer } },
+          select: {
+            id: true,
+            codigo: true,
+            nombre: true,
+            tipo: true,
+            categoria: true,
+            nivel: true,
+            padreCodigo: true,
+          },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  // Cargar todos los ancestros (sintéticas) hasta el root.
+  const codigosAncestros = new Set<string>();
+  for (const c of cuentasFlujo) {
+    let codigo: string | null = c.padreCodigo;
+    while (codigo) {
+      if (codigosAncestros.has(codigo)) break;
+      codigosAncestros.add(codigo);
+      const padre = codigo.lastIndexOf(".");
+      codigo = padre === -1 ? null : codigo.slice(0, padre);
+    }
+  }
+
+  const ancestros =
+    codigosAncestros.size > 0
+      ? await db.cuentaContable.findMany({
+          where: { codigo: { in: Array.from(codigosAncestros) } },
+          select: {
+            id: true,
+            codigo: true,
+            nombre: true,
+            tipo: true,
+            categoria: true,
+            nivel: true,
+            padreCodigo: true,
+          },
+        })
+      : [];
+
+  // 5) Construir tree (cuentas contrapartida).
+  const todasCuentasFlujo = [...cuentasFlujo, ...ancestros].sort((a, b) =>
+    a.codigo.localeCompare(b.codigo),
+  );
   const byCodigo = new Map<string, FlujoNode>();
-  for (const c of cuentas) {
+  for (const c of todasCuentasFlujo) {
     const valoresPorMes: Record<string, FlujoCelula> = {};
     for (const m of meses) valoresPorMes[m] = celulaCero();
     if (c.tipo === "ANALITICA") {
-      const porMes = agg.get(c.id);
+      const porMes = flujoPorCuenta.get(c.id);
       if (porMes) {
         for (const [mes, monto] of porMes.entries()) {
           if (valoresPorMes[mes]) {
-            valoresPorMes[mes] = { monto, origen: "REALIZADO" };
+            valoresPorMes[mes] = {
+              monto: monto.toDecimalPlaces(2),
+              origen: "REALIZADO",
+            };
           }
         }
       }
@@ -182,10 +279,8 @@ export async function getFlujoCaja(
     });
   }
 
-  // 5) Linkar tree por padreCodigo
-  const ingresosRoots: FlujoNode[] = [];
-  const egresosRoots: FlujoNode[] = [];
-  for (const c of cuentas) {
+  const contrapartidasRoots: FlujoNode[] = [];
+  for (const c of todasCuentasFlujo) {
     const node = byCodigo.get(c.codigo)!;
     if (c.padreCodigo) {
       const parent = byCodigo.get(c.padreCodigo);
@@ -194,11 +289,10 @@ export async function getFlujoCaja(
         continue;
       }
     }
-    if (node.categoria === "INGRESO") ingresosRoots.push(node);
-    else if (node.categoria === "EGRESO") egresosRoots.push(node);
+    contrapartidasRoots.push(node);
   }
 
-  // 6) Roll-up bottom-up nas SINTETICAs
+  // Roll-up bottom-up
   const rollUp = (node: FlujoNode): void => {
     if (node.tipo === "SINTETICA" && node.children.length > 0) {
       for (const ch of node.children) rollUp(ch);
@@ -219,29 +313,76 @@ export async function getFlujoCaja(
       node.totalPeriodo = node.totalPeriodo.toDecimalPlaces(2);
     }
   };
-  for (const r of ingresosRoots) rollUp(r);
-  for (const r of egresosRoots) rollUp(r);
+  for (const r of contrapartidasRoots) rollUp(r);
 
-  // 7) Totales por mes
+  // Ordenar roots por código (1, 2, 3, 4, 5)
+  contrapartidasRoots.sort((a, b) => a.codigo.localeCompare(b.codigo));
+
+  // 6) Tree de transferencias (bancos involucrados en pure transfers)
+  const transferenciasNodes: FlujoNode[] = bancosTransfer.map((c) => {
+    const valoresPorMes: Record<string, FlujoCelula> = {};
+    for (const m of meses) valoresPorMes[m] = celulaCero();
+    const porMes = transferenciasPorBanco.get(c.id);
+    if (porMes) {
+      for (const [mes, monto] of porMes.entries()) {
+        if (valoresPorMes[mes]) {
+          valoresPorMes[mes] = {
+            monto: monto.toDecimalPlaces(2),
+            origen: "REALIZADO",
+          };
+        }
+      }
+    }
+    const totalPeriodo = sumMoney(
+      Object.values(valoresPorMes).map((v) => v.monto),
+    );
+    return {
+      cuentaId: c.id,
+      codigo: c.codigo,
+      nombre: c.nombre,
+      tipo: c.tipo,
+      categoria: c.categoria,
+      nivel: c.nivel,
+      valoresPorMes,
+      totalPeriodo,
+      children: [],
+    };
+  });
+
+  // 7) Totales por mes:
+  //    - Ingresos: suma de cashflows positivos en contrapartidas (cash que
+  //      llegó al banco)
+  //    - Egresos: suma de cashflows negativos en contrapartidas (cash que
+  //      salió del banco)
+  //    - Saldo del mes = ingresos + egresos (egresos ya negativo)
   const totalIngresosPorMes: Record<string, Decimal> = {};
   const totalEgresosPorMes: Record<string, Decimal> = {};
   const saldoMensalPorMes: Record<string, Decimal> = {};
   const saldoAcumuladoPorMes: Record<string, Decimal> = {};
 
+  // Walk all ANALITICAs (nodes sin children) en contrapartidas
+  const analiticas: FlujoNode[] = [];
+  const collectAnaliticas = (n: FlujoNode) => {
+    if (n.tipo === "ANALITICA") analiticas.push(n);
+    n.children.forEach(collectAnaliticas);
+  };
+  for (const r of contrapartidasRoots) collectAnaliticas(r);
+
   let acum = saldoInicial;
   for (const m of meses) {
-    const totalIn = sumMoney(
-      ingresosRoots.map((r) => r.valoresPorMes[m]?.monto ?? new Decimal(0)),
-    );
-    const totalEg = sumMoney(
-      egresosRoots.map((r) => r.valoresPorMes[m]?.monto ?? new Decimal(0)),
-    );
-    totalIngresosPorMes[m] = totalIn;
-    totalEgresosPorMes[m] = totalEg;
-    const saldo = totalIn.minus(totalEg);
-    saldoMensalPorMes[m] = saldo;
+    let ingresos = new Decimal(0);
+    let egresos = new Decimal(0);
+    for (const a of analiticas) {
+      const v = a.valoresPorMes[m]?.monto ?? new Decimal(0);
+      if (v.gt(0)) ingresos = ingresos.plus(v);
+      else if (v.lt(0)) egresos = egresos.plus(v); // egresos negativo
+    }
+    totalIngresosPorMes[m] = ingresos.toDecimalPlaces(2);
+    totalEgresosPorMes[m] = egresos.toDecimalPlaces(2);
+    const saldo = ingresos.plus(egresos);
+    saldoMensalPorMes[m] = saldo.toDecimalPlaces(2);
     acum = acum.plus(saldo);
-    saldoAcumuladoPorMes[m] = acum;
+    saldoAcumuladoPorMes[m] = acum.toDecimalPlaces(2);
   }
 
   return {
@@ -249,8 +390,8 @@ export async function getFlujoCaja(
     desde,
     hasta,
     meses,
-    ingresos: ingresosRoots,
-    egresos: egresosRoots,
+    contrapartidas: contrapartidasRoots,
+    transferencias: transferenciasNodes,
     totales: {
       totalIngresosPorMes,
       totalEgresosPorMes,
@@ -264,40 +405,4 @@ export async function getFlujoCaja(
 
 function celulaCero(): FlujoCelula {
   return { monto: new Decimal(0), origen: "REALIZADO" };
-}
-
-function emptyResult(
-  moneda: Moneda,
-  desde: Date,
-  hasta: Date,
-  meses: string[],
-  saldoInicial: Decimal,
-): FlujoCajaResult {
-  const cero = (): Record<string, Decimal> => {
-    const r: Record<string, Decimal> = {};
-    for (const m of meses) r[m] = new Decimal(0);
-    return r;
-  };
-  const acum = (): Record<string, Decimal> => {
-    const r: Record<string, Decimal> = {};
-    let s = saldoInicial;
-    for (const m of meses) r[m] = s;
-    return r;
-  };
-  return {
-    moneda,
-    desde,
-    hasta,
-    meses,
-    ingresos: [],
-    egresos: [],
-    totales: {
-      totalIngresosPorMes: cero(),
-      totalEgresosPorMes: cero(),
-      saldoMensalPorMes: cero(),
-      saldoInicial,
-      saldoAcumuladoPorMes: acum(),
-    },
-    advertencias: [],
-  };
 }

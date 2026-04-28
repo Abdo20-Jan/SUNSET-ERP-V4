@@ -47,14 +47,12 @@ function mesKeyOf(d: Date): string {
 
 // Serializa Decimal → string para o cliente (preserva precisão).
 function serializeNode(node: FlujoNode): SerializedNode {
-  // Em flujo-caja só vêm INGRESO/EGRESO; cast seguro.
-  const categoria = node.categoria as "INGRESO" | "EGRESO";
   return {
     cuentaId: node.cuentaId,
     codigo: node.codigo,
     nombre: node.nombre,
     tipo: node.tipo,
-    categoria,
+    categoria: node.categoria,
     nivel: node.nivel,
     valoresPorMes: Object.fromEntries(
       Object.entries(node.valoresPorMes).map(([k, v]) => [
@@ -104,8 +102,8 @@ export default async function FlujoCajaPage({
 
   const flujo = await getFlujoCaja(desdeFinal, hastaFinal, moneda);
 
-  const ingresosSer = flujo.ingresos.map(serializeNode);
-  const egresosSer = flujo.egresos.map(serializeNode);
+  const contrapartidasSer = flujo.contrapartidas.map(serializeNode);
+  const transferenciasSer = flujo.transferencias.map(serializeNode);
 
   const totales: SerializedTotales = {
     totalIngresosPorMes: mapValues(flujo.totales.totalIngresosPorMes),
@@ -122,8 +120,10 @@ export default async function FlujoCajaPage({
           Flujo de Caja
         </h1>
         <p className="text-sm text-muted-foreground">
-          Iterando árbol del plan de cuentas · Ingresos y Egresos por cuenta,
-          totales y saldo acumulado por mes.
+          Movimientos reales de bancos y cajas, agrupados por la cuenta
+          contrapartida (proveedores, clientes, préstamos, impuestos, gastos,
+          créditos fiscales, etc). El saldo acumulado iguala al saldo
+          contable de bancos.
         </p>
       </div>
 
@@ -136,8 +136,8 @@ export default async function FlujoCajaPage({
       <Card className="py-0">
         <FlujoMatriz
           meses={flujo.meses}
-          ingresos={ingresosSer}
-          egresos={egresosSer}
+          contrapartidas={contrapartidasSer}
+          transferencias={transferenciasSer}
           totales={totales}
         />
       </Card>

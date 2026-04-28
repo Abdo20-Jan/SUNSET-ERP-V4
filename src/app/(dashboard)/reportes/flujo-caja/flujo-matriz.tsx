@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 
@@ -22,7 +22,7 @@ export type SerializedNode = {
   codigo: string;
   nombre: string;
   tipo: "SINTETICA" | "ANALITICA";
-  categoria: "INGRESO" | "EGRESO";
+  categoria: "ACTIVO" | "PASIVO" | "PATRIMONIO" | "INGRESO" | "EGRESO";
   nivel: number;
   valoresPorMes: Record<string, { monto: string; origen: string }>;
   totalPeriodo: string;
@@ -39,25 +39,39 @@ export type SerializedTotales = {
 
 type Props = {
   meses: string[];
-  ingresos: SerializedNode[];
-  egresos: SerializedNode[];
+  contrapartidas: SerializedNode[];
+  transferencias: SerializedNode[];
   totales: SerializedTotales;
 };
 
-// Cell rendering com sinal coloreado:
-// - isNegative=true: força exibição como egreso (rojo, parens) mesmo se valor abs.
-// - sin isNegative: respeta el signo nativo del número (positivo verde con +, negativo rojo parens).
+const SECCION_LABELS: Record<SerializedNode["categoria"], string> = {
+  ACTIVO: "Activos",
+  PASIVO: "Pasivos",
+  PATRIMONIO: "Patrimonio",
+  INGRESO: "Ingresos operativos",
+  EGRESO: "Egresos operativos",
+};
+
+const SECCION_ORDER: SerializedNode["categoria"][] = [
+  "INGRESO",
+  "EGRESO",
+  "ACTIVO",
+  "PASIVO",
+  "PATRIMONIO",
+];
+
+// Cell rendering — sign nativo del cashflow.
+//   Positivo = entrou no caixa (verde, "+ X").
+//   Negativo = saiu do caixa (rojo, "(X)").
 function MontoCell({
   monto,
   destacar = false,
-  isNegative = false,
 }: {
   monto: string;
   destacar?: boolean;
-  isNegative?: boolean;
 }) {
   const num = Number(monto);
-  if (!Number.isFinite(num) || num === 0) {
+  if (!Number.isFinite(num) || Math.abs(num) < 0.01) {
     return (
       <span className="block text-right font-mono text-xs text-muted-foreground tabular-nums">
         —
@@ -65,18 +79,18 @@ function MontoCell({
     );
   }
   const abs = fmtMoney(Math.abs(num).toFixed(2));
-  const showAsNegative = isNegative || num < 0;
+  const isNegative = num < 0;
   return (
     <span
       className={cn(
         "block text-right font-mono text-xs tabular-nums",
         destacar && "font-semibold",
-        showAsNegative
+        isNegative
           ? "text-rose-600 dark:text-rose-400"
           : "text-emerald-700 dark:text-emerald-400",
       )}
     >
-      {showAsNegative ? `(${abs})` : `+ ${abs}`}
+      {isNegative ? `(${abs})` : `+ ${abs}`}
     </span>
   );
 }
@@ -97,14 +111,12 @@ function NodeRow({
   node,
   depth,
   meses,
-  isEgreso,
   expanded,
   onToggle,
 }: {
   node: SerializedNode;
   depth: number;
   meses: string[];
-  isEgreso: boolean;
   expanded: Set<number>;
   onToggle: (id: number) => void;
 }) {
@@ -117,11 +129,7 @@ function NodeRow({
     <>
       <TableRow className={rowClasses(node, depth)}>
         <TableCell
-          className={cn(
-            "py-1.5 sticky left-0 z-10",
-            rowClasses(node, depth),
-            // forçar fundo para a sticky cell
-          )}
+          className={cn("py-1.5 sticky left-0 z-10", rowClasses(node, depth))}
           style={{ paddingLeft: `${indent + 12}px` }}
         >
           <div
@@ -156,7 +164,11 @@ function NodeRow({
             <span
               className={cn(
                 "ml-1 truncate",
-                isRoot ? "text-sm font-bold" : node.tipo === "ANALITICA" ? "text-xs" : "text-sm",
+                isRoot
+                  ? "text-sm font-bold"
+                  : node.tipo === "ANALITICA"
+                    ? "text-xs"
+                    : "text-sm",
               )}
             >
               {node.nombre}
@@ -168,7 +180,6 @@ function NodeRow({
             <MontoCell
               monto={node.valoresPorMes[m]?.monto ?? "0"}
               destacar={node.tipo === "SINTETICA"}
-              isNegative={isEgreso}
             />
           </TableCell>
         ))}
@@ -176,7 +187,6 @@ function NodeRow({
           <MontoCell
             monto={node.totalPeriodo}
             destacar={node.tipo === "SINTETICA"}
-            isNegative={isEgreso}
           />
         </TableCell>
       </TableRow>
@@ -187,7 +197,6 @@ function NodeRow({
               node={child}
               depth={depth + 1}
               meses={meses}
-              isEgreso={isEgreso}
               expanded={expanded}
               onToggle={onToggle}
             />
@@ -197,12 +206,16 @@ function NodeRow({
   );
 }
 
-export function FlujoMatriz({ meses, ingresos, egresos, totales }: Props) {
-  // Por padrão expande nivel 0 (raízes)
+export function FlujoMatriz({
+  meses,
+  contrapartidas,
+  transferencias,
+  totales,
+}: Props) {
+  // Por padrão expande los roots de cada sección
   const [expanded, setExpanded] = useState<Set<number>>(() => {
     const init = new Set<number>();
-    for (const r of ingresos) init.add(r.cuentaId);
-    for (const r of egresos) init.add(r.cuentaId);
+    for (const r of contrapartidas) init.add(r.cuentaId);
     return init;
   });
 
@@ -215,13 +228,24 @@ export function FlujoMatriz({ meses, ingresos, egresos, totales }: Props) {
     });
   };
 
+  // Agrupar contrapartidas por categoría (sección económica)
+  const contrapartidasPorSeccion = new Map<
+    SerializedNode["categoria"],
+    SerializedNode[]
+  >();
+  for (const n of contrapartidas) {
+    const arr = contrapartidasPorSeccion.get(n.categoria) ?? [];
+    arr.push(n);
+    contrapartidasPorSeccion.set(n.categoria, arr);
+  }
+
   return (
     <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow className="border-b-2">
             <TableHead className="sticky left-0 z-20 bg-background min-w-[280px] text-xs font-semibold uppercase tracking-wide">
-              Cuenta
+              Cuenta contrapartida
             </TableHead>
             {meses.map((m) => (
               <TableHead
@@ -237,108 +261,115 @@ export function FlujoMatriz({ meses, ingresos, egresos, totales }: Props) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {/* INGRESOS */}
-          <TableRow className="bg-emerald-50 dark:bg-emerald-950/30 border-y-2 border-emerald-300 dark:border-emerald-700/50">
-            <TableCell
-              colSpan={meses.length + 2}
-              className="sticky left-0 z-10 bg-emerald-50 py-2 text-sm font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
-            >
-              Ingresos
-            </TableCell>
-          </TableRow>
-          {ingresos.length === 0 ? (
+          {SECCION_ORDER.flatMap((seccion) => {
+            const nodos = contrapartidasPorSeccion.get(seccion) ?? [];
+            if (nodos.length === 0) return [];
+            return [
+              <TableRow
+                key={`hdr-${seccion}`}
+                className="bg-slate-100 border-y-2 border-slate-300 dark:bg-slate-900/40 dark:border-slate-700/50"
+              >
+                <TableCell
+                  colSpan={meses.length + 2}
+                  className="sticky left-0 z-10 bg-slate-100 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-700 dark:bg-slate-900/40 dark:text-slate-300"
+                >
+                  {SECCION_LABELS[seccion]}
+                </TableCell>
+              </TableRow>,
+              ...nodos.map((node) => (
+                <NodeRow
+                  key={node.cuentaId}
+                  node={node}
+                  depth={0}
+                  meses={meses}
+                  expanded={expanded}
+                  onToggle={toggle}
+                />
+              )),
+            ];
+          })}
+
+          {contrapartidas.length === 0 && (
             <TableRow>
               <TableCell
                 colSpan={meses.length + 2}
                 className="py-3 text-center text-xs text-muted-foreground"
               >
-                Sin ingresos en el período.
+                Sin movimientos en el período.
               </TableCell>
             </TableRow>
-          ) : (
-            ingresos.map((node) => (
-              <NodeRow
-                key={node.cuentaId}
-                node={node}
-                depth={0}
-                meses={meses}
-                isEgreso={false}
-                expanded={expanded}
-                onToggle={toggle}
-              />
-            ))
           )}
-          <TableRow className="bg-emerald-100 dark:bg-emerald-950/50 border-t-2 border-emerald-300 dark:border-emerald-700/50">
-            <TableCell className="sticky left-0 z-10 bg-emerald-100 py-2 text-sm font-bold uppercase dark:bg-emerald-950/50">
+
+          {/* Transferencias entre cuentas propias (si hay) */}
+          {transferencias.length > 0 && (
+            <>
+              <TableRow className="bg-indigo-50 border-y-2 border-indigo-300 dark:bg-indigo-950/30 dark:border-indigo-700/50">
+                <TableCell
+                  colSpan={meses.length + 2}
+                  className="sticky left-0 z-10 bg-indigo-50 py-2 text-[11px] font-bold uppercase tracking-wide text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-300"
+                >
+                  Transferencias entre cuentas propias{" "}
+                  <span className="font-normal text-muted-foreground normal-case">
+                    (suman 0 — visible per banco)
+                  </span>
+                </TableCell>
+              </TableRow>
+              {transferencias.map((node) => (
+                <NodeRow
+                  key={`tr-${node.cuentaId}`}
+                  node={node}
+                  depth={0}
+                  meses={meses}
+                  expanded={expanded}
+                  onToggle={toggle}
+                />
+              ))}
+            </>
+          )}
+
+          {/* Totales */}
+          <TableRow className="bg-emerald-100 border-t-2 border-emerald-300 dark:bg-emerald-950/40 dark:border-emerald-700/50">
+            <TableCell className="sticky left-0 z-10 bg-emerald-100 py-2 text-sm font-bold uppercase dark:bg-emerald-950/40">
               Total Ingresos
             </TableCell>
             {meses.map((m) => (
-              <TableCell key={m} className="bg-emerald-100 py-2 dark:bg-emerald-950/50">
+              <TableCell
+                key={m}
+                className="bg-emerald-100 py-2 dark:bg-emerald-950/40"
+              >
                 <MontoCell
                   monto={totales.totalIngresosPorMes[m] ?? "0"}
                   destacar
-                  isNegative={false}
                 />
               </TableCell>
             ))}
-            <TableCell className="bg-emerald-100 py-2 border-l dark:bg-emerald-950/50">
+            <TableCell className="bg-emerald-100 py-2 border-l dark:bg-emerald-950/40">
               <MontoCell
                 monto={sumByKey(totales.totalIngresosPorMes, meses)}
                 destacar
-                isNegative={false}
               />
             </TableCell>
           </TableRow>
 
-          {/* EGRESOS */}
-          <TableRow className="bg-rose-50 dark:bg-rose-950/30 border-y-2 border-rose-300 dark:border-rose-700/50">
-            <TableCell
-              colSpan={meses.length + 2}
-              className="sticky left-0 z-10 bg-rose-50 py-2 text-sm font-bold uppercase tracking-wide text-rose-700 dark:bg-rose-950/30 dark:text-rose-300"
-            >
-              Egresos
-            </TableCell>
-          </TableRow>
-          {egresos.length === 0 ? (
-            <TableRow>
-              <TableCell
-                colSpan={meses.length + 2}
-                className="py-3 text-center text-xs text-muted-foreground"
-              >
-                Sin egresos en el período.
-              </TableCell>
-            </TableRow>
-          ) : (
-            egresos.map((node) => (
-              <NodeRow
-                key={node.cuentaId}
-                node={node}
-                depth={0}
-                meses={meses}
-                isEgreso
-                expanded={expanded}
-                onToggle={toggle}
-              />
-            ))
-          )}
-          <TableRow className="bg-rose-100 dark:bg-rose-950/50 border-t-2 border-rose-300 dark:border-rose-700/50">
-            <TableCell className="sticky left-0 z-10 bg-rose-100 py-2 text-sm font-bold uppercase dark:bg-rose-950/50">
+          <TableRow className="bg-rose-100 border-t-2 border-rose-300 dark:bg-rose-950/40 dark:border-rose-700/50">
+            <TableCell className="sticky left-0 z-10 bg-rose-100 py-2 text-sm font-bold uppercase dark:bg-rose-950/40">
               Total Egresos
             </TableCell>
             {meses.map((m) => (
-              <TableCell key={m} className="bg-rose-100 py-2 dark:bg-rose-950/50">
+              <TableCell
+                key={m}
+                className="bg-rose-100 py-2 dark:bg-rose-950/40"
+              >
                 <MontoCell
                   monto={totales.totalEgresosPorMes[m] ?? "0"}
                   destacar
-                  isNegative
                 />
               </TableCell>
             ))}
-            <TableCell className="bg-rose-100 py-2 border-l dark:bg-rose-950/50">
+            <TableCell className="bg-rose-100 py-2 border-l dark:bg-rose-950/40">
               <MontoCell
                 monto={sumByKey(totales.totalEgresosPorMes, meses)}
                 destacar
-                isNegative
               />
             </TableCell>
           </TableRow>
@@ -346,13 +377,16 @@ export function FlujoMatriz({ meses, ingresos, egresos, totales }: Props) {
           {/* SALDO MENSAL + ACUMULADO */}
           <TableRow className="border-t-4 border-double bg-slate-900 text-slate-50 hover:bg-slate-900 dark:bg-slate-800">
             <TableCell className="sticky left-0 z-10 bg-slate-900 py-3 text-sm font-bold uppercase dark:bg-slate-800">
-              Saldo del mes (Ing − Egr)
+              Saldo del mes (Ing + Egr)
             </TableCell>
             {meses.map((m) => {
               const value = totales.saldoMensalPorMes[m] ?? "0";
               const signo = fmtSigno(value);
               return (
-                <TableCell key={m} className="bg-slate-900 py-3 dark:bg-slate-800">
+                <TableCell
+                  key={m}
+                  className="bg-slate-900 py-3 dark:bg-slate-800"
+                >
                   <SaldoCell value={value} signo={signo} />
                 </TableCell>
               );
@@ -366,7 +400,7 @@ export function FlujoMatriz({ meses, ingresos, egresos, totales }: Props) {
           </TableRow>
           <TableRow className="bg-slate-800 text-slate-50 hover:bg-slate-800 dark:bg-slate-900">
             <TableCell className="sticky left-0 z-10 bg-slate-800 py-3 text-sm font-bold uppercase dark:bg-slate-900">
-              Saldo acumulado
+              Saldo acumulado bancos+caja
               <span className="ml-2 text-xs font-normal text-slate-300">
                 (saldo inicial: {fmtMoney(totales.saldoInicial)})
               </span>
@@ -375,7 +409,10 @@ export function FlujoMatriz({ meses, ingresos, egresos, totales }: Props) {
               const value = totales.saldoAcumuladoPorMes[m] ?? "0";
               const signo = fmtSigno(value);
               return (
-                <TableCell key={m} className="bg-slate-800 py-3 dark:bg-slate-900">
+                <TableCell
+                  key={m}
+                  className="bg-slate-800 py-3 dark:bg-slate-900"
+                >
                   <SaldoCell value={value} signo={signo} />
                 </TableCell>
               );
@@ -421,7 +458,3 @@ function sumByKey(obj: Record<string, string>, keys: string[]): string {
   for (const k of keys) s += Number(obj[k] ?? 0);
   return s.toFixed(2);
 }
-
-// Suppress unused-import warning for Fragment (kept for potential expansion).
-const _f = Fragment;
-void _f;
