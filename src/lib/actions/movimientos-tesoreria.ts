@@ -9,11 +9,14 @@ import { db } from "@/lib/db";
 import {
   AsientoError,
   contabilizarAsiento,
+  crearAsientoManual,
   crearAsientoMovimientoTesoreria,
   crearAsientoTransferencia,
+  type LineaInput,
 } from "@/lib/services/asiento-automatico";
 import { validarSaldoSuficientePrestamo } from "@/lib/services/prestamo";
 import {
+  AsientoOrigen,
   CuentaTipo,
   Moneda,
   MovimientoTesoreriaTipo,
@@ -90,17 +93,32 @@ export async function listarCuentasContablesParaContrapartida(): Promise<
 const MONEY_RE = /^\d+(\.\d{1,2})?$/;
 const FX_RE = /^\d+(\.\d{1,6})?$/;
 
+const lineaContrapartidaSchema = z.object({
+  cuentaContableId: z.number().int().positive(),
+  monto: z.string().regex(MONEY_RE, "Monto inválido (máx. 2 decimales)"),
+  descripcion: z
+    .string()
+    .trim()
+    .max(255)
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
+});
+
 const crearMovimientoSchema = z
   .object({
     tipo: z.enum([MovimientoTesoreriaTipo.COBRO, MovimientoTesoreriaTipo.PAGO]),
     cuentaBancariaId: z.string().uuid(),
     fecha: z.coerce.date(),
-    monto: z.string().regex(MONEY_RE, "Monto inválido (máx. 2 decimales)"),
     moneda: z.nativeEnum(Moneda),
     tipoCambio: z
       .string()
       .regex(FX_RE, "Tipo de cambio inválido (máx. 6 decimales)"),
-    cuentaContableId: z.number().int().positive(),
+    // 1+ contrapartidas. El total del movimiento bancario es la suma
+    // de sus montos. Para casos simples (1 sola contrapartida) se
+    // mantiene el comportamiento clásico (incluyendo split IDCB 33/67%).
+    lineas: z
+      .array(lineaContrapartidaSchema)
+      .min(1, "Agregue al menos una línea de contrapartida"),
     descripcion: z
       .string()
       .trim()
@@ -121,13 +139,27 @@ const crearMovimientoSchema = z
       .transform((v) => (v && v.length > 0 ? v : null)),
   })
   .superRefine((data, ctx) => {
-    if (Number(data.monto) <= 0) {
+    let total = new Decimal(0);
+    for (let i = 0; i < data.lineas.length; i++) {
+      const m = new Decimal(data.lineas[i]!.monto);
+      if (m.lte(0)) {
+        ctx.addIssue({
+          path: ["lineas", i, "monto"],
+          code: "custom",
+          message: "El monto debe ser mayor a 0",
+        });
+      }
+      total = total.plus(m);
+    }
+    if (total.lte(0)) {
       ctx.addIssue({
-        path: ["monto"],
+        path: ["lineas"],
         code: "custom",
-        message: "El monto debe ser mayor a 0",
+        message: "El total del movimiento debe ser mayor a 0",
       });
     }
+    // Cuentas duplicadas → permitimos (el user puede partir un mismo
+    // gasto en 2 líneas con descripciones distintas). Sin chequeo.
     if (data.moneda === Moneda.ARS && Number(data.tipoCambio) !== 1) {
       ctx.addIssue({
         path: ["tipoCambio"],
@@ -173,14 +205,19 @@ export async function crearMovimientoTesoreriaAction(
     tipo,
     cuentaBancariaId,
     fecha,
-    monto,
     moneda,
     tipoCambio,
-    cuentaContableId,
+    lineas,
     descripcion,
     comprobante,
     referenciaBanco,
   } = parsed.data;
+
+  const total = lineas.reduce(
+    (s, l) => s.plus(new Decimal(l.monto)),
+    new Decimal(0),
+  );
+  const totalStr = total.toDecimalPlaces(2).toFixed(2);
 
   const cuentaBancaria = await db.cuentaBancaria.findUnique({
     where: { id: cuentaBancariaId },
@@ -198,50 +235,55 @@ export async function crearMovimientoTesoreriaAction(
     };
   }
 
-  if (cuentaBancaria.cuentaContableId === cuentaContableId) {
-    return {
-      ok: false,
-      error: "La contrapartida no puede ser la misma cuenta contable del banco.",
-    };
-  }
-
-  const contrapartida = await db.cuentaContable.findUnique({
-    where: { id: cuentaContableId },
+  // Validar cada contrapartida: existe, activa, ANALITICA, distinta del banco.
+  const cuentaIds = lineas.map((l) => l.cuentaContableId);
+  const cuentasContrapartida = await db.cuentaContable.findMany({
+    where: { id: { in: cuentaIds } },
     select: { id: true, codigo: true, tipo: true, activa: true },
   });
+  const cuentaById = new Map(cuentasContrapartida.map((c) => [c.id, c]));
 
-  if (!contrapartida) {
-    return { ok: false, error: "La cuenta contrapartida no existe." };
-  }
-  if (!contrapartida.activa) {
-    return {
-      ok: false,
-      error: `La cuenta ${contrapartida.codigo} está inactiva.`,
-    };
-  }
-  if (contrapartida.tipo !== CuentaTipo.ANALITICA) {
-    return {
-      ok: false,
-      error: "La contrapartida debe ser una cuenta ANALITICA.",
-    };
+  for (const linea of lineas) {
+    const c = cuentaById.get(linea.cuentaContableId);
+    if (!c) {
+      return {
+        ok: false,
+        error: `La cuenta contrapartida ${linea.cuentaContableId} no existe.`,
+      };
+    }
+    if (!c.activa) {
+      return { ok: false, error: `La cuenta ${c.codigo} está inactiva.` };
+    }
+    if (c.tipo !== CuentaTipo.ANALITICA) {
+      return {
+        ok: false,
+        error: `La cuenta ${c.codigo} no es ANALITICA.`,
+      };
+    }
+    if (cuentaBancaria.cuentaContableId === c.id) {
+      return {
+        ok: false,
+        error: "La contrapartida no puede ser la misma cuenta contable del banco.",
+      };
+    }
   }
 
+  // Préstamo amortization: validar saldo por línea cuyo cuenta es préstamo.
   if (tipo === MovimientoTesoreriaTipo.PAGO) {
-    const prestamoEnCuenta = await db.prestamoExterno.findFirst({
-      where: { cuentaContableId },
-      select: { id: true, prestamista: true },
-    });
+    for (const linea of lineas) {
+      const prestamoEnCuenta = await db.prestamoExterno.findFirst({
+        where: { cuentaContableId: linea.cuentaContableId },
+        select: { id: true, prestamista: true },
+      });
+      if (!prestamoEnCuenta) continue;
 
-    if (prestamoEnCuenta) {
-      const intentoArs = new Decimal(monto)
+      const intentoArs = new Decimal(linea.monto)
         .times(new Decimal(tipoCambio))
         .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-
       const saldoCheck = await validarSaldoSuficientePrestamo(
-        cuentaContableId,
+        linea.cuentaContableId,
         intentoArs,
       );
-
       if (!saldoCheck.ok) {
         return {
           ok: false,
@@ -251,6 +293,8 @@ export async function crearMovimientoTesoreriaAction(
     }
   }
 
+  const primaryCuentaId = lineas[0]!.cuentaContableId;
+
   try {
     const result = await db.$transaction(async (tx) => {
       const mov = await tx.movimientoTesoreria.create({
@@ -258,10 +302,10 @@ export async function crearMovimientoTesoreriaAction(
           tipo,
           cuentaBancariaId,
           fecha,
-          monto,
+          monto: totalStr,
           moneda,
           tipoCambio,
-          cuentaContableId,
+          cuentaContableId: primaryCuentaId,
           descripcion,
           comprobante,
           referenciaBanco,
@@ -269,14 +313,68 @@ export async function crearMovimientoTesoreriaAction(
         select: { id: true },
       });
 
-      const asiento = await crearAsientoMovimientoTesoreria(mov.id, tx);
-      const contabilizado = await contabilizarAsiento(asiento.id, tx);
+      let asientoId: string;
+      let asientoNumero: number;
 
-      return {
-        movimientoId: mov.id,
-        asientoId: contabilizado.id,
-        asientoNumero: contabilizado.numero,
-      };
+      if (lineas.length === 1) {
+        // 1 contrapartida — flujo clásico con split IDCB automático.
+        const asiento = await crearAsientoMovimientoTesoreria(mov.id, tx);
+        const contabilizado = await contabilizarAsiento(asiento.id, tx);
+        asientoId = contabilizado.id;
+        asientoNumero = contabilizado.numero;
+      } else {
+        // N contrapartidas — asiento manual de N+1 líneas.
+        const asientoLineas: LineaInput[] = [];
+        if (tipo === MovimientoTesoreriaTipo.COBRO) {
+          asientoLineas.push({
+            cuentaId: cuentaBancaria.cuentaContableId,
+            debe: totalStr,
+            haber: 0,
+          });
+          for (const l of lineas) {
+            asientoLineas.push({
+              cuentaId: l.cuentaContableId,
+              debe: 0,
+              haber: l.monto,
+              descripcion: l.descripcion ?? undefined,
+            });
+          }
+        } else {
+          for (const l of lineas) {
+            asientoLineas.push({
+              cuentaId: l.cuentaContableId,
+              debe: l.monto,
+              haber: 0,
+              descripcion: l.descripcion ?? undefined,
+            });
+          }
+          asientoLineas.push({
+            cuentaId: cuentaBancaria.cuentaContableId,
+            debe: 0,
+            haber: totalStr,
+          });
+        }
+        const asiento = await crearAsientoManual(
+          {
+            fecha,
+            descripcion: descripcion ?? `${tipo} ${moneda} ${totalStr}`,
+            origen: AsientoOrigen.TESORERIA,
+            moneda,
+            tipoCambio,
+            lineas: asientoLineas,
+          },
+          tx,
+        );
+        await tx.movimientoTesoreria.update({
+          where: { id: mov.id },
+          data: { asientoId: asiento.id },
+        });
+        const contabilizado = await contabilizarAsiento(asiento.id, tx);
+        asientoId = contabilizado.id;
+        asientoNumero = contabilizado.numero;
+      }
+
+      return { movimientoId: mov.id, asientoId, asientoNumero };
     });
 
     revalidatePath("/tesoreria/cuentas");

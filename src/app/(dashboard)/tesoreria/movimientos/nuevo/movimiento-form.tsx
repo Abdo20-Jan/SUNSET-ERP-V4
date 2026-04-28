@@ -2,17 +2,19 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  Add01Icon,
   Alert02Icon,
   ArrowDown02Icon,
   ArrowUp02Icon,
   Calendar03Icon,
+  Delete02Icon,
   InformationCircleIcon,
 } from "@hugeicons/core-free-icons";
 
@@ -46,28 +48,46 @@ import { Textarea } from "@/components/ui/textarea";
 const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
 const FX_RE = /^\d+(\.\d{1,6})?$/;
 
+const lineaSchema = z.object({
+  cuentaContableId: z
+    .number()
+    .int()
+    .positive({ message: "Seleccione la cuenta" }),
+  monto: z.string().regex(DECIMAL_RE, "Monto inválido (máx. 2 decimales)"),
+  descripcion: z.string().trim().max(255).optional(),
+});
+
 const formSchema = z
   .object({
     tipo: z.enum(["COBRO", "PAGO"]),
     cuentaBancariaId: z.string().uuid({ message: "Seleccione la cuenta bancaria" }),
     fecha: z.date({ message: "Seleccione la fecha" }),
-    monto: z.string().regex(DECIMAL_RE, "Monto inválido (máx. 2 decimales)"),
     moneda: z.enum(["ARS", "USD"]),
     tipoCambio: z.string().regex(FX_RE, "Tipo de cambio inválido"),
-    cuentaContableId: z
-      .number()
-      .int()
-      .positive({ message: "Seleccione la cuenta contrapartida" }),
+    lineas: z.array(lineaSchema).min(1, "Agregue al menos una línea"),
     descripcion: z.string().trim().max(255).optional(),
     comprobante: z.string().trim().max(100).optional(),
     referenciaBanco: z.string().trim().max(100).optional(),
   })
   .superRefine((data, ctx) => {
-    if (Number(data.monto) <= 0) {
+    let total = 0;
+    data.lineas.forEach((l, i) => {
+      const m = Number(l.monto);
+      if (!Number.isFinite(m) || m <= 0) {
+        ctx.addIssue({
+          path: ["lineas", i, "monto"],
+          code: z.ZodIssueCode.custom,
+          message: "Monto > 0",
+        });
+      } else {
+        total += m;
+      }
+    });
+    if (total <= 0) {
       ctx.addIssue({
-        path: ["monto"],
+        path: ["lineas"],
         code: z.ZodIssueCode.custom,
-        message: "El monto debe ser mayor a 0",
+        message: "El total debe ser mayor a 0",
       });
     }
     const tc = Number(data.tipoCambio);
@@ -132,21 +152,35 @@ export function MovimientoForm({
       tipo: initial?.tipo ?? "COBRO",
       cuentaBancariaId: "",
       fecha: new Date(),
-      monto: initial?.monto ?? "0",
       moneda: "ARS",
       tipoCambio: "1",
-      cuentaContableId: initial?.cuentaContableId ?? 0,
-      descripcion: initial?.descripcion ?? "",
+      lineas: [
+        {
+          cuentaContableId: initial?.cuentaContableId ?? 0,
+          monto: initial?.monto ?? "0",
+          descripcion: initial?.descripcion ?? "",
+        },
+      ],
+      descripcion: "",
       comprobante: initial?.comprobante ?? "",
       referenciaBanco: initial?.referenciaBanco ?? "",
     },
   });
 
+  const {
+    fields: lineaFields,
+    append: appendLinea,
+    remove: removeLinea,
+  } = useFieldArray({ control, name: "lineas" });
+
   const tipo = useWatch({ control, name: "tipo" });
   const moneda = useWatch({ control, name: "moneda" });
   const cuentaBancariaId = useWatch({ control, name: "cuentaBancariaId" });
-  const monto = useWatch({ control, name: "monto" });
-  const cuentaContableId = useWatch({ control, name: "cuentaContableId" });
+  const lineas = useWatch({ control, name: "lineas" });
+  const totalCalculado = useMemo(() => {
+    if (!lineas) return 0;
+    return lineas.reduce((s, l) => s + (Number(l?.monto) || 0), 0);
+  }, [lineas]);
 
   const bancoSeleccionado = useMemo(
     () => cuentasBancarias.find((c) => c.id === cuentaBancariaId) ?? null,
@@ -172,9 +206,11 @@ export function MovimientoForm({
     );
   }, [cuentasContrapartida, bancoSeleccionado]);
 
+  const primeraLineaCuentaId = lineas?.[0]?.cuentaContableId ?? 0;
   const contrapartidaSeleccionada = useMemo(
-    () => cuentasContrapartida.find((c) => c.id === cuentaContableId) ?? null,
-    [cuentasContrapartida, cuentaContableId],
+    () =>
+      cuentasContrapartida.find((c) => c.id === primeraLineaCuentaId) ?? null,
+    [cuentasContrapartida, primeraLineaCuentaId],
   );
 
   const handleModoChange = (nuevoModo: ModoAmortizacion) => {
@@ -187,9 +223,9 @@ export function MovimientoForm({
       nuevoModo === "intereses" && contextoAmortizacion.cuentaIntereses
         ? contextoAmortizacion.cuentaIntereses.id
         : contextoAmortizacion.cuentaPrestamo.id;
-    setValue("cuentaContableId", cuentaId, { shouldValidate: true });
+    setValue("lineas.0.cuentaContableId", cuentaId, { shouldValidate: true });
     setValue(
-      "descripcion",
+      "lineas.0.descripcion",
       nuevoModo === "intereses"
         ? `Intereses préstamo ${contextoAmortizacion.prestamo.prestamista}`
         : `Amortización préstamo ${contextoAmortizacion.prestamo.prestamista}`,
@@ -203,10 +239,13 @@ export function MovimientoForm({
         tipo: values.tipo,
         cuentaBancariaId: values.cuentaBancariaId,
         fecha: values.fecha,
-        monto: values.monto,
         moneda: values.moneda,
         tipoCambio: values.tipoCambio,
-        cuentaContableId: values.cuentaContableId,
+        lineas: values.lineas.map((l) => ({
+          cuentaContableId: l.cuentaContableId,
+          monto: l.monto,
+          descripcion: l.descripcion,
+        })),
         descripcion: values.descripcion,
         comprobante: values.comprobante,
         referenciaBanco: values.referenciaBanco,
@@ -326,19 +365,7 @@ export function MovimientoForm({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="monto">Monto</Label>
-              <Input
-                id="monto"
-                inputMode="decimal"
-                className="text-right tabular-nums"
-                aria-invalid={!!errors.monto}
-                {...register("monto")}
-              />
-              {errors.monto && <FieldError message={errors.monto.message} />}
-            </div>
-
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="flex flex-col gap-2">
               <Label htmlFor="moneda">Moneda</Label>
               <Controller
@@ -397,32 +424,139 @@ export function MovimientoForm({
                     : contextoAmortizacion.cuentaPrestamo.nombre}
                 </span>
               </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="lineas.0.monto">Monto</Label>
+                <Input
+                  id="lineas.0.monto"
+                  inputMode="decimal"
+                  className="text-right tabular-nums"
+                  aria-invalid={!!errors.lineas?.[0]?.monto}
+                  {...register("lineas.0.monto")}
+                />
+                {errors.lineas?.[0]?.monto && (
+                  <FieldError message={errors.lineas[0].monto.message} />
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">
                 Determinada por el tipo de pago seleccionado arriba.
               </p>
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
-              <Label>Cuenta contrapartida</Label>
-              <Controller
-                control={control}
-                name="cuentaContableId"
-                render={({ field }) => (
-                  <CuentaCombobox
-                    value={field.value || null}
-                    onChange={field.onChange}
-                    cuentas={contrapartidasFiltradas}
-                    placeholder="Seleccione la cuenta contable (ej: Proveedores, Clientes, Gastos)"
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <Label>Líneas de contrapartida</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    appendLinea(
+                      { cuentaContableId: 0, monto: "0", descripcion: "" },
+                      { shouldFocus: false },
+                    )
+                  }
+                >
+                  <HugeiconsIcon
+                    icon={Add01Icon}
+                    strokeWidth={2}
+                    className="size-3.5"
                   />
-                )}
-              />
-              {errors.cuentaContableId && (
-                <FieldError message={errors.cuentaContableId.message} />
-              )}
+                  Agregar línea
+                </Button>
+              </div>
+              <div className="flex flex-col gap-2">
+                {lineaFields.map((field, idx) => (
+                  <div
+                    key={field.id}
+                    className="grid grid-cols-1 gap-2 rounded-md border bg-card px-3 py-2 md:grid-cols-[2fr_1fr_2fr_auto]"
+                  >
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                        Cuenta {idx + 1}
+                      </Label>
+                      <Controller
+                        control={control}
+                        name={`lineas.${idx}.cuentaContableId`}
+                        render={({ field: f }) => (
+                          <CuentaCombobox
+                            value={f.value || null}
+                            onChange={f.onChange}
+                            cuentas={contrapartidasFiltradas}
+                            placeholder="Cuenta contable"
+                          />
+                        )}
+                      />
+                      {errors.lineas?.[idx]?.cuentaContableId && (
+                        <FieldError
+                          message={
+                            errors.lineas[idx]?.cuentaContableId?.message
+                          }
+                        />
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                        Monto
+                      </Label>
+                      <Input
+                        inputMode="decimal"
+                        className="text-right tabular-nums"
+                        aria-invalid={!!errors.lineas?.[idx]?.monto}
+                        {...register(`lineas.${idx}.monto`)}
+                      />
+                      {errors.lineas?.[idx]?.monto && (
+                        <FieldError
+                          message={errors.lineas[idx]?.monto?.message}
+                        />
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                        Descripción
+                      </Label>
+                      <Input
+                        placeholder="opcional"
+                        {...register(`lineas.${idx}.descripcion`)}
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      {lineaFields.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeLinea(idx)}
+                          aria-label="Eliminar línea"
+                        >
+                          <HugeiconsIcon
+                            icon={Delete02Icon}
+                            strokeWidth={2}
+                            className="size-3.5"
+                          />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">
+                  {tipo === "COBRO"
+                    ? "Total a cobrar (entrada al banco)"
+                    : "Total a pagar (salida del banco)"}
+                </span>
+                <span className="font-mono font-semibold tabular-nums">
+                  {moneda}{" "}
+                  {totalCalculado.toLocaleString("es-AR", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
               <p className="text-xs text-muted-foreground">
                 {tipo === "COBRO"
-                  ? "Origen del cobro (cliente, ingreso, pasivo cancelado, etc.)."
-                  : "Destino del pago (proveedor, gasto, activo adquirido, etc.)."}
+                  ? "Origen del cobro: cliente, ingreso, pasivo cancelado, etc. Podés partir el cobro en varias contrapartidas (ej: cliente paga factura + impuesto)."
+                  : "Destino del pago: proveedor, gasto, activo adquirido, etc. Podés partir el pago en varias contrapartidas (ej: factura + IVA + sellos en una sola transferencia)."}
               </p>
             </div>
           )}
@@ -472,6 +606,7 @@ export function MovimientoForm({
             </span>
           </div>
           {tipo === "PAGO" &&
+            lineas?.length === 1 &&
             contrapartidaSeleccionada &&
             ("cuentaContableCodigo" in contrapartidaSeleccionada
               ? contrapartidaSeleccionada.cuentaContableCodigo
@@ -484,10 +619,17 @@ export function MovimientoForm({
             )}
           <AsientoPreview
             tipo={tipo}
-            monto={monto}
             moneda={moneda}
             banco={bancoSeleccionado}
-            contrapartida={contrapartidaSeleccionada}
+            lineas={(lineas ?? []).map((l) => ({
+              cuenta:
+                cuentasContrapartida.find(
+                  (c) => c.id === l?.cuentaContableId,
+                ) ?? null,
+              monto: l?.monto ?? "0",
+              descripcion: l?.descripcion ?? "",
+            }))}
+            totalCalculado={totalCalculado}
           />
         </CardContent>
       </Card>
@@ -559,30 +701,29 @@ function TipoButton({
 
 function AsientoPreview({
   tipo,
-  monto,
   moneda,
   banco,
-  contrapartida,
+  lineas,
+  totalCalculado,
 }: {
   tipo: "COBRO" | "PAGO";
-  monto: string;
   moneda: "ARS" | "USD";
   banco: CuentaBancariaOption | null;
-  contrapartida: CuentaContableContrapartidaOption | null;
+  lineas: Array<{
+    cuenta: CuentaContableContrapartidaOption | null;
+    monto: string;
+    descripcion: string;
+  }>;
+  totalCalculado: number;
 }) {
-  const valor = Number(monto);
-  const valorFmt = Number.isFinite(valor) && valor > 0 ? valor.toFixed(2) : "—";
+  const valorFmt = totalCalculado > 0 ? totalCalculado.toFixed(2) : "—";
 
-  // Caso especial: Imp. Ley 25413 (IDCB / impuesto al cheque) en PAGO.
-  // 33% va a Crédito pago a cuenta Ganancias (1.1.4.12 ACTIVO),
-  // 67% al gasto (5.8.1.06 EGRESO). El sistema lo divide automáticamente.
-  const contrapartidaCodigo = contrapartida
-    ? "cuentaContableCodigo" in contrapartida
-      ? contrapartida.cuentaContableCodigo
-      : contrapartida.codigo
-    : null;
+  // Caso especial: 1 sola línea + cuenta 5.8.1.06 + tipo PAGO.
+  // El backend divide 33% a 1.1.4.12 (crédito Ganancias) + 67% a gasto.
+  const unicaLineaCodigo =
+    lineas.length === 1 && lineas[0]?.cuenta ? lineas[0].cuenta.codigo : null;
   const esImpuestoLey25413 =
-    tipo === "PAGO" && contrapartidaCodigo === "5.8.1.06";
+    tipo === "PAGO" && unicaLineaCodigo === "5.8.1.06";
 
   let rows: Array<{
     role: string;
@@ -592,13 +733,17 @@ function AsientoPreview({
     haber: string;
   }>;
 
-  if (esImpuestoLey25413 && Number.isFinite(valor) && valor > 0) {
-    const credito = Math.round(valor * 0.33 * 100) / 100;
-    const gasto = Math.round((valor - credito) * 100) / 100;
+  if (
+    esImpuestoLey25413 &&
+    Number.isFinite(totalCalculado) &&
+    totalCalculado > 0
+  ) {
+    const credito = Math.round(totalCalculado * 0.33 * 100) / 100;
+    const gasto = Math.round((totalCalculado - credito) * 100) / 100;
     rows = [
       {
         role: "DEBE",
-        cuenta: contrapartida,
+        cuenta: lineas[0]!.cuenta,
         debe: gasto.toFixed(2),
         haber: "—",
       },
@@ -617,21 +762,27 @@ function AsientoPreview({
   } else if (tipo === "COBRO") {
     rows = [
       { role: "DEBE", cuenta: banco, debe: valorFmt, haber: "—" },
-      {
-        role: "HABER",
-        cuenta: contrapartida,
-        debe: "—",
-        haber: valorFmt,
-      },
+      ...lineas.map((l) => {
+        const m = Number(l.monto);
+        return {
+          role: "HABER",
+          cuenta: l.cuenta,
+          debe: "—",
+          haber: m > 0 ? m.toFixed(2) : "—",
+        };
+      }),
     ];
   } else {
     rows = [
-      {
-        role: "DEBE",
-        cuenta: contrapartida,
-        debe: valorFmt,
-        haber: "—",
-      },
+      ...lineas.map((l) => {
+        const m = Number(l.monto);
+        return {
+          role: "DEBE",
+          cuenta: l.cuenta,
+          debe: m > 0 ? m.toFixed(2) : "—",
+          haber: "—",
+        };
+      }),
       { role: "HABER", cuenta: banco, debe: "—", haber: valorFmt },
     ];
   }
