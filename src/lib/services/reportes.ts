@@ -37,19 +37,8 @@ export { getFlujoCaja } from "./reportes/flujo-caja";
 export type {
   FlujoCajaResult,
   FlujoCelula,
-  FlujoItemRow,
+  FlujoNode,
   FlujoOrigen,
-  FlujoSeccionRow,
-  FlujoSubseccionRow,
 } from "./reportes/flujo-caja";
-
-export {
-  FLUJO_CAJA_ESTRUCTURA,
-  type FlujoDireccion,
-  type FlujoItem,
-  type FlujoSeccion,
-  type FlujoSeccionId,
-  type FlujoSubseccion,
-} from "./reportes/flujo-caja-config";
 
 export type { CuentaTreeNode } from "./reportes/shared";

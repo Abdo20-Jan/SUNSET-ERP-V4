@@ -58,22 +58,24 @@ function fmt(value: string, tc: string | null | undefined): string {
 }
 
 // Niveles → estilo de fila. Profundidad 0 = raíz (sintética máxima).
+// Demonstrativo financeiro: hierarquia sutil, sem fundos pesados, só
+// peso de tipografia + linhas pontilhadas + zebra leve nas analíticas.
 function rowClasses(row: Row<SerializedTreeNode>): string {
   const r = row.original;
   const depth = row.depth;
   if (r.tipo === "SINTETICA" && depth === 0) {
-    return "bg-slate-900 text-slate-50 hover:bg-slate-900 dark:bg-slate-800";
+    return "border-t-2 border-slate-300 dark:border-slate-700 bg-slate-100/60 hover:bg-slate-100 dark:bg-slate-900/40 dark:hover:bg-slate-900/60";
   }
   if (r.tipo === "SINTETICA" && depth === 1) {
-    return "bg-muted/60 hover:bg-muted/70 font-semibold";
+    return "bg-muted/40 hover:bg-muted/60";
   }
   if (r.tipo === "SINTETICA") {
-    return "bg-muted/30 hover:bg-muted/40";
+    return "hover:bg-muted/30";
   }
-  // Analítica con zebra suave (alterna por índice de fila)
+  // Analítica con zebra muito suave
   return row.index % 2 === 0
-    ? "hover:bg-muted/40"
-    : "bg-muted/10 hover:bg-muted/40";
+    ? "hover:bg-muted/30"
+    : "bg-muted/10 hover:bg-muted/30";
 }
 
 const colCodigo: ColumnDef<SerializedTreeNode> = {
@@ -85,8 +87,8 @@ const colCodigo: ColumnDef<SerializedTreeNode> = {
     return (
       <div
         className={cn(
-          "flex items-center gap-1 font-mono text-xs",
-          row.depth === 0 && r.tipo === "SINTETICA" && "text-sm font-bold",
+          "flex items-center gap-1 font-mono text-xs text-muted-foreground",
+          row.depth === 0 && r.tipo === "SINTETICA" && "text-sm font-bold text-foreground",
         )}
         style={{ paddingLeft: `${row.depth * 18}px` }}
       >
@@ -283,7 +285,7 @@ export function CuentaTreeTable({
           ))
         )}
         {totalLabel && totalValue != null ? (
-          <TableRow className="border-t-4 border-double bg-slate-900 text-slate-50 hover:bg-slate-900 dark:bg-slate-800">
+          <TableRow className="border-t-4 border-double bg-muted/80 hover:bg-muted/80 dark:bg-muted/60">
             <TableCell colSpan={2} className="py-3 text-sm font-bold uppercase tracking-wide">
               {totalLabel}
             </TableCell>
@@ -295,7 +297,7 @@ export function CuentaTreeTable({
               </TableCell>
             ) : null}
             <TableCell colSpan={2} />
-            <TableCell className="py-3 text-right font-mono text-sm font-bold tabular-nums">
+            <TableCell className="py-3 text-right font-mono text-base font-bold tabular-nums">
               {renderSigned(totalValue, tcParaUsd)}
             </TableCell>
           </TableRow>

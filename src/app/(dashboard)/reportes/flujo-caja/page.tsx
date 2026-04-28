@@ -1,14 +1,11 @@
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Alert02Icon } from "@hugeicons/core-free-icons";
-
-import { getFlujoCaja } from "@/lib/services/reportes";
+import { getFlujoCaja, type FlujoNode } from "@/lib/services/reportes";
 import type { Moneda } from "@/generated/prisma/client";
 import { Card } from "@/components/ui/card";
 
 import { FlujoFilters } from "./flujo-filters";
 import {
   FlujoMatriz,
-  type SerializedSeccion,
+  type SerializedNode,
   type SerializedTotales,
 } from "./flujo-matriz";
 
@@ -48,6 +45,38 @@ function mesKeyOf(d: Date): string {
   return `${y}-${m}`;
 }
 
+// Serializa Decimal → string para o cliente (preserva precisão).
+function serializeNode(node: FlujoNode): SerializedNode {
+  // Em flujo-caja só vêm INGRESO/EGRESO; cast seguro.
+  const categoria = node.categoria as "INGRESO" | "EGRESO";
+  return {
+    cuentaId: node.cuentaId,
+    codigo: node.codigo,
+    nombre: node.nombre,
+    tipo: node.tipo,
+    categoria,
+    nivel: node.nivel,
+    valoresPorMes: Object.fromEntries(
+      Object.entries(node.valoresPorMes).map(([k, v]) => [
+        k,
+        { monto: v.monto.toFixed(2), origen: v.origen },
+      ]),
+    ),
+    totalPeriodo: node.totalPeriodo.toFixed(2),
+    children: node.children.map(serializeNode),
+  };
+}
+
+function mapValues(
+  rec: Record<string, { toFixed: (n: number) => string }>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(rec)) {
+    out[k] = v.toFixed(2);
+  }
+  return out;
+}
+
 export default async function FlujoCajaPage({
   searchParams,
 }: {
@@ -60,7 +89,6 @@ export default async function FlujoCajaPage({
   const curM = now.getUTCMonth() + 1;
 
   const desdeParsed = parseMesKey(params.desde) ?? { y: curY, m: curM };
-  // Default hasta = current + 5 months
   const defaultHasta = new Date(Date.UTC(curY, curM - 1 + 5, 1));
   const hastaParsed =
     parseMesKey(params.hasta) ?? {
@@ -71,37 +99,17 @@ export default async function FlujoCajaPage({
 
   const desde = firstDayUtc(desdeParsed.y, desdeParsed.m);
   const hasta = lastDayUtc(hastaParsed.y, hastaParsed.m);
-
-  // Guard: if desde > hasta, swap
   const [desdeFinal, hastaFinal] =
     desde.getTime() <= hasta.getTime() ? [desde, hasta] : [hasta, desde];
 
   const flujo = await getFlujoCaja(desdeFinal, hastaFinal, moneda);
 
-  const serializedSecciones: SerializedSeccion[] = flujo.secciones.map(
-    (sec) => ({
-      id: sec.id,
-      label: sec.label,
-      direccion: sec.direccion,
-      subsecciones: sec.subsecciones.map((sub) => ({
-        label: sub.label,
-        items: sub.items.map((item) => ({
-          label: item.label,
-          cuentaCodigos: item.cuentaCodigos,
-          valores: Object.fromEntries(
-            Object.entries(item.valores).map(([k, v]) => [
-              k,
-              { monto: v.monto.toFixed(2), origen: v.origen },
-            ]),
-          ),
-        })),
-      })),
-    }),
-  );
+  const ingresosSer = flujo.ingresos.map(serializeNode);
+  const egresosSer = flujo.egresos.map(serializeNode);
 
-  const serializedTotales: SerializedTotales = {
-    totalSalidasPorMes: mapValues(flujo.totales.totalSalidasPorMes),
+  const totales: SerializedTotales = {
     totalIngresosPorMes: mapValues(flujo.totales.totalIngresosPorMes),
+    totalEgresosPorMes: mapValues(flujo.totales.totalEgresosPorMes),
     saldoMensalPorMes: mapValues(flujo.totales.saldoMensalPorMes),
     saldoInicial: flujo.totales.saldoInicial.toFixed(2),
     saldoAcumuladoPorMes: mapValues(flujo.totales.saldoAcumuladoPorMes),
@@ -111,11 +119,11 @@ export default async function FlujoCajaPage({
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">
-          Flujo de Caja Proyectado
+          Flujo de Caja
         </h1>
         <p className="text-sm text-muted-foreground">
-          Matriz mensual · Realizado (contabilizado) + Proyectado (embarques en
-          tránsito).
+          Iterando árbol del plan de cuentas · Ingresos y Egresos por cuenta,
+          totales y saldo acumulado por mes.
         </p>
       </div>
 
@@ -125,42 +133,14 @@ export default async function FlujoCajaPage({
         moneda={moneda}
       />
 
-      {flujo.advertencias.length > 0 ? (
-        <Card
-          size="sm"
-          className="border-amber-400/40 bg-amber-50 px-4 py-3 ring-amber-400/40 dark:bg-amber-950/40"
-        >
-          <div className="flex items-start gap-3">
-            <HugeiconsIcon
-              icon={Alert02Icon}
-              className="size-4 shrink-0 text-amber-700 dark:text-amber-400"
-            />
-            <ul className="flex flex-col gap-1 text-xs text-amber-900 dark:text-amber-200">
-              {flujo.advertencias.map((a, i) => (
-                <li key={i}>{a}</li>
-              ))}
-            </ul>
-          </div>
-        </Card>
-      ) : null}
-
-      <Card className="py-0">
+      <Card className="py-0 overflow-hidden">
         <FlujoMatriz
           meses={flujo.meses}
-          secciones={serializedSecciones}
-          totales={serializedTotales}
+          ingresos={ingresosSer}
+          egresos={egresosSer}
+          totales={totales}
         />
       </Card>
     </div>
   );
-}
-
-function mapValues(
-  rec: Record<string, { toFixed: (n: number) => string }>,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(rec)) {
-    out[k] = v.toFixed(2);
-  }
-  return out;
 }

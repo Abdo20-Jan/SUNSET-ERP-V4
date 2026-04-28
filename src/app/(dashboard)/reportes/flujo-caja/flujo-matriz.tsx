@@ -1,9 +1,9 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { ArrowDown01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 
-import type { FlujoDireccion, FlujoSeccionId } from "@/lib/services/reportes";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -17,32 +17,21 @@ import { cn } from "@/lib/utils";
 import { fmtMoney, fmtSigno } from "../_components/money";
 import { formatMesLabel } from "./flujo-filters";
 
-export type SerializedCelula = {
-  monto: string;
-  origen: "REALIZADO" | "PROYECTADO";
-};
-
-export type SerializedItem = {
-  label: string;
-  cuentaCodigos: string[];
-  valores: Record<string, SerializedCelula>;
-};
-
-export type SerializedSubseccion = {
-  label: string;
-  items: SerializedItem[];
-};
-
-export type SerializedSeccion = {
-  id: FlujoSeccionId;
-  label: string;
-  direccion: FlujoDireccion;
-  subsecciones: SerializedSubseccion[];
+export type SerializedNode = {
+  cuentaId: number;
+  codigo: string;
+  nombre: string;
+  tipo: "SINTETICA" | "ANALITICA";
+  categoria: "INGRESO" | "EGRESO";
+  nivel: number;
+  valoresPorMes: Record<string, { monto: string; origen: string }>;
+  totalPeriodo: string;
+  children: SerializedNode[];
 };
 
 export type SerializedTotales = {
-  totalSalidasPorMes: Record<string, string>;
   totalIngresosPorMes: Record<string, string>;
+  totalEgresosPorMes: Record<string, string>;
   saldoMensalPorMes: Record<string, string>;
   saldoInicial: string;
   saldoAcumuladoPorMes: Record<string, string>;
@@ -50,208 +39,386 @@ export type SerializedTotales = {
 
 type Props = {
   meses: string[];
-  secciones: SerializedSeccion[];
+  ingresos: SerializedNode[];
+  egresos: SerializedNode[];
   totales: SerializedTotales;
 };
 
-export function FlujoMatriz({ meses, secciones, totales }: Props) {
+// Cell rendering com sinal coloreado
+function MontoCell({
+  monto,
+  destacar = false,
+  isNegative = false,
+}: {
+  monto: string;
+  destacar?: boolean;
+  isNegative?: boolean;
+}) {
+  const num = Number(monto);
+  if (!Number.isFinite(num) || num === 0) {
+    return (
+      <span className="block text-right font-mono text-xs text-muted-foreground tabular-nums">
+        —
+      </span>
+    );
+  }
+  const abs = fmtMoney(Math.abs(num).toFixed(2));
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="sticky left-0 z-10 min-w-72 bg-background">
-            Concepto
-          </TableHead>
-          {meses.map((m) => (
-            <TableHead key={m} className="min-w-28 text-right">
-              {formatMesLabel(m)}
-            </TableHead>
-          ))}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {secciones.map((sec) => (
-          <SeccionRows key={sec.id} sec={sec} meses={meses} />
-        ))}
-
-        {/* Total Salidas */}
-        <TotalRow
-          label="Total Salidas"
-          meses={meses}
-          valores={totales.totalSalidasPorMes}
-          tone="negative-when-positive"
-          className="border-t-2"
-        />
-        {/* Total Ingresos */}
-        <TotalRow
-          label="Total Ingresos"
-          meses={meses}
-          valores={totales.totalIngresosPorMes}
-          tone="positive-when-positive"
-        />
-        {/* Saldo Mensual */}
-        <TotalRow
-          label="Saldo Mensual"
-          meses={meses}
-          valores={totales.saldoMensalPorMes}
-          tone="signed"
-          emphasis
-        />
-        {/* Saldo Inicial */}
-        <TableRow className="border-t bg-muted/30 hover:bg-muted/30">
-          <TableCell className="sticky left-0 z-10 bg-muted/30 font-semibold">
-            Saldo Inicial (Caja + Bancos)
-          </TableCell>
-          <TableCell
-            colSpan={Math.max(meses.length, 1)}
-            className="text-right font-mono text-xs tabular-nums"
-          >
-            {fmtMoney(totales.saldoInicial)}
-          </TableCell>
-        </TableRow>
-        {/* Saldo Acumulado */}
-        <TotalRow
-          label="Saldo Acumulado"
-          meses={meses}
-          valores={totales.saldoAcumuladoPorMes}
-          tone="signed"
-          emphasis
-        />
-      </TableBody>
-    </Table>
+    <span
+      className={cn(
+        "block text-right font-mono text-xs tabular-nums",
+        destacar && "font-semibold",
+        isNegative
+          ? "text-rose-600 dark:text-rose-400"
+          : "text-emerald-700 dark:text-emerald-400",
+      )}
+    >
+      {isNegative ? `(${abs})` : abs}
+    </span>
   );
 }
 
-function SeccionRows({
-  sec,
+function rowClasses(node: SerializedNode, depth: number): string {
+  if (node.tipo === "SINTETICA" && depth === 0) {
+    return "bg-muted/70 hover:bg-muted/80 font-semibold";
+  }
+  if (node.tipo === "SINTETICA") {
+    return "bg-muted/30 hover:bg-muted/40 font-medium";
+  }
+  return depth % 2 === 1
+    ? "hover:bg-muted/30"
+    : "bg-muted/10 hover:bg-muted/30";
+}
+
+function NodeRow({
+  node,
+  depth,
   meses,
+  isEgreso,
+  expanded,
+  onToggle,
 }: {
-  sec: SerializedSeccion;
+  node: SerializedNode;
+  depth: number;
   meses: string[];
+  isEgreso: boolean;
+  expanded: Set<number>;
+  onToggle: (id: number) => void;
 }) {
+  const hasChildren = node.children.length > 0;
+  const isOpen = hasChildren ? expanded.has(node.cuentaId) : false;
+  const indent = depth * 14;
+  const isRoot = depth === 0 && node.tipo === "SINTETICA";
+
   return (
     <>
-      <TableRow className="bg-muted/50 hover:bg-muted/50">
-        <TableCell className="sticky left-0 z-10 bg-muted/50 py-2">
-          <div className="flex items-center gap-2 font-bold uppercase tracking-wide text-xs">
-            {sec.label}
-            <Badge
-              variant={sec.direccion === "SALIDA" ? "destructive" : "secondary"}
-              className="text-[10px]"
+      <TableRow className={rowClasses(node, depth)}>
+        <TableCell
+          className={cn(
+            "py-1.5 sticky left-0 z-10",
+            rowClasses(node, depth),
+            // forçar fundo para a sticky cell
+          )}
+          style={{ paddingLeft: `${indent + 12}px` }}
+        >
+          <div
+            className={cn(
+              "flex items-center gap-1",
+              isRoot && "uppercase tracking-wide",
+            )}
+          >
+            {hasChildren ? (
+              <button
+                type="button"
+                onClick={() => onToggle(node.cuentaId)}
+                className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-background/50"
+                aria-label={isOpen ? "Recolher" : "Expandir"}
+              >
+                <HugeiconsIcon
+                  icon={isOpen ? ArrowDown01Icon : ArrowRight01Icon}
+                  className="size-4"
+                />
+              </button>
+            ) : (
+              <span className="inline-block size-5 shrink-0" />
+            )}
+            <span
+              className={cn(
+                "font-mono text-xs",
+                isRoot ? "text-sm font-bold" : "text-muted-foreground",
+              )}
             >
-              {sec.direccion === "SALIDA" ? "Salida" : "Ingreso"}
-            </Badge>
+              {node.codigo}
+            </span>
+            <span
+              className={cn(
+                "ml-1 truncate",
+                isRoot ? "text-sm font-bold" : node.tipo === "ANALITICA" ? "text-xs" : "text-sm",
+              )}
+            >
+              {node.nombre}
+            </span>
           </div>
         </TableCell>
         {meses.map((m) => (
-          <TableCell key={m} className="py-2" />
+          <TableCell key={m} className="py-1.5">
+            <MontoCell
+              monto={node.valoresPorMes[m]?.monto ?? "0"}
+              destacar={node.tipo === "SINTETICA"}
+              isNegative={isEgreso}
+            />
+          </TableCell>
         ))}
+        <TableCell className="py-1.5 border-l">
+          <MontoCell
+            monto={node.totalPeriodo}
+            destacar={node.tipo === "SINTETICA"}
+            isNegative={isEgreso}
+          />
+        </TableCell>
       </TableRow>
-      {sec.subsecciones.map((sub) => (
-        <Fragment key={`${sec.id}-${sub.label}`}>
-          <TableRow className="bg-muted/20">
-            <TableCell className="sticky left-0 z-10 bg-muted/20 py-1.5 pl-6 font-semibold text-xs">
-              {sub.label}
-            </TableCell>
-            {meses.map((m) => (
-              <TableCell key={m} className="py-1.5" />
-            ))}
-          </TableRow>
-          {sub.items.map((item) => (
-            <TableRow key={`${sec.id}-${sub.label}-${item.label}`}>
-              <TableCell className="sticky left-0 z-10 bg-background py-1.5 pl-10 text-xs">
-                {item.label}
-              </TableCell>
-              {meses.map((m) => {
-                const celula = item.valores[m];
-                if (!celula) {
-                  return (
-                    <TableCell
-                      key={m}
-                      className="py-1.5 text-right font-mono text-xs tabular-nums text-muted-foreground"
-                    >
-                      {fmtMoney("0.00")}
-                    </TableCell>
-                  );
-                }
-                const isProjected = celula.origen === "PROYECTADO";
-                const isZero = Number.parseFloat(celula.monto) === 0;
-                return (
-                  <TableCell
-                    key={m}
-                    className={cn(
-                      "py-1.5 text-right font-mono text-xs tabular-nums",
-                      isZero && "text-muted-foreground",
-                      isProjected && !isZero && "italic text-sky-700 dark:text-sky-400",
-                    )}
-                    title={isProjected ? "Proyectado" : "Realizado"}
-                  >
-                    {fmtMoney(celula.monto)}
-                  </TableCell>
-                );
-              })}
-            </TableRow>
-          ))}
-        </Fragment>
-      ))}
+      {isOpen
+        ? node.children.map((child) => (
+            <NodeRow
+              key={child.cuentaId}
+              node={child}
+              depth={depth + 1}
+              meses={meses}
+              isEgreso={isEgreso}
+              expanded={expanded}
+              onToggle={onToggle}
+            />
+          ))
+        : null}
     </>
   );
 }
 
-type TotalRowProps = {
-  label: string;
-  meses: string[];
-  valores: Record<string, string>;
-  tone: "signed" | "positive-when-positive" | "negative-when-positive";
-  emphasis?: boolean;
-  className?: string;
-};
+export function FlujoMatriz({ meses, ingresos, egresos, totales }: Props) {
+  // Por padrão expande nivel 0 (raízes)
+  const [expanded, setExpanded] = useState<Set<number>>(() => {
+    const init = new Set<number>();
+    for (const r of ingresos) init.add(r.cuentaId);
+    for (const r of egresos) init.add(r.cuentaId);
+    return init;
+  });
 
-function TotalRow({
-  label,
-  meses,
-  valores,
-  tone,
-  emphasis,
-  className,
-}: TotalRowProps) {
+  const toggle = (id: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   return (
-    <TableRow
-      className={cn(
-        "bg-muted/40 hover:bg-muted/40 font-medium",
-        emphasis && "font-bold",
-        className,
-      )}
-    >
-      <TableCell className={cn("sticky left-0 z-10 bg-muted/40")}>
-        {label}
-      </TableCell>
-      {meses.map((m) => {
-        const raw = valores[m] ?? "0.00";
-        const signo = fmtSigno(raw);
-        let colorClass = "";
-        if (tone === "signed") {
-          if (signo === "positive")
-            colorClass = "text-emerald-700 dark:text-emerald-400";
-          else if (signo === "negative") colorClass = "text-destructive";
-        } else if (tone === "positive-when-positive") {
-          if (signo === "positive")
-            colorClass = "text-emerald-700 dark:text-emerald-400";
-        } else if (tone === "negative-when-positive") {
-          if (signo === "positive") colorClass = "text-destructive";
-        }
-        return (
-          <TableCell
-            key={m}
-            className={cn(
-              "text-right font-mono text-xs tabular-nums",
-              colorClass,
-            )}
-          >
-            {fmtMoney(raw)}
-          </TableCell>
-        );
-      })}
-    </TableRow>
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow className="border-b-2">
+            <TableHead className="sticky left-0 z-20 bg-background min-w-[280px] text-xs font-semibold uppercase tracking-wide">
+              Cuenta
+            </TableHead>
+            {meses.map((m) => (
+              <TableHead
+                key={m}
+                className="text-right text-xs font-semibold uppercase tracking-wide"
+              >
+                {formatMesLabel(m)}
+              </TableHead>
+            ))}
+            <TableHead className="border-l text-right text-xs font-semibold uppercase tracking-wide">
+              Total
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {/* INGRESOS */}
+          <TableRow className="bg-emerald-50 dark:bg-emerald-950/30 border-y-2 border-emerald-300 dark:border-emerald-700/50">
+            <TableCell
+              colSpan={meses.length + 2}
+              className="sticky left-0 z-10 bg-emerald-50 py-2 text-sm font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
+            >
+              Ingresos
+            </TableCell>
+          </TableRow>
+          {ingresos.length === 0 ? (
+            <TableRow>
+              <TableCell
+                colSpan={meses.length + 2}
+                className="py-3 text-center text-xs text-muted-foreground"
+              >
+                Sin ingresos en el período.
+              </TableCell>
+            </TableRow>
+          ) : (
+            ingresos.map((node) => (
+              <NodeRow
+                key={node.cuentaId}
+                node={node}
+                depth={0}
+                meses={meses}
+                isEgreso={false}
+                expanded={expanded}
+                onToggle={toggle}
+              />
+            ))
+          )}
+          <TableRow className="bg-emerald-100 dark:bg-emerald-950/50 border-t-2 border-emerald-300 dark:border-emerald-700/50">
+            <TableCell className="sticky left-0 z-10 bg-emerald-100 py-2 text-sm font-bold uppercase dark:bg-emerald-950/50">
+              Total Ingresos
+            </TableCell>
+            {meses.map((m) => (
+              <TableCell key={m} className="bg-emerald-100 py-2 dark:bg-emerald-950/50">
+                <MontoCell
+                  monto={totales.totalIngresosPorMes[m] ?? "0"}
+                  destacar
+                  isNegative={false}
+                />
+              </TableCell>
+            ))}
+            <TableCell className="bg-emerald-100 py-2 border-l dark:bg-emerald-950/50">
+              <MontoCell
+                monto={sumByKey(totales.totalIngresosPorMes, meses)}
+                destacar
+                isNegative={false}
+              />
+            </TableCell>
+          </TableRow>
+
+          {/* EGRESOS */}
+          <TableRow className="bg-rose-50 dark:bg-rose-950/30 border-y-2 border-rose-300 dark:border-rose-700/50">
+            <TableCell
+              colSpan={meses.length + 2}
+              className="sticky left-0 z-10 bg-rose-50 py-2 text-sm font-bold uppercase tracking-wide text-rose-700 dark:bg-rose-950/30 dark:text-rose-300"
+            >
+              Egresos
+            </TableCell>
+          </TableRow>
+          {egresos.length === 0 ? (
+            <TableRow>
+              <TableCell
+                colSpan={meses.length + 2}
+                className="py-3 text-center text-xs text-muted-foreground"
+              >
+                Sin egresos en el período.
+              </TableCell>
+            </TableRow>
+          ) : (
+            egresos.map((node) => (
+              <NodeRow
+                key={node.cuentaId}
+                node={node}
+                depth={0}
+                meses={meses}
+                isEgreso
+                expanded={expanded}
+                onToggle={toggle}
+              />
+            ))
+          )}
+          <TableRow className="bg-rose-100 dark:bg-rose-950/50 border-t-2 border-rose-300 dark:border-rose-700/50">
+            <TableCell className="sticky left-0 z-10 bg-rose-100 py-2 text-sm font-bold uppercase dark:bg-rose-950/50">
+              Total Egresos
+            </TableCell>
+            {meses.map((m) => (
+              <TableCell key={m} className="bg-rose-100 py-2 dark:bg-rose-950/50">
+                <MontoCell
+                  monto={totales.totalEgresosPorMes[m] ?? "0"}
+                  destacar
+                  isNegative
+                />
+              </TableCell>
+            ))}
+            <TableCell className="bg-rose-100 py-2 border-l dark:bg-rose-950/50">
+              <MontoCell
+                monto={sumByKey(totales.totalEgresosPorMes, meses)}
+                destacar
+                isNegative
+              />
+            </TableCell>
+          </TableRow>
+
+          {/* SALDO MENSAL + ACUMULADO */}
+          <TableRow className="border-t-4 border-double bg-slate-900 text-slate-50 hover:bg-slate-900 dark:bg-slate-800">
+            <TableCell className="sticky left-0 z-10 bg-slate-900 py-3 text-sm font-bold uppercase dark:bg-slate-800">
+              Saldo del mes (Ing − Egr)
+            </TableCell>
+            {meses.map((m) => {
+              const value = totales.saldoMensalPorMes[m] ?? "0";
+              const signo = fmtSigno(value);
+              return (
+                <TableCell key={m} className="bg-slate-900 py-3 dark:bg-slate-800">
+                  <SaldoCell value={value} signo={signo} />
+                </TableCell>
+              );
+            })}
+            <TableCell className="bg-slate-900 py-3 border-l dark:bg-slate-800">
+              <SaldoCell
+                value={sumByKey(totales.saldoMensalPorMes, meses)}
+                signo={fmtSigno(sumByKey(totales.saldoMensalPorMes, meses))}
+              />
+            </TableCell>
+          </TableRow>
+          <TableRow className="bg-slate-800 text-slate-50 hover:bg-slate-800 dark:bg-slate-900">
+            <TableCell className="sticky left-0 z-10 bg-slate-800 py-3 text-sm font-bold uppercase dark:bg-slate-900">
+              Saldo acumulado
+              <span className="ml-2 text-xs font-normal text-slate-300">
+                (saldo inicial: {fmtMoney(totales.saldoInicial)})
+              </span>
+            </TableCell>
+            {meses.map((m) => {
+              const value = totales.saldoAcumuladoPorMes[m] ?? "0";
+              const signo = fmtSigno(value);
+              return (
+                <TableCell key={m} className="bg-slate-800 py-3 dark:bg-slate-900">
+                  <SaldoCell value={value} signo={signo} />
+                </TableCell>
+              );
+            })}
+            <TableCell className="bg-slate-800 py-3 border-l dark:bg-slate-900" />
+          </TableRow>
+        </TableBody>
+      </Table>
+    </div>
   );
 }
+
+function SaldoCell({
+  value,
+  signo,
+}: {
+  value: string;
+  signo: ReturnType<typeof fmtSigno>;
+}) {
+  const num = Number(value);
+  const abs = fmtMoney(Math.abs(num).toFixed(2));
+  if (signo === "zero") {
+    return (
+      <span className="block text-right font-mono text-sm font-bold text-slate-400 tabular-nums">
+        —
+      </span>
+    );
+  }
+  return (
+    <span
+      className={cn(
+        "block text-right font-mono text-sm font-bold tabular-nums",
+        signo === "negative" ? "text-rose-300" : "text-emerald-300",
+      )}
+    >
+      {signo === "negative" ? `(${abs})` : abs}
+    </span>
+  );
+}
+
+function sumByKey(obj: Record<string, string>, keys: string[]): string {
+  let s = 0;
+  for (const k of keys) s += Number(obj[k] ?? 0);
+  return s.toFixed(2);
+}
+
+// Suppress unused-import warning for Fragment (kept for potential expansion).
+const _f = Fragment;
+void _f;
