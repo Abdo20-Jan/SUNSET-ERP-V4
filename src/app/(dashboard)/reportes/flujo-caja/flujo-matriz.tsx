@@ -44,7 +44,9 @@ type Props = {
   totales: SerializedTotales;
 };
 
-// Cell rendering com sinal coloreado
+// Cell rendering com sinal coloreado:
+// - isNegative=true: força exibição como egreso (rojo, parens) mesmo se valor abs.
+// - sin isNegative: respeta el signo nativo del número (positivo verde con +, negativo rojo parens).
 function MontoCell({
   monto,
   destacar = false,
@@ -63,17 +65,18 @@ function MontoCell({
     );
   }
   const abs = fmtMoney(Math.abs(num).toFixed(2));
+  const showAsNegative = isNegative || num < 0;
   return (
     <span
       className={cn(
         "block text-right font-mono text-xs tabular-nums",
         destacar && "font-semibold",
-        isNegative
+        showAsNegative
           ? "text-rose-600 dark:text-rose-400"
           : "text-emerald-700 dark:text-emerald-400",
       )}
     >
-      {isNegative ? `(${abs})` : abs}
+      {showAsNegative ? `(${abs})` : `+ ${abs}`}
     </span>
   );
 }

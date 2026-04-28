@@ -21,6 +21,7 @@ import {
   revertirLineaAction,
 } from "@/lib/actions/extractos";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { MoneyAmount } from "@/components/ui/money-amount";
 
 const LineaExtractoStatus = {
   PENDIENTE: "PENDIENTE",
@@ -221,23 +222,23 @@ export function LineasReview({
         </Button>
       </div>
 
-      <Card className="overflow-hidden">
+      <Card>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-[90px]">Fecha</TableHead>
+              <TableHead className="w-30">ID / Ref.</TableHead>
               <TableHead>Descripción</TableHead>
-              <TableHead className="w-[140px]">Referencia</TableHead>
               <TableHead>Sugerencia</TableHead>
-              <TableHead className="text-right">Monto</TableHead>
+              <TableHead className="w-[140px] text-right">Valor</TableHead>
+              <TableHead className="w-30 text-right">Débito</TableHead>
+              <TableHead className="w-30 text-right">Crédito</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead className="w-[260px] text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {lineas.map((l) => {
-              const monto = Number(l.monto);
-              const isPositive = monto > 0;
               const sugerencia = l.cuentaSugeridaCodigo
                 ? `${l.cuentaSugeridaCodigo} ${l.cuentaSugeridaNombre ?? ""}`.trim()
                 : l.proveedorNombre
@@ -247,28 +248,31 @@ export function LineasReview({
                     : null;
               const contrapartida = resolverContrapartida(l);
               const isPendiente = l.status === LineaExtractoStatus.PENDIENTE;
+              const idRef = l.referenciaBanco ?? l.comprobante ?? null;
 
               return (
                 <TableRow key={l.id} className={isPendiente ? "" : "opacity-60"}>
                   <TableCell className="text-xs tabular-nums">
                     {fmtDate(new Date(l.fecha))}
                   </TableCell>
-                  <TableCell className="max-w-[280px]">
-                    <p className="text-sm">{l.descripcion}</p>
-                    {l.comprobante ? (
-                      <p className="text-xs text-muted-foreground">Comp.: {l.comprobante}</p>
-                    ) : null}
-                  </TableCell>
                   <TableCell className="font-mono text-xs">
-                    {l.referenciaBanco ? (
-                      <span title="Código de referencia del banco">
-                        {l.referenciaBanco}
+                    {idRef ? (
+                      <span title={l.referenciaBanco ? "Cód. ref. banco" : "Comprobante"}>
+                        {idRef}
                       </span>
                     ) : (
-                      <span className="text-muted-foreground">—</span>
+                      <span className="text-muted-foreground/50">—</span>
                     )}
                   </TableCell>
-                  <TableCell className="max-w-[260px]">
+                  <TableCell className="max-w-70">
+                    <p className="text-[13px]">{l.descripcion}</p>
+                    {l.comprobante && l.referenciaBanco ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        Comp.: {l.comprobante}
+                      </p>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="max-w-65">
                     {sugerencia ? (
                       <div className="flex flex-col gap-1">
                         <p className="text-xs">{sugerencia}</p>
@@ -292,15 +296,14 @@ export function LineasReview({
                       </p>
                     ) : null}
                   </TableCell>
-                  <TableCell
-                    className={`text-right tabular-nums ${
-                      isPositive
-                        ? "text-green-700 dark:text-green-400"
-                        : "text-red-700 dark:text-red-400"
-                    }`}
-                  >
-                    {isPositive ? "+" : ""}
-                    {fmtMoney(l.monto)}
+                  <TableCell className="text-right">
+                    <MoneyAmount value={l.monto} mode="signed" />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <MoneyAmount value={l.monto} mode="debit-column" />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <MoneyAmount value={l.monto} mode="credit-column" />
                   </TableCell>
                   <TableCell>
                     <Badge variant={STATUS_VARIANT[l.status]}>

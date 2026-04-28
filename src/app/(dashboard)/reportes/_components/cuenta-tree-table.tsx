@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/table";
 import { convertirAUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { MoneyAmount } from "@/components/ui/money-amount";
 
 import { fmtMoney } from "./money";
 import type { SerializedTreeNode } from "./cuenta-tree-node";
@@ -39,18 +40,9 @@ type Props = {
   tcParaUsd?: string | null;
 };
 
-// Format con paréntesis y signo coloreado para saldos.
+// Saldo coloreado: positivo `+ N` verde, negativo `(N)` rojo, cero muted.
 function renderSigned(value: string, tc: string | null | undefined) {
-  const converted = convertirAUsd(value, tc);
-  const num = Number(converted);
-  if (!Number.isFinite(num) || num === 0) {
-    return <span className="text-muted-foreground">{fmtMoney(converted)}</span>;
-  }
-  const abs = fmtMoney(Math.abs(num).toFixed(2));
-  if (num < 0) {
-    return <span className="text-rose-600 dark:text-rose-400">({abs})</span>;
-  }
-  return <span className="text-emerald-700 dark:text-emerald-400">{abs}</span>;
+  return <MoneyAmount value={value} mode="signed" tcParaUsd={tc ?? undefined} />;
 }
 
 function fmt(value: string, tc: string | null | undefined): string {
@@ -64,18 +56,17 @@ function rowClasses(row: Row<SerializedTreeNode>): string {
   const r = row.original;
   const depth = row.depth;
   if (r.tipo === "SINTETICA" && depth === 0) {
-    return "border-t-2 border-slate-300 dark:border-slate-700 bg-slate-100/60 hover:bg-slate-100 dark:bg-slate-900/40 dark:hover:bg-slate-900/60";
+    return "border-t border-border-strong bg-secondary/70 hover:bg-secondary";
   }
   if (r.tipo === "SINTETICA" && depth === 1) {
-    return "bg-muted/40 hover:bg-muted/60";
+    return "bg-muted/50 hover:bg-muted/70";
   }
   if (r.tipo === "SINTETICA") {
-    return "hover:bg-muted/30";
+    return "hover:bg-accent/30";
   }
-  // Analítica con zebra muito suave
   return row.index % 2 === 0
-    ? "hover:bg-muted/30"
-    : "bg-muted/10 hover:bg-muted/30";
+    ? "hover:bg-accent/30"
+    : "bg-muted/20 hover:bg-accent/30";
 }
 
 const colCodigo: ColumnDef<SerializedTreeNode> = {
@@ -277,7 +268,7 @@ export function CuentaTreeTable({
           table.getRowModel().rows.map((row) => (
             <TableRow key={row.id} className={rowClasses(row)}>
               {row.getVisibleCells().map((cell) => (
-                <TableCell key={cell.id} className="py-1.5">
+                <TableCell key={cell.id} className="py-1">
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </TableCell>
               ))}
@@ -285,19 +276,19 @@ export function CuentaTreeTable({
           ))
         )}
         {totalLabel && totalValue != null ? (
-          <TableRow className="border-t-4 border-double bg-muted/80 hover:bg-muted/80 dark:bg-muted/60">
-            <TableCell colSpan={2} className="py-3 text-sm font-bold uppercase tracking-wide">
+          <TableRow className="border-t-2 border-double border-border-strong bg-primary/5 hover:bg-primary/5">
+            <TableCell colSpan={2} className="py-2 text-[12px] font-bold uppercase tracking-wider text-foreground">
               {totalLabel}
             </TableCell>
             {showSaldoInicial ? (
-              <TableCell className="py-3 text-right font-mono text-sm font-bold tabular-nums">
+              <TableCell className="py-2 text-right font-mono text-[13px] font-bold tabular-nums">
                 {totalSaldoInicial != null
                   ? renderSigned(totalSaldoInicial, tcParaUsd)
                   : ""}
               </TableCell>
             ) : null}
             <TableCell colSpan={2} />
-            <TableCell className="py-3 text-right font-mono text-base font-bold tabular-nums">
+            <TableCell className="py-2 text-right font-mono text-[14px] font-bold tabular-nums">
               {renderSigned(totalValue, tcParaUsd)}
             </TableCell>
           </TableRow>

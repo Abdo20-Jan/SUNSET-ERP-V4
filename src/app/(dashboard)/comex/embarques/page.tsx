@@ -64,10 +64,10 @@ export default async function EmbarquesPage({
   if (moneda) filtroTags.push(`moneda ${moneda}`);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Embarques</h1>
+          <h1 className="text-[15px] font-semibold tracking-tight">Embarques</h1>
           <p className="text-sm text-muted-foreground">
             {rows.length} embarque{rows.length === 1 ? "" : "s"}
             {filtroTags.length > 0

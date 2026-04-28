@@ -1,6 +1,6 @@
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 
 export function SecondaryStat({
   label,
@@ -12,18 +12,20 @@ export function SecondaryStat({
   icon: IconSvgElement;
 }) {
   return (
-    <Card size="sm">
-      <CardContent className="flex items-center gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-          <HugeiconsIcon icon={icon} className="size-4" />
+    <Card size="sm" className="gap-1.5 py-2.5">
+      <div className="flex items-center gap-2.5 px-3">
+        <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+          <HugeiconsIcon icon={icon} className="size-3.5" strokeWidth={2} />
         </div>
-        <div className="flex flex-col">
-          <span className="text-xs text-muted-foreground">{label}</span>
-          <span className="font-heading text-lg font-semibold tabular-nums">
+        <div className="flex min-w-0 flex-col leading-tight">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {label}
+          </span>
+          <span className="font-mono text-base font-semibold tabular-nums">
             {value.toLocaleString("es-AR")}
           </span>
         </div>
-      </CardContent>
+      </div>
     </Card>
   );
 }

@@ -297,12 +297,15 @@ export function CompraForm({
   }, [totals]);
 
   const addItem = () => {
-    append({
-      productoId: "",
-      cantidad: 1,
-      precioUnitario: "0",
-      ivaPorcentaje: "21",
-    });
+    append(
+      {
+        productoId: "",
+        cantidad: 1,
+        precioUnitario: "0",
+        ivaPorcentaje: "21",
+      },
+      { shouldFocus: false },
+    );
   };
 
   function buildPayload(values: FormValues) {
@@ -368,7 +371,7 @@ export function CompraForm({
   return (
     <form onSubmit={submitGuardar} className="flex flex-col gap-6 pb-32">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="text-[15px] font-semibold tracking-tight">
           {isEdit ? `Editar compra ${initialData!.numero}` : "Nueva compra"}
         </h1>
         <p className="text-sm text-muted-foreground">

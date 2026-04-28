@@ -17,9 +17,9 @@ export default async function CotizacionesPage() {
   }));
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="text-[15px] font-semibold tracking-tight">
           Cotizaciones USD
         </h1>
         <p className="text-sm text-muted-foreground">

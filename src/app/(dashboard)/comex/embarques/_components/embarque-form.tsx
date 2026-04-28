@@ -597,7 +597,10 @@ export function EmbarqueForm(props: Props) {
   };
 
   const addItem = () => {
-    append({ productoId: "", cantidad: 1, precioUnitarioFob: "0" });
+    append(
+      { productoId: "", cantidad: 1, precioUnitarioFob: "0" },
+      { shouldFocus: false },
+    );
   };
 
   const onSubmit = handleSubmit((values) => {
@@ -624,7 +627,7 @@ export function EmbarqueForm(props: Props) {
     <form onSubmit={onSubmit} className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-[15px] font-semibold tracking-tight">
             {isEdit ? "Editar embarque" : "Nuevo embarque"}
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -1105,25 +1108,28 @@ export function EmbarqueForm(props: Props) {
                 variant="outline"
                 size="sm"
                 onClick={() =>
-                  appendCosto({
-                    proveedorId: "",
-                    moneda: "ARS",
-                    tipoCambio: "1",
-                    facturaNumero: "",
-                    fechaFactura: "",
-                    iva: "0",
-                    iibb: "0",
-                    otros: "0",
-                    notas: "",
-                    lineas: [
-                      {
-                        tipo: "GASTOS_PORTUARIOS",
-                        cuentaContableGastoId: 0,
-                        descripcion: "",
-                        subtotal: "0",
-                      },
-                    ],
-                  })
+                  appendCosto(
+                    {
+                      proveedorId: "",
+                      moneda: "ARS",
+                      tipoCambio: "1",
+                      facturaNumero: "",
+                      fechaFactura: "",
+                      iva: "0",
+                      iibb: "0",
+                      otros: "0",
+                      notas: "",
+                      lineas: [
+                        {
+                          tipo: "GASTOS_PORTUARIOS",
+                          cuentaContableGastoId: 0,
+                          descripcion: "",
+                          subtotal: "0",
+                        },
+                      ],
+                    },
+                    { shouldFocus: false },
+                  )
                 }
               >
                 <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
@@ -1513,32 +1519,32 @@ const CATEGORIA_STYLES: Record<
 > = {
   DESPACHANTE: {
     title: "Despachante",
-    borderLeft: "border-l-cyan-500",
-    headerBg: "bg-cyan-50/60 dark:bg-cyan-950/30",
-    label: "text-cyan-700 dark:text-cyan-300",
+    borderLeft: "border-l-teal-500",
+    headerBg: "bg-teal-50/40 dark:bg-teal-950/20",
+    label: "text-teal-700 dark:text-teal-300",
   },
   OPERADOR_LOGISTICO: {
     title: "Operador logístico",
     borderLeft: "border-l-indigo-500",
-    headerBg: "bg-indigo-50/60 dark:bg-indigo-950/30",
+    headerBg: "bg-indigo-50/40 dark:bg-indigo-950/20",
     label: "text-indigo-700 dark:text-indigo-300",
   },
   GASTOS_PORTUARIOS: {
     title: "Gastos portuarios",
     borderLeft: "border-l-amber-500",
-    headerBg: "bg-amber-50/60 dark:bg-amber-950/30",
-    label: "text-amber-700 dark:text-amber-300",
+    headerBg: "bg-amber-50/50 dark:bg-amber-950/20",
+    label: "text-amber-800 dark:text-amber-300",
   },
   AGENTE_FLETE: {
     title: "Agencia marítima / Flete nacional",
     borderLeft: "border-l-emerald-500",
-    headerBg: "bg-emerald-50/60 dark:bg-emerald-950/30",
+    headerBg: "bg-emerald-50/40 dark:bg-emerald-950/20",
     label: "text-emerald-700 dark:text-emerald-300",
   },
   GENERAL: {
     title: "General",
-    borderLeft: "border-l-slate-300 dark:border-l-slate-600",
-    headerBg: "bg-muted/40",
+    borderLeft: "border-l-border-strong",
+    headerBg: "bg-muted/30",
     label: "text-muted-foreground",
   },
 };
@@ -1694,7 +1700,7 @@ const FacturaCard = memo(function FacturaCard({
 
   return (
     <div
-      className={`overflow-hidden rounded-lg border border-l-4 bg-card shadow-sm ${estilo.borderLeft}`}
+      className={`rounded-lg border border-l-4 bg-card shadow-sm ${estilo.borderLeft}`}
     >
       <div
         className={`flex items-center justify-between gap-2 border-b px-4 py-3 ${estilo.headerBg}`}
@@ -1872,12 +1878,15 @@ const FacturaCard = memo(function FacturaCard({
               size="sm"
               onClick={() => {
                 const prov = proveedores.find((p) => p.id === proveedorId);
-                appendLinea({
-                  tipo: "GASTOS_PORTUARIOS",
-                  cuentaContableGastoId: prov?.cuentaGastoContableId ?? 0,
-                  descripcion: "",
-                  subtotal: "0",
-                });
+                appendLinea(
+                  {
+                    tipo: "GASTOS_PORTUARIOS",
+                    cuentaContableGastoId: prov?.cuentaGastoContableId ?? 0,
+                    descripcion: "",
+                    subtotal: "0",
+                  },
+                  { shouldFocus: false },
+                );
               }}
             >
               <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />

@@ -231,7 +231,7 @@ export function PedidoVentaForm({
   return (
     <form onSubmit={submit} className="flex flex-col gap-6 pb-32">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="text-[15px] font-semibold tracking-tight">
           {isEdit
             ? `Editar pedido ${initialData!.numero}`
             : "Nuevo pedido de venta (OV)"}
@@ -337,7 +337,10 @@ export function PedidoVentaForm({
               type="button"
               variant="outline"
               onClick={() =>
-                append({ productoId: "", cantidad: 1, precioUnitario: "0" })
+                append(
+                  { productoId: "", cantidad: 1, precioUnitario: "0" },
+                  { shouldFocus: false },
+                )
               }
             >
               <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />

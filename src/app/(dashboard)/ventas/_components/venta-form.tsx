@@ -364,12 +364,15 @@ export function VentaForm({
   }, [totals]);
 
   const addItem = () => {
-    append({
-      productoId: "",
-      cantidad: 1,
-      precioUnitario: "0",
-      ivaPorcentaje: "21",
-    });
+    append(
+      {
+        productoId: "",
+        cantidad: 1,
+        precioUnitario: "0",
+        ivaPorcentaje: "21",
+      },
+      { shouldFocus: false },
+    );
   };
 
   const submitGuardar = handleSubmit((values) => {
@@ -474,7 +477,7 @@ export function VentaForm({
   return (
     <form onSubmit={submitGuardar} className="flex flex-col gap-6 pb-32">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="text-[15px] font-semibold tracking-tight">
           {isEdit ? `Editar venta ${initialData!.numero}` : "Nueva venta"}
         </h1>
         <p className="text-sm text-muted-foreground">
@@ -651,16 +654,19 @@ export function VentaForm({
               variant="outline"
               size="sm"
               onClick={() =>
-                appendCheque({
-                  numero: "",
-                  tipo: "ECHEQ",
-                  banco: "",
-                  emisor: "",
-                  cuitEmisor: "",
-                  importe: "0",
-                  fechaEmision: todayISO(),
-                  fechaPago: todayISO(),
-                })
+                appendCheque(
+                  {
+                    numero: "",
+                    tipo: "ECHEQ",
+                    banco: "",
+                    emisor: "",
+                    cuitEmisor: "",
+                    importe: "0",
+                    fechaEmision: todayISO(),
+                    fechaPago: todayISO(),
+                  },
+                  { shouldFocus: false },
+                )
               }
             >
               + Agregar cheque

@@ -12,10 +12,10 @@ export default async function PedidosCompraPage() {
   const rows = await listarPedidosCompra();
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-[15px] font-semibold tracking-tight">
             Pedidos de compra (OC)
           </h1>
           <p className="text-sm text-muted-foreground">

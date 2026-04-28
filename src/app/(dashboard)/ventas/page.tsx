@@ -15,10 +15,10 @@ export default async function VentasPage() {
   const borradores = rows.filter((r) => r.estado === "BORRADOR").length;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Ventas</h1>
+          <h1 className="text-[15px] font-semibold tracking-tight">Ventas</h1>
           <p className="text-sm text-muted-foreground">
             {rows.length} venta{rows.length === 1 ? "" : "s"}
             {rows.length > 0 && (

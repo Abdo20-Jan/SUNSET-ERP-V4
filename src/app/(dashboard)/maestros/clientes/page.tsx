@@ -13,9 +13,9 @@ export default async function ClientesPage() {
   ]);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Clientes</h1>
+        <h1 className="text-[15px] font-semibold tracking-tight">Clientes</h1>
         <p className="text-sm text-muted-foreground">
           {clientes.length} cliente{clientes.length === 1 ? "" : "s"} registrado
           {clientes.length === 1 ? "" : "s"}.

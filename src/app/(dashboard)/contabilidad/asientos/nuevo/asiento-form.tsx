@@ -282,7 +282,7 @@ export function AsientoForm({ cuentas }: { cuentas: Cuenta[] }) {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => append({ ...EMPTY_LINEA })}
+            onClick={() => append({ ...EMPTY_LINEA }, { shouldFocus: false })}
           >
             <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
             Agregar línea

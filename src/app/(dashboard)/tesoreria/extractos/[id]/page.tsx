@@ -124,7 +124,7 @@ export default async function ExtractoDetallePage({
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-2">
         <Link
           href="/tesoreria/extractos"
@@ -135,7 +135,7 @@ export default async function ExtractoDetallePage({
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight">
+            <h1 className="text-[15px] font-semibold tracking-tight">
               {imp.cuentaBancaria.banco} · {periodo}
             </h1>
             <p className="text-sm text-muted-foreground">

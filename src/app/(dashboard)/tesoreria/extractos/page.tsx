@@ -53,10 +53,10 @@ export default async function ExtractosPage() {
   });
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-[15px] font-semibold tracking-tight">
             Extractos bancarios
           </h1>
           <p className="text-sm text-muted-foreground">

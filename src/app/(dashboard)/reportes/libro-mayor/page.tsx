@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 
 import { fmtMoney } from "../_components/money";
+import { MoneyAmount } from "@/components/ui/money-amount";
 import { MonedaToggle, type Moneda } from "../_components/moneda-toggle";
 import { MayorFilters } from "./mayor-filters";
 
@@ -115,9 +116,9 @@ export default async function LibroMayorPage({
           : "Histórico completo";
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Libro Mayor</h1>
+        <h1 className="text-[15px] font-semibold tracking-tight">Libro Mayor</h1>
         <p className="text-sm text-muted-foreground">
           Movimientos por cuenta analítica con saldo acumulado.
         </p>
@@ -165,8 +166,12 @@ export default async function LibroMayorPage({
                   <TableCell colSpan={5} className="py-2 text-xs italic text-muted-foreground">
                     Saldo inicial al {desdeStr}
                   </TableCell>
-                  <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
-                    {fmt(mayor.saldoInicial.toFixed(2))}
+                  <TableCell className="py-2 text-right text-xs">
+                    <MoneyAmount
+                      value={mayor.saldoInicial.toFixed(2)}
+                      mode="signed"
+                      tcParaUsd={tcParaUsd ?? undefined}
+                    />
                   </TableCell>
                 </TableRow>
               ) : null}
@@ -207,8 +212,12 @@ export default async function LibroMayorPage({
                     <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
                       {fmt(l.haber.toFixed(2))}
                     </TableCell>
-                    <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
-                      {fmt(l.saldoAcumulado.toFixed(2))}
+                    <TableCell className="py-2 text-right text-xs">
+                      <MoneyAmount
+                        value={l.saldoAcumulado.toFixed(2)}
+                        mode="signed"
+                        tcParaUsd={tcParaUsd ?? undefined}
+                      />
                     </TableCell>
                   </TableRow>
                 ))
@@ -226,8 +235,13 @@ export default async function LibroMayorPage({
                   <TableCell className="py-3 text-right font-mono text-sm tabular-nums">
                     {fmt(mayor.totalHaber.toFixed(2))}
                   </TableCell>
-                  <TableCell className="py-3 text-right font-mono text-sm font-bold tabular-nums">
-                    {fmt(mayor.saldoFinal.toFixed(2))}
+                  <TableCell className="py-3 text-right text-sm font-bold">
+                    <MoneyAmount
+                      value={mayor.saldoFinal.toFixed(2)}
+                      mode="signed"
+                      tcParaUsd={tcParaUsd ?? undefined}
+                      className="text-sm font-bold"
+                    />
                   </TableCell>
                 </TableRow>
               </TableFooter>

@@ -85,10 +85,10 @@ export default async function PrestamosPage({
   if (estado) filtroTags.push(`estado ${ESTADO_SHORT[estado]}`);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Préstamos</h1>
+          <h1 className="text-[15px] font-semibold tracking-tight">Préstamos</h1>
           <p className="text-sm text-muted-foreground">
             {rows.length} préstamo{rows.length === 1 ? "" : "s"}
             {filtroTags.length > 0

@@ -24,6 +24,7 @@ import {
 } from "@/lib/services/dashboard";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageHeader } from "@/components/layout/page-header";
 
 import { AlertasCard } from "./_components/alertas-card";
 import { EmbarquesRecientesCard } from "./_components/embarques-recientes-card";
@@ -170,20 +171,17 @@ export default async function DashboardPage() {
   const session = await auth();
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">
-          Bienvenido, {session?.user.nombre}. Indicadores calculados desde la
-          contabilidad (asientos contabilizados).
-        </p>
-      </div>
+    <div className="flex flex-col gap-3">
+      <PageHeader
+        title="Dashboard"
+        description={`${session?.user.nombre ?? "Bienvenido"} · indicadores derivados de asientos contabilizados`}
+      />
 
       <Suspense fallback={<CardSkeleton rows={2} />}>
         <AlertasSection />
       </Suspense>
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <Suspense
           fallback={
             <>
@@ -202,8 +200,8 @@ export default async function DashboardPage() {
         <IngresosEgresosSection />
       </Suspense>
 
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="flex flex-col gap-4">
+      <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className="flex flex-col gap-3">
           <Suspense fallback={<CardSkeleton rows={4} />}>
             <SaldosSection />
           </Suspense>
@@ -211,7 +209,7 @@ export default async function DashboardPage() {
             <PrestamosSection />
           </Suspense>
         </div>
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3">
           <Suspense fallback={<CardSkeleton rows={4} />}>
             <AsientosSection />
           </Suspense>
@@ -221,7 +219,7 @@ export default async function DashboardPage() {
         </div>
       </section>
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <section className="grid grid-cols-2 gap-2.5 md:grid-cols-4">
         <Suspense
           fallback={
             <>

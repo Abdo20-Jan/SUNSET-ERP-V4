@@ -15,9 +15,9 @@ export default async function GastosFijosPage() {
   ]);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Gastos fijos</h1>
+        <h1 className="text-[15px] font-semibold tracking-tight">Gastos fijos</h1>
         <p className="text-sm text-muted-foreground">
           Templates de gastos recurrentes (alquiler, contador, internet, etc).
           Configurá una vez y registrá cada mes — genera asiento contable y
