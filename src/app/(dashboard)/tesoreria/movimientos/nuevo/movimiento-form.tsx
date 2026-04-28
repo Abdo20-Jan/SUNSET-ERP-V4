@@ -217,7 +217,9 @@ export function MovimientoForm({
           `Movimiento registrado — Asiento Nº ${result.asientoNumero}`,
         );
         router.push(
-          contextoAmortizacion ? "/tesoreria/prestamos" : "/tesoreria/cuentas",
+          contextoAmortizacion
+            ? "/tesoreria/prestamos"
+            : "/tesoreria/movimientos",
         );
       } else {
         toast.error(result.error);

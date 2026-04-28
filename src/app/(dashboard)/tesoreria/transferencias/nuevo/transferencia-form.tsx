@@ -199,7 +199,7 @@ export function TransferenciaForm({
         toast.success(
           `Transferencia registrada — Asiento Nº ${result.asientoNumero}`,
         );
-        router.push("/tesoreria/cuentas");
+        router.push("/tesoreria/movimientos");
       } else {
         toast.error(result.error);
       }
