@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useTransition } from "react";
+import { memo, useEffect, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Controller,
@@ -1162,7 +1162,7 @@ export function EmbarqueForm(props: Props) {
                   proveedores={props.proveedores}
                   cuentasGasto={props.cuentasGasto}
                   disabled={readonly}
-                  onRemove={() => removeCosto(index)}
+                  removeCosto={removeCosto}
                   errors={errors.costos?.[index] as FacturaErrors | undefined}
                 />
               ))}
@@ -1499,7 +1499,67 @@ type FacturaErrors = {
   }>;
 };
 
-function FacturaCard({
+// Categorías visuales (palitos de cor) en el módulo de costos.
+type CategoriaCosto =
+  | "DESPACHANTE"
+  | "OPERADOR_LOGISTICO"
+  | "GASTOS_PORTUARIOS"
+  | "AGENTE_FLETE"
+  | "GENERAL";
+
+const CATEGORIA_STYLES: Record<
+  CategoriaCosto,
+  { title: string; borderLeft: string; headerBg: string; label: string }
+> = {
+  DESPACHANTE: {
+    title: "Despachante",
+    borderLeft: "border-l-cyan-500",
+    headerBg: "bg-cyan-50/60 dark:bg-cyan-950/30",
+    label: "text-cyan-700 dark:text-cyan-300",
+  },
+  OPERADOR_LOGISTICO: {
+    title: "Operador logístico",
+    borderLeft: "border-l-indigo-500",
+    headerBg: "bg-indigo-50/60 dark:bg-indigo-950/30",
+    label: "text-indigo-700 dark:text-indigo-300",
+  },
+  GASTOS_PORTUARIOS: {
+    title: "Gastos portuarios",
+    borderLeft: "border-l-amber-500",
+    headerBg: "bg-amber-50/60 dark:bg-amber-950/30",
+    label: "text-amber-700 dark:text-amber-300",
+  },
+  AGENTE_FLETE: {
+    title: "Agencia marítima / Flete nacional",
+    borderLeft: "border-l-emerald-500",
+    headerBg: "bg-emerald-50/60 dark:bg-emerald-950/30",
+    label: "text-emerald-700 dark:text-emerald-300",
+  },
+  GENERAL: {
+    title: "General",
+    borderLeft: "border-l-slate-300 dark:border-l-slate-600",
+    headerBg: "bg-muted/40",
+    label: "text-muted-foreground",
+  },
+};
+
+function categoriaParaProveedor(
+  tipo: ProveedorOption["tipoProveedor"] | null,
+): CategoriaCosto {
+  if (!tipo) return "GENERAL";
+  if (tipo === "DESPACHANTE") return "DESPACHANTE";
+  if (tipo === "LOGISTICA") return "OPERADOR_LOGISTICO";
+  if (tipo === "GASTOS_PORTUARIOS") return "GASTOS_PORTUARIOS";
+  if (tipo === "ALMACENAJE") return "AGENTE_FLETE";
+  if (tipo === "SERVICIOS_EXTERIOR") return "AGENTE_FLETE";
+  return "GENERAL";
+}
+
+// Memoizamos FacturaCard porque o EmbarqueForm faz `useWatch` em
+// `costos`, lo que dispara re-render del padre en cada keystroke. Sin
+// memo, todas las facturas se re-renderizan y los selects/comboboxes
+// pierden foco o "contaminan" entre índices visualmente.
+const FacturaCard = memo(function FacturaCard({
   index,
   control,
   register,
@@ -1507,7 +1567,7 @@ function FacturaCard({
   proveedores,
   cuentasGasto,
   disabled,
-  onRemove,
+  removeCosto,
   errors,
 }: {
   index: number;
@@ -1517,7 +1577,8 @@ function FacturaCard({
   proveedores: ProveedorOption[];
   cuentasGasto: CuentaOption[];
   disabled: boolean;
-  onRemove: () => void;
+  // Función estable de useFieldArray. Memo invalida si cambia el ref.
+  removeCosto: (index: number) => void;
   errors?: FacturaErrors;
 }) {
   const moneda = useWatch({ control, name: `costos.${index}.moneda` as const });
@@ -1621,19 +1682,26 @@ function FacturaCard({
     };
   }, [lineas, tc, facturaIva, facturaIibb, facturaOtros]);
 
-  const proveedorNombre = useMemo(
-    () =>
-      proveedores.find((p) => p.id === proveedorId)?.nombre ??
-      "Sin proveedor",
+  const proveedorActual = useMemo(
+    () => proveedores.find((p) => p.id === proveedorId) ?? null,
     [proveedores, proveedorId],
   );
+  const proveedorNombre = proveedorActual?.nombre ?? "Sin proveedor";
+  const categoria = categoriaParaProveedor(
+    proveedorActual?.tipoProveedor ?? null,
+  );
+  const estilo = CATEGORIA_STYLES[categoria];
 
   return (
-    <div className="rounded-lg border bg-card shadow-sm">
-      <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-4 py-3">
+    <div
+      className={`overflow-hidden rounded-lg border border-l-4 bg-card shadow-sm ${estilo.borderLeft}`}
+    >
+      <div
+        className={`flex items-center justify-between gap-2 border-b px-4 py-3 ${estilo.headerBg}`}
+      >
         <div className="flex flex-col">
-          <span className="text-xs uppercase tracking-wide text-muted-foreground">
-            Factura #{index + 1}
+          <span className={`text-xs font-semibold uppercase tracking-wide ${estilo.label}`}>
+            {estilo.title} · Factura #{index + 1}
           </span>
           <span className="text-sm font-medium">{proveedorNombre}</span>
         </div>
@@ -1642,7 +1710,7 @@ function FacturaCard({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={onRemove}
+            onClick={() => removeCosto(index)}
             aria-label="Remover factura"
           >
             <HugeiconsIcon
@@ -1852,7 +1920,7 @@ function FacturaCard({
                     register={register}
                     cuentasGasto={cuentasGasto}
                     disabled={disabled}
-                    onRemove={() => removeLinea(lineaIdx)}
+                    removeLinea={removeLinea}
                     errors={errors?.lineas?.[lineaIdx]}
                   />
                 ))}
@@ -1903,18 +1971,18 @@ function FacturaCard({
       </div>
     </div>
   );
-}
+});
 
 type LineaErrors = NonNullable<FacturaErrors["lineas"]>[number];
 
-function LineaRow({
+const LineaRow = memo(function LineaRow({
   facturaIndex,
   lineaIndex,
   control,
   register,
   cuentasGasto,
   disabled,
-  onRemove,
+  removeLinea,
   errors,
 }: {
   facturaIndex: number;
@@ -1923,7 +1991,7 @@ function LineaRow({
   register: ReturnType<typeof useForm<FormValues>>["register"];
   cuentasGasto: CuentaOption[];
   disabled: boolean;
-  onRemove: () => void;
+  removeLinea: (lineaIdx: number) => void;
   errors?: LineaErrors;
 }) {
   const path = `costos.${facturaIndex}.lineas.${lineaIndex}` as const;
@@ -1998,7 +2066,7 @@ function LineaRow({
             variant="ghost"
             size="icon"
             className="h-7 w-7"
-            onClick={onRemove}
+            onClick={() => removeLinea(lineaIndex)}
             aria-label="Quitar línea"
           >
             <HugeiconsIcon
@@ -2011,7 +2079,7 @@ function LineaRow({
       )}
     </tr>
   );
-}
+});
 
 function MoneyField({
   label,
