@@ -9,7 +9,9 @@ import { revertirIngresoEmbarque } from "@/lib/services/stock";
 import {
   COMPRA_CODIGOS,
   EMBARQUE_CODIGOS,
+  EXTRACTO_BANCARIO_CODIGOS,
   GASTO_POR_TIPO_PROVEEDOR,
+  PORCENTAJE_LEY_25413_COMPUTABLE,
   TRANSFERENCIA_CODIGOS,
   TASA_PROVISION_GANANCIAS,
   VENTA_CODIGOS,
@@ -481,7 +483,10 @@ export async function crearAsientoMovimientoTesoreria(
   const run = async (inner: TxClient) => {
     const mov = await inner.movimientoTesoreria.findUnique({
       where: { id: movimientoId },
-      include: { cuentaBancaria: { select: { cuentaContableId: true } } },
+      include: {
+        cuentaBancaria: { select: { cuentaContableId: true } },
+        cuentaContable: { select: { codigo: true } },
+      },
     });
 
     if (!mov) {
@@ -502,27 +507,62 @@ export async function crearAsientoMovimientoTesoreria(
     const contrapartidaId = mov.cuentaContableId;
     const valor = money(mov.monto).toString();
 
+    // Caso especial — Impuesto Ley 25413 (Imp. al cheque/IDCB):
+    // 33% va como crédito fiscal pago a cuenta de Ganancias (1.1.4.12),
+    // 67% como gasto (5.8.1.06). Aplica sólo en PAGO y cuando la
+    // contrapartida elegida es la cuenta del impuesto.
+    const esImpuestoLey25413 =
+      mov.tipo === MovimientoTesoreriaTipo.PAGO &&
+      mov.cuentaContable?.codigo === "5.8.1.06";
+
     let lineas: LineaInput[];
-    switch (mov.tipo) {
-      case MovimientoTesoreriaTipo.COBRO:
-        lineas = [
-          { cuentaId: bancoCuentaId, debe: valor, haber: 0 },
-          { cuentaId: contrapartidaId, debe: 0, haber: valor },
-        ];
-        break;
-      case MovimientoTesoreriaTipo.PAGO:
-        lineas = [
-          { cuentaId: contrapartidaId, debe: valor, haber: 0 },
-          { cuentaId: bancoCuentaId, debe: 0, haber: valor },
-        ];
-        break;
-      case MovimientoTesoreriaTipo.TRANSFERENCIA:
-        // contrapartida = cuenta contable del banco DESTINO
-        lineas = [
-          { cuentaId: contrapartidaId, debe: valor, haber: 0 },
-          { cuentaId: bancoCuentaId, debe: 0, haber: valor },
-        ];
-        break;
+
+    if (esImpuestoLey25413) {
+      const creditoCuentaId = await getOrCreateCuenta(
+        inner,
+        EXTRACTO_BANCARIO_CODIGOS.CREDITO_LEY_25413_GANANCIAS,
+      );
+      const montoAbs = toDecimal(mov.monto).toNumber();
+      const creditoMonto =
+        Math.round(montoAbs * PORCENTAJE_LEY_25413_COMPUTABLE * 100) / 100;
+      const gastoMonto = Math.round((montoAbs - creditoMonto) * 100) / 100;
+      lineas = [
+        {
+          cuentaId: contrapartidaId,
+          debe: gastoMonto.toFixed(2),
+          haber: 0,
+          descripcion: "Gasto no computable (67%)",
+        },
+        {
+          cuentaId: creditoCuentaId,
+          debe: creditoMonto.toFixed(2),
+          haber: 0,
+          descripcion: "Pago a cuenta Ganancias (33%)",
+        },
+        { cuentaId: bancoCuentaId, debe: 0, haber: valor },
+      ];
+    } else {
+      switch (mov.tipo) {
+        case MovimientoTesoreriaTipo.COBRO:
+          lineas = [
+            { cuentaId: bancoCuentaId, debe: valor, haber: 0 },
+            { cuentaId: contrapartidaId, debe: 0, haber: valor },
+          ];
+          break;
+        case MovimientoTesoreriaTipo.PAGO:
+          lineas = [
+            { cuentaId: contrapartidaId, debe: valor, haber: 0 },
+            { cuentaId: bancoCuentaId, debe: 0, haber: valor },
+          ];
+          break;
+        case MovimientoTesoreriaTipo.TRANSFERENCIA:
+          // contrapartida = cuenta contable del banco DESTINO
+          lineas = [
+            { cuentaId: contrapartidaId, debe: valor, haber: 0 },
+            { cuentaId: bancoCuentaId, debe: 0, haber: valor },
+          ];
+          break;
+      }
     }
 
     const asiento = await crearAsientoEnTx(inner, {

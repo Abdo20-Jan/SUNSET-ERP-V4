@@ -471,6 +471,17 @@ export function MovimientoForm({
               Partida doble · se generará en estado CONTABILIZADO
             </span>
           </div>
+          {tipo === "PAGO" &&
+            contrapartidaSeleccionada &&
+            ("cuentaContableCodigo" in contrapartidaSeleccionada
+              ? contrapartidaSeleccionada.cuentaContableCodigo
+              : contrapartidaSeleccionada.codigo) === "5.8.1.06" && (
+              <div className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
+                <strong>Imp. Ley 25413 (IDCB)</strong> — el sistema dividirá
+                automáticamente: 67% como gasto (5.8.1.06) y 33% como crédito
+                pago a cuenta de Ganancias (1.1.4.12).
+              </div>
+            )}
           <AsientoPreview
             tipo={tipo}
             monto={monto}
@@ -562,28 +573,68 @@ function AsientoPreview({
   const valor = Number(monto);
   const valorFmt = Number.isFinite(valor) && valor > 0 ? valor.toFixed(2) : "—";
 
-  // COBRO: banco DEBE, contrapartida HABER
-  // PAGO: contrapartida DEBE, banco HABER
-  const rows =
-    tipo === "COBRO"
-      ? [
-          { role: "DEBE", cuenta: banco, debe: valorFmt, haber: "—" },
-          {
-            role: "HABER",
-            cuenta: contrapartida,
-            debe: "—",
-            haber: valorFmt,
-          },
-        ]
-      : [
-          {
-            role: "DEBE",
-            cuenta: contrapartida,
-            debe: valorFmt,
-            haber: "—",
-          },
-          { role: "HABER", cuenta: banco, debe: "—", haber: valorFmt },
-        ];
+  // Caso especial: Imp. Ley 25413 (IDCB / impuesto al cheque) en PAGO.
+  // 33% va a Crédito pago a cuenta Ganancias (1.1.4.12 ACTIVO),
+  // 67% al gasto (5.8.1.06 EGRESO). El sistema lo divide automáticamente.
+  const contrapartidaCodigo = contrapartida
+    ? "cuentaContableCodigo" in contrapartida
+      ? contrapartida.cuentaContableCodigo
+      : contrapartida.codigo
+    : null;
+  const esImpuestoLey25413 =
+    tipo === "PAGO" && contrapartidaCodigo === "5.8.1.06";
+
+  let rows: Array<{
+    role: string;
+    cuenta: CuentaBancariaOption | CuentaContableContrapartidaOption | null;
+    cuentaOverride?: { codigo: string; nombre: string };
+    debe: string;
+    haber: string;
+  }>;
+
+  if (esImpuestoLey25413 && Number.isFinite(valor) && valor > 0) {
+    const credito = Math.round(valor * 0.33 * 100) / 100;
+    const gasto = Math.round((valor - credito) * 100) / 100;
+    rows = [
+      {
+        role: "DEBE",
+        cuenta: contrapartida,
+        debe: gasto.toFixed(2),
+        haber: "—",
+      },
+      {
+        role: "DEBE",
+        cuenta: null,
+        cuentaOverride: {
+          codigo: "1.1.4.12",
+          nombre: "CRÉDITO LEY 25413 PAGO A CUENTA GANANCIAS (33%)",
+        },
+        debe: credito.toFixed(2),
+        haber: "—",
+      },
+      { role: "HABER", cuenta: banco, debe: "—", haber: valorFmt },
+    ];
+  } else if (tipo === "COBRO") {
+    rows = [
+      { role: "DEBE", cuenta: banco, debe: valorFmt, haber: "—" },
+      {
+        role: "HABER",
+        cuenta: contrapartida,
+        debe: "—",
+        haber: valorFmt,
+      },
+    ];
+  } else {
+    rows = [
+      {
+        role: "DEBE",
+        cuenta: contrapartida,
+        debe: valorFmt,
+        haber: "—",
+      },
+      { role: "HABER", cuenta: banco, debe: "—", haber: valorFmt },
+    ];
+  }
 
   return (
     <div className="overflow-x-auto rounded-lg border">
@@ -603,7 +654,14 @@ function AsientoPreview({
                 {r.role}
               </td>
               <td className="py-2 pl-3">
-                {r.cuenta ? (
+                {r.cuentaOverride ? (
+                  <span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {r.cuentaOverride.codigo}
+                    </span>{" "}
+                    <span>{r.cuentaOverride.nombre}</span>
+                  </span>
+                ) : r.cuenta ? (
                   <span>
                     <span className="font-mono text-xs text-muted-foreground">
                       {renderCuentaCodigo(r.cuenta)}
