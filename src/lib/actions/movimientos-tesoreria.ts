@@ -395,6 +395,295 @@ export async function crearMovimientoTesoreriaAction(
   }
 }
 
+// ============================================================
+// Pago a través de intermediário (despachante, agente, etc).
+// El usuário transfiere $X al despachante; el despachante paga las
+// facturas a los proveedores finales. La diferencia entre el monto
+// transferido y la suma de las facturas queda como anticipo (a favor
+// del usuário) o saldo pendiente con el intermediário.
+// ============================================================
+
+const pagoIntermediarioSchema = z
+  .object({
+    cuentaBancariaId: z.string().uuid(),
+    fecha: z.coerce.date(),
+    moneda: z.nativeEnum(Moneda),
+    tipoCambio: z.string().regex(FX_RE),
+    // Monto que efectivamente sale del banco hacia el intermediario.
+    // Puede ser distinto al subtotal de facturas pagadas.
+    montoTransferido: z.string().regex(MONEY_RE),
+    // Facturas que el intermediario va a pagar en nuestro nombre.
+    facturas: z
+      .array(
+        z.object({
+          cuentaContableId: z.number().int().positive(),
+          monto: z.string().regex(MONEY_RE),
+          descripcion: z
+            .string()
+            .trim()
+            .max(255)
+            .optional()
+            .transform((v) => (v && v.length > 0 ? v : null)),
+        }),
+      )
+      .min(1),
+    // Cuenta del intermediario (despachante, agente). Absorbe la
+    // diferencia entre montoTransferido y subtotal facturas.
+    beneficiarioCuentaId: z.number().int().positive(),
+    descripcion: z
+      .string()
+      .trim()
+      .max(255)
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null)),
+    comprobante: z
+      .string()
+      .trim()
+      .max(100)
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null)),
+    referenciaBanco: z
+      .string()
+      .trim()
+      .max(100)
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null)),
+  })
+  .superRefine((data, ctx) => {
+    const total = new Decimal(data.montoTransferido);
+    if (total.lte(0)) {
+      ctx.addIssue({
+        path: ["montoTransferido"],
+        code: "custom",
+        message: "Monto transferido debe ser > 0",
+      });
+    }
+    let subtotal = new Decimal(0);
+    data.facturas.forEach((f, i) => {
+      const m = new Decimal(f.monto);
+      if (m.lte(0)) {
+        ctx.addIssue({
+          path: ["facturas", i, "monto"],
+          code: "custom",
+          message: "Monto factura > 0",
+        });
+      }
+      subtotal = subtotal.plus(m);
+    });
+    if (subtotal.lte(0)) {
+      ctx.addIssue({
+        path: ["facturas"],
+        code: "custom",
+        message: "Subtotal facturas > 0",
+      });
+    }
+    if (data.moneda === Moneda.ARS && Number(data.tipoCambio) !== 1) {
+      ctx.addIssue({
+        path: ["tipoCambio"],
+        code: "custom",
+        message: "TC debe ser 1 para ARS",
+      });
+    }
+  });
+
+export type PagoIntermediarioInput = z.input<typeof pagoIntermediarioSchema>;
+
+export type PagoIntermediarioResult =
+  | {
+      ok: true;
+      movimientoId: string;
+      asientoId: string;
+      asientoNumero: number;
+      diferencia: string;
+      tipoDiferencia: "exacto" | "anticipo" | "saldo_pendiente";
+    }
+  | { ok: false; error: string };
+
+export async function pagarConIntermediarioAction(
+  raw: PagoIntermediarioInput,
+): Promise<PagoIntermediarioResult> {
+  const session = await auth();
+  if (!session) return { ok: false, error: "No autorizado." };
+
+  const parsed = pagoIntermediarioSchema.safeParse(raw);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    return { ok: false, error: first?.message ?? "Datos inválidos." };
+  }
+
+  const data = parsed.data;
+  const total = new Decimal(data.montoTransferido);
+  const subtotal = data.facturas.reduce(
+    (s, f) => s.plus(new Decimal(f.monto)),
+    new Decimal(0),
+  );
+  const diferencia = total.minus(subtotal);
+
+  // Validaciones de cuentas
+  const cuentaBancaria = await db.cuentaBancaria.findUnique({
+    where: { id: data.cuentaBancariaId },
+    select: { id: true, moneda: true, cuentaContableId: true },
+  });
+  if (!cuentaBancaria) {
+    return { ok: false, error: "Cuenta bancaria no existe." };
+  }
+  if (cuentaBancaria.moneda !== data.moneda) {
+    return {
+      ok: false,
+      error: `Moneda movimiento (${data.moneda}) ≠ moneda cuenta (${cuentaBancaria.moneda}).`,
+    };
+  }
+
+  const cuentaIds = Array.from(
+    new Set([
+      ...data.facturas.map((f) => f.cuentaContableId),
+      data.beneficiarioCuentaId,
+    ]),
+  );
+  const cuentas = await db.cuentaContable.findMany({
+    where: { id: { in: cuentaIds } },
+    select: { id: true, codigo: true, tipo: true, activa: true },
+  });
+  const cuentaById = new Map(cuentas.map((c) => [c.id, c]));
+
+  for (const id of cuentaIds) {
+    const c = cuentaById.get(id);
+    if (!c) {
+      return { ok: false, error: `Cuenta ${id} no existe.` };
+    }
+    if (!c.activa) {
+      return { ok: false, error: `Cuenta ${c.codigo} inactiva.` };
+    }
+    if (c.tipo !== CuentaTipo.ANALITICA) {
+      return { ok: false, error: `Cuenta ${c.codigo} no es ANALITICA.` };
+    }
+    if (id === cuentaBancaria.cuentaContableId) {
+      return {
+        ok: false,
+        error: "Las cuentas de contrapartida no pueden ser la cuenta del banco.",
+      };
+    }
+  }
+
+  const beneficiarioCuenta = cuentaById.get(data.beneficiarioCuentaId)!;
+
+  try {
+    const result = await db.$transaction(async (tx) => {
+      // El MovimientoTesoreria registra el monto bancario real y apunta al
+      // beneficiario como contrapartida primária (para listados/CxP).
+      const mov = await tx.movimientoTesoreria.create({
+        data: {
+          tipo: MovimientoTesoreriaTipo.PAGO,
+          cuentaBancariaId: data.cuentaBancariaId,
+          fecha: data.fecha,
+          monto: total.toFixed(2),
+          moneda: data.moneda,
+          tipoCambio: data.tipoCambio,
+          cuentaContableId: data.beneficiarioCuentaId,
+          descripcion: data.descripcion,
+          comprobante: data.comprobante,
+          referenciaBanco: data.referenciaBanco,
+        },
+        select: { id: true },
+      });
+
+      // Construir asiento manual:
+      //   DEBE [cada factura proveedor]   por su monto
+      //   DEBE [beneficiario] diferencia  si transferimos demás (anticipo)
+      //   HABER [beneficiario] |diferencia|  si transferimos de menos
+      //   HABER [banco] montoTransferido
+      const lineas: LineaInput[] = [];
+
+      for (const f of data.facturas) {
+        lineas.push({
+          cuentaId: f.cuentaContableId,
+          debe: f.monto,
+          haber: 0,
+          descripcion: f.descripcion ?? undefined,
+        });
+      }
+
+      if (diferencia.gt(0)) {
+        lineas.push({
+          cuentaId: data.beneficiarioCuentaId,
+          debe: diferencia.toFixed(2),
+          haber: 0,
+          descripcion: `Anticipo / saldo a favor`,
+        });
+      } else if (diferencia.lt(0)) {
+        lineas.push({
+          cuentaId: data.beneficiarioCuentaId,
+          debe: 0,
+          haber: diferencia.abs().toFixed(2),
+          descripcion: `Saldo pendiente con intermediario`,
+        });
+      }
+
+      lineas.push({
+        cuentaId: cuentaBancaria.cuentaContableId,
+        debe: 0,
+        haber: total.toFixed(2),
+      });
+
+      const asiento = await crearAsientoManual(
+        {
+          fecha: data.fecha,
+          descripcion:
+            data.descripcion ??
+            `Pago vía intermediario — ${data.facturas.length} factura${
+              data.facturas.length === 1 ? "" : "s"
+            }`,
+          origen: AsientoOrigen.TESORERIA,
+          moneda: data.moneda,
+          tipoCambio: data.tipoCambio,
+          lineas,
+        },
+        tx,
+      );
+      await tx.movimientoTesoreria.update({
+        where: { id: mov.id },
+        data: { asientoId: asiento.id },
+      });
+      const contabilizado = await contabilizarAsiento(asiento.id, tx);
+
+      return {
+        movimientoId: mov.id,
+        asientoId: contabilizado.id,
+        asientoNumero: contabilizado.numero,
+      };
+    });
+
+    revalidatePath("/tesoreria/cuentas");
+    revalidatePath("/tesoreria/movimientos");
+    revalidatePath("/tesoreria/cuentas-a-pagar");
+    revalidatePath("/tesoreria/saldos-proveedores");
+    revalidatePath("/contabilidad/asientos");
+
+    const tipoDiferencia: "exacto" | "anticipo" | "saldo_pendiente" =
+      diferencia.eq(0)
+        ? "exacto"
+        : diferencia.gt(0)
+          ? "anticipo"
+          : "saldo_pendiente";
+
+    return {
+      ok: true,
+      ...result,
+      diferencia: diferencia.toFixed(2),
+      tipoDiferencia,
+    };
+  } catch (err) {
+    if (err instanceof AsientoError) {
+      return { ok: false, error: mapAsientoErrorMessage(err) };
+    }
+    console.error("pagarConIntermediarioAction failed", err);
+    return {
+      ok: false,
+      error: "Error inesperado al registrar el pago.",
+    };
+  }
+}
+
 const crearTransferenciaSchema = z
   .object({
     cuentaBancariaOrigenId: z.string().uuid(),

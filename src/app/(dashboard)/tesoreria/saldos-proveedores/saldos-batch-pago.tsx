@@ -10,6 +10,7 @@ import { ArrowRight02Icon } from "@hugeicons/core-free-icons";
 import { fmtMoney } from "@/lib/format";
 import {
   crearMovimientoTesoreriaAction,
+  pagarConIntermediarioAction,
   type CuentaBancariaOption,
 } from "@/lib/actions/movimientos-tesoreria";
 import { Badge } from "@/components/ui/badge";
@@ -80,6 +81,15 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias }: Props) {
   const [comprobante, setComprobante] = useState("");
   const [referenciaBanco, setReferenciaBanco] = useState("");
   const [descripcion, setDescripcion] = useState("");
+  // Pago via intermediário (despachante que paga las facturas en nuestro
+  // nombre). Cuando activado: monto transferido puede diferir del subtotal
+  // de facturas; la diferencia queda como anticipo (a favor) o deuda con
+  // el intermediário.
+  const [conIntermediario, setConIntermediario] = useState(false);
+  const [intermediarioCuentaId, setIntermediarioCuentaId] = useState<
+    number | null
+  >(null);
+  const [montoTransferido, setMontoTransferido] = useState<string>("");
 
   const provById = new Map(proveedores.map((p) => [p.proveedorId, p]));
   const seleccionados = Array.from(selected)
@@ -102,6 +112,12 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias }: Props) {
       return next;
     });
   };
+
+  const subtotalFacturas = totalSeleccionado;
+  const montoTransferidoNum = conIntermediario
+    ? Number(montoTransferido) || 0
+    : subtotalFacturas;
+  const diferencia = montoTransferidoNum - subtotalFacturas;
 
   const onSubmit = () => {
     if (seleccionados.length === 0) {
@@ -141,6 +157,52 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias }: Props) {
         .join(", ")}${seleccionados.length > 3 ? "…" : ""})`;
 
     startTransition(async () => {
+      // Caso 1: con intermediário (despachante que paga las facturas).
+      if (conIntermediario) {
+        if (!intermediarioCuentaId) {
+          toast.error("Seleccioná el beneficiário (intermediário).");
+          return;
+        }
+        if (montoTransferidoNum <= 0) {
+          toast.error("Monto transferido debe ser > 0.");
+          return;
+        }
+        const r = await pagarConIntermediarioAction({
+          cuentaBancariaId,
+          fecha: new Date(fecha),
+          moneda: "ARS",
+          tipoCambio: "1",
+          montoTransferido: montoTransferidoNum.toFixed(2),
+          facturas: lineas,
+          beneficiarioCuentaId: intermediarioCuentaId,
+          descripcion: descripcionFinal.slice(0, 255),
+          comprobante: comprobante || undefined,
+          referenciaBanco: referenciaBanco || undefined,
+        });
+        if (!r.ok) {
+          toast.error(r.error);
+          return;
+        }
+        const mensaje =
+          r.tipoDiferencia === "anticipo"
+            ? `Pago registrado (Asiento Nº ${r.asientoNumero}). Anticipo de ARS ${r.diferencia} a favor del intermediário.`
+            : r.tipoDiferencia === "saldo_pendiente"
+              ? `Pago registrado (Asiento Nº ${r.asientoNumero}). Quedó saldo pendiente de ARS ${Math.abs(Number(r.diferencia)).toFixed(2)} con el intermediário.`
+              : `Pago registrado — Asiento Nº ${r.asientoNumero}.`;
+        toast.success(mensaje);
+        setSelected(new Set());
+        setMontosOverride({});
+        setComprobante("");
+        setReferenciaBanco("");
+        setDescripcion("");
+        setConIntermediario(false);
+        setIntermediarioCuentaId(null);
+        setMontoTransferido("");
+        router.refresh();
+        return;
+      }
+
+      // Caso 2: pago directo a los proveedores (no intermediário).
       const r = await crearMovimientoTesoreriaAction({
         tipo: "PAGO",
         cuentaBancariaId,
@@ -237,11 +299,12 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias }: Props) {
                 <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
                   {seleccionados.length} proveedor
                   {seleccionados.length === 1 ? "" : "es"} seleccionado
-                  {seleccionados.length === 1 ? "" : "s"}
+                  {seleccionados.length === 1 ? "" : "s"}{" "}
+                  (subtotal facturas)
                 </span>
                 <span className="font-mono text-lg font-semibold tabular-nums">
                   ARS{" "}
-                  {totalSeleccionado.toLocaleString("es-AR", {
+                  {subtotalFacturas.toLocaleString("es-AR", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -257,6 +320,175 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias }: Props) {
                   : `Pagar ${seleccionados.length} con un movimiento`}
               </Button>
             </div>
+
+            {/* Toggle de intermediário */}
+            <label className="flex cursor-pointer items-start gap-2 rounded-md border bg-card px-3 py-2 text-[12px]">
+              <Checkbox
+                checked={conIntermediario}
+                onCheckedChange={(v) => {
+                  const checked = !!v;
+                  setConIntermediario(checked);
+                  if (checked && !montoTransferido) {
+                    setMontoTransferido(subtotalFacturas.toFixed(2));
+                  }
+                }}
+                className="mt-0.5"
+              />
+              <div className="flex flex-col gap-0.5">
+                <span className="font-medium">
+                  Pago vía intermediário (despachante / agente)
+                </span>
+                <span className="text-muted-foreground">
+                  Activá si transferís a un despachante (ej: CYSAR) que paga
+                  las facturas a TRP/EXOLGAN/etc en tu nombre. La diferencia
+                  entre el monto transferido y el subtotal de facturas queda
+                  como anticipo (a tu favor) o saldo pendiente con el
+                  intermediário.
+                </span>
+              </div>
+            </label>
+
+            {conIntermediario && (
+              <div className="flex flex-col gap-2 rounded-md border-2 border-amber-300/70 bg-amber-50/50 px-3 py-2 dark:border-amber-700/50 dark:bg-amber-950/20">
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-[11px]">
+                      Beneficiário (intermediário) *
+                    </Label>
+                    <Select
+                      value={
+                        intermediarioCuentaId
+                          ? String(intermediarioCuentaId)
+                          : undefined
+                      }
+                      onValueChange={(v) =>
+                        setIntermediarioCuentaId(v ? Number(v) : null)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Seleccione proveedor intermediário">
+                          {(value) => {
+                            if (!value) return "Seleccione proveedor intermediário";
+                            const id = Number(value);
+                            const p = proveedores.find(
+                              (x) => x.cuentaContableId === id,
+                            );
+                            return p
+                              ? p.proveedorNombre
+                              : `Cuenta #${id}`;
+                          }}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {proveedores
+                          .filter(
+                            (p): p is typeof p & { cuentaContableId: number } =>
+                              p.cuentaContableId !== null,
+                          )
+                          .map((p) => (
+                            <SelectItem
+                              key={p.proveedorId}
+                              value={String(p.cuentaContableId)}
+                            >
+                              {p.proveedorNombre}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-[11px]">
+                      Monto efectivamente transferido (ARS) *
+                    </Label>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      className="text-right font-mono tabular-nums"
+                      value={montoTransferido}
+                      onChange={(e) => setMontoTransferido(e.target.value)}
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+
+                {/* Diferencia */}
+                <div className="grid grid-cols-3 gap-2 text-[12px]">
+                  <div className="rounded-md border bg-card px-2 py-1">
+                    <div className="text-[10px] uppercase text-muted-foreground">
+                      Subtotal facturas
+                    </div>
+                    <div className="font-mono tabular-nums">
+                      ARS{" "}
+                      {subtotalFacturas.toLocaleString("es-AR", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </div>
+                  </div>
+                  <div className="rounded-md border bg-card px-2 py-1">
+                    <div className="text-[10px] uppercase text-muted-foreground">
+                      Transferido al banco
+                    </div>
+                    <div className="font-mono tabular-nums">
+                      ARS{" "}
+                      {montoTransferidoNum.toLocaleString("es-AR", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </div>
+                  </div>
+                  <div
+                    className={
+                      "rounded-md border-2 px-2 py-1 " +
+                      (Math.abs(diferencia) < 0.01
+                        ? "border-muted-foreground/30 bg-card"
+                        : diferencia > 0
+                          ? "border-emerald-400 bg-emerald-50/60 dark:bg-emerald-950/30"
+                          : "border-rose-400 bg-rose-50/60 dark:bg-rose-950/30")
+                    }
+                  >
+                    <div className="text-[10px] uppercase text-muted-foreground">
+                      Diferencia
+                    </div>
+                    <div className="font-mono tabular-nums">
+                      {Math.abs(diferencia) < 0.01 ? (
+                        <span>—</span>
+                      ) : diferencia > 0 ? (
+                        <span className="text-emerald-700 dark:text-emerald-400">
+                          + ARS{" "}
+                          {diferencia.toLocaleString("es-AR", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      ) : (
+                        <span className="text-rose-700 dark:text-rose-400">
+                          − ARS{" "}
+                          {Math.abs(diferencia).toLocaleString("es-AR", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      )}
+                    </div>
+                    {Math.abs(diferencia) >= 0.01 && (
+                      <div
+                        className={
+                          "mt-0.5 text-[10px] " +
+                          (diferencia > 0
+                            ? "text-emerald-700 dark:text-emerald-400"
+                            : "text-rose-700 dark:text-rose-400")
+                        }
+                      >
+                        {diferencia > 0
+                          ? "Anticipo / saldo a favor"
+                          : "Saldo pendiente con intermediário"}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
               <div className="flex flex-col gap-1">
@@ -344,6 +576,36 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias }: Props) {
                     </li>
                   );
                 })}
+                {conIntermediario &&
+                  intermediarioCuentaId &&
+                  Math.abs(diferencia) >= 0.01 && (
+                    <li
+                      className={
+                        diferencia > 0
+                          ? "text-emerald-700 dark:text-emerald-400"
+                          : "text-rose-700 dark:text-rose-400"
+                      }
+                    >
+                      {diferencia > 0 ? "DEBE" : "HABER"}{" "}
+                      {(() => {
+                        const p = proveedores.find(
+                          (x) => x.cuentaContableId === intermediarioCuentaId,
+                        );
+                        return p?.proveedorNombre ?? `Cuenta #${intermediarioCuentaId}`;
+                      })()}{" "}
+                      —{" "}
+                      <span className="tabular-nums">
+                        ARS{" "}
+                        {Math.abs(diferencia).toLocaleString("es-AR", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>{" "}
+                      <span className="text-muted-foreground">
+                        ({diferencia > 0 ? "anticipo" : "saldo pendiente"})
+                      </span>
+                    </li>
+                  )}
                 <li className="border-t pt-0.5">
                   HABER{" "}
                   {(() => {
@@ -355,7 +617,10 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias }: Props) {
                   —{" "}
                   <span className="tabular-nums">
                     ARS{" "}
-                    {totalSeleccionado.toLocaleString("es-AR", {
+                    {(conIntermediario
+                      ? montoTransferidoNum
+                      : subtotalFacturas
+                    ).toLocaleString("es-AR", {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
