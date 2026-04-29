@@ -734,6 +734,73 @@ export async function getVepEmbarques(): Promise<VepEmbarque[]> {
   return result;
 }
 
+/** Refuerzos / VEPs complementarios pendientes — saldo HABER de
+ *  la cuenta 2.1.5.99 SALDO PENDIENTE ADUANA agrupado por embarque
+ *  (extraído de la descripción de la línea o del asiento). */
+export type RefuerzoVepPendiente = {
+  embarqueCodigo: string;
+  saldoPendiente: string;
+  fechaOrigen: string; // ISO — fecha del primer asiento que generó el refuerzo
+};
+
+const RE_EMBARQUE_CODIGO = /AR-\d{6}-[A-Z0-9]+/;
+
+export async function getRefuerzosVepPendientes(): Promise<
+  RefuerzoVepPendiente[]
+> {
+  const cuenta = await db.cuentaContable.findFirst({
+    where: { codigo: "2.1.5.99" },
+    select: { id: true },
+  });
+  if (!cuenta) return [];
+
+  const lineas = await db.lineaAsiento.findMany({
+    where: {
+      cuentaId: cuenta.id,
+      asiento: { estado: AsientoEstado.CONTABILIZADO },
+    },
+    select: {
+      debe: true,
+      haber: true,
+      descripcion: true,
+      asiento: { select: { fecha: true, descripcion: true } },
+    },
+  });
+
+  // Agrupar por código de embarque extraído de la descripción.
+  // Sólo consideramos líneas cuyo texto contenga un código AR-… ; las
+  // que no — caso atípico — quedan agrupadas como "_genérico" y no se
+  // muestran (no podemos asociarlas a un embarque para pagarlas).
+  type Bucket = { saldo: ReturnType<typeof toDecimal>; fecha: Date };
+  const porEmbarque = new Map<string, Bucket>();
+
+  for (const l of lineas) {
+    const text = `${l.descripcion ?? ""} ${l.asiento.descripcion ?? ""}`;
+    const m = text.match(RE_EMBARQUE_CODIGO);
+    if (!m) continue;
+    const codigo = m[0];
+    const haber = toDecimal(l.haber);
+    const debe = toDecimal(l.debe);
+    const delta = haber.minus(debe); // pasivo: HABER suma saldo, DEBE lo cancela
+    const existing = porEmbarque.get(codigo);
+    if (existing) {
+      existing.saldo = existing.saldo.plus(delta);
+      if (l.asiento.fecha < existing.fecha) existing.fecha = l.asiento.fecha;
+    } else {
+      porEmbarque.set(codigo, { saldo: delta, fecha: l.asiento.fecha });
+    }
+  }
+
+  return Array.from(porEmbarque.entries())
+    .filter(([, v]) => v.saldo.gt(0.005))
+    .map(([codigo, v]) => ({
+      embarqueCodigo: codigo,
+      saldoPendiente: v.saldo.toFixed(2),
+      fechaOrigen: v.fecha.toISOString(),
+    }))
+    .sort((a, b) => a.embarqueCodigo.localeCompare(b.embarqueCodigo));
+}
+
 /** Saldo deudor de la cuenta CRÉDITO A FAVOR ADUANA (1.1.4.13).
  *  Retorna el monto disponible para aplicar contra próximos VEPs.
  *  Devuelve "0.00" si la cuenta no existe o el saldo es <= 0. */

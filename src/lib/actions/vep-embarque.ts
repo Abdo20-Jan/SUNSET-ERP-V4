@@ -13,6 +13,7 @@ import {
 import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { VEP_ADUANA_CODIGOS } from "@/lib/services/cuenta-registry";
 import {
+  getRefuerzosVepPendientes,
   getSaldoCreditoAduana,
   getVepEmbarques,
 } from "@/lib/services/cuentas-a-pagar";
@@ -302,6 +303,241 @@ export async function pagarVepEmbarqueAction(
     if (err instanceof AsientoError) return { ok: false, error: err.message };
     const msg = err instanceof Error ? err.message : "Error desconocido";
     console.error("pagarVepEmbarqueAction failed", err);
+    return { ok: false, error: msg };
+  }
+}
+
+// ============================================================
+// Pago de VEP refuerzo / complementario
+// (cancela saldo HABER en 2.1.5.99 SALDO PENDIENTE ADUANA)
+// ============================================================
+
+const refuerzoSchema = z.object({
+  embarqueCodigo: z.string().min(3),
+  cuentaBancariaId: z.string().uuid().optional(),
+  fecha: z.coerce.date(),
+  comprobante: z.string().trim().max(100).optional(),
+  referenciaBanco: z.string().trim().max(100).optional(),
+  /** Monto efectivamente transferido al banco. Si vacío y crédito
+   *  aplicado cubre el saldo, se asume 0. */
+  montoBanco: z.string().regex(MONEY_RE, "Monto inválido.").optional(),
+  /** Crédito a favor Aduana (1.1.4.13) aplicado al pago. Si vacío o "0",
+   *  no se usa. */
+  creditoAplicado: z
+    .string()
+    .regex(MONEY_RE, "Crédito aplicado inválido.")
+    .optional(),
+});
+
+export type PagarRefuerzoVepInput = z.input<typeof refuerzoSchema>;
+
+export type PagarRefuerzoVepResult =
+  | {
+      ok: true;
+      asientoId: string;
+      asientoNumero: number;
+      saldoCancelado: string;
+      montoBanco: string;
+      creditoAplicado: string;
+      saldoRestante: string;
+    }
+  | { ok: false; error: string };
+
+export async function pagarRefuerzoVepAction(
+  raw: PagarRefuerzoVepInput,
+): Promise<PagarRefuerzoVepResult> {
+  const session = await auth();
+  if (!session) return { ok: false, error: "No autorizado." };
+
+  const parsed = refuerzoSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Datos inválidos.",
+    };
+  }
+
+  const {
+    embarqueCodigo,
+    cuentaBancariaId,
+    fecha,
+    comprobante,
+    referenciaBanco,
+    montoBanco: montoBancoInput,
+    creditoAplicado: creditoAplicadoInput,
+  } = parsed.data;
+
+  // Cuenta bancaria (opcional si pago 100% con crédito)
+  const cuentaBancaria = cuentaBancariaId
+    ? await db.cuentaBancaria.findUnique({
+        where: { id: cuentaBancariaId },
+        select: {
+          id: true,
+          banco: true,
+          moneda: true,
+          cuentaContableId: true,
+        },
+      })
+    : null;
+  if (cuentaBancariaId && !cuentaBancaria) {
+    return { ok: false, error: "Cuenta bancaria no existe." };
+  }
+  if (cuentaBancaria && cuentaBancaria.moneda !== Moneda.ARS) {
+    return {
+      ok: false,
+      error: "El refuerzo de VEP se paga en ARS.",
+    };
+  }
+
+  // Buscar saldo pendiente del refuerzo para este embarque
+  const refuerzos = await getRefuerzosVepPendientes();
+  const r = refuerzos.find((x) => x.embarqueCodigo === embarqueCodigo);
+  if (!r) {
+    return {
+      ok: false,
+      error: `No hay saldo pendiente de refuerzo para el embarque ${embarqueCodigo}.`,
+    };
+  }
+  const saldoPendienteNum = Number(r.saldoPendiente);
+
+  const creditoAplicadoNum =
+    creditoAplicadoInput && Number(creditoAplicadoInput) > 0
+      ? Number(creditoAplicadoInput)
+      : 0;
+  const montoBancoNum =
+    montoBancoInput !== undefined && Number(montoBancoInput) >= 0
+      ? Number(montoBancoInput)
+      : Math.max(0, saldoPendienteNum - creditoAplicadoNum);
+
+  // Validar saldo crédito disponible
+  if (creditoAplicadoNum > 0) {
+    const saldoCredito = await getSaldoCreditoAduana();
+    const disponible = Number(saldoCredito.saldo);
+    if (creditoAplicadoNum > disponible + 0.005) {
+      return {
+        ok: false,
+        error: `El crédito aplicado (ARS ${creditoAplicadoNum.toFixed(2)}) excede el saldo disponible en 1.1.4.13 (ARS ${disponible.toFixed(2)}).`,
+      };
+    }
+  }
+
+  const totalPagoNum = creditoAplicadoNum + montoBancoNum;
+  if (totalPagoNum <= 0) {
+    return {
+      ok: false,
+      error: "El pago debe ser mayor a cero.",
+    };
+  }
+  if (totalPagoNum > saldoPendienteNum + 0.005) {
+    return {
+      ok: false,
+      error: `El total a pagar (ARS ${totalPagoNum.toFixed(2)}) excede el saldo pendiente del refuerzo (ARS ${saldoPendienteNum.toFixed(2)}).`,
+    };
+  }
+  if (montoBancoNum > 0 && !cuentaBancaria) {
+    return {
+      ok: false,
+      error: "Seleccione una cuenta bancaria para el monto a transferir.",
+    };
+  }
+
+  try {
+    const result = await db.$transaction(async (tx) => {
+      const lineas: Array<{
+        cuentaId: number;
+        debe: string;
+        haber: string;
+        descripcion?: string;
+      }> = [];
+
+      const cuentaSaldoPendienteId = await getOrCreateCuenta(
+        tx,
+        VEP_ADUANA_CODIGOS.SALDO_PENDIENTE_ADUANA,
+      );
+      lineas.push({
+        cuentaId: cuentaSaldoPendienteId,
+        debe: totalPagoNum.toFixed(2),
+        haber: "0",
+        descripcion: `Pago refuerzo VEP embarque ${embarqueCodigo}`,
+      });
+
+      if (creditoAplicadoNum > 0) {
+        const cuentaCreditoId = await getOrCreateCuenta(
+          tx,
+          VEP_ADUANA_CODIGOS.CREDITO_ADUANA,
+        );
+        lineas.push({
+          cuentaId: cuentaCreditoId,
+          debe: "0",
+          haber: creditoAplicadoNum.toFixed(2),
+          descripcion: `Aplicación crédito a favor Aduana — refuerzo ${embarqueCodigo}`,
+        });
+      }
+
+      if (montoBancoNum > 0 && cuentaBancaria) {
+        lineas.push({
+          cuentaId: cuentaBancaria.cuentaContableId,
+          debe: "0",
+          haber: montoBancoNum.toFixed(2),
+          descripcion: `Pago refuerzo VEP ${embarqueCodigo} — ${cuentaBancaria.banco}`,
+        });
+      }
+
+      const descripcionAsiento = `Pago refuerzo VEP embarque ${embarqueCodigo}${comprobante ? ` (${comprobante})` : ""}`;
+
+      const asiento = await crearAsientoManual(
+        {
+          fecha,
+          descripcion: descripcionAsiento,
+          origen: AsientoOrigen.TESORERIA,
+          moneda: Moneda.ARS,
+          tipoCambio: "1",
+          lineas,
+        },
+        tx,
+      );
+
+      if (montoBancoNum > 0 && cuentaBancaria) {
+        await tx.movimientoTesoreria.create({
+          data: {
+            tipo: MovimientoTesoreriaTipo.PAGO,
+            cuentaBancariaId: cuentaBancaria.id,
+            fecha,
+            monto: montoBancoNum.toFixed(2),
+            moneda: Moneda.ARS,
+            tipoCambio: "1",
+            cuentaContableId: cuentaSaldoPendienteId,
+            descripcion: descripcionAsiento,
+            comprobante,
+            referenciaBanco,
+            asientoId: asiento.id,
+          },
+        });
+      }
+
+      await contabilizarAsiento(asiento.id, tx);
+
+      return {
+        asientoId: asiento.id,
+        asientoNumero: asiento.numero,
+        saldoCancelado: totalPagoNum.toFixed(2),
+        montoBanco: montoBancoNum.toFixed(2),
+        creditoAplicado: creditoAplicadoNum.toFixed(2),
+        saldoRestante: (saldoPendienteNum - totalPagoNum).toFixed(2),
+      };
+    });
+
+    revalidatePath("/tesoreria/cuentas-a-pagar");
+    revalidatePath("/tesoreria/cuentas");
+    revalidatePath("/tesoreria/movimientos");
+    revalidatePath("/tesoreria/extracto");
+    revalidatePath("/contabilidad/asientos");
+
+    return { ok: true, ...result };
+  } catch (err) {
+    if (err instanceof AsientoError) return { ok: false, error: err.message };
+    const msg = err instanceof Error ? err.message : "Error desconocido";
+    console.error("pagarRefuerzoVepAction failed", err);
     return { ok: false, error: msg };
   }
 }

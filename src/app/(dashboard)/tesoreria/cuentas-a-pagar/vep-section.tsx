@@ -6,7 +6,10 @@ import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 
-import { pagarVepEmbarqueAction } from "@/lib/actions/vep-embarque";
+import {
+  pagarRefuerzoVepAction,
+  pagarVepEmbarqueAction,
+} from "@/lib/actions/vep-embarque";
 import { fmtMoney } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,7 +41,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import type { VepEmbarque } from "@/lib/services/cuentas-a-pagar";
+import type {
+  RefuerzoVepPendiente,
+  VepEmbarque,
+} from "@/lib/services/cuentas-a-pagar";
 
 export type CuentaBancariaArsOption = {
   id: string;
@@ -48,19 +54,23 @@ export type CuentaBancariaArsOption = {
 
 export function VepSection({
   veps,
+  refuerzos,
   cuentasBancarias,
   saldoCreditoAduana,
 }: {
   veps: VepEmbarque[];
+  refuerzos: RefuerzoVepPendiente[];
   cuentasBancarias: CuentaBancariaArsOption[];
   saldoCreditoAduana: string;
 }) {
   const [pagar, setPagar] = useState<VepEmbarque | null>(null);
+  const [pagarRefuerzo, setPagarRefuerzo] =
+    useState<RefuerzoVepPendiente | null>(null);
 
   const pendientes = veps.filter((v) => !v.pagado);
   const pagados = veps.filter((v) => v.pagado);
 
-  if (veps.length === 0) return null;
+  if (veps.length === 0 && refuerzos.length === 0) return null;
 
   const saldoCreditoNum = Number(saldoCreditoAduana);
   const tieneCredito = saldoCreditoNum > 0.005;
@@ -183,11 +193,68 @@ export function VepSection({
         </CardContent>
       </Card>
 
+      {refuerzos.length > 0 && (
+        <Card>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex flex-col gap-0.5">
+              <h2 className="text-sm font-semibold">
+                VEP complementarios / refuerzos pendientes
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Saldo HABER de la cuenta 2.1.5.99 — diferencias generadas
+                cuando el VEP original se pagó por menos que la liquidación
+                final del despacho. Cancelá con un VEP de refuerzo. Podés
+                aplicar crédito a favor (1.1.4.13) si lo tenés.
+              </p>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-40">Embarque</TableHead>
+                  <TableHead>Origen</TableHead>
+                  <TableHead className="text-right">Saldo (ARS)</TableHead>
+                  <TableHead className="w-32 text-right"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {refuerzos.map((r) => (
+                  <TableRow key={r.embarqueCodigo}>
+                    <TableCell className="font-mono text-xs">
+                      {r.embarqueCodigo}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      desde {r.fechaOrigen.slice(0, 10)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">
+                      {fmtMoney(r.saldoPendiente)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        onClick={() => setPagarRefuerzo(r)}
+                      >
+                        Pagar refuerzo
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
       <PagarVepDialog
         vep={pagar}
         cuentasBancarias={cuentasBancarias}
         saldoCreditoAduana={saldoCreditoAduana}
         onClose={() => setPagar(null)}
+      />
+      <PagarRefuerzoVepDialog
+        refuerzo={pagarRefuerzo}
+        cuentasBancarias={cuentasBancarias}
+        saldoCreditoAduana={saldoCreditoAduana}
+        onClose={() => setPagarRefuerzo(null)}
       />
     </>
   );
@@ -466,6 +533,270 @@ function PagarVepDialog({
               </Label>
               <Input
                 id="referenciaBanco"
+                value={referenciaBanco}
+                onChange={(e) => setReferenciaBanco(e.target.value)}
+                placeholder="Cód. Op. del banco"
+                maxLength={100}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <DialogClose
+              render={
+                <Button variant="ghost" type="button">
+                  Cancelar
+                </Button>
+              }
+            />
+            <Button type="submit" disabled={isPending}>
+              <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} />
+              {isPending ? "Procesando…" : "Confirmar y contabilizar"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PagarRefuerzoVepDialog({
+  refuerzo,
+  cuentasBancarias,
+  saldoCreditoAduana,
+  onClose,
+}: {
+  refuerzo: RefuerzoVepPendiente | null;
+  cuentasBancarias: CuentaBancariaArsOption[];
+  saldoCreditoAduana: string;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [cuentaBancariaId, setCuentaBancariaId] = useState<string>("");
+  const [fecha, setFecha] = useState<string>(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [comprobante, setComprobante] = useState<string>("");
+  const [referenciaBanco, setReferenciaBanco] = useState<string>("");
+  const [montoBanco, setMontoBanco] = useState<string>(
+    refuerzo?.saldoPendiente ?? "",
+  );
+  const [creditoAplicado, setCreditoAplicado] = useState<string>("0");
+
+  const saldoCreditoNum = Number(saldoCreditoAduana);
+
+  useEffect(() => {
+    if (refuerzo) {
+      setMontoBanco(refuerzo.saldoPendiente);
+      setCreditoAplicado("0");
+    }
+  }, [refuerzo]);
+
+  if (!refuerzo) return null;
+
+  const saldoNum = Number(refuerzo.saldoPendiente);
+  const bancoNum = Number(montoBanco || "0");
+  const creditoNum = Number(creditoAplicado || "0");
+  const totalPagoNum =
+    (Number.isFinite(bancoNum) ? bancoNum : 0) +
+    (Number.isFinite(creditoNum) ? creditoNum : 0);
+  const restante = saldoNum - totalPagoNum;
+  const creditoExcedido = creditoNum > saldoCreditoNum + 0.005;
+  const totalExcedido = totalPagoNum > saldoNum + 0.005;
+
+  function aplicarCreditoCompleto() {
+    if (!refuerzo) return;
+    const usar = Math.min(saldoCreditoNum, saldoNum);
+    setCreditoAplicado(usar.toFixed(2));
+    setMontoBanco(Math.max(0, saldoNum - usar).toFixed(2));
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!refuerzo) return;
+    if (creditoExcedido) {
+      toast.error(
+        `Crédito aplicado excede el saldo disponible (ARS ${fmtMoney(saldoCreditoAduana)}).`,
+      );
+      return;
+    }
+    if (totalExcedido) {
+      toast.error("El total a pagar excede el saldo del refuerzo.");
+      return;
+    }
+    if (creditoNum < saldoNum && !cuentaBancariaId) {
+      toast.error("Seleccioná la cuenta bancaria desde la que se paga.");
+      return;
+    }
+    if (totalPagoNum <= 0) {
+      toast.error("El pago debe ser mayor a cero.");
+      return;
+    }
+
+    startTransition(async () => {
+      const result = await pagarRefuerzoVepAction({
+        embarqueCodigo: refuerzo.embarqueCodigo,
+        cuentaBancariaId: cuentaBancariaId || undefined,
+        fecha: new Date(fecha + "T12:00:00Z"),
+        comprobante: comprobante.trim() || undefined,
+        referenciaBanco: referenciaBanco.trim() || undefined,
+        montoBanco: bancoNum.toFixed(2),
+        creditoAplicado: creditoNum > 0 ? creditoNum.toFixed(2) : undefined,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      const partes: string[] = [];
+      if (Number(result.creditoAplicado) > 0) {
+        partes.push(`crédito aplicado ARS ${fmtMoney(result.creditoAplicado)}`);
+      }
+      if (Number(result.saldoRestante) > 0.005) {
+        partes.push(`saldo restante ARS ${fmtMoney(result.saldoRestante)}`);
+      }
+      const msgExtra = partes.length > 0 ? ` · ${partes.join(" · ")}` : "";
+      toast.success(
+        `Refuerzo pagado — asiento #${result.asientoNumero}${msgExtra}`,
+      );
+      onClose();
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog open={Boolean(refuerzo)} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>
+            Pagar refuerzo VEP — {refuerzo.embarqueCodigo}
+          </DialogTitle>
+          <DialogDescription>
+            Cancela parte o el total del saldo pendiente con Aduana
+            (cuenta 2.1.5.99). Saldo:{" "}
+            <strong>ARS {fmtMoney(refuerzo.saldoPendiente)}</strong>.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          {saldoCreditoNum > 0.005 && (
+            <div className="flex flex-col gap-2 rounded-md border border-emerald-300 bg-emerald-50/50 p-3 dark:border-emerald-700 dark:bg-emerald-950/20">
+              <div className="flex items-center justify-between">
+                <Label
+                  htmlFor="refuerzo-credito"
+                  className="text-emerald-900 dark:text-emerald-200"
+                >
+                  Aplicar crédito a favor (1.1.4.13)
+                </Label>
+                <button
+                  type="button"
+                  className="text-xs underline underline-offset-2 text-emerald-800 dark:text-emerald-300"
+                  onClick={aplicarCreditoCompleto}
+                >
+                  Usar máximo (ARS {fmtMoney(Math.min(saldoCreditoNum, saldoNum).toFixed(2))})
+                </button>
+              </div>
+              <Input
+                id="refuerzo-credito"
+                value={creditoAplicado}
+                onChange={(e) => setCreditoAplicado(e.target.value)}
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <p className="text-[11px] text-emerald-900/80 dark:text-emerald-200/80">
+                Saldo disponible:{" "}
+                <strong>ARS {fmtMoney(saldoCreditoAduana)}</strong>.
+              </p>
+              {creditoExcedido && (
+                <p className="text-[11px] font-semibold text-red-700 dark:text-red-400">
+                  Excede el saldo disponible.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="refuerzo-banco">Monto al banco</Label>
+            <Input
+              id="refuerzo-banco"
+              value={montoBanco}
+              onChange={(e) => setMontoBanco(e.target.value)}
+              inputMode="decimal"
+              placeholder={refuerzo.saldoPendiente}
+            />
+            <div className="flex justify-between text-[11px] text-muted-foreground">
+              <span>
+                Total pago:{" "}
+                <strong className="font-mono">
+                  ARS {fmtMoney(totalPagoNum.toFixed(2))}
+                </strong>
+              </span>
+              <span>
+                {restante > 0.005
+                  ? `Restante: ARS ${fmtMoney(restante.toFixed(2))}`
+                  : restante < -0.005
+                    ? `Excede en: ARS ${fmtMoney(Math.abs(restante).toFixed(2))}`
+                    : "Cubre 100% del saldo"}
+              </span>
+            </div>
+            {totalExcedido && (
+              <p className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900 dark:border-red-700 dark:bg-red-950/30 dark:text-red-200">
+                El total a pagar excede el saldo pendiente del refuerzo.
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label>Cuenta bancaria de débito (opcional si 100% crédito)</Label>
+            <Select
+              value={cuentaBancariaId}
+              onValueChange={(v) => setCuentaBancariaId(v ?? "")}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar...">
+                  {(value) => {
+                    if (!value) return "Seleccionar...";
+                    const c = cuentasBancarias.find((c) => c.id === value);
+                    return c
+                      ? `${c.banco}${c.numero ? ` · ${c.numero}` : ""}`
+                      : "Seleccionar...";
+                  }}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {cuentasBancarias.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {`${c.banco}${c.numero ? ` · ${c.numero}` : ""}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="refuerzo-fecha">Fecha</Label>
+              <Input
+                id="refuerzo-fecha"
+                type="date"
+                value={fecha}
+                onChange={(e) => setFecha(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="refuerzo-comprobante">Nº VEP (opcional)</Label>
+              <Input
+                id="refuerzo-comprobante"
+                value={comprobante}
+                onChange={(e) => setComprobante(e.target.value)}
+                placeholder="ej: 001556692219"
+                maxLength={100}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="refuerzo-ref">Referencia banco (opcional)</Label>
+              <Input
+                id="refuerzo-ref"
                 value={referenciaBanco}
                 onChange={(e) => setReferenciaBanco(e.target.value)}
                 placeholder="Cód. Op. del banco"

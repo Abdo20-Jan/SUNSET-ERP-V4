@@ -13,6 +13,7 @@ import { fmtMoney } from "../../reportes/_components/money";
 import {
   getCuentasAPagar,
   getCuentasAPagarPorEmbarque,
+  getRefuerzosVepPendientes,
   getSaldoCreditoAduana,
   getSaldosPorProveedorConAging,
   getVepEmbarques,
@@ -32,6 +33,7 @@ export default async function CuentasAPagarPage() {
     porEmbarque,
     saldosProveedores,
     vepEmbarques,
+    refuerzos,
     cuentasBancariasArs,
     cuentasBancariasMov,
     saldoCreditoAduana,
@@ -40,10 +42,17 @@ export default async function CuentasAPagarPage() {
     getCuentasAPagarPorEmbarque(),
     getSaldosPorProveedorConAging(),
     getVepEmbarques(),
+    getRefuerzosVepPendientes(),
     listarCuentasBancariasParaVep(),
     listarCuentasBancariasParaMovimiento(),
     getSaldoCreditoAduana(),
   ]);
+
+  // Filtrar 2.1.5.99 de la sección Aduana genérica — el saldo pendiente
+  // de refuerzo se gestiona en la sección VEP con flujo dedicado.
+  const aduanaSinRefuerzo = data.aduana.filter(
+    (r) => r.cuentaCodigo !== "2.1.5.99",
+  );
 
   return (
     <div className="flex flex-col gap-3">
@@ -81,6 +90,7 @@ export default async function CuentasAPagarPage() {
 
       <VepSection
         veps={vepEmbarques}
+        refuerzos={refuerzos}
         cuentasBancarias={cuentasBancariasArs}
         saldoCreditoAduana={saldoCreditoAduana.saldo}
       />
@@ -88,7 +98,7 @@ export default async function CuentasAPagarPage() {
       <Section
         title="Aduana / Nacionalización"
         subtitle="Tributos por pagar a Aduana y AFIP por embarques importados (cuenta 2.1.5.x). El pago se hace via VEP arriba — esta tabla muestra el saldo agregado por cuenta."
-        rows={data.aduana}
+        rows={aduanaSinRefuerzo}
       />
 
       <Section
