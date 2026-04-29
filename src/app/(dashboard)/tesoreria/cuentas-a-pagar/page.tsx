@@ -13,6 +13,7 @@ import { fmtMoney } from "../../reportes/_components/money";
 import {
   getCuentasAPagar,
   getCuentasAPagarPorEmbarque,
+  getSaldosPorProveedorConAging,
   getVepEmbarques,
   type CxPRow,
 } from "@/lib/services/cuentas-a-pagar";
@@ -21,18 +22,26 @@ import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-
 
 import { VepSection } from "./vep-section";
 import { EmbarqueBatchPago } from "./embarque-batch-pago";
+import { SaldosBatchPago } from "../saldos-proveedores/saldos-batch-pago";
 
 export const dynamic = "force-dynamic";
 
 export default async function CuentasAPagarPage() {
-  const [data, porEmbarque, vepEmbarques, cuentasBancariasArs, cuentasBancariasMov] =
-    await Promise.all([
-      getCuentasAPagar(),
-      getCuentasAPagarPorEmbarque(),
-      getVepEmbarques(),
-      listarCuentasBancariasParaVep(),
-      listarCuentasBancariasParaMovimiento(),
-    ]);
+  const [
+    data,
+    porEmbarque,
+    saldosProveedores,
+    vepEmbarques,
+    cuentasBancariasArs,
+    cuentasBancariasMov,
+  ] = await Promise.all([
+    getCuentasAPagar(),
+    getCuentasAPagarPorEmbarque(),
+    getSaldosPorProveedorConAging(),
+    getVepEmbarques(),
+    listarCuentasBancariasParaVep(),
+    listarCuentasBancariasParaMovimiento(),
+  ]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -62,12 +71,30 @@ export default async function CuentasAPagarPage() {
         </CardContent>
       </Card>
 
-      <Section
-        title="Proveedores comerciales"
-        subtitle="Deuda con proveedores de mercadería y servicios logísticos (cuenta 2.1.1.x)."
-        rows={data.proveedoresComerciales}
-        showProveedores
-      />
+      {/* Multi-pago por proveedor — checkboxes para pagar N proveedores
+          en un único cheque/transferencia (1 asiento, N líneas DEBE) */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold">
+            Saldos por proveedor — Multi-pago
+          </h2>
+          <Link
+            href="/tesoreria/saldos-proveedores"
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          >
+            Ver con aging detallado →
+          </Link>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Marcá las casillas de los proveedores a pagar — podés pagar varios
+          con 1 sólo movimiento bancario (cheque o transferencia). Editá el
+          monto inline si pagás parcial.
+        </p>
+        <SaldosBatchPago
+          proveedores={saldosProveedores}
+          cuentasBancarias={cuentasBancariasMov}
+        />
+      </div>
 
       <VepSection veps={vepEmbarques} cuentasBancarias={cuentasBancariasArs} />
 
