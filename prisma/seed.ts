@@ -281,6 +281,10 @@ const ANALITICAS_BASE: AnaliticaBaseSeed[] = [
   // 3.2.1.03 al declarar dividendos antes del pago efectivo).
   { codigo: "2.1.9.01", nombre: "DIVIDENDOS A PAGAR",                  categoria: CuentaCategoria.PASIVO },
 
+  // Inversiones FCI por banco. 1.1.6.01 queda como genérica (legacy).
+  { codigo: "1.1.6.02", nombre: "INVERSIONES — SANTANDER SUPERFONDOS PESOS", categoria: CuentaCategoria.ACTIVO },
+  { codigo: "1.1.6.03", nombre: "INVERSIONES — GALICIA FONDOS FIMA PESOS",   categoria: CuentaCategoria.ACTIVO },
+
   // Ingresos no operativos
   { codigo: "4.2.1.01", nombre: "DESCUENTOS OBTENIDOS",                categoria: CuentaCategoria.INGRESO },
   { codigo: "4.2.1.02", nombre: "INTERESES GANADOS",                   categoria: CuentaCategoria.INGRESO },
