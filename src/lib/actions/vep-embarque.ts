@@ -16,6 +16,7 @@ import { getVepEmbarques } from "@/lib/services/cuentas-a-pagar";
 import {
   AsientoOrigen,
   Moneda,
+  MovimientoTesoreriaTipo,
 } from "@/generated/prisma/client";
 
 const MONEY_RE = /^\d+(\.\d{1,2})?$/;
@@ -25,6 +26,7 @@ const inputSchema = z.object({
   cuentaBancariaId: z.string().uuid(),
   fecha: z.coerce.date(),
   comprobante: z.string().trim().max(100).optional(),
+  referenciaBanco: z.string().trim().max(100).optional(),
   /** Monto efectivamente pagado al banco — puede diferir del total VEP
    *  por diferencia cambiaria entre cierre y despacho oficializado.
    *  Si vacío, se asume igual al total VEP. */
@@ -59,8 +61,14 @@ export async function pagarVepEmbarqueAction(
     };
   }
 
-  const { embarqueId, cuentaBancariaId, fecha, comprobante, montoPagado: montoPagadoInput } =
-    parsed.data;
+  const {
+    embarqueId,
+    cuentaBancariaId,
+    fecha,
+    comprobante,
+    referenciaBanco,
+    montoPagado: montoPagadoInput,
+  } = parsed.data;
 
   const cuentaBancaria = await db.cuentaBancaria.findUnique({
     where: { id: cuentaBancariaId },
@@ -167,6 +175,31 @@ export async function pagarVepEmbarqueAction(
         tx,
       );
 
+      // Crear MovimientoTesoreria para que el pago aparezca en
+      // /tesoreria/movimientos y /tesoreria/extracto, con referencia
+      // bancaria + comprobante (nº VEP) preservados.
+      // La cuenta contable primaria del movimiento es la primera cuenta
+      // tributaria del VEP (referencial — el desglose completo está en
+      // el asiento).
+      const cuentaTributariaPrimaria = vep.cuentas[0]?.cuentaId;
+      if (cuentaTributariaPrimaria) {
+        await tx.movimientoTesoreria.create({
+          data: {
+            tipo: MovimientoTesoreriaTipo.PAGO,
+            cuentaBancariaId,
+            fecha,
+            monto: montoPagadoNum.toFixed(2),
+            moneda: Moneda.ARS,
+            tipoCambio: "1",
+            cuentaContableId: cuentaTributariaPrimaria,
+            descripcion: descripcionAsiento,
+            comprobante,
+            referenciaBanco,
+            asientoId: asiento.id,
+          },
+        });
+      }
+
       await contabilizarAsiento(asiento.id, tx);
 
       return {
@@ -181,6 +214,8 @@ export async function pagarVepEmbarqueAction(
 
     revalidatePath("/tesoreria/cuentas-a-pagar");
     revalidatePath("/tesoreria/cuentas");
+    revalidatePath("/tesoreria/movimientos");
+    revalidatePath("/tesoreria/extracto");
     revalidatePath("/contabilidad/asientos");
 
     return { ok: true, ...result };

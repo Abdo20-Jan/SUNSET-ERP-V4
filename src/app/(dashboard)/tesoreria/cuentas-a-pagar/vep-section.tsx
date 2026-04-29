@@ -191,6 +191,7 @@ function PagarVepDialog({
     new Date().toISOString().slice(0, 10),
   );
   const [comprobante, setComprobante] = useState<string>("");
+  const [referenciaBanco, setReferenciaBanco] = useState<string>("");
   const [montoPagado, setMontoPagado] = useState<string>(vep?.totalArs ?? "");
 
   // Reset montoPagado when vep changes
@@ -228,6 +229,7 @@ function PagarVepDialog({
         cuentaBancariaId,
         fecha: new Date(fecha + "T12:00:00Z"),
         comprobante: comprobante.trim() || undefined,
+        referenciaBanco: referenciaBanco.trim() || undefined,
         montoPagado: pagadoNum.toFixed(2),
       });
       if (!result.ok) {
@@ -342,7 +344,7 @@ function PagarVepDialog({
             )}
           </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div className="flex flex-col gap-2">
               <Label htmlFor="fecha">Fecha</Label>
               <Input
@@ -359,6 +361,18 @@ function PagarVepDialog({
                 value={comprobante}
                 onChange={(e) => setComprobante(e.target.value)}
                 placeholder="ej: 001556692219"
+                maxLength={100}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="referenciaBanco">
+                Referencia banco (opcional)
+              </Label>
+              <Input
+                id="referenciaBanco"
+                value={referenciaBanco}
+                onChange={(e) => setReferenciaBanco(e.target.value)}
+                placeholder="Cód. Op. del banco"
                 maxLength={100}
               />
             </div>
