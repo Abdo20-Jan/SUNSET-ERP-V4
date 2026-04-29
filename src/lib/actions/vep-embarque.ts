@@ -12,7 +12,10 @@ import {
 } from "@/lib/services/asiento-automatico";
 import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { VEP_ADUANA_CODIGOS } from "@/lib/services/cuenta-registry";
-import { getVepEmbarques } from "@/lib/services/cuentas-a-pagar";
+import {
+  getSaldoCreditoAduana,
+  getVepEmbarques,
+} from "@/lib/services/cuentas-a-pagar";
 import {
   AsientoOrigen,
   Moneda,
@@ -23,7 +26,10 @@ const MONEY_RE = /^\d+(\.\d{1,2})?$/;
 
 const inputSchema = z.object({
   embarqueId: z.string().uuid(),
-  cuentaBancariaId: z.string().uuid(),
+  /** Cuenta bancaria de débito. Opcional sólo cuando el VEP se paga
+   *  100% con crédito a favor de Aduana — en ese caso no hay
+   *  movimiento bancario. */
+  cuentaBancariaId: z.string().uuid().optional(),
   fecha: z.coerce.date(),
   comprobante: z.string().trim().max(100).optional(),
   referenciaBanco: z.string().trim().max(100).optional(),
@@ -31,6 +37,13 @@ const inputSchema = z.object({
    *  por diferencia cambiaria entre cierre y despacho oficializado.
    *  Si vacío, se asume igual al total VEP. */
   montoPagado: z.string().regex(MONEY_RE, "Monto inválido.").optional(),
+  /** Monto del crédito a favor de Aduana (1.1.4.13) que se aplica como
+   *  parte del pago. El total efectivo del VEP = creditoAplicado +
+   *  montoPagado (banco). Si vacío o "0", no se usa crédito. */
+  creditoAplicado: z
+    .string()
+    .regex(MONEY_RE, "Crédito aplicado inválido.")
+    .optional(),
 });
 
 export type PagarVepInput = z.input<typeof inputSchema>;
@@ -42,6 +55,7 @@ export type PagarVepResult =
       asientoNumero: number;
       totalVep: string;
       montoPagado: string;
+      creditoAplicado: string;
       diferencia: string;
       tipoDiferencia: "credito" | "deuda" | "exacto";
     }
@@ -68,16 +82,24 @@ export async function pagarVepEmbarqueAction(
     comprobante,
     referenciaBanco,
     montoPagado: montoPagadoInput,
+    creditoAplicado: creditoAplicadoInput,
   } = parsed.data;
 
-  const cuentaBancaria = await db.cuentaBancaria.findUnique({
-    where: { id: cuentaBancariaId },
-    select: { id: true, banco: true, moneda: true, cuentaContableId: true },
-  });
-  if (!cuentaBancaria) {
+  const cuentaBancaria = cuentaBancariaId
+    ? await db.cuentaBancaria.findUnique({
+        where: { id: cuentaBancariaId },
+        select: {
+          id: true,
+          banco: true,
+          moneda: true,
+          cuentaContableId: true,
+        },
+      })
+    : null;
+  if (cuentaBancariaId && !cuentaBancaria) {
     return { ok: false, error: "Cuenta bancaria no existe." };
   }
-  if (cuentaBancaria.moneda !== Moneda.ARS) {
+  if (cuentaBancaria && cuentaBancaria.moneda !== Moneda.ARS) {
     return {
       ok: false,
       error: "El VEP de despacho aduanero se paga en ARS — seleccione una cuenta en pesos.",
@@ -100,13 +122,50 @@ export async function pagarVepEmbarqueAction(
     };
   }
 
-  // Computar montos: total VEP (calculado al cierre) vs monto pagado (real)
+  // Computar montos: total VEP (calculado al cierre), crédito aplicado
+  // (de 1.1.4.13) y monto pagado al banco. El total efectivo del pago =
+  // creditoAplicado + montoBanco. La diferencia cambiaria se computa
+  // sobre el TOTAL efectivo vs el total VEP.
   const totalVepNum = Number(vep.totalArs);
-  const montoPagadoNum =
-    montoPagadoInput && Number(montoPagadoInput) > 0
+  const creditoAplicadoNum =
+    creditoAplicadoInput && Number(creditoAplicadoInput) > 0
+      ? Number(creditoAplicadoInput)
+      : 0;
+
+  // Validar que haya saldo suficiente en 1.1.4.13
+  if (creditoAplicadoNum > 0) {
+    const saldoCredito = await getSaldoCreditoAduana();
+    const disponible = Number(saldoCredito.saldo);
+    if (creditoAplicadoNum > disponible + 0.005) {
+      return {
+        ok: false,
+        error: `El crédito aplicado (ARS ${creditoAplicadoNum.toFixed(2)}) excede el saldo disponible en 1.1.4.13 (ARS ${disponible.toFixed(2)}).`,
+      };
+    }
+  }
+
+  const montoBancoNum =
+    montoPagadoInput !== undefined && Number(montoPagadoInput) >= 0
       ? Number(montoPagadoInput)
-      : totalVepNum;
-  const diferenciaNum = montoPagadoNum - totalVepNum;
+      : Math.max(0, totalVepNum - creditoAplicadoNum);
+
+  const totalPagoNum = creditoAplicadoNum + montoBancoNum;
+  if (totalPagoNum <= 0) {
+    return {
+      ok: false,
+      error: "El pago debe ser mayor a cero (entre crédito aplicado y banco).",
+    };
+  }
+
+  // Si hay monto al banco, la cuenta bancaria debe estar seleccionada.
+  if (montoBancoNum > 0 && !cuentaBancaria) {
+    return {
+      ok: false,
+      error: "Seleccione una cuenta bancaria para el monto a transferir.",
+    };
+  }
+
+  const diferenciaNum = totalPagoNum - totalVepNum;
   const tipoDiferencia: "credito" | "deuda" | "exacto" =
     Math.abs(diferenciaNum) < 0.005
       ? "exacto"
@@ -128,19 +187,38 @@ export async function pagarVepEmbarqueAction(
         descripcion: `Pago VEP ${vep.embarqueCodigo} — ${c.cuentaNombre}`,
       }));
 
-      // Línea de ajuste por diferencia cambiaria entre cierre y despacho
-      if (tipoDiferencia === "credito") {
+      // Línea de aplicación del crédito a favor (1.1.4.13) +
+      // ajuste por diferencia cambiaria. Ambos tocan la misma cuenta
+      // cuando hay sobra; netamos para no duplicar líneas.
+      const sobranteCredito =
+        tipoDiferencia === "credito" ? Math.abs(diferenciaNum) : 0;
+      const netoCredito = creditoAplicadoNum - sobranteCredito;
+      // > 0 → HABER 1.1.4.13 (consume crédito neto)
+      // < 0 → DEBE 1.1.4.13 (genera más crédito que el consumido)
+      // = 0 → no se emite línea
+      if (Math.abs(netoCredito) >= 0.005) {
         const creditoCuentaId = await getOrCreateCuenta(
           tx,
           VEP_ADUANA_CODIGOS.CREDITO_ADUANA,
         );
-        lineas.push({
-          cuentaId: creditoCuentaId,
-          debe: Math.abs(diferenciaNum).toFixed(2),
-          haber: "0",
-          descripcion: `Crédito a favor Aduana — diferencia cambiaria VEP ${vep.embarqueCodigo}`,
-        });
-      } else if (tipoDiferencia === "deuda") {
+        if (netoCredito > 0) {
+          lineas.push({
+            cuentaId: creditoCuentaId,
+            debe: "0",
+            haber: netoCredito.toFixed(2),
+            descripcion: `Aplicación crédito a favor Aduana — VEP ${vep.embarqueCodigo}`,
+          });
+        } else {
+          lineas.push({
+            cuentaId: creditoCuentaId,
+            debe: Math.abs(netoCredito).toFixed(2),
+            haber: "0",
+            descripcion: `Crédito a favor Aduana — diferencia cambiaria VEP ${vep.embarqueCodigo}`,
+          });
+        }
+      }
+
+      if (tipoDiferencia === "deuda") {
         const deudaCuentaId = await getOrCreateCuenta(
           tx,
           VEP_ADUANA_CODIGOS.SALDO_PENDIENTE_ADUANA,
@@ -153,13 +231,16 @@ export async function pagarVepEmbarqueAction(
         });
       }
 
-      // HABER del banco con el monto efectivamente pagado
-      lineas.push({
-        cuentaId: cuentaBancaria.cuentaContableId,
-        debe: "0",
-        haber: montoPagadoNum.toFixed(2),
-        descripcion: `Pago VEP ${vep.embarqueCodigo} — ${cuentaBancaria.banco}`,
-      });
+      // HABER del banco con el monto efectivamente transferido (puede
+      // ser cero si el VEP se paga totalmente con crédito a favor).
+      if (montoBancoNum > 0 && cuentaBancaria) {
+        lineas.push({
+          cuentaId: cuentaBancaria.cuentaContableId,
+          debe: "0",
+          haber: montoBancoNum.toFixed(2),
+          descripcion: `Pago VEP ${vep.embarqueCodigo} — ${cuentaBancaria.banco}`,
+        });
+      }
 
       const descripcionAsiento = `Pago VEP despacho ${vep.embarqueCodigo}${comprobante ? ` (${comprobante})` : ""}`;
 
@@ -175,20 +256,17 @@ export async function pagarVepEmbarqueAction(
         tx,
       );
 
-      // Crear MovimientoTesoreria para que el pago aparezca en
-      // /tesoreria/movimientos y /tesoreria/extracto, con referencia
-      // bancaria + comprobante (nº VEP) preservados.
-      // La cuenta contable primaria del movimiento es la primera cuenta
-      // tributaria del VEP (referencial — el desglose completo está en
-      // el asiento).
+      // Crear MovimientoTesoreria sólo si efectivamente hubo
+      // movimiento bancario (pago 100% con crédito a favor no genera
+      // entrada en extracto).
       const cuentaTributariaPrimaria = vep.cuentas[0]?.cuentaId;
-      if (cuentaTributariaPrimaria) {
+      if (cuentaTributariaPrimaria && montoBancoNum > 0 && cuentaBancaria) {
         await tx.movimientoTesoreria.create({
           data: {
             tipo: MovimientoTesoreriaTipo.PAGO,
-            cuentaBancariaId,
+            cuentaBancariaId: cuentaBancaria.id,
             fecha,
-            monto: montoPagadoNum.toFixed(2),
+            monto: montoBancoNum.toFixed(2),
             moneda: Moneda.ARS,
             tipoCambio: "1",
             cuentaContableId: cuentaTributariaPrimaria,
@@ -206,7 +284,8 @@ export async function pagarVepEmbarqueAction(
         asientoId: asiento.id,
         asientoNumero: asiento.numero,
         totalVep: vep.totalArs,
-        montoPagado: montoPagadoNum.toFixed(2),
+        montoPagado: montoBancoNum.toFixed(2),
+        creditoAplicado: creditoAplicadoNum.toFixed(2),
         diferencia: Math.abs(diferenciaNum).toFixed(2),
         tipoDiferencia,
       };

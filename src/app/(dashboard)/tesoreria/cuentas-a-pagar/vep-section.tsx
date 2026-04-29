@@ -49,9 +49,11 @@ export type CuentaBancariaArsOption = {
 export function VepSection({
   veps,
   cuentasBancarias,
+  saldoCreditoAduana,
 }: {
   veps: VepEmbarque[];
   cuentasBancarias: CuentaBancariaArsOption[];
+  saldoCreditoAduana: string;
 }) {
   const [pagar, setPagar] = useState<VepEmbarque | null>(null);
 
@@ -59,6 +61,9 @@ export function VepSection({
   const pagados = veps.filter((v) => v.pagado);
 
   if (veps.length === 0) return null;
+
+  const saldoCreditoNum = Number(saldoCreditoAduana);
+  const tieneCredito = saldoCreditoNum > 0.005;
 
   return (
     <>
@@ -74,6 +79,18 @@ export function VepSection({
               completo con un único movimiento contable.
             </p>
           </div>
+
+          {tieneCredito && (
+            <div className="flex items-center justify-between rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
+              <span>
+                Crédito a favor Aduana disponible (cuenta 1.1.4.13). Aplicable
+                contra cualquier VEP pendiente al momento de pagar.
+              </span>
+              <span className="font-mono font-semibold tabular-nums">
+                ARS {fmtMoney(saldoCreditoAduana)}
+              </span>
+            </div>
+          )}
 
           {pendientes.length > 0 && (
             <Table>
@@ -169,6 +186,7 @@ export function VepSection({
       <PagarVepDialog
         vep={pagar}
         cuentasBancarias={cuentasBancarias}
+        saldoCreditoAduana={saldoCreditoAduana}
         onClose={() => setPagar(null)}
       />
     </>
@@ -178,10 +196,12 @@ export function VepSection({
 function PagarVepDialog({
   vep,
   cuentasBancarias,
+  saldoCreditoAduana,
   onClose,
 }: {
   vep: VepEmbarque | null;
   cuentasBancarias: CuentaBancariaArsOption[];
+  saldoCreditoAduana: string;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -193,55 +213,83 @@ function PagarVepDialog({
   const [comprobante, setComprobante] = useState<string>("");
   const [referenciaBanco, setReferenciaBanco] = useState<string>("");
   const [montoPagado, setMontoPagado] = useState<string>(vep?.totalArs ?? "");
+  const [creditoAplicado, setCreditoAplicado] = useState<string>("0");
 
-  // Reset montoPagado when vep changes
+  const saldoCreditoNum = Number(saldoCreditoAduana);
+
+  // Reset valores when vep changes
   useEffect(() => {
-    if (vep) setMontoPagado(vep.totalArs);
+    if (vep) {
+      setMontoPagado(vep.totalArs);
+      setCreditoAplicado("0");
+    }
   }, [vep]);
 
   if (!vep) return null;
 
   const totalNum = Number(vep.totalArs);
-  const pagadoNum = Number(montoPagado || "0");
-  const diff = pagadoNum - totalNum;
+  const bancoNum = Number(montoPagado || "0");
+  const creditoNum = Number(creditoAplicado || "0");
+  const totalPagoNum =
+    (Number.isFinite(bancoNum) ? bancoNum : 0) +
+    (Number.isFinite(creditoNum) ? creditoNum : 0);
+  const diff = totalPagoNum - totalNum;
   const tipoDiff: "credito" | "deuda" | "exacto" =
-    !Number.isFinite(pagadoNum) || Math.abs(diff) < 0.005
-      ? "exacto"
-      : diff > 0
-        ? "credito"
-        : "deuda";
+    Math.abs(diff) < 0.005 ? "exacto" : diff > 0 ? "credito" : "deuda";
+
+  const creditoExcedido = creditoNum > saldoCreditoNum + 0.005;
+
+  function aplicarCreditoCompleto() {
+    if (!vep) return;
+    const usar = Math.min(saldoCreditoNum, totalNum);
+    setCreditoAplicado(usar.toFixed(2));
+    setMontoPagado(Math.max(0, totalNum - usar).toFixed(2));
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!vep) return;
-    if (!cuentaBancariaId) {
+    if (creditoExcedido) {
+      toast.error(
+        `Crédito aplicado excede el saldo disponible (ARS ${fmtMoney(saldoCreditoAduana)}).`,
+      );
+      return;
+    }
+    if (creditoNum < totalNum && !cuentaBancariaId) {
       toast.error("Seleccioná la cuenta bancaria desde la que se paga.");
       return;
     }
-    if (!Number.isFinite(pagadoNum) || pagadoNum <= 0) {
-      toast.error("Monto pagado inválido.");
+    if (!Number.isFinite(totalPagoNum) || totalPagoNum <= 0) {
+      toast.error("El pago debe ser mayor a cero.");
       return;
     }
 
     startTransition(async () => {
       const result = await pagarVepEmbarqueAction({
         embarqueId: vep.embarqueId,
-        cuentaBancariaId,
+        cuentaBancariaId: cuentaBancariaId || undefined,
         fecha: new Date(fecha + "T12:00:00Z"),
         comprobante: comprobante.trim() || undefined,
         referenciaBanco: referenciaBanco.trim() || undefined,
-        montoPagado: pagadoNum.toFixed(2),
+        montoPagado: bancoNum.toFixed(2),
+        creditoAplicado: creditoNum > 0 ? creditoNum.toFixed(2) : undefined,
       });
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
-      const msgDiff =
-        result.tipoDiferencia === "credito"
-          ? ` · Crédito a favor: ARS ${fmtMoney(result.diferencia)}`
-          : result.tipoDiferencia === "deuda"
-            ? ` · Saldo pendiente (refuerzo): ARS ${fmtMoney(result.diferencia)}`
-            : "";
+      const partes: string[] = [];
+      if (Number(result.creditoAplicado) > 0) {
+        partes.push(`crédito aplicado ARS ${fmtMoney(result.creditoAplicado)}`);
+      }
+      if (result.tipoDiferencia === "credito") {
+        partes.push(`nueva diferencia a favor ARS ${fmtMoney(result.diferencia)}`);
+      } else if (result.tipoDiferencia === "deuda") {
+        partes.push(
+          `saldo pendiente (refuerzo) ARS ${fmtMoney(result.diferencia)}`,
+        );
+      }
+      const msgDiff = partes.length > 0 ? ` · ${partes.join(" · ")}` : "";
       toast.success(
         `VEP registrado — asiento #${result.asientoNumero}${msgDiff}`,
       );
@@ -312,6 +360,40 @@ function PagarVepDialog({
             </Select>
           </div>
 
+          {saldoCreditoNum > 0.005 && (
+            <div className="flex flex-col gap-2 rounded-md border border-emerald-300 bg-emerald-50/50 p-3 dark:border-emerald-700 dark:bg-emerald-950/20">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="credito-aplicado" className="text-emerald-900 dark:text-emerald-200">
+                  Aplicar crédito a favor (1.1.4.13)
+                </Label>
+                <button
+                  type="button"
+                  className="text-xs underline underline-offset-2 text-emerald-800 dark:text-emerald-300"
+                  onClick={aplicarCreditoCompleto}
+                >
+                  Usar máximo (ARS {fmtMoney(Math.min(saldoCreditoNum, totalNum).toFixed(2))})
+                </button>
+              </div>
+              <Input
+                id="credito-aplicado"
+                value={creditoAplicado}
+                onChange={(e) => setCreditoAplicado(e.target.value)}
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <p className="text-[11px] text-emerald-900/80 dark:text-emerald-200/80">
+                Saldo disponible: <strong>ARS {fmtMoney(saldoCreditoAduana)}</strong>.
+                Se descuenta del crédito y reduce lo que tenés que transferir
+                al banco.
+              </p>
+              {creditoExcedido && (
+                <p className="text-[11px] font-semibold text-red-700 dark:text-red-400">
+                  Excede el saldo disponible.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-col gap-2">
             <Label htmlFor="monto-pagado">
               Monto efectivamente pagado al banco
@@ -323,23 +405,37 @@ function PagarVepDialog({
               inputMode="decimal"
               placeholder={vep.totalArs}
             />
+            <div className="flex justify-between text-[11px] text-muted-foreground">
+              <span>
+                Total efectivo del pago:{" "}
+                <strong className="font-mono">
+                  ARS {fmtMoney(totalPagoNum.toFixed(2))}
+                </strong>{" "}
+                (crédito + banco)
+              </span>
+              <span>
+                Total VEP:{" "}
+                <span className="font-mono">ARS {fmtMoney(vep.totalArs)}</span>
+              </span>
+            </div>
             {tipoDiff === "credito" && (
               <p className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
-                Pagaste <strong>ARS {fmtMoney(diff.toFixed(2))}</strong> de
-                más → genera <strong>crédito a favor de Aduana</strong>{" "}
+                Estás pagando <strong>ARS {fmtMoney(diff.toFixed(2))}</strong> de
+                más → genera <strong>nuevo crédito a favor de Aduana</strong>{" "}
                 (cuenta 1.1.4.13). Aplicable contra próximos despachos.
               </p>
             )}
             {tipoDiff === "deuda" && (
               <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
-                Pagaste <strong>ARS {fmtMoney(Math.abs(diff).toFixed(2))}</strong>{" "}
+                Estás pagando <strong>ARS {fmtMoney(Math.abs(diff).toFixed(2))}</strong>{" "}
                 de menos → genera <strong>saldo pendiente con Aduana</strong>{" "}
                 (cuenta 2.1.5.99). Tendrás que pagar un VEP de refuerzo.
               </p>
             )}
-            {tipoDiff === "exacto" && Number(montoPagado) > 0 && (
+            {tipoDiff === "exacto" && totalPagoNum > 0 && (
               <p className="text-xs text-muted-foreground">
-                Pago exacto al total VEP — no genera crédito ni deuda.
+                Pago exacto al total VEP — no genera crédito ni deuda
+                adicional.
               </p>
             )}
           </div>

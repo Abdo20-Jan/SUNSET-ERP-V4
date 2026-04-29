@@ -13,6 +13,7 @@ import { fmtMoney } from "../../reportes/_components/money";
 import {
   getCuentasAPagar,
   getCuentasAPagarPorEmbarque,
+  getSaldoCreditoAduana,
   getSaldosPorProveedorConAging,
   getVepEmbarques,
   type CxPRow,
@@ -33,6 +34,7 @@ export default async function CuentasAPagarPage() {
     vepEmbarques,
     cuentasBancariasArs,
     cuentasBancariasMov,
+    saldoCreditoAduana,
   ] = await Promise.all([
     getCuentasAPagar(),
     getCuentasAPagarPorEmbarque(),
@@ -40,6 +42,7 @@ export default async function CuentasAPagarPage() {
     getVepEmbarques(),
     listarCuentasBancariasParaVep(),
     listarCuentasBancariasParaMovimiento(),
+    getSaldoCreditoAduana(),
   ]);
 
   return (
@@ -76,7 +79,11 @@ export default async function CuentasAPagarPage() {
         proveedores={saldosProveedores}
       />
 
-      <VepSection veps={vepEmbarques} cuentasBancarias={cuentasBancariasArs} />
+      <VepSection
+        veps={vepEmbarques}
+        cuentasBancarias={cuentasBancariasArs}
+        saldoCreditoAduana={saldoCreditoAduana.saldo}
+      />
 
       <Section
         title="Aduana / Nacionalización"

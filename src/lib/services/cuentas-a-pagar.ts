@@ -2,6 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
+import { VEP_ADUANA_CODIGOS } from "@/lib/services/cuenta-registry";
 import {
   AsientoEstado,
   CompraEstado,
@@ -492,12 +493,11 @@ export async function getCuentasAPagarPorEmbarque(): Promise<
     });
   }
 
-  // Calcular total + filtrar grupos donde el saldo del proveedor en su
-  // cuenta es 0 (todo ya pagado vía algún movimiento previo).
+  // Calcular total + filtrar grupos donde ya se aplicaron pagos por
+  // ese embarque puntual a la cuenta del proveedor.
   const result: CuentaAPagarPorEmbarque[] = [];
 
-  // Saldos vivos por cuenta (haber - debe). Si <=0, el proveedor no
-  // debe nada — ese grupo ya está pagado.
+  // Saldo vivo global del proveedor (haber - debe) — informativo.
   const cuentaIds = Array.from(groups.values())
     .map((g) => g.proveedorCuentaContableId)
     .filter((id): id is number => id !== null);
@@ -520,6 +520,35 @@ export async function getCuentasAPagarPorEmbarque(): Promise<
     }),
   );
 
+  // Pagos aplicados por (cuentaProveedorId + embarqueCodigo): suma de
+  // DEBES en la cuenta del proveedor cuyas líneas mencionan el código
+  // del embarque. Esto permite distinguir qué facturas de ese proveedor
+  // ya fueron canceladas — el código del embarque queda en la
+  // descripción al pagar vía multi-pago / intermediario.
+  const pagosPorClave = new Map<string, string>();
+  await Promise.all(
+    Array.from(groups.values()).map(async (g) => {
+      if (!g.proveedorCuentaContableId) return;
+      const agg = await db.lineaAsiento.aggregate({
+        where: {
+          cuentaId: g.proveedorCuentaContableId,
+          debe: { gt: 0 },
+          asiento: { estado: AsientoEstado.CONTABILIZADO },
+          OR: [
+            { descripcion: { contains: g.embarqueCodigo } },
+            { asiento: { descripcion: { contains: g.embarqueCodigo } } },
+          ],
+        },
+        _sum: { debe: true },
+      });
+      const total = toDecimal(agg._sum.debe ?? 0);
+      pagosPorClave.set(
+        `${g.proveedorCuentaContableId}::${g.embarqueCodigo}`,
+        total.toFixed(2),
+      );
+    }),
+  );
+
   for (const g of groups.values()) {
     const totalGrupo = g.facturas.reduce(
       (acc, f) => acc.plus(toDecimal(f.totalArs)),
@@ -532,11 +561,30 @@ export async function getCuentasAPagarPorEmbarque(): Promise<
       : toDecimal(0);
     g.saldoVivoProveedorArs = saldoVivo.toFixed(2);
 
-    // Pendiente = min(totalGrupo, saldoVivo). Si saldoVivo <= 0, el
-    // proveedor ya no debe nada (todos los embarques con él pagados):
-    // omitir grupo.
+    // Pagos ya aplicados a este embarque (líneas DEBE en cuenta del
+    // proveedor con el código del embarque en la descripción).
+    const pagadoEmbarque = g.proveedorCuentaContableId
+      ? toDecimal(
+          pagosPorClave.get(
+            `${g.proveedorCuentaContableId}::${g.embarqueCodigo}`,
+          ) ?? "0",
+        )
+      : toDecimal(0);
+
+    // Si los pagos aplicados al embarque ya cubren el total del grupo,
+    // está pago — omitir.
+    const pendienteEmbarque = totalGrupo.minus(pagadoEmbarque);
+    if (pendienteEmbarque.lte(0.005)) continue;
+
+    // También respetar el saldo vivo global: si <=0, todo está pagado.
     if (saldoVivo.lte(0)) continue;
-    const pendiente = saldoVivo.gt(totalGrupo) ? totalGrupo : saldoVivo;
+
+    // pendienteArs = min(pendienteEmbarque, saldoVivo). Cubre el caso
+    // edge donde el embarque tiene pagos sin código pero hubo
+    // amortización al proveedor.
+    const pendiente = pendienteEmbarque.gt(saldoVivo)
+      ? saldoVivo
+      : pendienteEmbarque;
     g.pendienteArs = pendiente.toFixed(2);
 
     g.facturas.sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -684,4 +732,40 @@ export async function getVepEmbarques(): Promise<VepEmbarque[]> {
   }
 
   return result;
+}
+
+/** Saldo deudor de la cuenta CRÉDITO A FAVOR ADUANA (1.1.4.13).
+ *  Retorna el monto disponible para aplicar contra próximos VEPs.
+ *  Devuelve "0.00" si la cuenta no existe o el saldo es <= 0. */
+export async function getSaldoCreditoAduana(): Promise<{
+  cuentaId: number | null;
+  cuentaCodigo: string;
+  saldo: string;
+}> {
+  const cuenta = await db.cuentaContable.findFirst({
+    where: { codigo: VEP_ADUANA_CODIGOS.CREDITO_ADUANA.codigo },
+    select: { id: true, codigo: true },
+  });
+  if (!cuenta) {
+    return {
+      cuentaId: null,
+      cuentaCodigo: VEP_ADUANA_CODIGOS.CREDITO_ADUANA.codigo,
+      saldo: "0.00",
+    };
+  }
+  const agg = await db.lineaAsiento.aggregate({
+    where: {
+      cuentaId: cuenta.id,
+      asiento: { estado: AsientoEstado.CONTABILIZADO },
+    },
+    _sum: { debe: true, haber: true },
+  });
+  const debe = toDecimal(agg._sum.debe ?? 0);
+  const haber = toDecimal(agg._sum.haber ?? 0);
+  const saldo = debe.minus(haber); // ACTIVO: deudor = debe - haber
+  return {
+    cuentaId: cuenta.id,
+    cuentaCodigo: cuenta.codigo,
+    saldo: saldo.lte(0) ? "0.00" : saldo.toFixed(2),
+  };
 }
