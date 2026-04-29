@@ -4,6 +4,7 @@ import {
   ArrowDataTransferHorizontalIcon,
   BankIcon,
   CreditCardIcon,
+  DocumentValidationIcon,
   ExchangeIcon,
   FileImportIcon,
   Invoice01Icon,
@@ -36,7 +37,14 @@ const SECTIONS = [
     href: "/tesoreria/movimientos",
     icon: Invoice01Icon,
     title: "Movimientos",
-    description: "Listado y extracto de cobros, pagos y transferencias",
+    description: "Listado de cobros, pagos y transferencias con detalle del asiento",
+  },
+  {
+    href: "/tesoreria/extracto",
+    icon: DocumentValidationIcon,
+    title: "Extracto bancario",
+    description:
+      "Movimientos de una cuenta con saldo corrido — equivale al extracto del banco",
   },
   {
     href: "/tesoreria/prestamos",

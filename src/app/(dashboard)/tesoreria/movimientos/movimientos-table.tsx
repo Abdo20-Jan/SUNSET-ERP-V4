@@ -366,8 +366,15 @@ function RowActions({
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={onOpenDetalle}>
           <HugeiconsIcon icon={ViewIcon} strokeWidth={2} />
-          Ver detalles
+          Ver detalles (panel)
         </DropdownMenuItem>
+        <DropdownMenuItem
+          render={
+            <a href={`/tesoreria/movimientos/${movimiento.id}`}>
+              Ver detalles (página completa)
+            </a>
+          }
+        />
         {puedeAnular && (
           <>
             <DropdownMenuSeparator />
