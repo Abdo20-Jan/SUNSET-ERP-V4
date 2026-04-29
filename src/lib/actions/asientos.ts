@@ -143,7 +143,7 @@ export type AsientoDetalle = {
   fecha: Date;
   descripcion: string;
   estado: "BORRADOR" | "CONTABILIZADO" | "ANULADO";
-  origen: "MANUAL" | "TESORERIA" | "COMEX" | "AJUSTE";
+  origen: "MANUAL" | "TESORERIA" | "COMEX" | "AJUSTE" | "GASTO";
   moneda: "ARS" | "USD";
   tipoCambio: string;
   totalDebe: string;

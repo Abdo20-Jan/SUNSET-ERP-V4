@@ -48,6 +48,7 @@ enum AsientoOrigen {
   TESORERIA
   COMEX
   AJUSTE
+  GASTO
 }
 
 enum TipoCuentaBancaria {
@@ -159,6 +160,16 @@ enum CompraEstado {
   CANCELADA
 }
 
+// Estado de un gasto local (factura ad-hoc de proveedor con N líneas
+// + IVA/IIBB header — ver model Gasto). Sigue la lógica de embarque
+// cost: BORRADOR es editable, CONTABILIZADO genera asiento, ANULADO
+// reverte el asiento.
+enum GastoEstado {
+  BORRADOR
+  CONTABILIZADO
+  ANULADO
+}
+
 enum VentaEstado {
   BORRADOR
   EMITIDA
@@ -263,6 +274,7 @@ model CuentaContable {
   embarqueCostoLineas EmbarqueCostoLinea[]      @relation("EmbarqueCostoLineaCuentaGasto")
   extractoLineas      LineaExtractoSugerencia[]
   gastosFijos         GastoFijo[]
+  lineasGasto         LineaGasto[]              @relation("LineaGastoCuentaGasto")
 }
 
 model PeriodoContable {
@@ -291,17 +303,18 @@ model Asiento {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  periodo             PeriodoContable      @relation(fields: [periodoId], references: [id])
-  lineas              LineaAsiento[]
-  movimiento          MovimientoTesoreria?
-  prestamo            PrestamoExterno?
-  venta               Venta?
-  compra              Compra?
-  embarqueCierre      Embarque?            @relation("EmbarqueAsientoCierre")
-  embarqueZonaPrimaria Embarque?           @relation("EmbarqueAsientoZP")
-  despacho            Despacho?
-  gastoFijoRegistro   GastoFijoRegistro?
-  chequeRecibidoCobro ChequeRecibido?
+  periodo              PeriodoContable      @relation(fields: [periodoId], references: [id])
+  lineas               LineaAsiento[]
+  movimiento           MovimientoTesoreria?
+  prestamo             PrestamoExterno?
+  venta                Venta?
+  compra               Compra?
+  embarqueCierre       Embarque?            @relation("EmbarqueAsientoCierre")
+  embarqueZonaPrimaria Embarque?            @relation("EmbarqueAsientoZP")
+  despacho             Despacho?
+  gastoFijoRegistro    GastoFijoRegistro?
+  gasto                Gasto?
+  chequeRecibidoCobro  ChequeRecibido?
 
   @@unique([periodoId, numero])
   @@index([fecha])
@@ -433,14 +446,14 @@ model Embarque {
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 
-  proveedor          Proveedor       @relation(fields: [proveedorId], references: [id])
-  items              ItemEmbarque[]
-  costos             EmbarqueCosto[]
-  asiento            Asiento?        @relation("EmbarqueAsientoCierre", fields: [asientoId], references: [id])
-  asientoZonaPrimaria Asiento?       @relation("EmbarqueAsientoZP", fields: [asientoZonaPrimariaId], references: [id])
-  depositoDestino    Deposito?       @relation(fields: [depositoDestinoId], references: [id])
-  pedidoCompra       PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
-  despachos          Despacho[]
+  proveedor           Proveedor       @relation(fields: [proveedorId], references: [id])
+  items               ItemEmbarque[]
+  costos              EmbarqueCosto[]
+  asiento             Asiento?        @relation("EmbarqueAsientoCierre", fields: [asientoId], references: [id])
+  asientoZonaPrimaria Asiento?        @relation("EmbarqueAsientoZP", fields: [asientoZonaPrimariaId], references: [id])
+  depositoDestino     Deposito?       @relation(fields: [depositoDestinoId], references: [id])
+  pedidoCompra        PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
+  despachos           Despacho[]
 }
 
 // Factura de proveedor local (gastos de nacionalización: despachante,
@@ -474,7 +487,7 @@ model EmbarqueCosto {
   // facturas con momento === DESPACHO cuando el embarque tiene N
   // despachos parciales. En flujo monolítico (sin Despacho records) o
   // facturas ZP queda en NULL.
-  despachoId       String?
+  despachoId String?
 
   embarque  Embarque             @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
   proveedor Proveedor            @relation(fields: [proveedorId], references: [id])
@@ -624,6 +637,58 @@ model ItemCompra {
   producto Producto @relation(fields: [productoId], references: [id])
 }
 
+// Gasto local — factura ad-hoc de proveedor con N líneas + IVA/IIBB
+// header. Sigue la lógica de EmbarqueCosto pero standalone (no ligada
+// a un embarque). Para gastos no recurrentes que no encajan ni en
+// Compra (mercadería con productoId) ni en GastoFijo (templates
+// recurrentes mensuales).
+model Gasto {
+  id               String        @id @default(uuid())
+  numero           String        @unique
+  proveedorId      String
+  fecha            DateTime
+  fechaVencimiento DateTime?
+  condicionPago    CondicionPago @default(CUENTA_CORRIENTE)
+  moneda           Moneda        @default(ARS)
+  tipoCambio       Decimal       @default(1) @db.Decimal(18, 6)
+  facturaNumero    String?
+  // Totales fiscales a nivel factura (no por línea):
+  subtotal         Decimal       @db.Decimal(18, 2)
+  iva              Decimal       @default(0) @db.Decimal(18, 2)
+  iibb             Decimal       @default(0) @db.Decimal(18, 2)
+  otros            Decimal       @default(0) @db.Decimal(18, 2)
+  total            Decimal       @db.Decimal(18, 2)
+  estado           GastoEstado   @default(BORRADOR)
+  asientoId        String?       @unique
+  notas            String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  proveedor Proveedor    @relation(fields: [proveedorId], references: [id])
+  asiento   Asiento?     @relation(fields: [asientoId], references: [id])
+  lineas    LineaGasto[]
+
+  @@index([proveedorId])
+  @@index([fecha])
+  @@index([fechaVencimiento])
+  @@index([estado])
+}
+
+// Concepto/gasto individual dentro de una factura Gasto. Sin
+// impuestos a nivel línea (IVA/IIBB van al header).
+model LineaGasto {
+  id                    Int     @id @default(autoincrement())
+  gastoId               String
+  cuentaContableGastoId Int
+  descripcion           String
+  subtotal              Decimal @db.Decimal(18, 2)
+
+  gasto               Gasto          @relation(fields: [gastoId], references: [id], onDelete: Cascade)
+  cuentaContableGasto CuentaContable @relation("LineaGastoCuentaGasto", fields: [cuentaContableGastoId], references: [id])
+
+  @@index([gastoId])
+}
+
 // ============================================================
 // DATOS MAESTROS
 // ============================================================
@@ -681,6 +746,7 @@ model Proveedor {
   pedidosCompra       PedidoCompra[]
   extractoLineas      LineaExtractoSugerencia[]
   gastosFijos         GastoFijo[]
+  gastos              Gasto[]
 }
 
 model Producto {
@@ -725,13 +791,13 @@ model Deposito {
 // ============================================================
 
 model MovimientoStock {
-  id            String              @id @default(uuid())
-  productoId    String
-  depositoId    String
-  tipo          MovimientoStockTipo
-  cantidad      Int
-  costoUnitario Decimal             @db.Decimal(18, 2)
-  fecha         DateTime            @default(now())
+  id             String              @id @default(uuid())
+  productoId     String
+  depositoId     String
+  tipo           MovimientoStockTipo
+  cantidad       Int
+  costoUnitario  Decimal             @db.Decimal(18, 2)
+  fecha          DateTime            @default(now())
   // FK opcional al ítem de embarque que originó el ingreso (para poder
   // revertir limpiamente en una anulación). Sólo seteado cuando el
   // movimiento viene de cerrar y contabilizar un embarque (flujo legacy
@@ -1046,9 +1112,9 @@ model ImportacionExtracto {
 }
 
 model LineaExtractoSugerencia {
-  id            String   @id @default(uuid())
-  importacionId String
-  ordenLinea    Int
+  id              String   @id @default(uuid())
+  importacionId   String
+  ordenLinea      Int
   fecha           DateTime
   descripcion     String
   comprobante     String?

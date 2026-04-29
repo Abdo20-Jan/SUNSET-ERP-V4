@@ -51,6 +51,7 @@ const ORIGEN_VARIANT: Record<AsientoOrigen, "default" | "secondary" | "outline">
     TESORERIA: "secondary",
     COMEX: "default",
     AJUSTE: "outline",
+    GASTO: "secondary",
   };
 
 function AsientoCard({

@@ -396,6 +396,10 @@ async function anularEnTx(tx: TxClient, asientoId: string): Promise<Asiento> {
     where: { asientoId },
     data: { asientoId: null, estado: "CANCELADA" },
   });
+  await tx.gasto.updateMany({
+    where: { asientoId },
+    data: { asientoId: null, estado: "ANULADO" },
+  });
 
   return tx.asiento.update({
     where: { id: asientoId },
@@ -2051,6 +2055,152 @@ export async function crearAsientoCompra(
     await inner.compra.update({
       where: { id: compraId },
       data: { asientoId: asiento.id },
+    });
+    return asiento;
+  };
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
+// Gasto local (factura ad-hoc con N líneas + IVA/IIBB header)
+// ============================================================
+//
+// Asiento generado:
+//
+//   Por cada linea:
+//     DEBE  linea.cuentaContableGastoId   subtotal × tc
+//
+//   DEBE  1.1.4.01 IVA Crédito Fiscal      iva × tc          (si > 0)
+//   DEBE  1.1.4.03 IIBB Crédito             iibb × tc        (si > 0)
+//   DEBE  primera_línea.cuenta             otros × tc        (si > 0)
+//
+//   HABER proveedor.cuentaContableId       total × tc
+//
+// Usa las mismas cuentas IVA/IIBB de COMPRA_CODIGOS (no son de
+// importación). Total proveedor = subtotal + iva + iibb + otros.
+export async function crearAsientoGasto(
+  gastoId: string,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const gasto = await inner.gasto.findUnique({
+      where: { id: gastoId },
+      include: {
+        proveedor: {
+          select: {
+            id: true,
+            nombre: true,
+            cuentaContableId: true,
+          },
+        },
+        lineas: { orderBy: { id: "asc" } },
+      },
+    });
+    if (!gasto) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Gasto ${gastoId} no existe.`,
+      );
+    }
+    if (gasto.asientoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Gasto ${gasto.numero} ya tiene asiento contable.`,
+      );
+    }
+    if (gasto.lineas.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Gasto ${gasto.numero}: agregá al menos una línea con cuenta de gasto.`,
+      );
+    }
+
+    const porCodigo = await ensureCuentasMap(inner, COMPRA_CODIGOS);
+
+    let proveedorCuentaId = gasto.proveedor.cuentaContableId;
+    if (!proveedorCuentaId) {
+      proveedorCuentaId =
+        porCodigo.get(COMPRA_CODIGOS.PROVEEDOR_FALLBACK.codigo) ?? null;
+      if (!proveedorCuentaId) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `Proveedor ${gasto.proveedor.nombre} sin cuenta contable y falta fallback ${COMPRA_CODIGOS.PROVEEDOR_FALLBACK.codigo}.`,
+        );
+      }
+    }
+
+    const tc = toDecimal(gasto.tipoCambio);
+    const ivaArs = toDecimal(gasto.iva).times(tc).toDecimalPlaces(2);
+    const iibbArs = toDecimal(gasto.iibb).times(tc).toDecimalPlaces(2);
+    const otrosArs = toDecimal(gasto.otros).times(tc).toDecimalPlaces(2);
+
+    const facturaLabel = gasto.facturaNumero
+      ? `${gasto.proveedor.nombre} Fact.${gasto.facturaNumero}`
+      : `${gasto.proveedor.nombre} ${gasto.numero}`;
+
+    const lineas: LineaInput[] = [];
+    let subtotalArs = toDecimal(0);
+    for (const linea of gasto.lineas) {
+      const lineaArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
+      if (!gtZero(lineaArs)) continue;
+      lineas.push({
+        cuentaId: linea.cuentaContableGastoId,
+        debe: money(lineaArs).toString(),
+        haber: 0,
+        descripcion: `${facturaLabel} — ${linea.descripcion}`,
+      });
+      subtotalArs = subtotalArs.plus(lineaArs);
+    }
+    if (lineas.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Gasto ${gasto.numero}: la suma de las líneas es cero.`,
+      );
+    }
+    if (ivaArs.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(COMPRA_CODIGOS.IVA_CREDITO.codigo)!,
+        debe: money(ivaArs).toString(),
+        haber: 0,
+        descripcion: `${facturaLabel} — IVA crédito`,
+      });
+    }
+    if (iibbArs.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(COMPRA_CODIGOS.IIBB_CREDITO.codigo)!,
+        debe: money(iibbArs).toString(),
+        haber: 0,
+        descripcion: `${facturaLabel} — IIBB crédito`,
+      });
+    }
+    if (otrosArs.gt(0)) {
+      lineas.push({
+        cuentaId: gasto.lineas[0].cuentaContableGastoId,
+        debe: money(otrosArs).toString(),
+        haber: 0,
+        descripcion: `${facturaLabel} — otros`,
+      });
+    }
+    const totalArs = subtotalArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+    lineas.push({
+      cuentaId: proveedorCuentaId,
+      debe: 0,
+      haber: money(totalArs).toString(),
+      descripcion: `${facturaLabel} — total a pagar${gasto.fechaVencimiento ? ` (vence ${gasto.fechaVencimiento.toISOString().slice(0, 10)})` : ""}`,
+    });
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: gasto.fecha,
+      descripcion: `Gasto ${gasto.numero} — ${gasto.proveedor.nombre}`,
+      origen: AsientoOrigen.GASTO,
+      moneda: Moneda.ARS,
+      tipoCambio: 1,
+      lineas,
+    });
+    await inner.gasto.update({
+      where: { id: gastoId },
+      data: { asientoId: asiento.id, estado: "CONTABILIZADO" },
     });
     return asiento;
   };
