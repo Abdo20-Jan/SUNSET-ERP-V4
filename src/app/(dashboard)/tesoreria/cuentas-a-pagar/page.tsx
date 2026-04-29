@@ -96,6 +96,13 @@ export default async function CuentasAPagarPage() {
       />
 
       <Section
+        title="Proveedores comerciales"
+        subtitle="Saldos pendientes a proveedores locales (cuenta 2.1.1.x). Incluye gastos, compras, gastos fijos y costos de embarque. Pagos se registran en Tesorería."
+        rows={data.proveedoresComerciales}
+        showProveedores
+      />
+
+      <Section
         title="Aduana / Nacionalización"
         subtitle="Tributos por pagar a Aduana y AFIP por embarques importados (cuenta 2.1.5.x). El pago se hace via VEP arriba — esta tabla muestra el saldo agregado por cuenta."
         rows={aduanaSinRefuerzo}
