@@ -53,38 +53,55 @@ export type EmbarqueListFilters = {
   proveedorId?: string;
 };
 
+export type EmbarquesListPage = {
+  rows: EmbarqueRow[];
+  total: number;
+};
+
 export async function listarEmbarques(
-  filtros?: EmbarqueListFilters,
-): Promise<EmbarqueRow[]> {
+  filtros?: EmbarqueListFilters & { page?: number; perPage?: number },
+): Promise<EmbarquesListPage> {
   const where: Prisma.EmbarqueWhereInput = {};
   if (filtros?.estado) where.estado = filtros.estado;
   if (filtros?.moneda) where.moneda = filtros.moneda;
   if (filtros?.proveedorId) where.proveedorId = filtros.proveedorId;
 
-  const embarques = await db.embarque.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    include: {
-      proveedor: { select: { id: true, nombre: true, pais: true } },
-      _count: { select: { items: true } },
-    },
-  });
+  const page = Math.max(1, Math.floor(filtros?.page ?? 1));
+  const perPage = Math.max(1, Math.min(500, Math.floor(filtros?.perPage ?? 50)));
+  const skip = (page - 1) * perPage;
 
-  return embarques.map((e) => ({
-    id: e.id,
-    codigo: e.codigo,
-    estado: e.estado,
-    moneda: e.moneda,
-    tipoCambio: e.tipoCambio.toString(),
-    fobTotal: e.fobTotal.toString(),
-    cifTotal: e.cifTotal.toString(),
-    costoTotal: e.costoTotal.toString(),
-    incoterm: e.incoterm,
-    lugarIncoterm: e.lugarIncoterm,
-    proveedor: e.proveedor,
-    itemsCount: e._count.items,
-    createdAt: e.createdAt.toISOString(),
-  }));
+  const [embarques, total] = await Promise.all([
+    db.embarque.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      include: {
+        proveedor: { select: { id: true, nombre: true, pais: true } },
+        _count: { select: { items: true } },
+      },
+      take: perPage,
+      skip,
+    }),
+    db.embarque.count({ where }),
+  ]);
+
+  return {
+    rows: embarques.map((e) => ({
+      id: e.id,
+      codigo: e.codigo,
+      estado: e.estado,
+      moneda: e.moneda,
+      tipoCambio: e.tipoCambio.toString(),
+      fobTotal: e.fobTotal.toString(),
+      cifTotal: e.cifTotal.toString(),
+      costoTotal: e.costoTotal.toString(),
+      incoterm: e.incoterm,
+      lugarIncoterm: e.lugarIncoterm,
+      proveedor: e.proveedor,
+      itemsCount: e._count.items,
+      createdAt: e.createdAt.toISOString(),
+    })),
+    total,
+  };
 }
 
 export async function listarProveedoresParaEmbarque(): Promise<ProveedorOption[]> {

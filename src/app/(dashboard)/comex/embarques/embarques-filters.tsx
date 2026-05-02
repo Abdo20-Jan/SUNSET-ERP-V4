@@ -48,6 +48,7 @@ export function EmbarquesFilters({ selectedEstado, selectedMoneda }: Props) {
     } else {
       next.set(key, value);
     }
+    next.delete("page");
     const qs = next.toString();
     startTransition(() => {
       router.push(qs.length > 0 ? `${pathname}?${qs}` : pathname);

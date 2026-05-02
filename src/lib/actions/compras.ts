@@ -47,24 +47,52 @@ export type ProductoParaCompra = {
   costoPromedio: string;
 };
 
-export async function listarCompras(): Promise<CompraRow[]> {
-  const rows = await db.compra.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { proveedor: { select: { id: true, nombre: true } } },
-  });
-  return rows.map((c) => ({
-    id: c.id,
-    numero: c.numero,
-    fecha: c.fecha.toISOString(),
-    fechaVencimiento: c.fechaVencimiento?.toISOString() ?? null,
-    proveedor: c.proveedor,
-    moneda: c.moneda,
-    subtotal: c.subtotal.toString(),
-    iva: c.iva.toString(),
-    total: c.total.toString(),
-    estado: c.estado,
-    asientoId: c.asientoId,
-  }));
+export type ComprasListPage = {
+  rows: CompraRow[];
+  total: number;
+  emitidas: number;
+  borradores: number;
+};
+
+export async function listarCompras(opts?: {
+  page?: number;
+  perPage?: number;
+}): Promise<ComprasListPage> {
+  const page = Math.max(1, Math.floor(opts?.page ?? 1));
+  const perPage = Math.max(1, Math.min(500, Math.floor(opts?.perPage ?? 50)));
+  const skip = (page - 1) * perPage;
+
+  const [rows, total, byEstado] = await Promise.all([
+    db.compra.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { proveedor: { select: { id: true, nombre: true } } },
+      take: perPage,
+      skip,
+    }),
+    db.compra.count(),
+    db.compra.groupBy({ by: ["estado"], _count: { _all: true } }),
+  ]);
+
+  const counts = new Map(byEstado.map((g) => [g.estado, g._count._all]));
+
+  return {
+    rows: rows.map((c) => ({
+      id: c.id,
+      numero: c.numero,
+      fecha: c.fecha.toISOString(),
+      fechaVencimiento: c.fechaVencimiento?.toISOString() ?? null,
+      proveedor: c.proveedor,
+      moneda: c.moneda,
+      subtotal: c.subtotal.toString(),
+      iva: c.iva.toString(),
+      total: c.total.toString(),
+      estado: c.estado,
+      asientoId: c.asientoId,
+    })),
+    total,
+    emitidas: counts.get(CompraEstado.EMITIDA) ?? 0,
+    borradores: counts.get(CompraEstado.BORRADOR) ?? 0,
+  };
 }
 
 export async function listarProveedoresParaCompra(): Promise<

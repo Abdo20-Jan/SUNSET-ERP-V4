@@ -12,6 +12,7 @@ import {
 } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Pagination, parsePaginationParams } from "@/components/ui/pagination";
 
 import { EmbarquesFilters } from "./embarques-filters";
 import { EmbarquesTable } from "./embarques-table";
@@ -19,6 +20,8 @@ import { EmbarquesTable } from "./embarques-table";
 type SearchParams = Promise<{
   estado?: string;
   moneda?: string;
+  page?: string;
+  perPage?: string;
 }>;
 
 function parseEstado(v: string | undefined): EmbarqueEstado | null {
@@ -53,12 +56,16 @@ export default async function EmbarquesPage({
 
   const estado = parseEstado(params.estado);
   const moneda = parseMoneda(params.moneda);
+  const { page, perPage } = parsePaginationParams(params);
 
-  const filtros: EmbarqueListFilters = {};
+  const filtros: EmbarqueListFilters & { page: number; perPage: number } = {
+    page,
+    perPage,
+  };
   if (estado) filtros.estado = estado;
   if (moneda) filtros.moneda = moneda;
 
-  const rows = await listarEmbarques(filtros);
+  const { rows, total } = await listarEmbarques(filtros);
 
   const filtroTags: string[] = [];
   if (estado) filtroTags.push(`estado ${ESTADO_SHORT[estado]}`);
@@ -70,7 +77,7 @@ export default async function EmbarquesPage({
         <div className="flex flex-col gap-1">
           <h1 className="text-[15px] font-semibold tracking-tight">Embarques</h1>
           <p className="text-sm text-muted-foreground">
-            {rows.length} embarque{rows.length === 1 ? "" : "s"}
+            {total} embarque{total === 1 ? "" : "s"}
             {filtroTags.length > 0
               ? ` · ${filtroTags.join(" · ")}`
               : " · importaciones registradas"}
@@ -92,6 +99,12 @@ export default async function EmbarquesPage({
 
       <Card className="py-0">
         <EmbarquesTable data={rows} />
+        <Pagination
+          page={page}
+          perPage={perPage}
+          total={total}
+          className="border-t"
+        />
       </Card>
     </div>
   );
