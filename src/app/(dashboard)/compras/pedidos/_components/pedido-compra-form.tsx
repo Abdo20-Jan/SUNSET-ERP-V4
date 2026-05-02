@@ -32,6 +32,7 @@ import {
 } from "@/components/proveedor-combobox";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -274,14 +275,32 @@ export function PedidoCompraForm({
 
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs uppercase tracking-wide">Fecha</Label>
-            <Input type="date" {...register("fecha")} />
+            <Controller
+              control={control}
+              name="fecha"
+              render={({ field }) => (
+                <DatePicker
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                />
+              )}
+            />
           </div>
 
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs uppercase tracking-wide">
               Fecha prevista
             </Label>
-            <Input type="date" {...register("fechaPrevista")} />
+            <Controller
+              control={control}
+              name="fechaPrevista"
+              render={({ field }) => (
+                <DatePicker
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                />
+              )}
+            />
           </div>
 
           <div className="flex flex-col gap-1.5">
