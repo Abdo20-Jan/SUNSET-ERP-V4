@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 
 function todayIso(): string {
@@ -65,12 +65,10 @@ export function BalanceFechaFilter({
         <Label htmlFor="fecha-desde" className="text-xs">
           Desde (opcional)
         </Label>
-        <Input
+        <DatePicker
           id="fecha-desde"
-          type="date"
           value={desde}
-          onChange={(e) => setDesde(e.target.value)}
-          className="w-44"
+          onChange={setDesde}
           max={hasta || undefined}
         />
       </div>
@@ -78,12 +76,10 @@ export function BalanceFechaFilter({
         <Label htmlFor="fecha-hasta" className="text-xs">
           Hasta
         </Label>
-        <Input
+        <DatePicker
           id="fecha-hasta"
-          type="date"
           value={hasta}
-          onChange={(e) => setHasta(e.target.value)}
-          className="w-44"
+          onChange={setHasta}
           min={desde || undefined}
         />
       </div>
