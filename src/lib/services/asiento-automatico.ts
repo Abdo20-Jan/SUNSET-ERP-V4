@@ -117,10 +117,18 @@ async function resolverPeriodo(
   tx: TxClient,
   fecha: Date,
 ): Promise<{ id: number; estado: PeriodoEstado }> {
+  // Los períodos guardan fechaInicio/fechaFin a las 00:00 UTC del primer/último
+  // día del mes. Si `fecha` cae al último día > 00:00 UTC, fechaFin (00:00) <
+  // fecha y el lookup falla. Truncamos `fecha` al inicio del día UTC para
+  // alinear con la representación de los bordes del período.
+  const fechaDia = new Date(
+    Date.UTC(fecha.getUTCFullYear(), fecha.getUTCMonth(), fecha.getUTCDate()),
+  );
+
   const periodo = await tx.periodoContable.findFirst({
     where: {
-      fechaInicio: { lte: fecha },
-      fechaFin: { gte: fecha },
+      fechaInicio: { lte: fechaDia },
+      fechaFin: { gte: fechaDia },
     },
     select: { id: true, estado: true },
   });

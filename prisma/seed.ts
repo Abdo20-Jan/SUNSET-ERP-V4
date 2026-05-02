@@ -99,7 +99,9 @@ async function seedPeriodos() {
     const codigo = `${year}-${String(month).padStart(2, "0")}`;
     const nombre = `${MESES_ES[month - 1]} ${year}`;
     const fechaInicio = new Date(Date.UTC(year, month - 1, 1));
-    const fechaFin = new Date(Date.UTC(year, month, 0));
+    // Último día del mes a las 23:59:59.999 UTC para que cualquier `new Date()`
+    // del último día caiga dentro del rango (antes era 00:00 y rompía el lookup).
+    const fechaFin = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
 
     await prisma.periodoContable.upsert({
       where: { codigo },
