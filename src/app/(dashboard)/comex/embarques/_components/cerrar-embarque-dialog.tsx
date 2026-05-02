@@ -17,6 +17,7 @@ import {
   revertirZonaPrimariaAction,
 } from "@/lib/actions/embarques";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Dialog,
   DialogContent,
@@ -96,14 +97,12 @@ export function CerrarEmbarqueDialog({
           <label htmlFor="fecha-cierre" className="text-sm font-medium">
             Fecha de cierre / nacionalización
           </label>
-          <input
+          <DatePicker
             id="fecha-cierre"
-            type="date"
             value={fecha}
-            onChange={(e) => setFecha(e.target.value)}
+            onChange={setFecha}
             max={todayIso()}
             disabled={pending}
-            className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
           <p className="text-xs text-muted-foreground">
             Fecha contable del asiento (la del despacho a plaza, no la del clic).
@@ -326,14 +325,12 @@ export function ConfirmarZonaPrimariaDialog({
           <label htmlFor="fecha-zp" className="text-sm font-medium">
             Fecha de zona primaria
           </label>
-          <input
+          <DatePicker
             id="fecha-zp"
-            type="date"
             value={fecha}
-            onChange={(e) => setFecha(e.target.value)}
+            onChange={setFecha}
             max={todayIso()}
             disabled={pending}
-            className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
           <p className="text-xs text-muted-foreground">
             Fecha contable del asiento (la del ingreso a zona primaria).
