@@ -23,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -510,12 +511,7 @@ function PagarVepDialog({
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div className="flex flex-col gap-2">
               <Label htmlFor="fecha">Fecha</Label>
-              <Input
-                id="fecha"
-                type="date"
-                value={fecha}
-                onChange={(e) => setFecha(e.target.value)}
-              />
+              <DatePicker id="fecha" value={fecha} onChange={setFecha} />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="comprobante">Nº VEP (opcional)</Label>
@@ -776,11 +772,10 @@ function PagarRefuerzoVepDialog({
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div className="flex flex-col gap-2">
               <Label htmlFor="refuerzo-fecha">Fecha</Label>
-              <Input
+              <DatePicker
                 id="refuerzo-fecha"
-                type="date"
                 value={fecha}
-                onChange={(e) => setFecha(e.target.value)}
+                onChange={setFecha}
               />
             </div>
             <div className="flex flex-col gap-2">
