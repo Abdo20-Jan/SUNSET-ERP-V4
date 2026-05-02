@@ -769,6 +769,7 @@ export async function crearAsientoTransferencia(
 export async function crearAsientoEmbarque(
   embarqueId: string,
   tx?: TxClient,
+  fecha?: Date,
 ): Promise<Asiento> {
   const run = async (inner: TxClient) => {
     const embarque = await inner.embarque.findUnique({
@@ -1065,7 +1066,7 @@ export async function crearAsientoEmbarque(
     }));
 
     const asiento = await crearAsientoEnTx(inner, {
-      fecha: new Date(),
+      fecha: fecha ?? new Date(),
       descripcion: `Nacionalización embarque ${embarque.codigo}`,
       origen: AsientoOrigen.COMEX,
       lineas: lineasInput,
@@ -1099,6 +1100,7 @@ export async function crearAsientoEmbarque(
 export async function crearAsientoZonaPrimaria(
   embarqueId: string,
   tx?: TxClient,
+  fecha?: Date,
 ): Promise<Asiento> {
   const run = async (inner: TxClient) => {
     const embarque = await inner.embarque.findUnique({
@@ -1267,7 +1269,7 @@ export async function crearAsientoZonaPrimaria(
     }));
 
     const asiento = await crearAsientoEnTx(inner, {
-      fecha: new Date(),
+      fecha: fecha ?? new Date(),
       descripcion: `Zona primaria embarque ${embarque.codigo}`,
       origen: AsientoOrigen.COMEX,
       lineas: lineasInput,

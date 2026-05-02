@@ -749,9 +749,21 @@ export type ConfirmarZonaPrimariaResult =
 
 export async function confirmarZonaPrimariaAction(
   embarqueId: string,
+  fechaIso?: string,
 ): Promise<ConfirmarZonaPrimariaResult> {
   if (!embarqueId || typeof embarqueId !== "string") {
     return { ok: false, error: "ID de embarque inválido." };
+  }
+
+  // Parsear fecha opcional. Si viene, debe ser ISO válido. Si no, queda undefined
+  // y crearAsiento usa new Date() por compatibilidad.
+  let fecha: Date | undefined;
+  if (fechaIso) {
+    const d = new Date(fechaIso);
+    if (Number.isNaN(d.getTime())) {
+      return { ok: false, error: "Fecha de zona primaria inválida." };
+    }
+    fecha = d;
   }
 
   try {
@@ -791,8 +803,14 @@ export async function confirmarZonaPrimariaAction(
         );
       }
 
-      const asiento = await crearAsientoZonaPrimaria(embarqueId, tx);
+      const asiento = await crearAsientoZonaPrimaria(embarqueId, tx, fecha);
       const contabilizado = await contabilizarAsiento(asiento.id, tx);
+
+      // Persistir fecha del fato contábil en el embarque (no la del clic).
+      await tx.embarque.update({
+        where: { id: embarqueId },
+        data: { fechaZonaPrimaria: fecha ?? new Date() },
+      });
 
       return {
         asientoId: contabilizado.id,
@@ -896,9 +914,20 @@ export type CerrarEmbarqueResult =
 
 export async function cerrarYContabilizarEmbarqueAction(
   embarqueId: string,
+  fechaIso?: string,
 ): Promise<CerrarEmbarqueResult> {
   if (!embarqueId || typeof embarqueId !== "string") {
     return { ok: false, error: "ID de embarque inválido." };
+  }
+
+  // Parsear fecha opcional del cierre. Si viene, ISO válido obligatorio.
+  let fecha: Date | undefined;
+  if (fechaIso) {
+    const d = new Date(fechaIso);
+    if (Number.isNaN(d.getTime())) {
+      return { ok: false, error: "Fecha de cierre inválida." };
+    }
+    fecha = d;
   }
 
   try {
@@ -942,7 +971,7 @@ export async function cerrarYContabilizarEmbarqueAction(
         );
       }
 
-      const asiento = await crearAsientoEmbarque(embarqueId, tx);
+      const asiento = await crearAsientoEmbarque(embarqueId, tx, fecha);
       const contabilizado = await contabilizarAsiento(asiento.id, tx);
 
       // Para el rateio aplanamos cada línea de cada factura: el TC de la
@@ -974,7 +1003,7 @@ export async function cerrarYContabilizarEmbarqueAction(
 
       await aplicarIngresoEmbarque(tx, {
         depositoDestinoId: embarque.depositoDestinoId,
-        fecha: new Date(),
+        fecha: fecha ?? new Date(),
         items: rateio.map((r) => ({
           itemEmbarqueId: r.id,
           productoId: r.productoId,
@@ -985,7 +1014,10 @@ export async function cerrarYContabilizarEmbarqueAction(
 
       await tx.embarque.update({
         where: { id: embarqueId },
-        data: { estado: EmbarqueEstado.CERRADO },
+        data: {
+          estado: EmbarqueEstado.CERRADO,
+          fechaCierre: fecha ?? new Date(),
+        },
       });
 
       return {

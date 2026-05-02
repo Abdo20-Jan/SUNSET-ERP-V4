@@ -34,6 +34,10 @@ type Props = {
   previewTotalDebe: string;
 };
 
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export function CerrarEmbarqueDialog({
   embarqueId,
   embarqueCodigo,
@@ -43,10 +47,15 @@ export function CerrarEmbarqueDialog({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [fecha, setFecha] = useState<string>(todayIso);
 
   const handleConfirm = () => {
+    if (!fecha) {
+      toast.error("Ingresá la fecha de cierre.");
+      return;
+    }
     startTransition(async () => {
-      const result = await cerrarYContabilizarEmbarqueAction(embarqueId);
+      const result = await cerrarYContabilizarEmbarqueAction(embarqueId, fecha);
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -82,6 +91,24 @@ export function CerrarEmbarqueDialog({
             <strong>CERRADO</strong>. No podrá editarse después.
           </DialogDescription>
         </DialogHeader>
+
+        <div className="space-y-1">
+          <label htmlFor="fecha-cierre" className="text-sm font-medium">
+            Fecha de cierre / nacionalización
+          </label>
+          <input
+            id="fecha-cierre"
+            type="date"
+            value={fecha}
+            onChange={(e) => setFecha(e.target.value)}
+            max={todayIso()}
+            disabled={pending}
+            className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <p className="text-xs text-muted-foreground">
+            Fecha contable del asiento (la del despacho a plaza, no la del clic).
+          </p>
+        </div>
 
         <div className="rounded-md border bg-muted/40 p-4 text-sm">
           <p className="font-medium">Resumen del asiento:</p>
@@ -252,10 +279,15 @@ export function ConfirmarZonaPrimariaDialog({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [fecha, setFecha] = useState<string>(todayIso);
 
   const handleConfirm = () => {
+    if (!fecha) {
+      toast.error("Ingresá la fecha de zona primaria.");
+      return;
+    }
     startTransition(async () => {
-      const result = await confirmarZonaPrimariaAction(embarqueId);
+      const result = await confirmarZonaPrimariaAction(embarqueId, fecha);
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -289,6 +321,24 @@ export function ConfirmarZonaPrimariaDialog({
             disponible para venta — eso requiere el despacho final.
           </DialogDescription>
         </DialogHeader>
+
+        <div className="space-y-1">
+          <label htmlFor="fecha-zp" className="text-sm font-medium">
+            Fecha de zona primaria
+          </label>
+          <input
+            id="fecha-zp"
+            type="date"
+            value={fecha}
+            onChange={(e) => setFecha(e.target.value)}
+            max={todayIso()}
+            disabled={pending}
+            className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <p className="text-xs text-muted-foreground">
+            Fecha contable del asiento (la del ingreso a zona primaria).
+          </p>
+        </div>
 
         <div className="rounded-md border bg-muted/40 p-4 text-[13px]">
           <p className="font-medium">Asiento parcial:</p>
