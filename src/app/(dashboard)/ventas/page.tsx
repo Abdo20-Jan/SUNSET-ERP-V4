@@ -5,14 +5,24 @@ import { Add01Icon } from "@hugeicons/core-free-icons";
 import { listarVentas } from "@/lib/actions/ventas";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Pagination, parsePaginationParams } from "@/components/ui/pagination";
 
 import { VentasTable } from "./_components/ventas-table";
 
-export default async function VentasPage() {
-  const rows = await listarVentas();
+type SearchParams = Promise<{ page?: string; perPage?: string }>;
 
-  const emitidas = rows.filter((r) => r.estado === "EMITIDA").length;
-  const borradores = rows.filter((r) => r.estado === "BORRADOR").length;
+export default async function VentasPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  const params = await searchParams;
+  const { page, perPage } = parsePaginationParams(params);
+
+  const { rows, total, emitidas, borradores } = await listarVentas({
+    page,
+    perPage,
+  });
 
   return (
     <div className="flex flex-col gap-3">
@@ -20,8 +30,8 @@ export default async function VentasPage() {
         <div className="flex flex-col gap-1">
           <h1 className="text-[15px] font-semibold tracking-tight">Ventas</h1>
           <p className="text-sm text-muted-foreground">
-            {rows.length} venta{rows.length === 1 ? "" : "s"}
-            {rows.length > 0 && (
+            {total} venta{total === 1 ? "" : "s"}
+            {total > 0 && (
               <span>
                 {" "}
                 · {emitidas} emitida{emitidas === 1 ? "" : "s"} · {borradores}{" "}
@@ -49,6 +59,12 @@ export default async function VentasPage() {
 
       <Card className="py-0">
         <VentasTable data={rows} />
+        <Pagination
+          page={page}
+          perPage={perPage}
+          total={total}
+          className="border-t"
+        />
       </Card>
     </div>
   );

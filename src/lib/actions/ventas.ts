@@ -52,24 +52,52 @@ export type ProductoParaVenta = {
   costoPromedio: string;
 };
 
-export async function listarVentas(): Promise<VentaRow[]> {
-  const rows = await db.venta.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { cliente: { select: { id: true, nombre: true } } },
-  });
-  return rows.map((v) => ({
-    id: v.id,
-    numero: v.numero,
-    fecha: v.fecha.toISOString(),
-    fechaVencimiento: v.fechaVencimiento?.toISOString() ?? null,
-    cliente: v.cliente,
-    moneda: v.moneda,
-    subtotal: v.subtotal.toString(),
-    iva: v.iva.toString(),
-    total: v.total.toString(),
-    estado: v.estado,
-    asientoId: v.asientoId,
-  }));
+export type VentasListPage = {
+  rows: VentaRow[];
+  total: number;
+  emitidas: number;
+  borradores: number;
+};
+
+export async function listarVentas(opts?: {
+  page?: number;
+  perPage?: number;
+}): Promise<VentasListPage> {
+  const page = Math.max(1, Math.floor(opts?.page ?? 1));
+  const perPage = Math.max(1, Math.min(500, Math.floor(opts?.perPage ?? 50)));
+  const skip = (page - 1) * perPage;
+
+  const [rows, total, byEstado] = await Promise.all([
+    db.venta.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { cliente: { select: { id: true, nombre: true } } },
+      take: perPage,
+      skip,
+    }),
+    db.venta.count(),
+    db.venta.groupBy({ by: ["estado"], _count: { _all: true } }),
+  ]);
+
+  const counts = new Map(byEstado.map((g) => [g.estado, g._count._all]));
+
+  return {
+    rows: rows.map((v) => ({
+      id: v.id,
+      numero: v.numero,
+      fecha: v.fecha.toISOString(),
+      fechaVencimiento: v.fechaVencimiento?.toISOString() ?? null,
+      cliente: v.cliente,
+      moneda: v.moneda,
+      subtotal: v.subtotal.toString(),
+      iva: v.iva.toString(),
+      total: v.total.toString(),
+      estado: v.estado,
+      asientoId: v.asientoId,
+    })),
+    total,
+    emitidas: counts.get(VentaEstado.EMITIDA) ?? 0,
+    borradores: counts.get(VentaEstado.BORRADOR) ?? 0,
+  };
 }
 
 export async function listarClientesParaVenta(): Promise<ClienteParaVenta[]> {
