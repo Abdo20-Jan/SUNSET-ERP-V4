@@ -50,7 +50,7 @@ export default async function BalanceGeneralPage({
   const fechaDesde = parseDate(desdeStr);
   const fechaHasta = endOfDay(hastaStr);
 
-  const moneda: Moneda = params.moneda === "USD" ? "USD" : "ARS";
+  const moneda: Moneda = params.moneda === "ARS" ? "ARS" : "USD";
 
   const [bg, cotizacion] = await Promise.all([
     getBalanceGeneralByFecha({ fechaDesde, fechaHasta }),
