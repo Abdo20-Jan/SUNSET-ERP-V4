@@ -439,9 +439,15 @@ model Embarque {
   iibb                   Decimal        @default(0) @db.Decimal(18, 2)
   costoTotal             Decimal        @default(0) @db.Decimal(18, 2)
   asientoId              String?        @unique
+  // Fecha en que se realizó el cierre/nacionalización (despacho a plaza).
+  // Es la fecha contable del asiento de Nacionalización (NO la del clic).
+  fechaCierre            DateTime?
   // Asiento generado al confirmar zona primaria (DEBE 1.1.5.02 MERC. EN
   // TRÁNSITO contra proveedor exterior + facturas locales con momento=ZONA_PRIMARIA).
   asientoZonaPrimariaId  String?        @unique
+  // Fecha en que la mercadería entró en Zona Primaria. Es la fecha contable
+  // del asiento de Zona Primaria (NO la del clic).
+  fechaZonaPrimaria      DateTime?
   depositoDestinoId      String?
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
