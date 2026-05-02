@@ -55,7 +55,7 @@ export default async function EstadoResultadosPage({
 
   const er = await getEstadoResultadosByFecha({ fechaDesde, fechaHasta });
 
-  const moneda: Moneda = params.moneda === "USD" ? "USD" : "ARS";
+  const moneda: Moneda = params.moneda === "ARS" ? "ARS" : "USD";
   const fechaCorte = fechaHasta ?? new Date();
   const cotizacion = await getCotizacionParaFecha(fechaCorte);
   const tcParaUsd =
