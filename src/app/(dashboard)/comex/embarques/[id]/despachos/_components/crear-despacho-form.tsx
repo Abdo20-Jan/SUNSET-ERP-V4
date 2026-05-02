@@ -9,6 +9,7 @@ import {
   contabilizarDespachoAction,
 } from "@/lib/actions/despachos";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -139,11 +140,7 @@ export function CrearDespachoForm({
       <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
         <div className="flex flex-col gap-1">
           <Label className="text-[11px]">Fecha despacho</Label>
-          <Input
-            type="date"
-            value={fecha}
-            onChange={(e) => setFecha(e.target.value)}
-          />
+          <DatePicker value={fecha} onChange={setFecha} />
         </div>
         <div className="flex flex-col gap-1">
           <Label className="text-[11px]">Nº OM oficializado</Label>
