@@ -2,12 +2,9 @@ import "server-only";
 
 import Decimal from "decimal.js";
 
+import { MovimientoStockTipo, type Prisma } from "@/generated/prisma/client";
 import { money, toDecimal } from "@/lib/decimal";
 import { AsientoError } from "@/lib/services/asiento-automatico";
-import {
-  MovimientoStockTipo,
-  Prisma,
-} from "@/generated/prisma/client";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -64,6 +61,13 @@ export async function aplicarIngresoEmbarque(
     await aplicarIngresoProducto(
       tx,
       item.productoId,
+      item.cantidad,
+      item.costoUnitario,
+    );
+    await aplicarIngresoSPD(
+      tx,
+      item.productoId,
+      params.depositoDestinoId,
       item.cantidad,
       item.costoUnitario,
     );
@@ -173,6 +177,13 @@ export async function aplicarIngresoDespacho(
       item.cantidad,
       item.costoUnitario,
     );
+    await aplicarIngresoSPD(
+      tx,
+      item.productoId,
+      params.depositoDestinoId,
+      item.cantidad,
+      item.costoUnitario,
+    );
   }
 }
 
@@ -208,6 +219,7 @@ export async function revertirIngresoDespacho(
 
   for (const productoId of productoIds) {
     await recalcularStockYCostoPromedio(tx, productoId);
+    await recalcularSPDPorProducto(tx, productoId);
   }
 }
 
@@ -244,6 +256,7 @@ export async function revertirIngresoEmbarque(
 
   for (const productoId of productoIds) {
     await recalcularStockYCostoPromedio(tx, productoId);
+    await recalcularSPDPorProducto(tx, productoId);
   }
 }
 
@@ -298,4 +311,300 @@ export async function recalcularStockYCostoPromedio(
       costoPromedio: money(promedio),
     },
   });
+}
+
+// ===============================================================
+// W3 — Stock por depósito (StockPorDeposito)
+// ===============================================================
+//
+// Las funciones de abajo operan sobre `StockPorDeposito` — la fuente
+// de verdad multi-depósito introducida en W3. Conviven con las
+// funciones legacy (que mantienen `Producto.stockActual` global) hasta
+// que `Producto.stockActual` sea derivable de SUM(SPD.cantidadFisica).
+
+/**
+ * Aplica un ingreso de stock al `StockPorDeposito` correspondiente al
+ * par (productoId, depositoId). Crea el row si no existe; si existe,
+ * suma la cantidad y recalcula el costo promedio ponderado del
+ * depósito (decisión arquitectónica W3 #3 — costoPromedio por depósito).
+ */
+export async function aplicarIngresoSPD(
+  tx: TxClient,
+  productoId: string,
+  depositoId: string,
+  cantidadIngreso: number,
+  costoUnitarioIngreso: Decimal,
+): Promise<void> {
+  const existing = await tx.stockPorDeposito.findUnique({
+    where: { productoId_depositoId: { productoId, depositoId } },
+    select: { cantidadFisica: true, costoPromedio: true },
+  });
+  if (!existing) {
+    await tx.stockPorDeposito.create({
+      data: {
+        productoId,
+        depositoId,
+        cantidadFisica: cantidadIngreso,
+        cantidadReservada: 0,
+        costoPromedio: money(costoUnitarioIngreso),
+        ultimoMovimiento: new Date(),
+      },
+    });
+    return;
+  }
+  const stockActual = existing.cantidadFisica;
+  const promedioActual = toDecimal(existing.costoPromedio);
+  const nuevoStock = stockActual + cantidadIngreso;
+  let nuevoPromedio: Decimal;
+  if (stockActual <= 0 || nuevoStock <= 0) {
+    nuevoPromedio = costoUnitarioIngreso;
+  } else {
+    const valorAnterior = promedioActual.times(stockActual);
+    const valorIngreso = costoUnitarioIngreso.times(cantidadIngreso);
+    nuevoPromedio = valorAnterior.plus(valorIngreso).dividedBy(nuevoStock);
+  }
+  await tx.stockPorDeposito.update({
+    where: { productoId_depositoId: { productoId, depositoId } },
+    data: {
+      cantidadFisica: nuevoStock,
+      costoPromedio: money(nuevoPromedio),
+      ultimoMovimiento: new Date(),
+    },
+  });
+}
+
+/**
+ * Aplica un egreso físico al SPD: decrementa cantidadFisica y
+ * cantidadReservada por la cantidad dada. Usado al confirmar una
+ * entrega (remito) — la mercadería sale del depósito y se libera la
+ * reserva equivalente. NO valida disponibilidad — el caller debe
+ * haber validado antes (vía `validarDisponible`).
+ */
+export async function aplicarEgresoSPD(
+  tx: TxClient,
+  productoId: string,
+  depositoId: string,
+  cantidad: number,
+): Promise<void> {
+  await tx.stockPorDeposito.update({
+    where: { productoId_depositoId: { productoId, depositoId } },
+    data: {
+      cantidadFisica: { decrement: cantidad },
+      cantidadReservada: { decrement: cantidad },
+      ultimoMovimiento: new Date(),
+    },
+  });
+}
+
+/**
+ * Aplica una reserva al SPD: incrementa cantidadReservada por la
+ * cantidad dada. Usado al emitir una venta — la mercadería todavía
+ * está físicamente en el depósito pero queda comprometida hasta la
+ * entrega. NO valida disponibilidad — el caller debe haber validado
+ * antes (vía `validarDisponible`).
+ */
+export async function aplicarReservaSPD(
+  tx: TxClient,
+  productoId: string,
+  depositoId: string,
+  cantidad: number,
+): Promise<void> {
+  await tx.stockPorDeposito.update({
+    where: { productoId_depositoId: { productoId, depositoId } },
+    data: {
+      cantidadReservada: { increment: cantidad },
+      ultimoMovimiento: new Date(),
+    },
+  });
+}
+
+/**
+ * Libera una reserva al SPD: decrementa cantidadReservada. Usado al
+ * anular una venta antes de entregar — devuelve disponibilidad sin
+ * tocar la cantidad física.
+ */
+export async function liberarReservaSPD(
+  tx: TxClient,
+  productoId: string,
+  depositoId: string,
+  cantidad: number,
+): Promise<void> {
+  await tx.stockPorDeposito.update({
+    where: { productoId_depositoId: { productoId, depositoId } },
+    data: {
+      cantidadReservada: { decrement: cantidad },
+      ultimoMovimiento: new Date(),
+    },
+  });
+}
+
+/**
+ * Aplica una transferencia: decrementa cantidadFisica del depósito
+ * origen e incrementa la del destino (creando el row destino si no
+ * existe, manteniendo el costoPromedio del origen). Genera 2
+ * MovimientoStock tipo TRANSFERENCIA — uno por dirección — linkados
+ * a la misma `Transferencia`. NO valida disponibilidad ni que origen
+ * != destino — caller debe validar antes.
+ */
+export async function aplicarTransferenciaSPD(
+  tx: TxClient,
+  params: {
+    productoId: string;
+    depositoOrigenId: string;
+    depositoDestinoId: string;
+    cantidad: number;
+    fecha: Date;
+    transferenciaId: string;
+  },
+): Promise<void> {
+  const origen = await tx.stockPorDeposito.findUnique({
+    where: {
+      productoId_depositoId: {
+        productoId: params.productoId,
+        depositoId: params.depositoOrigenId,
+      },
+    },
+    select: { costoPromedio: true },
+  });
+  if (!origen) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `No hay stock del producto ${params.productoId} en el depósito origen ${params.depositoOrigenId}.`,
+    );
+  }
+  const costoUnitario = toDecimal(origen.costoPromedio);
+
+  // Decrementar origen
+  await tx.stockPorDeposito.update({
+    where: {
+      productoId_depositoId: {
+        productoId: params.productoId,
+        depositoId: params.depositoOrigenId,
+      },
+    },
+    data: {
+      cantidadFisica: { decrement: params.cantidad },
+      ultimoMovimiento: params.fecha,
+    },
+  });
+
+  // Incrementar destino — usa aplicarIngresoSPD para promedio ponderado
+  // si ya existe stock previo en destino.
+  await aplicarIngresoSPD(
+    tx,
+    params.productoId,
+    params.depositoDestinoId,
+    params.cantidad,
+    costoUnitario,
+  );
+
+  // 2 MovimientoStock tipo TRANSFERENCIA, linkados a la misma transferencia
+  await tx.movimientoStock.createMany({
+    data: [
+      {
+        productoId: params.productoId,
+        depositoId: params.depositoOrigenId,
+        tipo: MovimientoStockTipo.TRANSFERENCIA,
+        cantidad: -params.cantidad,
+        costoUnitario: money(costoUnitario),
+        fecha: params.fecha,
+        transferenciaId: params.transferenciaId,
+      },
+      {
+        productoId: params.productoId,
+        depositoId: params.depositoDestinoId,
+        tipo: MovimientoStockTipo.TRANSFERENCIA,
+        cantidad: params.cantidad,
+        costoUnitario: money(costoUnitario),
+        fecha: params.fecha,
+        transferenciaId: params.transferenciaId,
+      },
+    ],
+  });
+}
+
+/**
+ * Recalcula `StockPorDeposito` para un producto desde cero, replayando
+ * todos sus `MovimientoStock` agrupados por depósito. Usado en la
+ * reversión de embarque/despacho para mantener consistencia.
+ *
+ * Convenciones de cantidad por tipo:
+ *  - INGRESO: cantidad positiva, suma a cantidadFisica del depósito
+ *    del movimiento + recalcula promedio ponderado.
+ *  - EGRESO: cantidad positiva, resta a cantidadFisica del depósito
+ *    del movimiento. Mantiene promedio.
+ *  - AJUSTE: cantidad signed, suma directamente. Mantiene promedio.
+ *  - TRANSFERENCIA: cantidad signed (negativa en origen, positiva en
+ *    destino). Suma directamente al SPD del depósito del movimiento.
+ *    Mantiene promedio.
+ *
+ * Nota: NO toca cantidadReservada — esa se reconstruye sólo desde
+ * EntregaVenta pendientes (no implementado en este replay; para
+ * recalcular reservas, ver futuro `recalcularReservasPorProducto`).
+ */
+export async function recalcularSPDPorProducto(
+  tx: TxClient,
+  productoId: string,
+): Promise<void> {
+  const movimientos = await tx.movimientoStock.findMany({
+    where: { productoId },
+    orderBy: [{ fecha: "asc" }, { id: "asc" }],
+    select: {
+      depositoId: true,
+      tipo: true,
+      cantidad: true,
+      costoUnitario: true,
+    },
+  });
+
+  type Estado = { stock: number; promedio: Decimal };
+  const porDeposito = new Map<string, Estado>();
+
+  for (const m of movimientos) {
+    const cur = porDeposito.get(m.depositoId) ?? {
+      stock: 0,
+      promedio: new Decimal(0),
+    };
+    if (m.tipo === MovimientoStockTipo.INGRESO) {
+      const costoIngreso = toDecimal(m.costoUnitario);
+      const nuevoStock = cur.stock + m.cantidad;
+      if (cur.stock <= 0 || nuevoStock <= 0) {
+        cur.promedio = costoIngreso;
+      } else {
+        const valorAnterior = cur.promedio.times(cur.stock);
+        const valorIngreso = costoIngreso.times(m.cantidad);
+        cur.promedio = valorAnterior
+          .plus(valorIngreso)
+          .dividedBy(nuevoStock);
+      }
+      cur.stock = nuevoStock;
+    } else if (m.tipo === MovimientoStockTipo.EGRESO) {
+      cur.stock -= m.cantidad;
+    } else if (m.tipo === MovimientoStockTipo.AJUSTE) {
+      cur.stock += m.cantidad;
+    } else if (m.tipo === MovimientoStockTipo.TRANSFERENCIA) {
+      // cantidad ya viene signed: -X en origen, +X en destino
+      cur.stock += m.cantidad;
+    }
+    porDeposito.set(m.depositoId, cur);
+  }
+
+  // Upsert cada depósito con stock recalculado. NO borra rows existentes
+  // con stock=0 para preservar history; sólo actualiza valores.
+  for (const [depositoId, estado] of porDeposito) {
+    await tx.stockPorDeposito.upsert({
+      where: { productoId_depositoId: { productoId, depositoId } },
+      create: {
+        productoId,
+        depositoId,
+        cantidadFisica: estado.stock,
+        cantidadReservada: 0,
+        costoPromedio: money(estado.promedio),
+      },
+      update: {
+        cantidadFisica: estado.stock,
+        costoPromedio: money(estado.promedio),
+      },
+    });
+  }
 }
