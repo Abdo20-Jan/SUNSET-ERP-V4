@@ -2,9 +2,8 @@ import Link from "next/link";
 
 import { listarTransferencias } from "@/lib/actions/transferencias";
 import { isStockDualEnabled } from "@/lib/features";
-import { fmtDate } from "@/lib/format";
 
-import { TransferenciaActions } from "./_components/transferencia-actions";
+import { TransferenciaRow } from "./_components/transferencia-row";
 
 export default async function TransferenciasPage() {
   if (!isStockDualEnabled()) {
@@ -55,37 +54,7 @@ export default async function TransferenciasPage() {
             </thead>
             <tbody>
               {transferencias.map((t) => (
-                <tr key={t.id} className="border-t">
-                  <td className="px-3 py-2 font-mono text-xs">{t.numero}</td>
-                  <td className="px-3 py-2">{fmtDate(t.fecha)}</td>
-                  <td className="px-3 py-2">
-                    <div className="font-mono text-xs">{t.producto.codigo}</div>
-                    <div>{t.producto.nombre}</div>
-                  </td>
-                  <td className="px-3 py-2 text-right font-medium">
-                    {t.cantidad}
-                  </td>
-                  <td className="px-3 py-2">
-                    {t.origen.nombre} → {t.destino.nombre}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span
-                      className={
-                        t.estado === "CONFIRMADA"
-                          ? "font-medium text-green-700"
-                          : "text-red-700"
-                      }
-                    >
-                      {t.estado}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <TransferenciaActions
-                      transferenciaId={t.id}
-                      estado={t.estado}
-                    />
-                  </td>
-                </tr>
+                <TransferenciaRow key={t.id} t={t} />
               ))}
             </tbody>
           </table>
