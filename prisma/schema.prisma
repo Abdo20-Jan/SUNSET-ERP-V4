@@ -255,7 +255,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  auditLogs AuditLog[]
+  auditLogs     AuditLog[]
+  leads         Lead[]
+  oportunidades Oportunidad[]
+  actividades   Actividad[]
 }
 
 // ============================================================
@@ -735,6 +738,10 @@ model Cliente {
   ventas         Venta[]
   pedidosVenta   PedidoVenta[]
   extractoLineas LineaExtractoSugerencia[]
+  leads          Lead[]
+  contactos      Contacto[]
+  oportunidades  Oportunidad[]
+  actividades    Actividad[]
 }
 
 model Proveedor {
@@ -1292,4 +1299,180 @@ model Cotizacion {
   updatedAt DateTime @updatedAt
 
   @@index([fecha])
+}
+
+// ============================================================
+// CRM (W4) — Lead → Pipeline → Cliente, contactos, actividades, scoring
+// ============================================================
+
+enum LeadFuente {
+  ORGANICO
+  REFERIDO
+  EVENTO
+  ANUNCIO
+  LINKEDIN
+  MERCADOLIBRE
+  FERIA
+  OTRO
+}
+
+enum LeadEstado {
+  NUEVO
+  CONTACTADO
+  CALIFICADO
+  DESCALIFICADO
+  CONVERTIDO
+}
+
+enum OportunidadEstado {
+  ABIERTA
+  GANADA
+  PERDIDA
+  EN_PAUSA
+}
+
+enum ActividadTipo {
+  LLAMADA
+  EMAIL
+  REUNION
+  NOTA
+  TAREA
+  WHATSAPP
+}
+
+model Lead {
+  id        String     @id @default(uuid())
+  nombre    String
+  empresa   String?
+  cuit      String?
+  email     String?
+  telefono  String?
+  fuente    LeadFuente @default(ORGANICO)
+  estado    LeadEstado @default(NUEVO)
+  score     Int        @default(0)
+  ownerId   String
+  notas     String?
+  clienteId String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  owner         User          @relation(fields: [ownerId], references: [id])
+  cliente       Cliente?      @relation(fields: [clienteId], references: [id])
+  contactos     Contacto[]
+  actividades   Actividad[]
+  oportunidades Oportunidad[]
+
+  @@index([ownerId])
+  @@index([estado])
+  @@index([clienteId])
+}
+
+model Contacto {
+  id          String   @id @default(uuid())
+  nombre      String
+  cargo       String?
+  email       String?
+  telefono    String?
+  esPrincipal Boolean  @default(false)
+  leadId      String?
+  clienteId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lead    Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  cliente Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+
+  @@index([leadId])
+  @@index([clienteId])
+}
+
+model PipelineStage {
+  id        String  @id @default(uuid())
+  nombre    String
+  orden     Int
+  esGanada  Boolean @default(false)
+  esPerdida Boolean @default(false)
+  activo    Boolean @default(true)
+
+  oportunidades Oportunidad[]
+
+  @@unique([orden])
+}
+
+model Oportunidad {
+  id             String            @id @default(uuid())
+  numero         String            @unique
+  titulo         String
+  monto          Decimal           @db.Decimal(18, 2)
+  moneda         Moneda            @default(USD)
+  stageId        String
+  probabilidad   Int               @default(50)
+  cierreEstimado DateTime?
+  estado         OportunidadEstado @default(ABIERTA)
+  leadId         String?
+  clienteId      String?
+  ownerId        String
+  notas          String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  stage       PipelineStage @relation(fields: [stageId], references: [id])
+  lead        Lead?         @relation(fields: [leadId], references: [id])
+  cliente     Cliente?      @relation(fields: [clienteId], references: [id])
+  owner       User          @relation(fields: [ownerId], references: [id])
+  actividades Actividad[]
+
+  @@index([stageId])
+  @@index([ownerId])
+  @@index([estado])
+  @@index([leadId])
+  @@index([clienteId])
+}
+
+model Actividad {
+  id              String        @id @default(uuid())
+  tipo            ActividadTipo
+  contenido       String
+  fechaProgramada DateTime?
+  completada      Boolean       @default(false)
+  fechaCompletada DateTime?
+  ownerId         String
+  leadId          String?
+  clienteId       String?
+  oportunidadId   String?
+  sentimiento     Decimal?      @db.Decimal(3, 2)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  owner       User         @relation(fields: [ownerId], references: [id])
+  lead        Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  cliente     Cliente?     @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  oportunidad Oportunidad? @relation(fields: [oportunidadId], references: [id], onDelete: SetNull)
+
+  @@index([ownerId, completada])
+  @@index([leadId])
+  @@index([clienteId])
+  @@index([oportunidadId])
+}
+
+model EmailTemplate {
+  id        String   @id @default(uuid())
+  nombre    String
+  asunto    String
+  cuerpo    String
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ScoringRule {
+  id        String   @id @default(uuid())
+  nombre    String
+  campo     String
+  operador  String
+  valor     String
+  puntos    Int
+  activa    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

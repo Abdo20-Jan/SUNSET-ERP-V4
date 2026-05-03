@@ -9,6 +9,8 @@ import {
   ShoppingBasket03Icon,
   Calendar03Icon,
   ReceiptDollarIcon,
+  PackageIcon,
+  CustomerService01Icon,
 } from "@hugeicons/core-free-icons";
 
 export type NavItem = {
@@ -32,8 +34,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     label: "Operación",
     items: [
+      { label: "CRM", href: "/crm", icon: CustomerService01Icon },
       { label: "Ventas", href: "/ventas", icon: ShoppingBag03Icon },
       { label: "Compras", href: "/compras", icon: ShoppingBasket03Icon },
+      { label: "Inventario", href: "/inventario", icon: PackageIcon },
       { label: "Comex", href: "/comex", icon: CargoShipIcon },
       { label: "Tesorería", href: "/tesoreria", icon: CreditCardIcon },
       { label: "Gastos", href: "/gastos", icon: ReceiptDollarIcon },

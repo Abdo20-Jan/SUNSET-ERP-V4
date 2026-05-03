@@ -369,6 +369,36 @@ async function seedDepositos() {
 }
 
 // ============================================================
+// PIPELINE STAGES CRM (W4) — 6 stages default
+// ============================================================
+
+async function seedPipelineStages() {
+  const stages = [
+    { orden: 1, nombre: "Nuevo", esGanada: false, esPerdida: false },
+    { orden: 2, nombre: "Calificado", esGanada: false, esPerdida: false },
+    { orden: 3, nombre: "Propuesta", esGanada: false, esPerdida: false },
+    { orden: 4, nombre: "Negociación", esGanada: false, esPerdida: false },
+    { orden: 5, nombre: "Ganado", esGanada: true, esPerdida: false },
+    { orden: 6, nombre: "Perdido", esGanada: false, esPerdida: true },
+  ];
+
+  for (const stage of stages) {
+    await prisma.pipelineStage.upsert({
+      where: { orden: stage.orden },
+      update: {
+        nombre: stage.nombre,
+        esGanada: stage.esGanada,
+        esPerdida: stage.esPerdida,
+        activo: true,
+      },
+      create: { ...stage, activo: true },
+    });
+  }
+
+  console.log(`✓ ${stages.length} pipeline stages CRM creados/actualizados`);
+}
+
+// ============================================================
 // MAIN
 // ============================================================
 
@@ -379,6 +409,7 @@ async function main() {
   await seedCuentas();
   await seedAnaliticasBase();
   await seedDepositos();
+  await seedPipelineStages();
   console.log("\n✅ Seed completado. Sistema listo para auto-construir el plan analítico.");
 }
 
