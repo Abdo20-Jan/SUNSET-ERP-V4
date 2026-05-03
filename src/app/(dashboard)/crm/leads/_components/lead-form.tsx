@@ -15,6 +15,8 @@ import type {
   LeadFuente,
 } from "@/generated/prisma/client";
 
+import { EnumSelect } from "./enum-select";
+
 type Props = {
   mode: "create" | "edit";
   leadId?: string;
@@ -66,16 +68,18 @@ export function LeadForm({ mode, leadId, initial }: Props) {
         <Field label="CUIT" name="cuit" defaultValue={initial?.cuit} />
         <Field label="Email" name="email" type="email" defaultValue={initial?.email} />
         <Field label="Teléfono" name="telefono" defaultValue={initial?.telefono} />
-        <Select label="Fuente" name="fuente" defaultValue={initial?.fuente ?? "ORGANICO"}>
-          {LEAD_FUENTES.map((f) => (
-            <option key={f} value={f}>{f}</option>
-          ))}
-        </Select>
-        <Select label="Estado" name="estado" defaultValue={initial?.estado ?? "NUEVO"}>
-          {LEAD_ESTADOS.map((e) => (
-            <option key={e} value={e}>{e}</option>
-          ))}
-        </Select>
+        <EnumSelect
+          label="Fuente"
+          name="fuente"
+          defaultValue={initial?.fuente ?? "ORGANICO"}
+          options={LEAD_FUENTES}
+        />
+        <EnumSelect
+          label="Estado"
+          name="estado"
+          defaultValue={initial?.estado ?? "NUEVO"}
+          options={LEAD_ESTADOS}
+        />
       </div>
 
       <label className="flex flex-col gap-1 text-sm">
@@ -136,27 +140,3 @@ function Field({ label, name, defaultValue, type, required }: FieldProps) {
   );
 }
 
-function Select({
-  label,
-  name,
-  defaultValue,
-  children,
-}: {
-  label: string;
-  name: string;
-  defaultValue?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-sm">
-      <span>{label}</span>
-      <select
-        name={name}
-        defaultValue={defaultValue}
-        className="rounded-md border px-3 py-2"
-      >
-        {children}
-      </select>
-    </label>
-  );
-}
