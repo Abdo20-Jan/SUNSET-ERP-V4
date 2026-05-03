@@ -10,12 +10,18 @@ import {
   sumMoney,
   toDecimal,
 } from "@/lib/decimal";
+import { isStockDualEnabled } from "@/lib/features";
 import {
   AsientoError,
   anularAsiento,
   contabilizarAsiento,
   crearAsientoVenta,
 } from "@/lib/services/asiento-automatico";
+import { aplicarReservaSPD, liberarReservaSPD } from "@/lib/services/stock";
+import {
+  getDepositoPorDefecto,
+  validarDisponible,
+} from "@/lib/services/stock-helpers";
 import {
   CondicionPago,
   Moneda,
@@ -465,6 +471,32 @@ export async function guardarVentaAction(
   }
 }
 
+type VentaEmisionItem = { productoId: string; cantidad: number };
+type TxClient = Prisma.TransactionClient;
+
+async function reservarStockEmision(
+  tx: TxClient,
+  items: readonly VentaEmisionItem[],
+): Promise<void> {
+  if (!isStockDualEnabled()) return;
+  const depositoId = await getDepositoPorDefecto(tx);
+  for (const it of items) {
+    await validarDisponible(tx, it.productoId, depositoId, it.cantidad);
+    await aplicarReservaSPD(tx, it.productoId, depositoId, it.cantidad);
+  }
+}
+
+async function liberarReservasAnulacion(
+  tx: TxClient,
+  items: readonly VentaEmisionItem[],
+): Promise<void> {
+  if (!isStockDualEnabled()) return;
+  const depositoId = await getDepositoPorDefecto(tx);
+  for (const it of items) {
+    await liberarReservaSPD(tx, it.productoId, depositoId, it.cantidad);
+  }
+}
+
 export async function emitirVentaAction(
   ventaId: string,
 ): Promise<{ ok: true; numeroAsiento: number } | { ok: false; error: string }> {
@@ -472,7 +504,11 @@ export async function emitirVentaAction(
     const result = await db.$transaction(async (tx) => {
       const v = await tx.venta.findUnique({
         where: { id: ventaId },
-        select: { estado: true, asientoId: true, numero: true },
+        select: {
+          asientoId: true,
+          numero: true,
+          items: { select: { productoId: true, cantidad: true } },
+        },
       });
       if (!v) throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
       if (v.asientoId) {
@@ -481,6 +517,7 @@ export async function emitirVentaAction(
           `Venta ${v.numero} ya tiene asiento.`,
         );
       }
+      await reservarStockEmision(tx, v.items);
       const asiento = await crearAsientoVenta(ventaId, tx);
       const cont = await contabilizarAsiento(asiento.id, tx);
       await tx.venta.update({
@@ -498,25 +535,48 @@ export async function emitirVentaAction(
   }
 }
 
+function ensureSinEntregasConfirmadas(
+  entregas: readonly { numero: string }[],
+): void {
+  if (entregas.length === 0 || !isStockDualEnabled()) return;
+  const numeros = entregas.map((e) => e.numero).join(", ");
+  throw new AsientoError(
+    "DOMINIO_INVALIDO",
+    `Venta tiene entrega(s) confirmada(s) (${numeros}). Anular entregas antes de anular la venta.`,
+  );
+}
+
 export async function anularVentaAction(
   ventaId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const v = await db.venta.findUnique({
-      where: { id: ventaId },
-      select: { asientoId: true },
-    });
-    if (!v) return { ok: false, error: "Venta no existe." };
-    if (!v.asientoId) {
-      // Sin asiento: solo marcar cancelada.
-      await db.venta.update({
+    await db.$transaction(async (tx) => {
+      const v = await tx.venta.findUnique({
         where: { id: ventaId },
-        data: { estado: VentaEstado.CANCELADA },
+        select: {
+          asientoId: true,
+          items: { select: { productoId: true, cantidad: true } },
+          entregas: {
+            where: { estado: "CONFIRMADA" },
+            select: { numero: true },
+          },
+        },
       });
-    } else {
-      await anularAsiento(v.asientoId);
-      // anularEnTx ya cancela y desvincula la venta.
-    }
+      if (!v) {
+        throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
+      }
+      ensureSinEntregasConfirmadas(v.entregas);
+
+      if (!v.asientoId) {
+        await tx.venta.update({
+          where: { id: ventaId },
+          data: { estado: VentaEstado.CANCELADA },
+        });
+        return;
+      }
+      await liberarReservasAnulacion(tx, v.items);
+      await anularAsiento(v.asientoId, tx);
+    });
     revalidatePath("/ventas");
     revalidatePath(`/ventas/${ventaId}`);
     return { ok: true };
