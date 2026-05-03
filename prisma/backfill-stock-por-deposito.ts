@@ -52,28 +52,35 @@ type CsvRow = {
   costoPromedio: string;
 };
 
-function parseArgs(argv: string[]): CliOpts {
-  const opts: CliOpts = { mode: "all-to", dryRun: false };
-  let mode: "all-to" | "csv" | null = null;
+type ArgKind = "all-to" | "csv" | "dry-run" | "help";
 
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--all-to") {
-      mode = "all-to";
-      opts.depositoId = argv[++i];
-    } else if (arg === "--csv") {
-      mode = "csv";
-      opts.csvPath = argv[++i];
-    } else if (arg === "--dry-run") {
-      opts.dryRun = true;
-    } else if (arg === "--help" || arg === "-h") {
-      printHelp();
-      process.exit(0);
-    } else {
-      throw new Error(`Argumento desconocido: ${arg}`);
-    }
+function classifyArg(
+  arg: string,
+  next: string | undefined,
+  opts: CliOpts,
+): ArgKind {
+  if (arg === "--all-to") {
+    opts.depositoId = next;
+    return "all-to";
   }
+  if (arg === "--csv") {
+    opts.csvPath = next;
+    return "csv";
+  }
+  if (arg === "--dry-run") {
+    opts.dryRun = true;
+    return "dry-run";
+  }
+  if (arg === "--help" || arg === "-h") {
+    return "help";
+  }
+  throw new Error(`Argumento desconocido: ${arg}`);
+}
 
+function validateMode(
+  mode: "all-to" | "csv" | null,
+  opts: CliOpts,
+): "all-to" | "csv" {
   if (!mode) {
     printHelp();
     throw new Error("Falta especificar --all-to <depositoId> o --csv <path>.");
@@ -84,7 +91,26 @@ function parseArgs(argv: string[]): CliOpts {
   if (mode === "csv" && !opts.csvPath) {
     throw new Error("--csv requiere un path.");
   }
-  opts.mode = mode;
+  return mode;
+}
+
+function parseArgs(argv: string[]): CliOpts {
+  const opts: CliOpts = { mode: "all-to", dryRun: false };
+  let mode: "all-to" | "csv" | null = null;
+
+  for (let i = 0; i < argv.length; i++) {
+    const kind = classifyArg(argv[i], argv[i + 1], opts);
+    if (kind === "help") {
+      printHelp();
+      process.exit(0);
+    }
+    if (kind === "all-to" || kind === "csv") {
+      mode = kind;
+      i++; // consumir el valor del argumento
+    }
+  }
+
+  opts.mode = validateMode(mode, opts);
   return opts;
 }
 
@@ -172,12 +198,18 @@ async function ejecutarBackfill(
   const plan: InsertPlan[] = [];
 
   if (opts.mode === "all-to") {
+    // validateMode garantiza que opts.depositoId está presente cuando mode === "all-to";
+    // este guard es defensivo y mantiene el narrowing explícito.
+    const depositoId = opts.depositoId;
+    if (!depositoId) {
+      throw new Error("--all-to requiere un depositoId.");
+    }
     const dep = await prisma.deposito.findUnique({
-      where: { id: opts.depositoId! },
+      where: { id: depositoId },
       select: { id: true, nombre: true, activo: true },
     });
     if (!dep) {
-      throw new Error(`Depósito ${opts.depositoId} no existe.`);
+      throw new Error(`Depósito ${depositoId} no existe.`);
     }
     if (!dep.activo) {
       throw new Error(`Depósito "${dep.nombre}" está inactivo.`);
@@ -192,7 +224,12 @@ async function ejecutarBackfill(
     }
     console.log(`  → todo el stock va a "${dep.nombre}".`);
   } else {
-    const rows = parseCsv(opts.csvPath!);
+    // validateMode garantiza opts.csvPath cuando mode === "csv".
+    const csvPath = opts.csvPath;
+    if (!csvPath) {
+      throw new Error("--csv requiere un path.");
+    }
+    const rows = parseCsv(csvPath);
     console.log(`✓ CSV leído: ${rows.length} filas.`);
 
     // Validar IDs (deposito y producto existen)
