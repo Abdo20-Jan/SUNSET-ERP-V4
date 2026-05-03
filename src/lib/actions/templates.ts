@@ -3,21 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { isCrmEnabled } from "@/lib/features";
+import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
 import { Prisma } from "@/generated/prisma/client";
 
 type ActionResult<T = undefined> =
   | { ok: true; data: T }
   | { ok: false; error: string };
-
-const FLAG_OFF_ERROR = {
-  ok: false as const,
-  error: "CRM no está habilitado (flag CRM_ENABLED=false).",
-};
-
-const NO_AUTH = { ok: false as const, error: "No autorizado." };
 
 const templateSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio."),
@@ -27,6 +19,21 @@ const templateSchema = z.object({
 });
 
 export type TemplateInput = z.input<typeof templateSchema>;
+
+type ParsedTemplate = z.output<typeof templateSchema>;
+
+function parseTemplateInput(
+  raw: TemplateInput,
+): { ok: true; data: ParsedTemplate } | { ok: false; error: string } {
+  const parsed = templateSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Datos inválidos.",
+    };
+  }
+  return { ok: true, data: parsed.data };
+}
 
 export async function listarTemplates() {
   return db.emailTemplate.findMany({ orderBy: { nombre: "asc" } });
@@ -39,19 +46,15 @@ export async function getTemplate(id: string) {
 export async function crearTemplateAction(
   raw: TemplateInput,
 ): Promise<ActionResult<{ id: string }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
 
-  const parsed = templateSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
-  }
+  const validated = parseTemplateInput(raw);
+  if (!validated.ok) return validated;
 
   try {
     const created = await db.emailTemplate.create({
-      data: parsed.data,
+      data: validated.data,
       select: { id: true },
     });
     revalidatePath("/crm/configuracion/templates");
@@ -66,20 +69,16 @@ export async function editarTemplateAction(
   id: string,
   raw: TemplateInput,
 ): Promise<ActionResult<{ id: string }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
 
-  const parsed = templateSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
-  }
+  const validated = parseTemplateInput(raw);
+  if (!validated.ok) return validated;
 
   try {
     const updated = await db.emailTemplate.update({
       where: { id },
-      data: parsed.data,
+      data: validated.data,
       select: { id: true },
     });
     revalidatePath("/crm/configuracion/templates");
@@ -96,9 +95,8 @@ export async function editarTemplateAction(
 export async function eliminarTemplateAction(
   id: string,
 ): Promise<ActionResult<undefined>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
 
   try {
     await db.emailTemplate.delete({ where: { id } });

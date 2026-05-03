@@ -13,54 +13,44 @@ type LeadFields = {
   notas: string | null;
 };
 
+const CAMPOS_VALIDOS: Record<string, keyof LeadFields> = {
+  empresa: "empresa",
+  cuit: "cuit",
+  email: "email",
+  telefono: "telefono",
+  fuente: "fuente",
+  estado: "estado",
+  notas: "notas",
+};
+
 function getCampo(lead: LeadFields, campo: string): string | null {
-  switch (campo) {
-    case "empresa":
-      return lead.empresa;
-    case "cuit":
-      return lead.cuit;
-    case "email":
-      return lead.email;
-    case "telefono":
-      return lead.telefono;
-    case "fuente":
-      return lead.fuente;
-    case "estado":
-      return lead.estado;
-    case "notas":
-      return lead.notas;
-    default:
-      return null;
-  }
+  const key = CAMPOS_VALIDOS[campo];
+  if (!key) return null;
+  const value = lead[key];
+  return typeof value === "string" ? value : null;
 }
+
+const OPERADORES: Record<
+  string,
+  (valor: string | null, regla: string) => boolean
+> = {
+  exists: (v) => v !== null && v.trim().length > 0,
+  "not-exists": (v) => v === null || v.trim().length === 0,
+  equals: (v, r) => v === r,
+  "not-equals": (v, r) => v !== r,
+  contains: (v, r) =>
+    v !== null && v.toLowerCase().includes(r.toLowerCase()),
+  "starts-with": (v, r) =>
+    v !== null && v.toLowerCase().startsWith(r.toLowerCase()),
+};
 
 function evaluarRegla(
   valorCampo: string | null,
   operador: string,
   valorRegla: string,
 ): boolean {
-  switch (operador) {
-    case "exists":
-      return valorCampo !== null && valorCampo.trim().length > 0;
-    case "not-exists":
-      return valorCampo === null || valorCampo.trim().length === 0;
-    case "equals":
-      return valorCampo === valorRegla;
-    case "not-equals":
-      return valorCampo !== valorRegla;
-    case "contains":
-      return (
-        valorCampo !== null &&
-        valorCampo.toLowerCase().includes(valorRegla.toLowerCase())
-      );
-    case "starts-with":
-      return (
-        valorCampo !== null &&
-        valorCampo.toLowerCase().startsWith(valorRegla.toLowerCase())
-      );
-    default:
-      return false;
-  }
+  const fn = OPERADORES[operador];
+  return fn ? fn(valorCampo, valorRegla) : false;
 }
 
 export async function calcularScoreLead(leadId: string): Promise<number> {

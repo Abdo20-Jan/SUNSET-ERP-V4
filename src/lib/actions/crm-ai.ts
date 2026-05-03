@@ -2,9 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { isCrmEnabled } from "@/lib/features";
+import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
 import {
   resumirLead,
   type ResumenLead,
@@ -17,45 +16,36 @@ type ActionResult<T = undefined> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
-const FLAG_OFF_ERROR = {
-  ok: false as const,
-  error: "CRM no está habilitado (flag CRM_ENABLED=false).",
-};
-
-const NO_AUTH = { ok: false as const, error: "No autorizado." };
+function mapAiError(err: unknown, contexto: string): string {
+  if (err instanceof Error) {
+    if (err.message.startsWith("ANTHROPIC_API_KEY")) return err.message;
+    if (err.message === "Lead no encontrado.") return err.message;
+    if (err.message === "Actividad no existe.") return err.message;
+  }
+  console.error(`${contexto} failed`, err);
+  return "El asistente no pudo completar la operación. Probá de nuevo.";
+}
 
 export async function resumirLeadAction(
   leadId: string,
 ): Promise<ActionResult<ResumenLead>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
   if (!leadId) return { ok: false, error: "Id requerido." };
 
   try {
     const data = await resumirLead(leadId);
     return { ok: true, data };
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith("ANTHROPIC_API_KEY")) {
-      return { ok: false, error: err.message };
-    }
-    if (err instanceof Error && err.message === "Lead no encontrado.") {
-      return { ok: false, error: err.message };
-    }
-    console.error("resumirLeadAction failed", err);
-    return {
-      ok: false,
-      error: "El asistente no pudo generar el resumen. Probá de nuevo.",
-    };
+    return { ok: false, error: mapAiError(err, "resumirLeadAction") };
   }
 }
 
 export async function recalcularScoringLeadAction(
   leadId: string,
 ): Promise<ActionResult<{ score: number }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
   if (!leadId) return { ok: false, error: "Id requerido." };
 
   try {
@@ -75,9 +65,8 @@ export async function recalcularScoringLeadAction(
 export async function analizarSentimientoActividadAction(
   actividadId: string,
 ): Promise<ActionResult<{ sentimiento: number; etiqueta: string }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
   if (!actividadId) return { ok: false, error: "Id requerido." };
 
   try {
@@ -98,13 +87,6 @@ export async function analizarSentimientoActividadAction(
     }
     return { ok: true, data: result };
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith("ANTHROPIC_API_KEY")) {
-      return { ok: false, error: err.message };
-    }
-    console.error("analizarSentimientoActividadAction failed", err);
-    return {
-      ok: false,
-      error: "El asistente no pudo analizar el sentimiento. Probá de nuevo.",
-    };
+    return { ok: false, error: mapAiError(err, "analizarSentimientoActividadAction") };
   }
 }
