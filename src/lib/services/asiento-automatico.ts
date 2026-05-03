@@ -1958,6 +1958,96 @@ export async function crearAsientoVenta(
 }
 
 // ============================================================
+// Entrega de venta (W3) — asiento de baja física
+// ============================================================
+//
+// DEBE  1.1.5.03 MERCADERIAS A ENTREGAR    Σ(cantidad × costoUnitario)
+// HABER 1.1.5.01 MERCADERIAS                ídem
+//
+// Cancela la cuenta provisória que crearAsientoVenta había debitado
+// contra CMV. Después de este asiento, el contable está alineado con
+// el stock físico (que también baja vía MovimientoStock EGRESO).
+
+export async function crearAsientoEntrega(
+  entregaId: string,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const entrega = await inner.entregaVenta.findUnique({
+      where: { id: entregaId },
+      select: {
+        id: true,
+        numero: true,
+        fecha: true,
+        asientoId: true,
+        venta: { select: { numero: true } },
+        items: {
+          select: { cantidad: true, costoUnitario: true },
+        },
+      },
+    });
+    if (!entrega) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Entrega ${entregaId} no existe.`,
+      );
+    }
+    if (entrega.asientoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Entrega ${entrega.numero} ya tiene asiento contable.`,
+      );
+    }
+
+    const totalCosto = entrega.items
+      .reduce(
+        (acc, it) => acc.plus(toDecimal(it.costoUnitario).times(it.cantidad)),
+        toDecimal(0),
+      )
+      .toDecimalPlaces(2);
+
+    if (!totalCosto.gt(0)) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Entrega ${entrega.numero} no tiene costo registrado — nada que asentar.`,
+      );
+    }
+
+    const porCodigo = await ensureCuentasMap(inner, VENTA_CODIGOS);
+    const lineas: LineaInput[] = [
+      {
+        cuentaId: porCodigo.get(VENTA_CODIGOS.MERCADERIAS_A_ENTREGAR.codigo)!,
+        debe: money(totalCosto).toString(),
+        haber: 0,
+        descripcion: `Entrega ${entrega.numero} — cancela mercaderías a entregar (venta ${entrega.venta.numero})`,
+      },
+      {
+        cuentaId: porCodigo.get(VENTA_CODIGOS.MERCADERIAS.codigo)!,
+        debe: 0,
+        haber: money(totalCosto).toString(),
+        descripcion: `Entrega ${entrega.numero} — egreso de stock`,
+      },
+    ];
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: entrega.fecha,
+      descripcion: `Entrega ${entrega.numero} (venta ${entrega.venta.numero})`,
+      origen: AsientoOrigen.MANUAL,
+      moneda: Moneda.ARS,
+      tipoCambio: 1,
+      lineas,
+    });
+    await inner.entregaVenta.update({
+      where: { id: entregaId },
+      data: { asientoId: asiento.id },
+    });
+    return asiento;
+  };
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
 // Compras locales — asiento automático
 // ============================================================
 //
