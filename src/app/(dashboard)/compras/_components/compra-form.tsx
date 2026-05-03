@@ -40,6 +40,7 @@ import {
 } from "@/components/proveedor-combobox";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -402,7 +403,16 @@ export function CompraForm({
           </Field>
 
           <Field label="Fecha" error={errors.fecha?.message}>
-            <Input type="date" {...register("fecha")} />
+            <Controller
+              control={control}
+              name="fecha"
+              render={({ field }) => (
+                <DatePicker
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                />
+              )}
+            />
           </Field>
 
           <Field
@@ -410,7 +420,16 @@ export function CompraForm({
             error={errors.fechaVencimiento?.message}
             hint="Auto-calculado según proveedor"
           >
-            <Input type="date" {...register("fechaVencimiento")} />
+            <Controller
+              control={control}
+              name="fechaVencimiento"
+              render={({ field }) => (
+                <DatePicker
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                />
+              )}
+            />
           </Field>
 
           <Field label="Condición de pago">

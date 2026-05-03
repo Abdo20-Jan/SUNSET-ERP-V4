@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -628,11 +629,7 @@ export function EmbarqueBatchPago({
               </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-[11px]">Fecha</Label>
-                <Input
-                  type="date"
-                  value={fecha}
-                  onChange={(e) => setFecha(e.target.value)}
-                />
+                <DatePicker value={fecha} onChange={setFecha} />
               </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-[11px]">Comprobante (opcional)</Label>

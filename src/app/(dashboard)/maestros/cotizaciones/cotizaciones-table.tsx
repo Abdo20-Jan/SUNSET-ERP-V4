@@ -31,6 +31,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -305,13 +306,11 @@ function CotizacionFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-2">
               <Label htmlFor="fecha">Fecha *</Label>
-              <Input
+              <DatePicker
                 id="fecha"
-                type="date"
                 value={fecha}
-                onChange={(e) => setFecha(e.target.value)}
+                onChange={setFecha}
                 disabled={state?.mode === "edit"}
-                required
               />
             </div>
             <div className="flex flex-col gap-2">

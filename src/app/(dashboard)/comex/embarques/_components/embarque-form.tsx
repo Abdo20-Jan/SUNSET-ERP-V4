@@ -49,6 +49,7 @@ import Decimal from "decimal.js";
 import { calcularTributosSugeridos } from "@/lib/services/comex";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -945,22 +946,34 @@ export function EmbarqueForm(props: Props) {
                 <Label htmlFor="fechaEmpaque" className="text-xs">
                   Fecha de empaque
                 </Label>
-                <Input
-                  id="fechaEmpaque"
-                  type="date"
-                  disabled={readonly}
-                  {...register("fechaEmpaque")}
+                <Controller
+                  control={control}
+                  name="fechaEmpaque"
+                  render={({ field }) => (
+                    <DatePicker
+                      id="fechaEmpaque"
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      disabled={readonly}
+                    />
+                  )}
                 />
               </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="fechaSalida" className="text-xs">
                   Fecha de salida
                 </Label>
-                <Input
-                  id="fechaSalida"
-                  type="date"
-                  disabled={readonly}
-                  {...register("fechaSalida")}
+                <Controller
+                  control={control}
+                  name="fechaSalida"
+                  render={({ field }) => (
+                    <DatePicker
+                      id="fechaSalida"
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      disabled={readonly}
+                    />
+                  )}
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -978,22 +991,34 @@ export function EmbarqueForm(props: Props) {
                 <Label htmlFor="fechaTransbordo" className="text-xs">
                   Fecha de transbordo
                 </Label>
-                <Input
-                  id="fechaTransbordo"
-                  type="date"
-                  disabled={readonly}
-                  {...register("fechaTransbordo")}
+                <Controller
+                  control={control}
+                  name="fechaTransbordo"
+                  render={({ field }) => (
+                    <DatePicker
+                      id="fechaTransbordo"
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      disabled={readonly}
+                    />
+                  )}
                 />
               </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="fechaLlegada" className="text-xs">
                   Fecha de llegada del contenedor
                 </Label>
-                <Input
-                  id="fechaLlegada"
-                  type="date"
-                  disabled={readonly}
-                  {...register("fechaLlegada")}
+                <Controller
+                  control={control}
+                  name="fechaLlegada"
+                  render={({ field }) => (
+                    <DatePicker
+                      id="fechaLlegada"
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      disabled={readonly}
+                    />
+                  )}
                 />
               </div>
               <div className="flex flex-col gap-1 md:col-span-2">
@@ -1852,11 +1877,16 @@ const FacturaCard = memo(function FacturaCard({
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <div className="flex flex-col gap-1">
             <Label className="text-xs">Fecha factura</Label>
-            <Input
-              type="date"
-              className="h-9"
-              disabled={disabled}
-              {...register(`costos.${index}.fechaFactura` as const)}
+            <Controller
+              control={control}
+              name={`costos.${index}.fechaFactura` as const}
+              render={({ field }) => (
+                <DatePicker
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  disabled={disabled}
+                />
+              )}
             />
           </div>
           <div className="flex flex-col gap-1">
