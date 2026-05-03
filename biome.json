@@ -1,0 +1,24 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "organizeImports": { "enabled": false },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        "noReactSpecificProps": "off"
+      }
+    }
+  },
+  "javascript": {
+    "jsxRuntime": "transparent"
+  },
+  "files": {
+    "ignore": [
+      "src/generated/**",
+      "node_modules/**",
+      ".next/**",
+      "prisma/migrations/**"
+    ]
+  }
+}
