@@ -24,6 +24,7 @@ import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-
 
 import { VepSection } from "./vep-section";
 import { EmbarqueBatchPago } from "./embarque-batch-pago";
+import { PagoPorFactura } from "./_components/pago-por-factura";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +82,11 @@ export default async function CuentasAPagarPage() {
           </span>
         </CardContent>
       </Card>
+
+      <PagoPorFactura
+        proveedores={saldosProveedores}
+        cuentasBancarias={cuentasBancariasMov}
+      />
 
       <EmbarqueBatchPago
         rows={porEmbarque}

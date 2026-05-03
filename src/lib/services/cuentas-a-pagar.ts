@@ -7,6 +7,7 @@ import {
   AsientoEstado,
   CompraEstado,
   EmbarqueEstado,
+  GastoEstado,
 } from "@/generated/prisma/client";
 
 export type ProveedorAsociado = {
@@ -188,14 +189,14 @@ export async function getSaldosPorProveedor(): Promise<SaldoProveedor[]> {
 // ============================================================
 
 export type FacturaPendiente = {
-  origen: "compra" | "embarque";
+  origen: "compra" | "embarque" | "gasto";
   id: string;
   numero: string;
   fecha: string;
   fechaVencimiento: string | null;
   diasParaVencer: number | null; // negativo = vencida hace N días
   bucket: "vencida" | "proxima" | "al_dia" | "sin_fecha";
-  monto: string; // ARS (Compra: total. EmbarqueCosto: lineas convertidas a ARS)
+  monto: string; // ARS (Compra/Gasto: total convertido. EmbarqueCosto: lineas convertidas a ARS)
   moneda: string;
 };
 
@@ -288,6 +289,22 @@ export async function getSaldosPorProveedorConAging(): Promise<
     },
   });
 
+  // Gastos contabilizados (estado = CONTABILIZADO genera saldo a pagar)
+  const gastos = await db.gasto.findMany({
+    where: { estado: GastoEstado.CONTABILIZADO },
+    select: {
+      id: true,
+      numero: true,
+      facturaNumero: true,
+      fecha: true,
+      fechaVencimiento: true,
+      total: true,
+      tipoCambio: true,
+      moneda: true,
+      proveedorId: true,
+    },
+  });
+
   function clasificar(
     fechaVenc: Date | null,
   ): { dias: number | null; bucket: FacturaPendiente["bucket"] } {
@@ -344,6 +361,24 @@ export async function getSaldosPorProveedorConAging(): Promise<
       moneda: c.moneda,
     });
     facturasPorProveedor.set(c.proveedorId, arr);
+  }
+
+  for (const g of gastos) {
+    const totalArs = toDecimal(g.total).times(toDecimal(g.tipoCambio));
+    const { dias, bucket } = clasificar(g.fechaVencimiento);
+    const arr = facturasPorProveedor.get(g.proveedorId) ?? [];
+    arr.push({
+      origen: "gasto",
+      id: g.id,
+      numero: g.facturaNumero ?? g.numero,
+      fecha: g.fecha.toISOString(),
+      fechaVencimiento: g.fechaVencimiento?.toISOString() ?? null,
+      diasParaVencer: dias,
+      bucket,
+      monto: totalArs.toFixed(2),
+      moneda: g.moneda,
+    });
+    facturasPorProveedor.set(g.proveedorId, arr);
   }
 
   const result: SaldoProveedorAging[] = [];
