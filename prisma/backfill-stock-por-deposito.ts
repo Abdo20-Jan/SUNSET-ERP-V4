@@ -1,0 +1,330 @@
+/**
+ * W3.3 — Backfill StockPorDeposito desde Producto.stockActual.
+ *
+ * Pre-requisitos:
+ *  1. Schema de W3.0 aplicado (`pnpm db:push`).
+ *  2. Depósitos NACIONAL + ZONA PRIMARIA ADUANEIRA (o nomenclatura propia)
+ *     ya cargados en la base.
+ *  3. Tabla StockPorDeposito vacía (el script aborta si encuentra rows
+ *     existentes — re-ejecutar requiere `DELETE FROM "StockPorDeposito"`).
+ *
+ * Uso:
+ *
+ *   # Modo simple — todo el stock de cada producto va a un único depósito.
+ *   # Útil cuando la operación arranca con un solo galpón físico.
+ *   pnpm db:backfill-stock --all-to <depositoId>
+ *
+ *   # Modo CSV — distribución manual entre N depósitos.
+ *   # CSV format (con header):
+ *   #   productoId,depositoId,cantidad,costoPromedio
+ *   # La SUMA de `cantidad` por productoId debe == Producto.stockActual.
+ *   # `costoPromedio` puede ser igual a Producto.costoPromedio actual o
+ *   # ajustado por depósito si se conoce el dato real.
+ *   pnpm db:backfill-stock --csv path/to/repartition.csv
+ *
+ *   # Dry-run — no escribe en la base; muestra lo que haría.
+ *   pnpm db:backfill-stock --csv path/to/repartition.csv --dry-run
+ *   pnpm db:backfill-stock --all-to <depositoId> --dry-run
+ *
+ * Verificación post-backfill: el script invoca el validador automáticamente.
+ * Si encuentra divergencias, hace rollback de toda la transacción.
+ */
+
+import "dotenv/config";
+
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Prisma, PrismaClient } from "../src/generated/prisma/client";
+
+type CliOpts = {
+  mode: "all-to" | "csv";
+  depositoId?: string;
+  csvPath?: string;
+  dryRun: boolean;
+};
+
+type CsvRow = {
+  productoId: string;
+  depositoId: string;
+  cantidad: number;
+  costoPromedio: string;
+};
+
+function parseArgs(argv: string[]): CliOpts {
+  const opts: CliOpts = { mode: "all-to", dryRun: false };
+  let mode: "all-to" | "csv" | null = null;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--all-to") {
+      mode = "all-to";
+      opts.depositoId = argv[++i];
+    } else if (arg === "--csv") {
+      mode = "csv";
+      opts.csvPath = argv[++i];
+    } else if (arg === "--dry-run") {
+      opts.dryRun = true;
+    } else if (arg === "--help" || arg === "-h") {
+      printHelp();
+      process.exit(0);
+    } else {
+      throw new Error(`Argumento desconocido: ${arg}`);
+    }
+  }
+
+  if (!mode) {
+    printHelp();
+    throw new Error("Falta especificar --all-to <depositoId> o --csv <path>.");
+  }
+  if (mode === "all-to" && !opts.depositoId) {
+    throw new Error("--all-to requiere un depositoId.");
+  }
+  if (mode === "csv" && !opts.csvPath) {
+    throw new Error("--csv requiere un path.");
+  }
+  opts.mode = mode;
+  return opts;
+}
+
+function printHelp(): void {
+  console.log(`
+Backfill StockPorDeposito desde Producto.stockActual.
+
+Modos:
+  --all-to <depositoId>    Asignar todo el stock de cada producto al depósito dado.
+  --csv <path>             Distribución manual via CSV (productoId,depositoId,cantidad,costoPromedio).
+  --dry-run                Simular sin escribir.
+  -h, --help               Mostrar esta ayuda.
+`);
+}
+
+function parseCsv(path: string): CsvRow[] {
+  const absolute = resolve(process.cwd(), path);
+  const raw = readFileSync(absolute, "utf-8");
+  const lines = raw
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  if (lines.length === 0) {
+    throw new Error(`CSV vacío: ${absolute}`);
+  }
+  const header = lines[0].split(",").map((c) => c.trim());
+  const expected = ["productoId", "depositoId", "cantidad", "costoPromedio"];
+  const headerMatches =
+    header.length === expected.length &&
+    expected.every((col, i) => header[i] === col);
+  if (!headerMatches) {
+    throw new Error(
+      `CSV header inesperado. Esperado: ${expected.join(",")}; encontrado: ${header.join(",")}`,
+    );
+  }
+
+  const rows: CsvRow[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(",").map((c) => c.trim());
+    if (cols.length !== 4) {
+      throw new Error(`CSV línea ${i + 1}: 4 columnas esperadas, encontradas ${cols.length}`);
+    }
+    const cantidad = Number.parseInt(cols[2], 10);
+    if (!Number.isFinite(cantidad) || cantidad < 0) {
+      throw new Error(`CSV línea ${i + 1}: cantidad inválida "${cols[2]}"`);
+    }
+    rows.push({
+      productoId: cols[0],
+      depositoId: cols[1],
+      cantidad,
+      costoPromedio: cols[3],
+    });
+  }
+  return rows;
+}
+
+async function ejecutarBackfill(
+  prisma: PrismaClient,
+  opts: CliOpts,
+): Promise<void> {
+  // 1) Pre-check: tabla vacía
+  const existing = await prisma.stockPorDeposito.count();
+  if (existing > 0) {
+    throw new Error(
+      `StockPorDeposito ya tiene ${existing} rows. Para re-ejecutar, vaciar primero la tabla.`,
+    );
+  }
+
+  // 2) Snapshot de productos con stock o costo
+  const productos = await prisma.producto.findMany({
+    where: { OR: [{ stockActual: { not: 0 } }, { costoPromedio: { not: 0 } }] },
+    select: { id: true, codigo: true, stockActual: true, costoPromedio: true },
+    orderBy: { codigo: "asc" },
+  });
+  console.log(`✓ ${productos.length} productos con stock/costo a procesar.`);
+
+  // 3) Construir plan de inserts
+  type InsertPlan = {
+    productoId: string;
+    depositoId: string;
+    cantidadFisica: number;
+    costoPromedio: Prisma.Decimal;
+  };
+  const plan: InsertPlan[] = [];
+
+  if (opts.mode === "all-to") {
+    const dep = await prisma.deposito.findUnique({
+      where: { id: opts.depositoId! },
+      select: { id: true, nombre: true, activo: true },
+    });
+    if (!dep) {
+      throw new Error(`Depósito ${opts.depositoId} no existe.`);
+    }
+    if (!dep.activo) {
+      throw new Error(`Depósito "${dep.nombre}" está inactivo.`);
+    }
+    for (const p of productos) {
+      plan.push({
+        productoId: p.id,
+        depositoId: dep.id,
+        cantidadFisica: p.stockActual,
+        costoPromedio: new Prisma.Decimal(p.costoPromedio),
+      });
+    }
+    console.log(`  → todo el stock va a "${dep.nombre}".`);
+  } else {
+    const rows = parseCsv(opts.csvPath!);
+    console.log(`✓ CSV leído: ${rows.length} filas.`);
+
+    // Validar IDs (deposito y producto existen)
+    const depIds = new Set(rows.map((r) => r.depositoId));
+    const prodIds = new Set(rows.map((r) => r.productoId));
+    const [depsExist, prodsExist] = await Promise.all([
+      prisma.deposito.findMany({
+        where: { id: { in: Array.from(depIds) } },
+        select: { id: true, nombre: true, activo: true },
+      }),
+      prisma.producto.findMany({
+        where: { id: { in: Array.from(prodIds) } },
+        select: { id: true },
+      }),
+    ]);
+    const depsById = new Map(depsExist.map((d) => [d.id, d]));
+    const prodIdsExisting = new Set(prodsExist.map((p) => p.id));
+    for (const r of rows) {
+      const dep = depsById.get(r.depositoId);
+      if (!dep) {
+        throw new Error(`CSV: depósito ${r.depositoId} no existe.`);
+      }
+      if (!dep.activo) {
+        throw new Error(`CSV: depósito "${dep.nombre}" está inactivo.`);
+      }
+      if (!prodIdsExisting.has(r.productoId)) {
+        throw new Error(`CSV: producto ${r.productoId} no existe.`);
+      }
+    }
+
+    // Validar SUMA por producto == Producto.stockActual
+    const sumByProducto = new Map<string, number>();
+    for (const r of rows) {
+      sumByProducto.set(
+        r.productoId,
+        (sumByProducto.get(r.productoId) ?? 0) + r.cantidad,
+      );
+    }
+    for (const p of productos) {
+      const sum = sumByProducto.get(p.id) ?? 0;
+      if (sum !== p.stockActual) {
+        throw new Error(
+          `CSV: producto ${p.codigo} (${p.id}) suma ${sum} pero stockActual=${p.stockActual}.`,
+        );
+      }
+    }
+
+    // Construir plan (deduplicar (producto, deposito) si aparecen 2 veces sumando)
+    const merged = new Map<string, InsertPlan>();
+    for (const r of rows) {
+      const key = `${r.productoId}|${r.depositoId}`;
+      const cur = merged.get(key);
+      if (cur) {
+        cur.cantidadFisica += r.cantidad;
+      } else {
+        merged.set(key, {
+          productoId: r.productoId,
+          depositoId: r.depositoId,
+          cantidadFisica: r.cantidad,
+          costoPromedio: new Prisma.Decimal(r.costoPromedio),
+        });
+      }
+    }
+    plan.push(...merged.values());
+  }
+
+  console.log(`\nPlan: ${plan.length} rows StockPorDeposito a insertar.`);
+  if (opts.dryRun) {
+    console.log("\n[DRY-RUN] No se escribirá nada. Primeras 5 filas del plan:");
+    for (const row of plan.slice(0, 5)) {
+      console.log(
+        `  producto=${row.productoId} depósito=${row.depositoId} cantidad=${row.cantidadFisica} cp=${row.costoPromedio.toString()}`,
+      );
+    }
+    return;
+  }
+
+  // 4) Transacción: insert + validación post
+  await prisma.$transaction(async (tx) => {
+    for (const row of plan) {
+      await tx.stockPorDeposito.create({
+        data: {
+          productoId: row.productoId,
+          depositoId: row.depositoId,
+          cantidadFisica: row.cantidadFisica,
+          cantidadReservada: 0,
+          costoPromedio: row.costoPromedio,
+        },
+      });
+    }
+    console.log(`✓ ${plan.length} rows insertados.`);
+
+    // Validación in-transaction: SUM(SPD.fisica) == Producto.stockActual
+    const divergencias: { codigo: string; expected: number; actual: number }[] = [];
+    for (const p of productos) {
+      const agg = await tx.stockPorDeposito.aggregate({
+        where: { productoId: p.id },
+        _sum: { cantidadFisica: true },
+      });
+      const actual = agg._sum.cantidadFisica ?? 0;
+      if (actual !== p.stockActual) {
+        divergencias.push({ codigo: p.codigo, expected: p.stockActual, actual });
+      }
+    }
+    if (divergencias.length > 0) {
+      console.error(`\n✗ ${divergencias.length} divergencias encontradas:`);
+      for (const d of divergencias.slice(0, 10)) {
+        console.error(`  ${d.codigo}: esperado=${d.expected} actual=${d.actual}`);
+      }
+      throw new Error("Backfill aborta — invariantes no satisfechos. Rollback.");
+    }
+    console.log(`✓ Invariantes OK: SUM(SPD.fisica) == Producto.stockActual para ${productos.length} productos.`);
+  });
+}
+
+async function main(): Promise<void> {
+  const opts = parseArgs(process.argv.slice(2));
+  console.log(`Modo: ${opts.mode}${opts.dryRun ? " (dry-run)" : ""}`);
+
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+  });
+
+  try {
+    await ejecutarBackfill(prisma, opts);
+    console.log(opts.dryRun ? "\n✓ Dry-run completo." : "\n✓ Backfill completo.");
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+main().catch((err: unknown) => {
+  console.error("\n✗ Error:", err instanceof Error ? err.message : err);
+  process.exit(1);
+});
