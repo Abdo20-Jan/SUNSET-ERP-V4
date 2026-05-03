@@ -5,6 +5,7 @@ import { getLead } from "@/lib/actions/leads";
 import { isCrmEnabled } from "@/lib/features";
 import { fmtDate } from "@/lib/format";
 
+import { AiSection } from "./_components/ai-section";
 import { ConvertirClienteButton } from "./_components/convertir-cliente-button";
 import { EliminarLeadButton } from "./_components/eliminar-lead-button";
 
@@ -80,6 +81,8 @@ export default async function LeadDetailPage({
           <p className="whitespace-pre-wrap text-sm">{lead.notas}</p>
         </section>
       )}
+
+      <AiSection leadId={lead.id} />
 
       <section className="space-y-3">
         <h2 className="text-lg font-medium">Contactos ({lead.contactos.length})</h2>
