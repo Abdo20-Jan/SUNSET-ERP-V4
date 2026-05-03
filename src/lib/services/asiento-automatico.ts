@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { eqMoney, gtZero, money, sumMoney, toDecimal } from "@/lib/decimal";
+import { isStockDualEnabled } from "@/lib/features";
 import { ensureCuentasMap, getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { revertirIngresoEmbarque } from "@/lib/services/stock";
 import {
@@ -1878,7 +1879,16 @@ export async function crearAsientoVenta(
     }
 
     // CMV: DEBE costo / HABER mercaderías. Solo si hay costo registrado.
+    //
+    // W3 stock dual (gated): cuando STOCK_DUAL_ENABLED=true la contrapartida
+    // HABER se hace contra `MERCADERIAS_A_ENTREGAR` (1.1.5.03), una cuenta
+    // provisória que se cancela contra MERCADERIAS (1.1.5.01) cuando se
+    // confirma la entrega. Esto mantiene contable y físico alineados durante
+    // la ventana emisión→entrega.
     if (totalCosto.gt(0)) {
+      const cuentaContrapartidaCodigo = isStockDualEnabled()
+        ? VENTA_CODIGOS.MERCADERIAS_A_ENTREGAR.codigo
+        : VENTA_CODIGOS.MERCADERIAS.codigo;
       lineas.push({
         cuentaId: porCodigo.get(VENTA_CODIGOS.CMV.codigo)!,
         debe: money(totalCosto).toString(),
@@ -1886,10 +1896,12 @@ export async function crearAsientoVenta(
         descripcion: `Venta ${venta.numero} — CMV (costo a promedio)`,
       });
       lineas.push({
-        cuentaId: porCodigo.get(VENTA_CODIGOS.MERCADERIAS.codigo)!,
+        cuentaId: porCodigo.get(cuentaContrapartidaCodigo)!,
         debe: 0,
         haber: money(totalCosto).toString(),
-        descripcion: `Venta ${venta.numero} — egreso de stock`,
+        descripcion: isStockDualEnabled()
+          ? `Venta ${venta.numero} — provisión mercaderías a entregar`
+          : `Venta ${venta.numero} — egreso de stock`,
       });
     }
 

@@ -10,12 +10,18 @@ import {
   sumMoney,
   toDecimal,
 } from "@/lib/decimal";
+import { isStockDualEnabled } from "@/lib/features";
 import {
   AsientoError,
   anularAsiento,
   contabilizarAsiento,
   crearAsientoVenta,
 } from "@/lib/services/asiento-automatico";
+import { aplicarReservaSPD, liberarReservaSPD } from "@/lib/services/stock";
+import {
+  getDepositoPorDefecto,
+  validarDisponible,
+} from "@/lib/services/stock-helpers";
 import {
   CondicionPago,
   Moneda,
@@ -472,7 +478,18 @@ export async function emitirVentaAction(
     const result = await db.$transaction(async (tx) => {
       const v = await tx.venta.findUnique({
         where: { id: ventaId },
-        select: { estado: true, asientoId: true, numero: true },
+        select: {
+          estado: true,
+          asientoId: true,
+          numero: true,
+          items: {
+            select: {
+              productoId: true,
+              cantidad: true,
+              producto: { select: { codigo: true } },
+            },
+          },
+        },
       });
       if (!v) throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
       if (v.asientoId) {
@@ -481,6 +498,23 @@ export async function emitirVentaAction(
           `Venta ${v.numero} ya tiene asiento.`,
         );
       }
+
+      // W3.5 — reserva de stock al emitir, gated por flag.
+      // Cuando off, comportamiento legacy: no toca StockPorDeposito.
+      // Cuando on, valida disponibilidad por (producto, depósito default)
+      // y aplica reserva. La cuenta provisória 1.1.5.03 ya se usa en
+      // crearAsientoVenta (asiento dual).
+      if (isStockDualEnabled()) {
+        const depositoId = await getDepositoPorDefecto(tx);
+        // Validar disponibilidad agrupada (varios items pueden tocar el mismo
+        // producto): hacer reservas item por item; cada validarDisponible
+        // mira el estado actualizado.
+        for (const it of v.items) {
+          await validarDisponible(tx, it.productoId, depositoId, it.cantidad);
+          await aplicarReservaSPD(tx, it.productoId, depositoId, it.cantidad);
+        }
+      }
+
       const asiento = await crearAsientoVenta(ventaId, tx);
       const cont = await contabilizarAsiento(asiento.id, tx);
       await tx.venta.update({
@@ -502,21 +536,53 @@ export async function anularVentaAction(
   ventaId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const v = await db.venta.findUnique({
-      where: { id: ventaId },
-      select: { asientoId: true },
-    });
-    if (!v) return { ok: false, error: "Venta no existe." };
-    if (!v.asientoId) {
-      // Sin asiento: solo marcar cancelada.
-      await db.venta.update({
+    await db.$transaction(async (tx) => {
+      const v = await tx.venta.findUnique({
         where: { id: ventaId },
-        data: { estado: VentaEstado.CANCELADA },
+        select: {
+          asientoId: true,
+          items: {
+            select: { productoId: true, cantidad: true },
+          },
+          entregas: {
+            where: { estado: "CONFIRMADA" },
+            select: { id: true, numero: true },
+          },
+        },
       });
-    } else {
-      await anularAsiento(v.asientoId);
+      if (!v) {
+        throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
+      }
+      // W3.5 — bloquear anulación si hay entrega CONFIRMADA: el operador
+      // debe anular las entregas primero (cascada manual) para que el
+      // stock vuelva al depósito antes de revertir asiento + reserva.
+      if (v.entregas.length > 0 && isStockDualEnabled()) {
+        const numeros = v.entregas.map((e) => e.numero).join(", ");
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `Venta tiene entrega(s) confirmada(s) (${numeros}). Anular entregas antes de anular la venta.`,
+        );
+      }
+
+      if (!v.asientoId) {
+        await tx.venta.update({
+          where: { id: ventaId },
+          data: { estado: VentaEstado.CANCELADA },
+        });
+        return;
+      }
+
+      // W3.5 — liberar reservas si corresponde, antes de anular asiento.
+      if (isStockDualEnabled()) {
+        const depositoId = await getDepositoPorDefecto(tx);
+        for (const it of v.items) {
+          await liberarReservaSPD(tx, it.productoId, depositoId, it.cantidad);
+        }
+      }
+
+      await anularAsiento(v.asientoId, tx);
       // anularEnTx ya cancela y desvincula la venta.
-    }
+    });
     revalidatePath("/ventas");
     revalidatePath(`/ventas/${ventaId}`);
     return { ok: true };
