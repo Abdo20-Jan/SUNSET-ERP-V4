@@ -176,6 +176,17 @@ enum VentaEstado {
   CANCELADA
 }
 
+enum EntregaEstado {
+  BORRADOR
+  CONFIRMADA
+  ANULADA
+}
+
+enum TransferenciaEstado {
+  CONFIRMADA
+  ANULADA
+}
+
 enum MovimientoStockTipo {
   INGRESO
   EGRESO
@@ -315,6 +326,7 @@ model Asiento {
   gastoFijoRegistro    GastoFijoRegistro?
   gasto                Gasto?
   chequeRecibidoCobro  ChequeRecibido?
+  entregaVenta         EntregaVenta?
 
   @@unique([periodoId, numero])
   @@index([fecha])
@@ -780,6 +792,8 @@ model Producto {
   movimientosStock  MovimientoStock[]
   itemsPedidoCompra ItemPedidoCompra[]
   itemsPedidoVenta  ItemPedidoVenta[]
+  stockPorDeposito  StockPorDeposito[]
+  transferencias    Transferencia[]
 }
 
 model Deposito {
@@ -788,8 +802,12 @@ model Deposito {
   direccion String?
   activo    Boolean @default(true)
 
-  movimientos MovimientoStock[]
-  embarques   Embarque[]
+  movimientos           MovimientoStock[]
+  embarques             Embarque[]
+  stockPorDeposito      StockPorDeposito[]
+  entregas              EntregaVenta[]
+  transferenciasOrigen  Transferencia[]    @relation("TransferenciaOrigen")
+  transferenciasDestino Transferencia[]    @relation("TransferenciaDestino")
 }
 
 // ============================================================
@@ -797,30 +815,38 @@ model Deposito {
 // ============================================================
 
 model MovimientoStock {
-  id             String              @id @default(uuid())
-  productoId     String
-  depositoId     String
-  tipo           MovimientoStockTipo
-  cantidad       Int
-  costoUnitario  Decimal             @db.Decimal(18, 2)
-  fecha          DateTime            @default(now())
+  id              String              @id @default(uuid())
+  productoId      String
+  depositoId      String
+  tipo            MovimientoStockTipo
+  cantidad        Int
+  costoUnitario   Decimal             @db.Decimal(18, 2)
+  fecha           DateTime            @default(now())
   // FK opcional al ítem de embarque que originó el ingreso (para poder
   // revertir limpiamente en una anulación). Sólo seteado cuando el
   // movimiento viene de cerrar y contabilizar un embarque (flujo legacy
   // monolítico).
-  itemEmbarqueId Int?
+  itemEmbarqueId  Int?
   // FK opcional al ítem de despacho que originó el ingreso. Sólo seteado
   // cuando el movimiento viene de contabilizar un Despacho parcial.
-  itemDespachoId Int?
+  itemDespachoId  Int?
+  // FK opcional al ítem de entrega de venta que originó el egreso (W3).
+  itemEntregaId   Int?
+  // FK opcional a la transferencia que originó el par origen/destino (W3).
+  transferenciaId String?
 
-  producto     Producto      @relation(fields: [productoId], references: [id])
-  deposito     Deposito      @relation(fields: [depositoId], references: [id])
-  itemEmbarque ItemEmbarque? @relation(fields: [itemEmbarqueId], references: [id], onDelete: SetNull)
-  itemDespacho ItemDespacho? @relation(fields: [itemDespachoId], references: [id], onDelete: SetNull)
+  producto      Producto       @relation(fields: [productoId], references: [id])
+  deposito      Deposito       @relation(fields: [depositoId], references: [id])
+  itemEmbarque  ItemEmbarque?  @relation(fields: [itemEmbarqueId], references: [id], onDelete: SetNull)
+  itemDespacho  ItemDespacho?  @relation(fields: [itemDespachoId], references: [id], onDelete: SetNull)
+  itemEntrega   ItemEntrega?   @relation(fields: [itemEntregaId], references: [id], onDelete: SetNull)
+  transferencia Transferencia? @relation(fields: [transferenciaId], references: [id], onDelete: SetNull)
 
   @@index([productoId])
   @@index([itemEmbarqueId])
   @@index([itemDespachoId])
+  @@index([itemEntregaId])
+  @@index([transferenciaId])
 }
 
 model Venta {
@@ -852,6 +878,7 @@ model Venta {
   items            ItemVenta[]
   pedidoVenta      PedidoVenta?     @relation(fields: [pedidoVentaId], references: [id])
   chequesRecibidos ChequeRecibido[]
+  entregas         EntregaVenta[]
 
   @@index([fechaVencimiento])
   @@index([clienteId])
@@ -909,8 +936,111 @@ model ItemVenta {
   iva            Decimal @db.Decimal(18, 2)
   total          Decimal @db.Decimal(18, 2)
 
-  venta    Venta    @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  venta        Venta         @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  producto     Producto      @relation(fields: [productoId], references: [id])
+  itemsEntrega ItemEntrega[]
+}
+
+// ============================================================
+// STOCK DUAL (W3): reserva en emisión + baja física en entrega
+// ============================================================
+
+// Stock segmentado por (producto, depósito). Reemplaza la noción de
+// `Producto.stockActual` global por una visión multi-depósito con
+// reserva separada de la cantidad física.
+//
+// - cantidadFisica:    lo que está realmente en el depósito.
+// - cantidadReservada: comprometido en ventas EMITIDAs pendientes de entrega.
+// - disponible (derivado): cantidadFisica - cantidadReservada.
+// - costoPromedio:     ponderado por depósito (decisión arquitectónica W3 #3).
+//
+// Mientras `STOCK_DUAL_ENABLED` esté off, este modelo se mantiene en
+// paralelo a `Producto.stockActual` (legacy) y se sincroniza en backfill.
+model StockPorDeposito {
+  id                String   @id @default(uuid())
+  productoId        String
+  depositoId        String
+  cantidadFisica    Int      @default(0)
+  cantidadReservada Int      @default(0)
+  costoPromedio     Decimal  @default(0) @db.Decimal(18, 2)
+  ultimoMovimiento  DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
   producto Producto @relation(fields: [productoId], references: [id])
+  deposito Deposito @relation(fields: [depositoId], references: [id])
+
+  @@unique([productoId, depositoId])
+  @@index([depositoId])
+}
+
+// Nota de entrega (remito) de una venta. Una venta EMITIDA puede tener
+// 0..N entregas (entregas parciales o completas). La entrega CONFIRMADA
+// es el momento en que se da de baja el stock físico y se genera el
+// asiento contable de baja (DEBE 1.1.5.02 MercaderiasAEntregar /
+// HABER 1.1.5.01 Mercaderias).
+model EntregaVenta {
+  id          String        @id @default(uuid())
+  numero      String        @unique
+  ventaId     String
+  depositoId  String
+  fecha       DateTime
+  estado      EntregaEstado @default(BORRADOR)
+  asientoId   String?       @unique
+  observacion String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  venta    Venta         @relation(fields: [ventaId], references: [id])
+  deposito Deposito      @relation(fields: [depositoId], references: [id])
+  asiento  Asiento?      @relation(fields: [asientoId], references: [id])
+  items    ItemEntrega[]
+
+  @@index([ventaId])
+  @@index([estado])
+}
+
+// Línea de una entrega: vincula 1..1 con un ItemVenta y captura la
+// `cantidad` entregada en este remito (puede ser parcial respecto al
+// item de venta original) y el `costoUnitario` snapshot del costoPromedio
+// del depósito en el momento de la confirmación (necesario para CMV).
+model ItemEntrega {
+  id            Int     @id @default(autoincrement())
+  entregaId     String
+  itemVentaId   Int
+  cantidad      Int
+  costoUnitario Decimal @default(0) @db.Decimal(18, 2)
+
+  entrega          EntregaVenta      @relation(fields: [entregaId], references: [id], onDelete: Cascade)
+  itemVenta        ItemVenta         @relation(fields: [itemVentaId], references: [id])
+  movimientosStock MovimientoStock[]
+
+  @@index([itemVentaId])
+}
+
+// Transferencia entre depósitos. Genera dos `MovimientoStock` tipo
+// TRANSFERENCIA (uno -cantidad en origen, otro +cantidad en destino).
+// No genera asiento contable (movimiento interno de inventario).
+model Transferencia {
+  id                String              @id @default(uuid())
+  numero            String              @unique
+  productoId        String
+  depositoOrigenId  String
+  depositoDestinoId String
+  cantidad          Int
+  fecha             DateTime
+  estado            TransferenciaEstado @default(CONFIRMADA)
+  observacion       String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  producto         Producto          @relation(fields: [productoId], references: [id])
+  origen           Deposito          @relation("TransferenciaOrigen", fields: [depositoOrigenId], references: [id])
+  destino          Deposito          @relation("TransferenciaDestino", fields: [depositoDestinoId], references: [id])
+  movimientosStock MovimientoStock[]
+
+  @@index([productoId])
+  @@index([fecha])
 }
 
 // ============================================================
