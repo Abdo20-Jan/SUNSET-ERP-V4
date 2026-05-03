@@ -99,7 +99,7 @@ export default async function CrmDashboardPage() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <NavTile
           href="/crm/oportunidades/pipeline"
           title="Pipeline kanban"
@@ -109,6 +109,11 @@ export default async function CrmDashboardPage() {
           href="/crm/contactos"
           title="Contactos"
           description="Personas vinculadas a leads y clientes."
+        />
+        <NavTile
+          href="/crm/configuracion/templates"
+          title="Templates de email"
+          description="Plantillas reutilizables (envío manual hasta W5)."
         />
       </div>
     </main>
