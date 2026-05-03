@@ -16,7 +16,7 @@ import { getStockPorDeposito } from "@/lib/services/stock-helpers";
 import {
   EntregaEstado,
   MovimientoStockTipo,
-  Prisma,
+  type Prisma,
 } from "@/generated/prisma/client";
 
 type TxClient = Prisma.TransactionClient;
@@ -40,6 +40,15 @@ type ActionResult<T = undefined> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
+const FLAG_OFF_ERROR = {
+  ok: false as const,
+  error: "Stock dual no está habilitado (flag STOCK_DUAL_ENABLED=false).",
+};
+
+// ---------------------------------------------------------------
+// Helpers compartidos
+// ---------------------------------------------------------------
+
 async function generarNumeroEntrega(tx: TxClient): Promise<string> {
   const year = new Date().getFullYear();
   const last = await tx.entregaVenta.findFirst({
@@ -53,11 +62,6 @@ async function generarNumeroEntrega(tx: TxClient): Promise<string> {
   return `R-${year}-${String(nextSeq).padStart(4, "0")}`;
 }
 
-/**
- * Valida que la cantidad acumulada por itemVenta entre todas las
- * entregas (BORRADOR + CONFIRMADA) no supere ItemVenta.cantidad.
- * Lanza AsientoError DOMINIO_INVALIDO si hay overcommit.
- */
 async function validarTopeItemVenta(
   tx: TxClient,
   itemVentaId: number,
@@ -65,7 +69,7 @@ async function validarTopeItemVenta(
 ): Promise<void> {
   const itemVenta = await tx.itemVenta.findUnique({
     where: { id: itemVentaId },
-    select: { id: true, cantidad: true, productoId: true },
+    select: { id: true, cantidad: true },
   });
   if (!itemVenta) {
     throw new AsientoError(
@@ -89,64 +93,70 @@ async function validarTopeItemVenta(
   }
 }
 
-/**
- * Crea una entrega en estado BORRADOR. NO toca stock ni asiento — sólo
- * persiste la nota. La confirmación es un paso separado (ver
- * `confirmarEntregaAction`).
- *
- * Sólo disponible cuando STOCK_DUAL_ENABLED=true.
- */
-export async function crearEntregaAction(
+function parseEntregaInput(
   raw: CrearEntregaInput,
-): Promise<ActionResult<{ entregaId: string; numero: string }>> {
-  if (!isStockDualEnabled()) {
-    return {
-      ok: false,
-      error: "Stock dual no está habilitado (flag STOCK_DUAL_ENABLED=false).",
-    };
-  }
+): z.infer<typeof crearEntregaSchema> {
   const parse = crearEntregaSchema.safeParse(raw);
   if (!parse.success) {
     const first = parse.error.issues[0];
-    return {
-      ok: false,
-      error: first ? `${first.path.join(".")}: ${first.message}` : "Input inválido.",
-    };
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      first ? `${first.path.join(".")}: ${first.message}` : "Input inválido.",
+    );
   }
-  const input = parse.data;
-  try {
-    const result = await db.$transaction(async (tx) => {
-      const venta = await tx.venta.findUnique({
-        where: { id: input.ventaId },
-        select: { id: true, estado: true, numero: true },
-      });
-      if (!venta) {
-        throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
-      }
-      if (venta.estado !== "EMITIDA") {
-        throw new AsientoError(
-          "DOMINIO_INVALIDO",
-          `Venta ${venta.numero} debe estar EMITIDA para entregar (estado actual: ${venta.estado}).`,
-        );
-      }
-      const dep = await tx.deposito.findUnique({
-        where: { id: input.depositoId },
-        select: { id: true, activo: true },
-      });
-      if (!dep || !dep.activo) {
-        throw new AsientoError(
-          "DOMINIO_INVALIDO",
-          "Depósito de entrega no existe o está inactivo.",
-        );
-      }
+  return parse.data;
+}
 
-      // Validar topes por item de venta
+async function ensureVentaEmitida(tx: TxClient, ventaId: string): Promise<void> {
+  const venta = await tx.venta.findUnique({
+    where: { id: ventaId },
+    select: { id: true, estado: true, numero: true },
+  });
+  if (!venta) {
+    throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
+  }
+  if (venta.estado !== "EMITIDA") {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Venta ${venta.numero} debe estar EMITIDA para entregar (estado actual: ${venta.estado}).`,
+    );
+  }
+}
+
+async function ensureDepositoActivo(
+  tx: TxClient,
+  depositoId: string,
+): Promise<void> {
+  const dep = await tx.deposito.findUnique({
+    where: { id: depositoId },
+    select: { id: true, activo: true },
+  });
+  if (!dep || !dep.activo) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      "Depósito de entrega no existe o está inactivo.",
+    );
+  }
+}
+
+// ---------------------------------------------------------------
+// Crear entrega (BORRADOR)
+// ---------------------------------------------------------------
+
+export async function crearEntregaAction(
+  raw: CrearEntregaInput,
+): Promise<ActionResult<{ entregaId: string; numero: string }>> {
+  if (!isStockDualEnabled()) return FLAG_OFF_ERROR;
+  try {
+    const input = parseEntregaInput(raw);
+    const result = await db.$transaction(async (tx) => {
+      await ensureVentaEmitida(tx, input.ventaId);
+      await ensureDepositoActivo(tx, input.depositoId);
       for (const it of input.items) {
         await validarTopeItemVenta(tx, it.itemVentaId, it.cantidad);
       }
-
       const numero = await generarNumeroEntrega(tx);
-      const entrega = await tx.entregaVenta.create({
+      return tx.entregaVenta.create({
         data: {
           numero,
           ventaId: input.ventaId,
@@ -158,13 +168,12 @@ export async function crearEntregaAction(
             create: input.items.map((it) => ({
               itemVentaId: it.itemVentaId,
               cantidad: it.cantidad,
-              costoUnitario: 0, // se setea al confirmar (snapshot del costoPromedio del depósito)
+              costoUnitario: 0,
             })),
           },
         },
         select: { id: true, numero: true },
       });
-      return entrega;
     });
     revalidatePath(`/ventas/${input.ventaId}`);
     revalidatePath(`/ventas/${input.ventaId}/entregas`);
@@ -175,95 +184,103 @@ export async function crearEntregaAction(
   }
 }
 
-/**
- * Confirma una entrega BORRADOR: snapshot de costos, MovimientoStock EGRESO,
- * decremento de cantidadFisica + cantidadReservada en SPD, y asiento contable
- * (DEBE 1.1.5.03 / HABER 1.1.5.01). Estado pasa a CONFIRMADA.
- */
-export async function confirmarEntregaAction(
-  entregaId: string,
-): Promise<ActionResult<{ numeroAsiento: number }>> {
-  if (!isStockDualEnabled()) {
-    return {
-      ok: false,
-      error: "Stock dual no está habilitado (flag STOCK_DUAL_ENABLED=false).",
-    };
-  }
-  try {
-    const result = await db.$transaction(async (tx) => {
-      const entrega = await tx.entregaVenta.findUnique({
-        where: { id: entregaId },
+// ---------------------------------------------------------------
+// Confirmar entrega (BORRADOR → CONFIRMADA)
+// ---------------------------------------------------------------
+
+type EntregaEnConfirmacion = NonNullable<
+  Awaited<ReturnType<typeof loadEntregaForConfirm>>
+>;
+
+async function loadEntregaForConfirm(tx: TxClient, entregaId: string) {
+  return tx.entregaVenta.findUnique({
+    where: { id: entregaId },
+    select: {
+      id: true,
+      numero: true,
+      fecha: true,
+      estado: true,
+      asientoId: true,
+      ventaId: true,
+      depositoId: true,
+      items: {
         select: {
           id: true,
-          numero: true,
-          fecha: true,
-          estado: true,
-          asientoId: true,
-          ventaId: true,
-          depositoId: true,
-          items: {
+          itemVentaId: true,
+          cantidad: true,
+          itemVenta: {
             select: {
-              id: true,
-              itemVentaId: true,
-              cantidad: true,
-              itemVenta: {
-                select: { productoId: true, producto: { select: { codigo: true } } },
-              },
+              productoId: true,
+              producto: { select: { codigo: true } },
             },
           },
         },
-      });
+      },
+    },
+  });
+}
+
+function ensureEntregaConfirmable(entrega: EntregaEnConfirmacion): void {
+  if (entrega.estado !== EntregaEstado.BORRADOR) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Entrega ${entrega.numero} no está en BORRADOR (estado actual: ${entrega.estado}).`,
+    );
+  }
+  if (entrega.asientoId) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Entrega ${entrega.numero} ya tiene asiento.`,
+    );
+  }
+}
+
+async function aplicarEgresoFisicoItem(
+  tx: TxClient,
+  entrega: EntregaEnConfirmacion,
+  it: EntregaEnConfirmacion["items"][number],
+): Promise<void> {
+  const productoId = it.itemVenta.productoId;
+  const stock = await getStockPorDeposito(tx, productoId, entrega.depositoId);
+  if (!stock || stock.cantidadFisica < it.cantidad) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Stock físico insuficiente: producto ${it.itemVenta.producto.codigo} en depósito ${entrega.depositoId} tiene ${stock?.cantidadFisica ?? 0}, entrega requiere ${it.cantidad}.`,
+    );
+  }
+  const costoUnit = stock.costoPromedio;
+  await tx.itemEntrega.update({
+    where: { id: it.id },
+    data: { costoUnitario: costoUnit },
+  });
+  await tx.movimientoStock.create({
+    data: {
+      productoId,
+      depositoId: entrega.depositoId,
+      tipo: MovimientoStockTipo.EGRESO,
+      cantidad: it.cantidad,
+      costoUnitario: costoUnit,
+      fecha: entrega.fecha,
+      itemEntregaId: it.id,
+    },
+  });
+  await aplicarEgresoSPD(tx, productoId, entrega.depositoId, it.cantidad);
+}
+
+export async function confirmarEntregaAction(
+  entregaId: string,
+): Promise<ActionResult<{ numeroAsiento: number }>> {
+  if (!isStockDualEnabled()) return FLAG_OFF_ERROR;
+  try {
+    const result = await db.$transaction(async (tx) => {
+      const entrega = await loadEntregaForConfirm(tx, entregaId);
       if (!entrega) {
         throw new AsientoError("DOMINIO_INVALIDO", "Entrega no existe.");
       }
-      if (entrega.estado !== EntregaEstado.BORRADOR) {
-        throw new AsientoError(
-          "DOMINIO_INVALIDO",
-          `Entrega ${entrega.numero} no está en BORRADOR (estado actual: ${entrega.estado}).`,
-        );
-      }
-      if (entrega.asientoId) {
-        throw new AsientoError(
-          "DOMINIO_INVALIDO",
-          `Entrega ${entrega.numero} ya tiene asiento.`,
-        );
-      }
-
-      // Por cada ítem: validar disponibilidad física, capturar costoPromedio
-      // del depósito como snapshot, generar MovimientoStock EGRESO, decrementar
-      // SPD (físico + reservado), actualizar ItemEntrega.costoUnitario.
+      ensureEntregaConfirmable(entrega);
       for (const it of entrega.items) {
-        const productoId = it.itemVenta.productoId;
-        const stock = await getStockPorDeposito(
-          tx,
-          productoId,
-          entrega.depositoId,
-        );
-        if (!stock || stock.cantidadFisica < it.cantidad) {
-          throw new AsientoError(
-            "DOMINIO_INVALIDO",
-            `Stock físico insuficiente: producto ${it.itemVenta.producto.codigo} en depósito ${entrega.depositoId} tiene ${stock?.cantidadFisica ?? 0}, entrega requiere ${it.cantidad}.`,
-          );
-        }
-        const costoUnit = stock.costoPromedio;
-        await tx.itemEntrega.update({
-          where: { id: it.id },
-          data: { costoUnitario: costoUnit },
-        });
-        await tx.movimientoStock.create({
-          data: {
-            productoId,
-            depositoId: entrega.depositoId,
-            tipo: MovimientoStockTipo.EGRESO,
-            cantidad: it.cantidad,
-            costoUnitario: costoUnit,
-            fecha: entrega.fecha,
-            itemEntregaId: it.id,
-          },
-        });
-        await aplicarEgresoSPD(tx, productoId, entrega.depositoId, it.cantidad);
+        await aplicarEgresoFisicoItem(tx, entrega, it);
       }
-
       const asiento = await crearAsientoEntrega(entregaId, tx);
       const cont = await contabilizarAsiento(asiento.id, tx);
       await tx.entregaVenta.update({
@@ -282,83 +299,91 @@ export async function confirmarEntregaAction(
   }
 }
 
-/**
- * Anula una entrega:
- *  - BORRADOR: borra la entrega y sus items (no había MovimientoStock).
- *  - CONFIRMADA: reverte MovimientoStock EGRESO, restaura cantidadFisica
- *    + cantidadReservada (la reserva original de la venta), anula asiento,
- *    marca ANULADA.
- */
+// ---------------------------------------------------------------
+// Anular entrega
+// ---------------------------------------------------------------
+
+type EntregaEnAnulacion = NonNullable<
+  Awaited<ReturnType<typeof loadEntregaForAnular>>
+>;
+
+async function loadEntregaForAnular(tx: TxClient, entregaId: string) {
+  return tx.entregaVenta.findUnique({
+    where: { id: entregaId },
+    select: {
+      id: true,
+      numero: true,
+      ventaId: true,
+      depositoId: true,
+      estado: true,
+      asientoId: true,
+      items: {
+        select: {
+          id: true,
+          cantidad: true,
+          itemVenta: { select: { productoId: true } },
+        },
+      },
+    },
+  });
+}
+
+async function restaurarSPDPorItemAnulacion(
+  tx: TxClient,
+  depositoId: string,
+  it: EntregaEnAnulacion["items"][number],
+): Promise<void> {
+  await tx.movimientoStock.deleteMany({
+    where: { itemEntregaId: it.id },
+  });
+  await tx.stockPorDeposito.update({
+    where: {
+      productoId_depositoId: {
+        productoId: it.itemVenta.productoId,
+        depositoId,
+      },
+    },
+    data: {
+      cantidadFisica: { increment: it.cantidad },
+      cantidadReservada: { increment: it.cantidad },
+      ultimoMovimiento: new Date(),
+    },
+  });
+}
+
+async function revertirEntregaConfirmada(
+  tx: TxClient,
+  entrega: EntregaEnAnulacion,
+): Promise<void> {
+  for (const it of entrega.items) {
+    await restaurarSPDPorItemAnulacion(tx, entrega.depositoId, it);
+  }
+  if (entrega.asientoId) {
+    await anularAsiento(entrega.asientoId, tx);
+  }
+  await tx.entregaVenta.update({
+    where: { id: entrega.id },
+    data: { estado: EntregaEstado.ANULADA },
+  });
+}
+
 export async function anularEntregaAction(
   entregaId: string,
 ): Promise<ActionResult> {
-  if (!isStockDualEnabled()) {
-    return {
-      ok: false,
-      error: "Stock dual no está habilitado (flag STOCK_DUAL_ENABLED=false).",
-    };
-  }
+  if (!isStockDualEnabled()) return FLAG_OFF_ERROR;
   try {
     await db.$transaction(async (tx) => {
-      const entrega = await tx.entregaVenta.findUnique({
-        where: { id: entregaId },
-        select: {
-          id: true,
-          numero: true,
-          ventaId: true,
-          depositoId: true,
-          estado: true,
-          asientoId: true,
-          items: {
-            select: {
-              id: true,
-              cantidad: true,
-              itemVenta: { select: { productoId: true } },
-            },
-          },
-        },
-      });
+      const entrega = await loadEntregaForAnular(tx, entregaId);
       if (!entrega) {
         throw new AsientoError("DOMINIO_INVALIDO", "Entrega no existe.");
       }
-      if (entrega.estado === EntregaEstado.ANULADA) {
-        return;
-      }
+      if (entrega.estado === EntregaEstado.ANULADA) return;
       if (entrega.estado === EntregaEstado.BORRADOR) {
         await tx.itemEntrega.deleteMany({ where: { entregaId } });
         await tx.entregaVenta.delete({ where: { id: entregaId } });
         return;
       }
-
-      // CONFIRMADA: revertir efecto físico/contable.
-      // 1) Revertir MovimientoStock EGRESO + restaurar SPD (cantidadFisica
-      //    sube, cantidadReservada también — la venta original sigue reservando).
-      for (const it of entrega.items) {
-        await tx.movimientoStock.deleteMany({
-          where: { itemEntregaId: it.id },
-        });
-        await tx.stockPorDeposito.update({
-          where: {
-            productoId_depositoId: {
-              productoId: it.itemVenta.productoId,
-              depositoId: entrega.depositoId,
-            },
-          },
-          data: {
-            cantidadFisica: { increment: it.cantidad },
-            cantidadReservada: { increment: it.cantidad },
-            ultimoMovimiento: new Date(),
-          },
-        });
-      }
-      // 2) Anular asiento (si existe) — anularEnTx desvincula entrega.
-      if (entrega.asientoId) {
-        await anularAsiento(entrega.asientoId, tx);
-      }
-      await tx.entregaVenta.update({
-        where: { id: entregaId },
-        data: { estado: EntregaEstado.ANULADA },
-      });
+      await revertirEntregaConfirmada(tx, entrega);
     });
     revalidatePath("/ventas");
     return { ok: true, data: undefined };
@@ -368,9 +393,10 @@ export async function anularEntregaAction(
   }
 }
 
-/**
- * Lista las entregas de una venta. Útil para la UI del detalle de venta.
- */
+// ---------------------------------------------------------------
+// Queries de lectura
+// ---------------------------------------------------------------
+
 export async function listarEntregasDeVenta(ventaId: string) {
   return db.entregaVenta.findMany({
     where: { ventaId },
@@ -400,11 +426,6 @@ export async function listarEntregasDeVenta(ventaId: string) {
   });
 }
 
-/**
- * Devuelve el saldo pendiente de entrega por ItemVenta (cantidad vendida
- * menos lo ya entregado en entregas no anuladas). Útil para construir el
- * formulario de "nueva entrega".
- */
 export async function saldoPendientePorItemVenta(ventaId: string) {
   const venta = await db.venta.findUnique({
     where: { id: ventaId },
@@ -419,26 +440,27 @@ export async function saldoPendientePorItemVenta(ventaId: string) {
     },
   });
   if (!venta) return [];
-  const result = [];
-  for (const it of venta.items) {
-    const ya = await db.itemEntrega.aggregate({
-      where: {
-        itemVentaId: it.id,
-        entrega: { estado: { not: EntregaEstado.ANULADA } },
-      },
-      _sum: { cantidad: true },
-    });
-    const entregado = ya._sum.cantidad ?? 0;
-    const pendiente = it.cantidad - entregado;
-    result.push({
+  const itemIds = venta.items.map((it) => it.id);
+  const aggregados = await db.itemEntrega.groupBy({
+    by: ["itemVentaId"],
+    where: {
+      itemVentaId: { in: itemIds },
+      entrega: { estado: { not: EntregaEstado.ANULADA } },
+    },
+    _sum: { cantidad: true },
+  });
+  const entregadoPorItem = new Map(
+    aggregados.map((a) => [a.itemVentaId, a._sum.cantidad ?? 0]),
+  );
+  return venta.items.map((it) => {
+    const entregado = entregadoPorItem.get(it.id) ?? 0;
+    return {
       itemVentaId: it.id,
       productoCodigo: it.producto.codigo,
       productoNombre: it.producto.nombre,
       vendido: it.cantidad,
       entregado,
-      pendiente,
-    });
-  }
-  return result;
+      pendiente: it.cantidad - entregado,
+    };
+  });
 }
-

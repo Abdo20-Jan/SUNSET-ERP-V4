@@ -10,7 +10,7 @@ import { aplicarTransferenciaSPD } from "@/lib/services/stock";
 import { validarDisponible } from "@/lib/services/stock-helpers";
 import {
   MovimientoStockTipo,
-  Prisma,
+  type Prisma,
   TransferenciaEstado,
 } from "@/generated/prisma/client";
 
@@ -36,6 +36,15 @@ type ActionResult<T = undefined> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
+const FLAG_OFF_ERROR = {
+  ok: false as const,
+  error: "Stock dual no está habilitado.",
+};
+
+// ---------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------
+
 async function generarNumeroTransferencia(tx: TxClient): Promise<string> {
   const year = new Date().getFullYear();
   const last = await tx.transferencia.findFirst({
@@ -49,67 +58,97 @@ async function generarNumeroTransferencia(tx: TxClient): Promise<string> {
   return `T-${year}-${String(nextSeq).padStart(4, "0")}`;
 }
 
-/**
- * Crea una transferencia entre depósitos en estado CONFIRMADA. Genera
- * 2 MovimientoStock TRANSFERENCIA (uno -cantidad en origen, +cantidad
- * en destino) y mueve cantidadFisica entre los SPD correspondientes.
- *
- * No genera asiento contable — es un movimiento interno de inventario.
- *
- * Sólo disponible cuando STOCK_DUAL_ENABLED=true.
- */
-export async function crearTransferenciaAction(
+function parseTransferenciaInput(
   raw: CrearTransferenciaInput,
-): Promise<ActionResult<{ transferenciaId: string; numero: string }>> {
-  if (!isStockDualEnabled()) {
-    return {
-      ok: false,
-      error: "Stock dual no está habilitado.",
-    };
-  }
+): z.infer<typeof crearTransferenciaSchema> {
   const parse = crearTransferenciaSchema.safeParse(raw);
   if (!parse.success) {
     const first = parse.error.issues[0];
-    return {
-      ok: false,
-      error: first ? `${first.path.join(".")}: ${first.message}` : "Input inválido.",
-    };
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      first ? `${first.path.join(".")}: ${first.message}` : "Input inválido.",
+    );
   }
-  const input = parse.data;
-  try {
-    const result = await db.$transaction(async (tx) => {
-      // Validar entidades
-      const [producto, origen, destino] = await Promise.all([
-        tx.producto.findUnique({
-          where: { id: input.productoId },
-          select: { id: true, codigo: true },
-        }),
-        tx.deposito.findUnique({
-          where: { id: input.depositoOrigenId },
-          select: { id: true, activo: true, nombre: true },
-        }),
-        tx.deposito.findUnique({
-          where: { id: input.depositoDestinoId },
-          select: { id: true, activo: true, nombre: true },
-        }),
-      ]);
-      if (!producto) {
-        throw new AsientoError("DOMINIO_INVALIDO", "Producto no existe.");
-      }
-      if (!origen || !origen.activo) {
-        throw new AsientoError(
-          "DOMINIO_INVALIDO",
-          "Depósito origen no existe o está inactivo.",
-        );
-      }
-      if (!destino || !destino.activo) {
-        throw new AsientoError(
-          "DOMINIO_INVALIDO",
-          "Depósito destino no existe o está inactivo.",
-        );
-      }
+  return parse.data;
+}
 
-      // Validar disponibilidad en origen (físico - reservado)
+async function ensureProductoExiste(
+  tx: TxClient,
+  productoId: string,
+): Promise<void> {
+  const p = await tx.producto.findUnique({
+    where: { id: productoId },
+    select: { id: true },
+  });
+  if (!p) {
+    throw new AsientoError("DOMINIO_INVALIDO", "Producto no existe.");
+  }
+}
+
+async function ensureDepositoActivoConId(
+  tx: TxClient,
+  depositoId: string,
+  rol: "origen" | "destino",
+): Promise<void> {
+  const dep = await tx.deposito.findUnique({
+    where: { id: depositoId },
+    select: { id: true, activo: true },
+  });
+  if (!dep || !dep.activo) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Depósito ${rol} no existe o está inactivo.`,
+    );
+  }
+}
+
+/**
+ * Mueve `cantidadFisica` entre dos SPD. Usado tanto al crear (vía
+ * aplicarTransferenciaSPD) como al anular (en sentido inverso). Útil
+ * para evitar duplicar el patrón {increment} / {decrement}.
+ */
+async function moverCantidadFisica(
+  tx: TxClient,
+  productoId: string,
+  depositoOrigenId: string,
+  depositoDestinoId: string,
+  cantidad: number,
+): Promise<void> {
+  const now = new Date();
+  await tx.stockPorDeposito.update({
+    where: {
+      productoId_depositoId: { productoId, depositoId: depositoOrigenId },
+    },
+    data: {
+      cantidadFisica: { increment: cantidad },
+      ultimoMovimiento: now,
+    },
+  });
+  await tx.stockPorDeposito.update({
+    where: {
+      productoId_depositoId: { productoId, depositoId: depositoDestinoId },
+    },
+    data: {
+      cantidadFisica: { decrement: cantidad },
+      ultimoMovimiento: now,
+    },
+  });
+}
+
+// ---------------------------------------------------------------
+// Crear transferencia
+// ---------------------------------------------------------------
+
+export async function crearTransferenciaAction(
+  raw: CrearTransferenciaInput,
+): Promise<ActionResult<{ transferenciaId: string; numero: string }>> {
+  if (!isStockDualEnabled()) return FLAG_OFF_ERROR;
+  try {
+    const input = parseTransferenciaInput(raw);
+    const result = await db.$transaction(async (tx) => {
+      await ensureProductoExiste(tx, input.productoId);
+      await ensureDepositoActivoConId(tx, input.depositoOrigenId, "origen");
+      await ensureDepositoActivoConId(tx, input.depositoDestinoId, "destino");
       await validarDisponible(
         tx,
         input.productoId,
@@ -145,31 +184,54 @@ export async function crearTransferenciaAction(
     });
     revalidatePath("/inventario");
     revalidatePath("/inventario/transferencias");
-    return { ok: true, data: { transferenciaId: result.id, numero: result.numero } };
+    return {
+      ok: true,
+      data: { transferenciaId: result.id, numero: result.numero },
+    };
   } catch (err) {
     if (err instanceof AsientoError) return { ok: false, error: err.message };
     return { ok: false, error: "Error al crear la transferencia." };
   }
 }
 
-/**
- * Anula una transferencia: borra los 2 MovimientoStock asociados,
- * restaura cantidadFisica en origen, decrementa en destino, marca ANULADA.
- *
- * NO valida disponibilidad en destino al revertir — si en el ínterin
- * alguien vendió de esa mercadería en destino, la cantidadFisica puede
- * quedar negativa y caería en la invariante 3. El operador debe usar
- * el validador (`pnpm db:validar-stock`) post-anulación si hay duda.
- */
+// ---------------------------------------------------------------
+// Anular transferencia
+// ---------------------------------------------------------------
+
+async function revertirTransferenciaConfirmada(
+  tx: TxClient,
+  t: {
+    id: string;
+    productoId: string;
+    depositoOrigenId: string;
+    depositoDestinoId: string;
+    cantidad: number;
+  },
+): Promise<void> {
+  await tx.movimientoStock.deleteMany({
+    where: {
+      transferenciaId: t.id,
+      tipo: MovimientoStockTipo.TRANSFERENCIA,
+    },
+  });
+  // Sentido inverso: origen recibe, destino devuelve.
+  await moverCantidadFisica(
+    tx,
+    t.productoId,
+    t.depositoOrigenId,
+    t.depositoDestinoId,
+    t.cantidad,
+  );
+  await tx.transferencia.update({
+    where: { id: t.id },
+    data: { estado: TransferenciaEstado.ANULADA },
+  });
+}
+
 export async function anularTransferenciaAction(
   transferenciaId: string,
 ): Promise<ActionResult> {
-  if (!isStockDualEnabled()) {
-    return {
-      ok: false,
-      error: "Stock dual no está habilitado.",
-    };
-  }
+  if (!isStockDualEnabled()) return FLAG_OFF_ERROR;
   try {
     await db.$transaction(async (tx) => {
       const t = await tx.transferencia.findUnique({
@@ -187,44 +249,7 @@ export async function anularTransferenciaAction(
         throw new AsientoError("DOMINIO_INVALIDO", "Transferencia no existe.");
       }
       if (t.estado === TransferenciaEstado.ANULADA) return;
-
-      await tx.movimientoStock.deleteMany({
-        where: {
-          transferenciaId,
-          tipo: MovimientoStockTipo.TRANSFERENCIA,
-        },
-      });
-
-      // Restaurar SPD: origen += cantidad, destino -= cantidad.
-      await tx.stockPorDeposito.update({
-        where: {
-          productoId_depositoId: {
-            productoId: t.productoId,
-            depositoId: t.depositoOrigenId,
-          },
-        },
-        data: {
-          cantidadFisica: { increment: t.cantidad },
-          ultimoMovimiento: new Date(),
-        },
-      });
-      await tx.stockPorDeposito.update({
-        where: {
-          productoId_depositoId: {
-            productoId: t.productoId,
-            depositoId: t.depositoDestinoId,
-          },
-        },
-        data: {
-          cantidadFisica: { decrement: t.cantidad },
-          ultimoMovimiento: new Date(),
-        },
-      });
-
-      await tx.transferencia.update({
-        where: { id: transferenciaId },
-        data: { estado: TransferenciaEstado.ANULADA },
-      });
+      await revertirTransferenciaConfirmada(tx, t);
     });
     revalidatePath("/inventario");
     revalidatePath("/inventario/transferencias");
@@ -234,6 +259,10 @@ export async function anularTransferenciaAction(
     return { ok: false, error: "Error al anular la transferencia." };
   }
 }
+
+// ---------------------------------------------------------------
+// Lectura
+// ---------------------------------------------------------------
 
 export async function listarTransferencias(limit = 100) {
   return db.transferencia.findMany({

@@ -15,6 +15,32 @@ type IngresoItem = {
   costoUnitario: Decimal;
 };
 
+/**
+ * Promedio ponderado: nuevo_promedio = (stock_anterior × promedio_anterior
+ * + cantidad × costo_ingreso) / (stock_anterior + cantidad).
+ *
+ * Cuando `stockAnterior <= 0` o `stockAnterior + cantidadIngreso <= 0`,
+ * el promedio anterior pierde sentido (no había costo registrado o el
+ * stock va a quedar en 0); en ese caso devuelve el costo del ingreso.
+ *
+ * Centralizado para evitar duplicar la fórmula en aplicarIngresoProducto,
+ * aplicarIngresoSPD, recalcularStockYCostoPromedio y recalcularSPDPorProducto.
+ */
+function calcularNuevoPromedio(
+  stockAnterior: number,
+  promedioAnterior: Decimal,
+  cantidadIngreso: number,
+  costoIngreso: Decimal,
+): Decimal {
+  const nuevoStock = stockAnterior + cantidadIngreso;
+  if (stockAnterior <= 0 || nuevoStock <= 0) {
+    return costoIngreso;
+  }
+  const valorAnterior = promedioAnterior.times(stockAnterior);
+  const valorIngreso = costoIngreso.times(cantidadIngreso);
+  return valorAnterior.plus(valorIngreso).dividedBy(nuevoStock);
+}
+
 export async function aplicarIngresoEmbarque(
   tx: TxClient,
   params: {
@@ -92,24 +118,17 @@ async function aplicarIngresoProducto(
   }
 
   const stockActual = producto.stockActual;
-  const costoPromedioActual = toDecimal(producto.costoPromedio);
-  const nuevoStock = stockActual + cantidadIngreso;
-
-  let nuevoCostoPromedio: Decimal;
-  if (stockActual <= 0 || nuevoStock <= 0) {
-    nuevoCostoPromedio = costoUnitarioIngreso;
-  } else {
-    const valorAnterior = costoPromedioActual.times(stockActual);
-    const valorIngreso = costoUnitarioIngreso.times(cantidadIngreso);
-    nuevoCostoPromedio = valorAnterior
-      .plus(valorIngreso)
-      .dividedBy(nuevoStock);
-  }
+  const nuevoCostoPromedio = calcularNuevoPromedio(
+    stockActual,
+    toDecimal(producto.costoPromedio),
+    cantidadIngreso,
+    costoUnitarioIngreso,
+  );
 
   await tx.producto.update({
     where: { id: productoId },
     data: {
-      stockActual: nuevoStock,
+      stockActual: stockActual + cantidadIngreso,
       costoPromedio: money(nuevoCostoPromedio),
     },
   });
@@ -283,25 +302,22 @@ export async function recalcularStockYCostoPromedio(
 
   for (const m of movimientos) {
     if (m.tipo === MovimientoStockTipo.INGRESO) {
-      const costoIngreso = toDecimal(m.costoUnitario);
-      const nuevoStock = stock + m.cantidad;
-      if (stock <= 0 || nuevoStock <= 0) {
-        promedio = costoIngreso;
-      } else {
-        const valorAnterior = promedio.times(stock);
-        const valorIngreso = costoIngreso.times(m.cantidad);
-        promedio = valorAnterior.plus(valorIngreso).dividedBy(nuevoStock);
-      }
-      stock = nuevoStock;
+      promedio = calcularNuevoPromedio(
+        stock,
+        promedio,
+        m.cantidad,
+        toDecimal(m.costoUnitario),
+      );
+      stock += m.cantidad;
     } else if (m.tipo === MovimientoStockTipo.EGRESO) {
       stock -= m.cantidad;
     } else if (m.tipo === MovimientoStockTipo.AJUSTE) {
-      // AJUSTE: cantidad signada (positiva o negativa según convención
-      // del registro). Mantiene costo medio.
+      // AJUSTE: cantidad signada (positiva o negativa). Mantiene costo medio.
       stock += m.cantidad;
-    } else if (m.tipo === MovimientoStockTipo.TRANSFERENCIA) {
-      // Transferencia entre depósitos: no afecta stock total ni costo.
     }
+    // TRANSFERENCIA: no afecta stock total ni costo a nivel Producto
+    // (es un movimento interno entre depósitos; ver recalcularSPDPorProducto
+    // para el efecto a nivel SPD).
   }
 
   await tx.producto.update({
@@ -353,20 +369,16 @@ export async function aplicarIngresoSPD(
     return;
   }
   const stockActual = existing.cantidadFisica;
-  const promedioActual = toDecimal(existing.costoPromedio);
-  const nuevoStock = stockActual + cantidadIngreso;
-  let nuevoPromedio: Decimal;
-  if (stockActual <= 0 || nuevoStock <= 0) {
-    nuevoPromedio = costoUnitarioIngreso;
-  } else {
-    const valorAnterior = promedioActual.times(stockActual);
-    const valorIngreso = costoUnitarioIngreso.times(cantidadIngreso);
-    nuevoPromedio = valorAnterior.plus(valorIngreso).dividedBy(nuevoStock);
-  }
+  const nuevoPromedio = calcularNuevoPromedio(
+    stockActual,
+    toDecimal(existing.costoPromedio),
+    cantidadIngreso,
+    costoUnitarioIngreso,
+  );
   await tx.stockPorDeposito.update({
     where: { productoId_depositoId: { productoId, depositoId } },
     data: {
-      cantidadFisica: nuevoStock,
+      cantidadFisica: stockActual + cantidadIngreso,
       costoPromedio: money(nuevoPromedio),
       ultimoMovimiento: new Date(),
     },
@@ -566,24 +578,20 @@ export async function recalcularSPDPorProducto(
       promedio: new Decimal(0),
     };
     if (m.tipo === MovimientoStockTipo.INGRESO) {
-      const costoIngreso = toDecimal(m.costoUnitario);
-      const nuevoStock = cur.stock + m.cantidad;
-      if (cur.stock <= 0 || nuevoStock <= 0) {
-        cur.promedio = costoIngreso;
-      } else {
-        const valorAnterior = cur.promedio.times(cur.stock);
-        const valorIngreso = costoIngreso.times(m.cantidad);
-        cur.promedio = valorAnterior
-          .plus(valorIngreso)
-          .dividedBy(nuevoStock);
-      }
-      cur.stock = nuevoStock;
+      cur.promedio = calcularNuevoPromedio(
+        cur.stock,
+        cur.promedio,
+        m.cantidad,
+        toDecimal(m.costoUnitario),
+      );
+      cur.stock += m.cantidad;
     } else if (m.tipo === MovimientoStockTipo.EGRESO) {
       cur.stock -= m.cantidad;
-    } else if (m.tipo === MovimientoStockTipo.AJUSTE) {
-      cur.stock += m.cantidad;
-    } else if (m.tipo === MovimientoStockTipo.TRANSFERENCIA) {
-      // cantidad ya viene signed: -X en origen, +X en destino
+    } else if (
+      m.tipo === MovimientoStockTipo.AJUSTE ||
+      m.tipo === MovimientoStockTipo.TRANSFERENCIA
+    ) {
+      // AJUSTE: cantidad signed; TRANSFERENCIA: -X origen / +X destino.
       cur.stock += m.cantidad;
     }
     porDeposito.set(m.depositoId, cur);

@@ -471,6 +471,32 @@ export async function guardarVentaAction(
   }
 }
 
+type VentaEmisionItem = { productoId: string; cantidad: number };
+type TxClient = Prisma.TransactionClient;
+
+async function reservarStockEmision(
+  tx: TxClient,
+  items: readonly VentaEmisionItem[],
+): Promise<void> {
+  if (!isStockDualEnabled()) return;
+  const depositoId = await getDepositoPorDefecto(tx);
+  for (const it of items) {
+    await validarDisponible(tx, it.productoId, depositoId, it.cantidad);
+    await aplicarReservaSPD(tx, it.productoId, depositoId, it.cantidad);
+  }
+}
+
+async function liberarReservasAnulacion(
+  tx: TxClient,
+  items: readonly VentaEmisionItem[],
+): Promise<void> {
+  if (!isStockDualEnabled()) return;
+  const depositoId = await getDepositoPorDefecto(tx);
+  for (const it of items) {
+    await liberarReservaSPD(tx, it.productoId, depositoId, it.cantidad);
+  }
+}
+
 export async function emitirVentaAction(
   ventaId: string,
 ): Promise<{ ok: true; numeroAsiento: number } | { ok: false; error: string }> {
@@ -479,16 +505,9 @@ export async function emitirVentaAction(
       const v = await tx.venta.findUnique({
         where: { id: ventaId },
         select: {
-          estado: true,
           asientoId: true,
           numero: true,
-          items: {
-            select: {
-              productoId: true,
-              cantidad: true,
-              producto: { select: { codigo: true } },
-            },
-          },
+          items: { select: { productoId: true, cantidad: true } },
         },
       });
       if (!v) throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
@@ -498,23 +517,7 @@ export async function emitirVentaAction(
           `Venta ${v.numero} ya tiene asiento.`,
         );
       }
-
-      // W3.5 — reserva de stock al emitir, gated por flag.
-      // Cuando off, comportamiento legacy: no toca StockPorDeposito.
-      // Cuando on, valida disponibilidad por (producto, depósito default)
-      // y aplica reserva. La cuenta provisória 1.1.5.03 ya se usa en
-      // crearAsientoVenta (asiento dual).
-      if (isStockDualEnabled()) {
-        const depositoId = await getDepositoPorDefecto(tx);
-        // Validar disponibilidad agrupada (varios items pueden tocar el mismo
-        // producto): hacer reservas item por item; cada validarDisponible
-        // mira el estado actualizado.
-        for (const it of v.items) {
-          await validarDisponible(tx, it.productoId, depositoId, it.cantidad);
-          await aplicarReservaSPD(tx, it.productoId, depositoId, it.cantidad);
-        }
-      }
-
+      await reservarStockEmision(tx, v.items);
       const asiento = await crearAsientoVenta(ventaId, tx);
       const cont = await contabilizarAsiento(asiento.id, tx);
       await tx.venta.update({
@@ -532,6 +535,17 @@ export async function emitirVentaAction(
   }
 }
 
+function ensureSinEntregasConfirmadas(
+  entregas: readonly { numero: string }[],
+): void {
+  if (entregas.length === 0 || !isStockDualEnabled()) return;
+  const numeros = entregas.map((e) => e.numero).join(", ");
+  throw new AsientoError(
+    "DOMINIO_INVALIDO",
+    `Venta tiene entrega(s) confirmada(s) (${numeros}). Anular entregas antes de anular la venta.`,
+  );
+}
+
 export async function anularVentaAction(
   ventaId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -541,28 +555,17 @@ export async function anularVentaAction(
         where: { id: ventaId },
         select: {
           asientoId: true,
-          items: {
-            select: { productoId: true, cantidad: true },
-          },
+          items: { select: { productoId: true, cantidad: true } },
           entregas: {
             where: { estado: "CONFIRMADA" },
-            select: { id: true, numero: true },
+            select: { numero: true },
           },
         },
       });
       if (!v) {
         throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
       }
-      // W3.5 — bloquear anulación si hay entrega CONFIRMADA: el operador
-      // debe anular las entregas primero (cascada manual) para que el
-      // stock vuelva al depósito antes de revertir asiento + reserva.
-      if (v.entregas.length > 0 && isStockDualEnabled()) {
-        const numeros = v.entregas.map((e) => e.numero).join(", ");
-        throw new AsientoError(
-          "DOMINIO_INVALIDO",
-          `Venta tiene entrega(s) confirmada(s) (${numeros}). Anular entregas antes de anular la venta.`,
-        );
-      }
+      ensureSinEntregasConfirmadas(v.entregas);
 
       if (!v.asientoId) {
         await tx.venta.update({
@@ -571,17 +574,8 @@ export async function anularVentaAction(
         });
         return;
       }
-
-      // W3.5 — liberar reservas si corresponde, antes de anular asiento.
-      if (isStockDualEnabled()) {
-        const depositoId = await getDepositoPorDefecto(tx);
-        for (const it of v.items) {
-          await liberarReservaSPD(tx, it.productoId, depositoId, it.cantidad);
-        }
-      }
-
+      await liberarReservasAnulacion(tx, v.items);
       await anularAsiento(v.asientoId, tx);
-      // anularEnTx ya cancela y desvincula la venta.
     });
     revalidatePath("/ventas");
     revalidatePath(`/ventas/${ventaId}`);
