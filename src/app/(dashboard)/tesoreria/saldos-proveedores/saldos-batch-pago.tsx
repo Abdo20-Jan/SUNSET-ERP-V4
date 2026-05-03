@@ -39,7 +39,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 type FacturaPendiente = {
-  origen: "compra" | "embarque";
+  origen: "compra" | "embarque" | "gasto";
   id: string;
   numero: string;
   fecha: string;
@@ -748,7 +748,11 @@ function ProveedorRow({
                     variant="outline"
                     className="text-[10px] uppercase tracking-wide"
                   >
-                    {f.origen === "compra" ? "C" : "EMB"}
+                    {f.origen === "compra"
+                      ? "C"
+                      : f.origen === "gasto"
+                        ? "G"
+                        : "EMB"}
                   </Badge>
                   <span className="font-mono">{f.numero}</span>
                   <span className="font-mono text-muted-foreground tabular-nums">
