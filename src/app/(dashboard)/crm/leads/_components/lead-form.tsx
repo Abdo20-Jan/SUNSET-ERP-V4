@@ -1,13 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
 
-import {
-  crearLeadAction,
-  editarLeadAction,
-  type LeadInput,
-} from "@/lib/actions/leads";
+import { type LeadInput } from "@/lib/actions/leads";
 import { LEAD_ESTADOS, LEAD_FUENTES } from "@/lib/crm-enums";
 import { fdString, fdStringOrUndefined } from "@/lib/form-data";
 import type {
@@ -16,6 +11,7 @@ import type {
 } from "@/generated/prisma/client";
 
 import { EnumSelect } from "./enum-select";
+import { useLeadFormSubmit } from "./use-lead-form-submit";
 
 type Props = {
   mode: "create" | "edit";
@@ -36,28 +32,17 @@ function buildLeadInput(formData: FormData): LeadInput {
   };
 }
 
+function pickSubmitLabel(pending: boolean, mode: "create" | "edit"): string {
+  if (pending) return "Guardando...";
+  return mode === "create" ? "Crear lead" : "Guardar cambios";
+}
+
 export function LeadForm({ mode, leadId, initial }: Props) {
   const router = useRouter();
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const { submit, pending, error } = useLeadFormSubmit(mode, leadId);
 
   function handleSubmit(formData: FormData) {
-    setError(null);
-    const input = buildLeadInput(formData);
-
-    start(async () => {
-      const result =
-        mode === "create"
-          ? await crearLeadAction(input)
-          : await editarLeadAction(leadId as string, input);
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      const targetId = mode === "create" ? result.data.id : leadId;
-      router.push(`/crm/leads/${targetId}`);
-      router.refresh();
-    });
+    submit(buildLeadInput(formData));
   }
 
   return (
@@ -92,7 +77,7 @@ export function LeadForm({ mode, leadId, initial }: Props) {
         />
       </label>
 
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
       <div className="flex gap-3">
         <button
@@ -100,7 +85,7 @@ export function LeadForm({ mode, leadId, initial }: Props) {
           disabled={pending}
           className="rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
-          {pending ? "Guardando..." : mode === "create" ? "Crear lead" : "Guardar cambios"}
+          {pickSubmitLabel(pending, mode)}
         </button>
         <button
           type="button"
@@ -139,4 +124,3 @@ function Field({ label, name, defaultValue, type, required }: FieldProps) {
     </label>
   );
 }
-
