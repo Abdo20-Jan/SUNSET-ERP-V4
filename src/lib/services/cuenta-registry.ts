@@ -52,6 +52,21 @@ export const VENTA_CODIGOS = {
     nombre: "MERCADERÍAS",
     categoria: CuentaCategoria.ACTIVO,
   },
+  // Cuenta provisória del flujo stock dual (W3). Cuando se EMITE una
+  // venta, el CMV se debita aquí en lugar de en MERCADERIAS — porque la
+  // mercadería todavía está físicamente en el depósito. Cuando la
+  // entrega (remito) se confirma, se hace DEBE 1.1.5.03 / HABER 1.1.5.01
+  // y se crea el MovimientoStock EGRESO efectivo. Mantiene el contable
+  // y el físico alineados durante la ventana emisión→entrega.
+  //
+  // Nota: el código 1.1.5.02 ya está ocupado por MERCADERIAS_EN_TRANSITO
+  // (mercadería en zona primaria pre-despacho), por eso esta cuenta
+  // provisória usa 1.1.5.03.
+  MERCADERIAS_A_ENTREGAR: {
+    codigo: "1.1.5.03",
+    nombre: "MERCADERÍAS A ENTREGAR",
+    categoria: CuentaCategoria.ACTIVO,
+  },
   // Provisión Impuesto a las Ganancias — se devenga la tasa sobre la
   // utilidad bruta de cada venta. El monto acumulado se paga al cierre
   // del ejercicio fiscal (DDJJ anual de Ganancias).
