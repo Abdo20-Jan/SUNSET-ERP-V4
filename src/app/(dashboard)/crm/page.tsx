@@ -8,6 +8,41 @@ import {
   OportunidadEstado,
 } from "@/generated/prisma/client";
 
+import { KpiCard, NavTile } from "./_components/dashboard-tiles";
+
+type Kpis = {
+  totalLeads: number;
+  leadsNuevos: number;
+  oportunidadesAbiertas: number;
+  oportunidadesGanadas: number;
+  actividadesPendientes: number;
+};
+
+async function fetchKpis(userId: string | undefined): Promise<Kpis> {
+  const [
+    totalLeads,
+    leadsNuevos,
+    oportunidadesAbiertas,
+    oportunidadesGanadas,
+    actividadesPendientes,
+  ] = await Promise.all([
+    db.lead.count(),
+    db.lead.count({ where: { estado: LeadEstado.NUEVO } }),
+    db.oportunidad.count({ where: { estado: OportunidadEstado.ABIERTA } }),
+    db.oportunidad.count({ where: { estado: OportunidadEstado.GANADA } }),
+    userId
+      ? db.actividad.count({ where: { ownerId: userId, completada: false } })
+      : Promise.resolve(0),
+  ]);
+  return {
+    totalLeads,
+    leadsNuevos,
+    oportunidadesAbiertas,
+    oportunidadesGanadas,
+    actividadesPendientes,
+  };
+}
+
 export default async function CrmDashboardPage() {
   if (!isCrmEnabled()) {
     return (
@@ -21,24 +56,7 @@ export default async function CrmDashboardPage() {
   }
 
   const session = await auth();
-
-  const [
-    totalLeads,
-    leadsNuevos,
-    oportunidadesAbiertas,
-    oportunidadesGanadas,
-    actividadesPendientes,
-  ] = await Promise.all([
-    db.lead.count(),
-    db.lead.count({ where: { estado: LeadEstado.NUEVO } }),
-    db.oportunidad.count({ where: { estado: OportunidadEstado.ABIERTA } }),
-    db.oportunidad.count({ where: { estado: OportunidadEstado.GANADA } }),
-    session?.user.id
-      ? db.actividad.count({
-          where: { ownerId: session.user.id, completada: false },
-        })
-      : 0,
-  ]);
+  const kpis = await fetchKpis(session?.user.id);
 
   return (
     <main className="container mx-auto space-y-6 p-6">
@@ -46,7 +64,7 @@ export default async function CrmDashboardPage() {
         <div>
           <h1 className="text-2xl font-semibold">CRM</h1>
           <p className="text-sm text-muted-foreground">
-            Pipeline comercial · {totalLeads} leads · {oportunidadesAbiertas} oportunidades abiertas
+            Pipeline comercial · {kpis.totalLeads} leads · {kpis.oportunidadesAbiertas} oportunidades abiertas
           </p>
         </div>
         <Link
@@ -58,63 +76,41 @@ export default async function CrmDashboardPage() {
       </header>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <KpiCard label="Leads totales" value={totalLeads} href="/crm/leads" />
+        <KpiCard label="Leads totales" value={kpis.totalLeads} href="/crm/leads" />
         <KpiCard
           label="Nuevos sin contactar"
-          value={leadsNuevos}
+          value={kpis.leadsNuevos}
           href="/crm/leads?estado=NUEVO"
         />
         <KpiCard
           label="Oportunidades abiertas"
-          value={oportunidadesAbiertas}
+          value={kpis.oportunidadesAbiertas}
           href="/crm/oportunidades"
         />
         <KpiCard
           label="Ganadas (acumulado)"
-          value={oportunidadesGanadas}
+          value={kpis.oportunidadesGanadas}
           href="/crm/oportunidades?estado=GANADA"
         />
         <KpiCard
           label="Mis actividades pendientes"
-          value={actividadesPendientes}
+          value={kpis.actividadesPendientes}
           href="/crm/actividades"
         />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Link
+        <NavTile
           href="/crm/oportunidades/pipeline"
-          className="rounded-md border p-4 hover:bg-muted"
-        >
-          <h2 className="font-medium">Pipeline kanban</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Ver oportunidades por etapa, mover entre stages.
-          </p>
-        </Link>
-        <Link href="/crm/contactos" className="rounded-md border p-4 hover:bg-muted">
-          <h2 className="font-medium">Contactos</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Personas vinculadas a leads y clientes.
-          </p>
-        </Link>
+          title="Pipeline kanban"
+          description="Ver oportunidades por etapa, mover entre stages."
+        />
+        <NavTile
+          href="/crm/contactos"
+          title="Contactos"
+          description="Personas vinculadas a leads y clientes."
+        />
       </div>
     </main>
-  );
-}
-
-function KpiCard({
-  label,
-  value,
-  href,
-}: {
-  label: string;
-  value: number;
-  href: string;
-}) {
-  return (
-    <Link href={href} className="rounded-md border p-4 hover:bg-muted">
-      <div className="text-sm text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
-    </Link>
   );
 }

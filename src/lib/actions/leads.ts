@@ -3,9 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { isCrmEnabled } from "@/lib/features";
+import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
 import {
   CondicionIva,
   LeadEstado,
@@ -18,13 +17,6 @@ import {
 type ActionResult<T = undefined> =
   | { ok: true; data: T }
   | { ok: false; error: string };
-
-const FLAG_OFF_ERROR = {
-  ok: false as const,
-  error: "CRM no está habilitado (flag CRM_ENABLED=false).",
-};
-
-const NO_AUTH = { ok: false as const, error: "No autorizado." };
 
 const nullableStr = z
   .string()
@@ -66,6 +58,19 @@ export type LeadRow = {
   updatedAt: Date;
 };
 
+function buildSearchFilter(search: string): Prisma.LeadWhereInput {
+  const q = search.trim();
+  if (q.length === 0) return {};
+  return {
+    OR: [
+      { nombre: { contains: q, mode: "insensitive" } },
+      { empresa: { contains: q, mode: "insensitive" } },
+      { cuit: { contains: q } },
+      { email: { contains: q, mode: "insensitive" } },
+    ],
+  };
+}
+
 export async function listarLeads(filtros?: {
   estado?: LeadEstado;
   ownerId?: string;
@@ -76,17 +81,7 @@ export async function listarLeads(filtros?: {
   if (filtros?.estado) where.estado = filtros.estado;
   if (filtros?.ownerId) where.ownerId = filtros.ownerId;
   if (filtros?.fuente) where.fuente = filtros.fuente;
-  if (filtros?.search) {
-    const q = filtros.search.trim();
-    if (q.length > 0) {
-      where.OR = [
-        { nombre: { contains: q, mode: "insensitive" } },
-        { empresa: { contains: q, mode: "insensitive" } },
-        { cuit: { contains: q } },
-        { email: { contains: q, mode: "insensitive" } },
-      ];
-    }
-  }
+  if (filtros?.search) Object.assign(where, buildSearchFilter(filtros.search));
 
   const rows = await db.lead.findMany({
     where,
@@ -136,22 +131,31 @@ export async function getLead(id: string) {
   });
 }
 
+function parseLeadInput(
+  raw: LeadInput,
+): { ok: true; data: z.output<typeof leadSchema> } | { ok: false; error: string } {
+  const parsed = leadSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Datos inválidos.",
+    };
+  }
+  return { ok: true, data: parsed.data };
+}
+
 export async function crearLeadAction(
   raw: LeadInput,
 ): Promise<ActionResult<{ id: string }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
 
-  const parsed = leadSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
-  }
+  const validated = parseLeadInput(raw);
+  if (!validated.ok) return validated;
 
   try {
     const created = await db.lead.create({
-      data: { ...parsed.data, ownerId: session.user.id },
+      data: { ...validated.data, ownerId: guard.userId },
       select: { id: true },
     });
     revalidatePath("/crm/leads");
@@ -167,21 +171,17 @@ export async function editarLeadAction(
   id: string,
   raw: LeadInput,
 ): Promise<ActionResult<{ id: string }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
   if (!id) return { ok: false, error: "Id requerido." };
 
-  const parsed = leadSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
-  }
+  const validated = parseLeadInput(raw);
+  if (!validated.ok) return validated;
 
   try {
     const updated = await db.lead.update({
       where: { id },
-      data: parsed.data,
+      data: validated.data,
       select: { id: true },
     });
     revalidatePath("/crm/leads");
@@ -199,9 +199,8 @@ export async function editarLeadAction(
 export async function eliminarLeadAction(
   id: string,
 ): Promise<ActionResult<undefined>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
   if (!id) return { ok: false, error: "Id requerido." };
 
   try {
@@ -217,93 +216,91 @@ export async function eliminarLeadAction(
   }
 }
 
+type LeadConContactos = Prisma.LeadGetPayload<{ include: { contactos: true } }>;
+
+async function findOrCreateClienteFromLead(
+  tx: Prisma.TransactionClient,
+  lead: LeadConContactos,
+): Promise<string> {
+  if (lead.cuit) {
+    const existente = await tx.cliente.findUnique({
+      where: { cuit: lead.cuit },
+      select: { id: true },
+    });
+    if (existente) return existente.id;
+  }
+  const nuevo = await tx.cliente.create({
+    data: {
+      nombre: lead.empresa ?? lead.nombre,
+      cuit: lead.cuit,
+      email: lead.email,
+      telefono: lead.telefono,
+      tipoCanal: TipoCanal.MINORISTA,
+      condicionIva: CondicionIva.RI,
+    },
+    select: { id: true },
+  });
+  return nuevo.id;
+}
+
+async function ejecutarConversion(
+  tx: Prisma.TransactionClient,
+  leadId: string,
+): Promise<{ clienteId: string; oportunidadesActualizadas: number }> {
+  const lead = await tx.lead.findUnique({
+    where: { id: leadId },
+    include: { contactos: true },
+  });
+  if (!lead) throw new Error("LEAD_NOT_FOUND");
+  if (lead.clienteId) throw new Error("LEAD_YA_CONVERTIDO");
+
+  const clienteId = await findOrCreateClienteFromLead(tx, lead);
+
+  await tx.lead.update({
+    where: { id: leadId },
+    data: { clienteId, estado: LeadEstado.CONVERTIDO },
+  });
+
+  if (lead.contactos.length > 0) {
+    await tx.contacto.updateMany({
+      where: { leadId, clienteId: null },
+      data: { clienteId },
+    });
+  }
+
+  const ops = await tx.oportunidad.updateMany({
+    where: { leadId, clienteId: null, estado: OportunidadEstado.ABIERTA },
+    data: { clienteId },
+  });
+
+  return { clienteId, oportunidadesActualizadas: ops.count };
+}
+
+function mapConvertirError(err: unknown): string {
+  if (err instanceof Error) {
+    if (err.message === "LEAD_NOT_FOUND") return "El lead no existe.";
+    if (err.message === "LEAD_YA_CONVERTIDO") {
+      return "El lead ya fue convertido a cliente.";
+    }
+  }
+  console.error("convertirLeadEnClienteAction failed", err);
+  return "Error inesperado al convertir el lead.";
+}
+
 export async function convertirLeadEnClienteAction(
   leadId: string,
 ): Promise<ActionResult<{ clienteId: string; oportunidadesActualizadas: number }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
 
   try {
-    const result = await db.$transaction(async (tx) => {
-      const lead = await tx.lead.findUnique({
-        where: { id: leadId },
-        include: { contactos: true },
-      });
-      if (!lead) throw new Error("LEAD_NOT_FOUND");
-      if (lead.clienteId) throw new Error("LEAD_YA_CONVERTIDO");
-
-      let clienteId: string;
-      if (lead.cuit) {
-        const existente = await tx.cliente.findUnique({
-          where: { cuit: lead.cuit },
-          select: { id: true },
-        });
-        if (existente) {
-          clienteId = existente.id;
-        } else {
-          const nuevo = await tx.cliente.create({
-            data: {
-              nombre: lead.empresa ?? lead.nombre,
-              cuit: lead.cuit,
-              email: lead.email,
-              telefono: lead.telefono,
-              tipoCanal: TipoCanal.MINORISTA,
-              condicionIva: CondicionIva.RI,
-            },
-            select: { id: true },
-          });
-          clienteId = nuevo.id;
-        }
-      } else {
-        const nuevo = await tx.cliente.create({
-          data: {
-            nombre: lead.empresa ?? lead.nombre,
-            email: lead.email,
-            telefono: lead.telefono,
-            tipoCanal: TipoCanal.MINORISTA,
-            condicionIva: CondicionIva.RI,
-          },
-          select: { id: true },
-        });
-        clienteId = nuevo.id;
-      }
-
-      await tx.lead.update({
-        where: { id: leadId },
-        data: { clienteId, estado: LeadEstado.CONVERTIDO },
-      });
-
-      if (lead.contactos.length > 0) {
-        await tx.contacto.updateMany({
-          where: { leadId, clienteId: null },
-          data: { clienteId },
-        });
-      }
-
-      const opsActualizadas = await tx.oportunidad.updateMany({
-        where: { leadId, clienteId: null, estado: OportunidadEstado.ABIERTA },
-        data: { clienteId },
-      });
-
-      return { clienteId, oportunidadesActualizadas: opsActualizadas.count };
-    });
-
+    const result = await db.$transaction((tx) => ejecutarConversion(tx, leadId));
     revalidatePath("/crm/leads");
     revalidatePath(`/crm/leads/${leadId}`);
     revalidatePath("/maestros/clientes");
     revalidatePath(`/maestros/clientes/${result.clienteId}`);
     return { ok: true, data: result };
   } catch (err) {
-    if (err instanceof Error) {
-      if (err.message === "LEAD_NOT_FOUND") {
-        return { ok: false, error: "El lead no existe." };
-      }
-      if (err.message === "LEAD_YA_CONVERTIDO") {
-        return { ok: false, error: "El lead ya fue convertido a cliente." };
-      }
-    }
-    console.error("convertirLeadEnClienteAction failed", err);
-    return { ok: false, error: "Error inesperado al convertir el lead." };
+    return { ok: false, error: mapConvertirError(err) };
   }
 }

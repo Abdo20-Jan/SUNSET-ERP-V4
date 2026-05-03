@@ -1,7 +1,7 @@
-import Link from "next/link";
-
 import { db } from "@/lib/db";
 import { isCrmEnabled } from "@/lib/features";
+
+import { ContactosTable } from "./_components/contactos-table";
 
 export default async function ContactosPage() {
   if (!isCrmEnabled()) {
@@ -33,50 +33,7 @@ export default async function ContactosPage() {
       {contactos.length === 0 ? (
         <p className="text-muted-foreground">Sin contactos. Agregar desde un lead o cliente.</p>
       ) : (
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted text-left">
-              <tr>
-                <th className="px-3 py-2">Nombre</th>
-                <th className="px-3 py-2">Cargo</th>
-                <th className="px-3 py-2">Email</th>
-                <th className="px-3 py-2">Teléfono</th>
-                <th className="px-3 py-2">Vinculado a</th>
-                <th className="px-3 py-2">Principal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {contactos.map((c) => (
-                <tr key={c.id} className="border-t hover:bg-muted/50">
-                  <td className="px-3 py-2 font-medium">{c.nombre}</td>
-                  <td className="px-3 py-2">{c.cargo ?? "—"}</td>
-                  <td className="px-3 py-2">{c.email ?? "—"}</td>
-                  <td className="px-3 py-2">{c.telefono ?? "—"}</td>
-                  <td className="px-3 py-2">
-                    {c.lead ? (
-                      <Link
-                        href={`/crm/leads/${c.lead.id}`}
-                        className="text-primary hover:underline"
-                      >
-                        Lead: {c.lead.empresa ?? c.lead.nombre}
-                      </Link>
-                    ) : c.cliente ? (
-                      <Link
-                        href={`/maestros/clientes/${c.cliente.id}`}
-                        className="text-primary hover:underline"
-                      >
-                        Cliente: {c.cliente.nombre}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-3 py-2">{c.esPrincipal ? "✓" : ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ContactosTable contactos={contactos} />
       )}
     </main>
   );

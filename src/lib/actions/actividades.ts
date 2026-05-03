@@ -3,39 +3,27 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { isCrmEnabled } from "@/lib/features";
+import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
 import { ActividadTipo, Prisma } from "@/generated/prisma/client";
 
 type ActionResult<T = undefined> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
-const FLAG_OFF_ERROR = {
-  ok: false as const,
-  error: "CRM no está habilitado (flag CRM_ENABLED=false).",
-};
-
-const NO_AUTH = { ok: false as const, error: "No autorizado." };
+const optionalStr = z
+  .string()
+  .optional()
+  .transform((v) => (v && v.trim().length > 0 ? v.trim() : null));
 
 const actividadSchema = z
   .object({
     tipo: z.nativeEnum(ActividadTipo),
     contenido: z.string().trim().min(1, "El contenido es obligatorio."),
     fechaProgramada: z.coerce.date().optional().nullable(),
-    leadId: z
-      .string()
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-    clienteId: z
-      .string()
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-    oportunidadId: z
-      .string()
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
+    leadId: optionalStr,
+    clienteId: optionalStr,
+    oportunidadId: optionalStr,
   })
   .refine(
     (v) => v.leadId !== null || v.clienteId !== null || v.oportunidadId !== null,
@@ -43,6 +31,32 @@ const actividadSchema = z
   );
 
 export type ActividadInput = z.input<typeof actividadSchema>;
+
+type ParsedActividad = z.output<typeof actividadSchema>;
+
+function parseActividadInput(
+  raw: ActividadInput,
+): { ok: true; data: ParsedActividad } | { ok: false; error: string } {
+  const parsed = actividadSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Datos inválidos.",
+    };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+function buildActividadData(parsed: ParsedActividad) {
+  return {
+    tipo: parsed.tipo,
+    contenido: parsed.contenido,
+    fechaProgramada: parsed.fechaProgramada ?? null,
+    leadId: parsed.leadId,
+    clienteId: parsed.clienteId,
+    oportunidadId: parsed.oportunidadId,
+  };
+}
 
 export async function listarActividadesPendientes(ownerId: string) {
   return db.actividad.findMany({
@@ -75,27 +89,15 @@ export async function listarActividadesDeOportunidad(oportunidadId: string) {
 export async function crearActividadAction(
   raw: ActividadInput,
 ): Promise<ActionResult<{ id: string }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
 
-  const parsed = actividadSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
-  }
+  const validated = parseActividadInput(raw);
+  if (!validated.ok) return validated;
 
   try {
     const created = await db.actividad.create({
-      data: {
-        tipo: parsed.data.tipo,
-        contenido: parsed.data.contenido,
-        fechaProgramada: parsed.data.fechaProgramada ?? null,
-        leadId: parsed.data.leadId,
-        clienteId: parsed.data.clienteId,
-        oportunidadId: parsed.data.oportunidadId,
-        ownerId: session.user.id,
-      },
+      data: { ...buildActividadData(validated.data), ownerId: guard.userId },
       select: { id: true, leadId: true, clienteId: true, oportunidadId: true },
     });
     revalidatePathsActividad(created.leadId, created.clienteId, created.oportunidadId);
@@ -110,28 +112,17 @@ export async function editarActividadAction(
   id: string,
   raw: ActividadInput,
 ): Promise<ActionResult<{ id: string }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
   if (!id) return { ok: false, error: "Id requerido." };
 
-  const parsed = actividadSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
-  }
+  const validated = parseActividadInput(raw);
+  if (!validated.ok) return validated;
 
   try {
     const updated = await db.actividad.update({
       where: { id },
-      data: {
-        tipo: parsed.data.tipo,
-        contenido: parsed.data.contenido,
-        fechaProgramada: parsed.data.fechaProgramada ?? null,
-        leadId: parsed.data.leadId,
-        clienteId: parsed.data.clienteId,
-        oportunidadId: parsed.data.oportunidadId,
-      },
+      data: buildActividadData(validated.data),
       select: { id: true, leadId: true, clienteId: true, oportunidadId: true },
     });
     revalidatePathsActividad(updated.leadId, updated.clienteId, updated.oportunidadId);
@@ -148,9 +139,8 @@ export async function editarActividadAction(
 export async function completarActividadAction(
   id: string,
 ): Promise<ActionResult<undefined>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
   if (!id) return { ok: false, error: "Id requerido." };
 
   try {
@@ -174,9 +164,8 @@ export async function completarActividadAction(
 export async function eliminarActividadAction(
   id: string,
 ): Promise<ActionResult<undefined>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
   if (!id) return { ok: false, error: "Id requerido." };
 
   try {

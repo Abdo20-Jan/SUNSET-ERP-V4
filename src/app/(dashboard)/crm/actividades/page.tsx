@@ -1,11 +1,8 @@
-import Link from "next/link";
-
 import { auth } from "@/lib/auth";
 import { listarActividadesPendientes } from "@/lib/actions/actividades";
 import { isCrmEnabled } from "@/lib/features";
-import { fmtDate } from "@/lib/format";
 
-import { CompletarButton } from "./_components/completar-button";
+import { ActividadItem } from "./_components/actividad-item";
 
 export default async function ActividadesPage() {
   if (!isCrmEnabled()) {
@@ -42,58 +39,9 @@ export default async function ActividadesPage() {
         <p className="text-muted-foreground">Sin actividades pendientes.</p>
       ) : (
         <ul className="space-y-2">
-          {actividades.map((a) => {
-            const atrasada =
-              a.fechaProgramada && a.fechaProgramada.getTime() < ahora;
-            return (
-              <li key={a.id} className="rounded-md border p-3 text-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1">
-                    <div>
-                      <span className="font-mono text-xs">{a.tipo}</span> · {a.contenido}
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {a.fechaProgramada ? (
-                        <span className={atrasada ? "text-red-700" : ""}>
-                          {fmtDate(a.fechaProgramada)}
-                          {atrasada ? " · ATRASADA" : ""}
-                        </span>
-                      ) : (
-                        "Sin fecha programada"
-                      )}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                      {a.lead && (
-                        <Link
-                          href={`/crm/leads/${a.lead.id}`}
-                          className="rounded bg-muted px-2 py-0.5 hover:bg-muted-foreground/10"
-                        >
-                          Lead: {a.lead.empresa ?? a.lead.nombre}
-                        </Link>
-                      )}
-                      {a.cliente && (
-                        <Link
-                          href={`/maestros/clientes/${a.cliente.id}`}
-                          className="rounded bg-muted px-2 py-0.5 hover:bg-muted-foreground/10"
-                        >
-                          Cliente: {a.cliente.nombre}
-                        </Link>
-                      )}
-                      {a.oportunidad && (
-                        <Link
-                          href={`/crm/oportunidades/${a.oportunidad.id}`}
-                          className="rounded bg-muted px-2 py-0.5 hover:bg-muted-foreground/10"
-                        >
-                          Op: {a.oportunidad.numero}
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                  <CompletarButton actividadId={a.id} />
-                </div>
-              </li>
-            );
-          })}
+          {actividades.map((a) => (
+            <ActividadItem key={a.id} a={a} ahora={ahora} />
+          ))}
         </ul>
       )}
     </main>

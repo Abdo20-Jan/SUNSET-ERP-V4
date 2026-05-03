@@ -3,21 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { isCrmEnabled } from "@/lib/features";
+import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
 import { Prisma } from "@/generated/prisma/client";
 
 type ActionResult<T = undefined> =
   | { ok: true; data: T }
   | { ok: false; error: string };
-
-const FLAG_OFF_ERROR = {
-  ok: false as const,
-  error: "CRM no está habilitado (flag CRM_ENABLED=false).",
-};
-
-const NO_AUTH = { ok: false as const, error: "No autorizado." };
 
 const nullableStr = z
   .string()
@@ -43,6 +35,21 @@ const contactoSchema = z
 
 export type ContactoInput = z.input<typeof contactoSchema>;
 
+type ParsedContacto = z.output<typeof contactoSchema>;
+
+function parseContactoInput(
+  raw: ContactoInput,
+): { ok: true; data: ParsedContacto } | { ok: false; error: string } {
+  const parsed = contactoSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Datos inválidos.",
+    };
+  }
+  return { ok: true, data: parsed.data };
+}
+
 export async function listarContactosDeLead(leadId: string) {
   return db.contacto.findMany({
     where: { leadId },
@@ -60,23 +67,23 @@ export async function listarContactosDeCliente(clienteId: string) {
 export async function crearContactoAction(
   raw: ContactoInput,
 ): Promise<ActionResult<{ id: string }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
 
-  const parsed = contactoSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
-  }
+  const validated = parseContactoInput(raw);
+  if (!validated.ok) return validated;
 
   try {
     const created = await db.$transaction(async (tx) => {
-      if (parsed.data.esPrincipal) {
-        await desmarcarOtrosPrincipales(tx, parsed.data.leadId, parsed.data.clienteId);
+      if (validated.data.esPrincipal) {
+        await desmarcarOtrosPrincipales(
+          tx,
+          validated.data.leadId,
+          validated.data.clienteId,
+        );
       }
       return tx.contacto.create({
-        data: parsed.data,
+        data: validated.data,
         select: { id: true, leadId: true, clienteId: true },
       });
     });
@@ -92,33 +99,17 @@ export async function editarContactoAction(
   id: string,
   raw: ContactoInput,
 ): Promise<ActionResult<{ id: string }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
   if (!id) return { ok: false, error: "Id requerido." };
 
-  const parsed = contactoSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
-  }
+  const validated = parseContactoInput(raw);
+  if (!validated.ok) return validated;
 
   try {
-    const updated = await db.$transaction(async (tx) => {
-      if (parsed.data.esPrincipal) {
-        await desmarcarOtrosPrincipales(
-          tx,
-          parsed.data.leadId,
-          parsed.data.clienteId,
-          id,
-        );
-      }
-      return tx.contacto.update({
-        where: { id },
-        data: parsed.data,
-        select: { id: true, leadId: true, clienteId: true },
-      });
-    });
+    const updated = await db.$transaction((tx) =>
+      ejecutarUpdateContacto(tx, id, validated.data),
+    );
     revalidatePathsContacto(updated.leadId, updated.clienteId);
     return { ok: true, data: { id: updated.id } };
   } catch (err) {
@@ -130,12 +121,26 @@ export async function editarContactoAction(
   }
 }
 
+async function ejecutarUpdateContacto(
+  tx: Prisma.TransactionClient,
+  id: string,
+  data: ParsedContacto,
+) {
+  if (data.esPrincipal) {
+    await desmarcarOtrosPrincipales(tx, data.leadId, data.clienteId, id);
+  }
+  return tx.contacto.update({
+    where: { id },
+    data,
+    select: { id: true, leadId: true, clienteId: true },
+  });
+}
+
 export async function marcarPrincipalAction(
   id: string,
 ): Promise<ActionResult<undefined>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
 
   try {
     await db.$transaction(async (tx) => {
@@ -161,9 +166,8 @@ export async function marcarPrincipalAction(
 export async function eliminarContactoAction(
   id: string,
 ): Promise<ActionResult<undefined>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
   if (!id) return { ok: false, error: "Id requerido." };
 
   try {

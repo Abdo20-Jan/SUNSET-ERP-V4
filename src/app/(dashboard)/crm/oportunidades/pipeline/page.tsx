@@ -8,6 +8,40 @@ import { OportunidadEstado } from "@/generated/prisma/client";
 
 import { KanbanBoard } from "./_components/kanban-board";
 
+type OpResumen = Awaited<ReturnType<typeof listarOportunidades>>[number];
+
+type KanbanCard = {
+  id: string;
+  numero: string;
+  titulo: string;
+  montoLabel: string;
+  stageId: string;
+  leadOClienteHref: string | null;
+  leadOClienteNombre: string;
+};
+
+function buildHref(o: OpResumen): string | null {
+  if (o.clienteId) return `/maestros/clientes/${o.clienteId}`;
+  if (o.leadId) return `/crm/leads/${o.leadId}`;
+  return null;
+}
+
+function buildNombre(o: OpResumen): string {
+  return o.clienteNombre ?? o.leadEmpresa ?? o.leadNombre ?? "—";
+}
+
+function buildKanbanCards(ops: OpResumen[]): KanbanCard[] {
+  return ops.map((o) => ({
+    id: o.id,
+    numero: o.numero,
+    titulo: o.titulo,
+    montoLabel: `${o.moneda} ${fmtMoney(o.monto)}`,
+    stageId: o.stageId,
+    leadOClienteHref: buildHref(o),
+    leadOClienteNombre: buildNombre(o),
+  }));
+}
+
 export default async function PipelinePage() {
   if (!isCrmEnabled()) {
     return (
@@ -25,20 +59,7 @@ export default async function PipelinePage() {
     listarOportunidades({ estado: OportunidadEstado.ABIERTA }),
   ]);
 
-  const cards = ops.map((o) => ({
-    id: o.id,
-    numero: o.numero,
-    titulo: o.titulo,
-    montoLabel: `${o.moneda} ${fmtMoney(o.monto)}`,
-    stageId: o.stageId,
-    leadOClienteId: o.clienteId ?? o.leadId,
-    leadOClienteNombre: o.clienteNombre ?? o.leadEmpresa ?? o.leadNombre ?? "—",
-    leadOClienteHref: o.clienteId
-      ? `/maestros/clientes/${o.clienteId}`
-      : o.leadId
-      ? `/crm/leads/${o.leadId}`
-      : null,
-  }));
+  const cards = buildKanbanCards(ops);
 
   return (
     <main className="container mx-auto space-y-6 p-6">
@@ -57,7 +78,10 @@ export default async function PipelinePage() {
         </Link>
       </header>
 
-      <KanbanBoard stages={stages.map((s) => ({ id: s.id, nombre: s.nombre }))} cards={cards} />
+      <KanbanBoard
+        stages={stages.map((s) => ({ id: s.id, nombre: s.nombre }))}
+        cards={cards}
+      />
     </main>
   );
 }

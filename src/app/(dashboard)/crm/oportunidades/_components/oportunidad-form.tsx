@@ -9,7 +9,28 @@ import {
   type OportunidadInput,
 } from "@/lib/actions/oportunidades";
 import { MONEDAS } from "@/lib/crm-enums";
+import { fdNumber, fdString, fdStringOrUndefined } from "@/lib/form-data";
 import type { Moneda } from "@/generated/prisma/client";
+
+function buildOportunidadInput(formData: FormData): OportunidadInput {
+  return {
+    titulo: fdString(formData, "titulo"),
+    monto: fdString(formData, "monto"),
+    moneda: (fdString(formData, "moneda") as Moneda) || "USD",
+    stageId: fdString(formData, "stageId"),
+    probabilidad: fdNumber(formData, "probabilidad", 50),
+    cierreEstimado: fdStringOrUndefined(formData, "cierreEstimado"),
+    leadId: fdStringOrUndefined(formData, "leadId"),
+    clienteId: fdStringOrUndefined(formData, "clienteId"),
+    notas: fdStringOrUndefined(formData, "notas"),
+  };
+}
+
+function pickInitialCierre(value: unknown): string {
+  if (typeof value === "string") return value.slice(0, 10);
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return "";
+}
 
 type StageOption = { id: string; nombre: string };
 type LeadOption = { id: string; nombre: string; empresa: string | null };
@@ -38,18 +59,7 @@ export function OportunidadForm({
 
   function handleSubmit(formData: FormData) {
     setError(null);
-    const input: OportunidadInput = {
-      titulo: String(formData.get("titulo") ?? ""),
-      monto: String(formData.get("monto") ?? ""),
-      moneda: (formData.get("moneda") as Moneda) ?? "USD",
-      stageId: String(formData.get("stageId") ?? ""),
-      probabilidad: Number(formData.get("probabilidad") ?? 50),
-      cierreEstimado:
-        String(formData.get("cierreEstimado") ?? "") || undefined,
-      leadId: String(formData.get("leadId") ?? "") || undefined,
-      clienteId: String(formData.get("clienteId") ?? "") || undefined,
-      notas: String(formData.get("notas") ?? "") || undefined,
-    };
+    const input = buildOportunidadInput(formData);
 
     start(async () => {
       const result =
@@ -66,12 +76,7 @@ export function OportunidadForm({
     });
   }
 
-  const cierreInicial =
-    typeof initial?.cierreEstimado === "string"
-      ? initial.cierreEstimado.slice(0, 10)
-      : initial?.cierreEstimado instanceof Date
-      ? initial.cierreEstimado.toISOString().slice(0, 10)
-      : "";
+  const cierreInicial = pickInitialCierre(initial?.cierreEstimado);
 
   return (
     <form action={handleSubmit} className="space-y-4">

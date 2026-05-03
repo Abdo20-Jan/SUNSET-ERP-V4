@@ -3,21 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { isCrmEnabled } from "@/lib/features";
+import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
 import { Prisma, Role } from "@/generated/prisma/client";
+import { auth } from "@/lib/auth";
 
 type ActionResult<T = undefined> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
-const FLAG_OFF_ERROR = {
-  ok: false as const,
-  error: "CRM no está habilitado (flag CRM_ENABLED=false).",
-};
-
-const NO_AUTH = { ok: false as const, error: "No autorizado." };
 const NO_ADMIN = {
   ok: false as const,
   error: "Solo el administrador puede modificar el pipeline.",
@@ -32,6 +26,32 @@ const stageSchema = z.object({
 
 export type StageInput = z.input<typeof stageSchema>;
 
+type ParsedStage = z.output<typeof stageSchema>;
+
+async function requireAdminCrm(): Promise<
+  | { ok: true; userId: string }
+  | { ok: false; error: string }
+> {
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
+  const session = await auth();
+  if (session?.user.role !== Role.ADMIN) return NO_ADMIN;
+  return guard;
+}
+
+function parseStageInput(
+  raw: StageInput,
+): { ok: true; data: ParsedStage } | { ok: false; error: string } {
+  const parsed = stageSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Datos inválidos.",
+    };
+  }
+  return { ok: true, data: parsed.data };
+}
+
 export async function listarStages() {
   return db.pipelineStage.findMany({
     where: { activo: true },
@@ -43,16 +63,11 @@ export async function listarStages() {
 export async function crearStageAction(
   raw: StageInput,
 ): Promise<ActionResult<{ id: string }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
-  if (session.user.role !== Role.ADMIN) return NO_ADMIN;
+  const guard = await requireAdminCrm();
+  if (!guard.ok) return guard;
 
-  const parsed = stageSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
-  }
+  const validated = parseStageInput(raw);
+  if (!validated.ok) return validated;
 
   try {
     const created = await db.$transaction(async (tx) => {
@@ -62,7 +77,7 @@ export async function crearStageAction(
       });
       const nextOrden = (last?.orden ?? 0) + 1;
       return tx.pipelineStage.create({
-        data: { ...parsed.data, orden: nextOrden },
+        data: { ...validated.data, orden: nextOrden },
         select: { id: true },
       });
     });
@@ -78,21 +93,16 @@ export async function editarStageAction(
   id: string,
   raw: StageInput,
 ): Promise<ActionResult<{ id: string }>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
-  if (session.user.role !== Role.ADMIN) return NO_ADMIN;
+  const guard = await requireAdminCrm();
+  if (!guard.ok) return guard;
 
-  const parsed = stageSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
-  }
+  const validated = parseStageInput(raw);
+  if (!validated.ok) return validated;
 
   try {
     const updated = await db.pipelineStage.update({
       where: { id },
-      data: parsed.data,
+      data: validated.data,
       select: { id: true },
     });
     revalidatePath("/crm/oportunidades/pipeline");
@@ -109,10 +119,8 @@ export async function editarStageAction(
 export async function reordenarStagesAction(
   ordenIds: string[],
 ): Promise<ActionResult<undefined>> {
-  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
-  if (session.user.role !== Role.ADMIN) return NO_ADMIN;
+  const guard = await requireAdminCrm();
+  if (!guard.ok) return guard;
   if (!Array.isArray(ordenIds) || ordenIds.length === 0) {
     return { ok: false, error: "Lista de stages requerida." };
   }

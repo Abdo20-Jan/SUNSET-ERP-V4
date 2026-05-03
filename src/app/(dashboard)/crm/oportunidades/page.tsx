@@ -2,10 +2,18 @@ import Link from "next/link";
 
 import { listarOportunidades } from "@/lib/actions/oportunidades";
 import { isCrmEnabled } from "@/lib/features";
-import { fmtDate, fmtMoney } from "@/lib/format";
 import { OportunidadEstado } from "@/generated/prisma/client";
 
+import { OportunidadesTable } from "./_components/oportunidades-table";
+
 type SearchParams = Promise<{ estado?: string }>;
+
+function parseEstado(v: string | undefined): OportunidadEstado | undefined {
+  if (!v) return undefined;
+  return (Object.values(OportunidadEstado) as string[]).includes(v)
+    ? (v as OportunidadEstado)
+    : undefined;
+}
 
 export default async function OportunidadesPage({
   searchParams,
@@ -24,9 +32,7 @@ export default async function OportunidadesPage({
   }
 
   const { estado } = await searchParams;
-  const estadoFilter = parseEstado(estado);
-
-  const ops = await listarOportunidades({ estado: estadoFilter });
+  const ops = await listarOportunidades({ estado: parseEstado(estado) });
 
   return (
     <main className="container mx-auto space-y-6 p-6">
@@ -76,79 +82,8 @@ export default async function OportunidadesPage({
       {ops.length === 0 ? (
         <p className="text-muted-foreground">Sin oportunidades.</p>
       ) : (
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted text-left">
-              <tr>
-                <th className="px-3 py-2">N°</th>
-                <th className="px-3 py-2">Título</th>
-                <th className="px-3 py-2 text-right">Monto</th>
-                <th className="px-3 py-2">Stage</th>
-                <th className="px-3 py-2">Estado</th>
-                <th className="px-3 py-2">Lead/Cliente</th>
-                <th className="px-3 py-2">Owner</th>
-                <th className="px-3 py-2">Cierre est.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ops.map((o) => (
-                <tr key={o.id} className="border-t hover:bg-muted/50">
-                  <td className="px-3 py-2 font-mono text-xs">
-                    <Link href={`/crm/oportunidades/${o.id}`} className="text-primary hover:underline">
-                      {o.numero}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2">{o.titulo}</td>
-                  <td className="px-3 py-2 text-right font-medium">
-                    {o.moneda} {fmtMoney(o.monto)}
-                  </td>
-                  <td className="px-3 py-2">{o.stageNombre}</td>
-                  <td className="px-3 py-2">
-                    <span className={estadoCls(o.estado)}>{o.estado}</span>
-                  </td>
-                  <td className="px-3 py-2">
-                    {o.clienteNombre ? (
-                      <Link
-                        href={`/maestros/clientes/${o.clienteId}`}
-                        className="text-primary hover:underline"
-                      >
-                        {o.clienteNombre}
-                      </Link>
-                    ) : o.leadId ? (
-                      <Link
-                        href={`/crm/leads/${o.leadId}`}
-                        className="text-primary hover:underline"
-                      >
-                        {o.leadEmpresa ?? o.leadNombre}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-3 py-2">{o.ownerNombre}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {o.cierreEstimado ? fmtDate(o.cierreEstimado) : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <OportunidadesTable ops={ops} />
       )}
     </main>
   );
-}
-
-function estadoCls(estado: OportunidadEstado): string {
-  if (estado === OportunidadEstado.GANADA) return "font-medium text-green-700";
-  if (estado === OportunidadEstado.PERDIDA) return "text-red-700";
-  if (estado === OportunidadEstado.EN_PAUSA) return "text-amber-700";
-  return "";
-}
-
-function parseEstado(v: string | undefined): OportunidadEstado | undefined {
-  if (!v) return undefined;
-  return (Object.values(OportunidadEstado) as string[]).includes(v)
-    ? (v as OportunidadEstado)
-    : undefined;
 }

@@ -9,6 +9,7 @@ import {
   type LeadInput,
 } from "@/lib/actions/leads";
 import { LEAD_ESTADOS, LEAD_FUENTES } from "@/lib/crm-enums";
+import { fdString, fdStringOrUndefined } from "@/lib/form-data";
 import type {
   LeadEstado,
   LeadFuente,
@@ -20,6 +21,19 @@ type Props = {
   initial?: Partial<LeadInput>;
 };
 
+function buildLeadInput(formData: FormData): LeadInput {
+  return {
+    nombre: fdString(formData, "nombre"),
+    empresa: fdStringOrUndefined(formData, "empresa"),
+    cuit: fdStringOrUndefined(formData, "cuit"),
+    email: fdStringOrUndefined(formData, "email"),
+    telefono: fdStringOrUndefined(formData, "telefono"),
+    fuente: (fdString(formData, "fuente") as LeadFuente) || "ORGANICO",
+    estado: (fdString(formData, "estado") as LeadEstado) || "NUEVO",
+    notas: fdStringOrUndefined(formData, "notas"),
+  };
+}
+
 export function LeadForm({ mode, leadId, initial }: Props) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -27,16 +41,7 @@ export function LeadForm({ mode, leadId, initial }: Props) {
 
   function handleSubmit(formData: FormData) {
     setError(null);
-    const input: LeadInput = {
-      nombre: String(formData.get("nombre") ?? ""),
-      empresa: String(formData.get("empresa") ?? "") || undefined,
-      cuit: String(formData.get("cuit") ?? "") || undefined,
-      email: String(formData.get("email") ?? "") || undefined,
-      telefono: String(formData.get("telefono") ?? "") || undefined,
-      fuente: (formData.get("fuente") as LeadFuente) ?? "ORGANICO",
-      estado: (formData.get("estado") as LeadEstado) ?? "NUEVO",
-      notas: String(formData.get("notas") ?? "") || undefined,
-    };
+    const input = buildLeadInput(formData);
 
     start(async () => {
       const result =
@@ -47,9 +52,8 @@ export function LeadForm({ mode, leadId, initial }: Props) {
         setError(result.error);
         return;
       }
-      router.push(
-        mode === "create" ? `/crm/leads/${result.data.id}` : `/crm/leads/${leadId}`,
-      );
+      const targetId = mode === "create" ? result.data.id : leadId;
+      router.push(`/crm/leads/${targetId}`);
       router.refresh();
     });
   }
@@ -58,10 +62,10 @@ export function LeadForm({ mode, leadId, initial }: Props) {
     <form action={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Field label="Nombre" name="nombre" defaultValue={initial?.nombre} required />
-        <Field label="Empresa" name="empresa" defaultValue={initial?.empresa ?? ""} />
-        <Field label="CUIT" name="cuit" defaultValue={initial?.cuit ?? ""} />
-        <Field label="Email" name="email" type="email" defaultValue={initial?.email ?? ""} />
-        <Field label="Teléfono" name="telefono" defaultValue={initial?.telefono ?? ""} />
+        <Field label="Empresa" name="empresa" defaultValue={initial?.empresa} />
+        <Field label="CUIT" name="cuit" defaultValue={initial?.cuit} />
+        <Field label="Email" name="email" type="email" defaultValue={initial?.email} />
+        <Field label="Teléfono" name="telefono" defaultValue={initial?.telefono} />
         <Select label="Fuente" name="fuente" defaultValue={initial?.fuente ?? "ORGANICO"}>
           {LEAD_FUENTES.map((f) => (
             <option key={f} value={f}>{f}</option>
@@ -106,24 +110,20 @@ export function LeadForm({ mode, leadId, initial }: Props) {
   );
 }
 
-function Field({
-  label,
-  name,
-  defaultValue,
-  type,
-  required,
-}: {
+type FieldProps = {
   label: string;
   name: string;
   defaultValue?: string | null;
   type?: string;
   required?: boolean;
-}) {
+};
+
+function Field({ label, name, defaultValue, type, required }: FieldProps) {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span>
         {label}
-        {required && <span className="text-red-700"> *</span>}
+        {required ? <span className="text-red-700"> *</span> : null}
       </span>
       <input
         type={type ?? "text"}
