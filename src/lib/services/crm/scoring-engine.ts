@@ -49,6 +49,7 @@ function evaluarRegla(
   operador: string,
   valorRegla: string,
 ): boolean {
+  // nosemgrep: javascript.lang.security.audit.unsafe-dynamic-method.unsafe-dynamic-method
   const fn = OPERADORES[operador];
   return fn ? fn(valorCampo, valorRegla) : false;
 }

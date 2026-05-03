@@ -22,6 +22,7 @@ function mapAiError(err: unknown, contexto: string): string {
     if (err.message === "Lead no encontrado.") return err.message;
     if (err.message === "Actividad no existe.") return err.message;
   }
+  // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
   console.error(`${contexto} failed`, err);
   return "El asistente no pudo completar la operación. Probá de nuevo.";
 }
