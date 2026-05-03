@@ -1,6 +1,6 @@
 import "server-only";
 
-import { Prisma } from "@/generated/prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 import { AsientoError } from "@/lib/services/asiento-automatico";
 
 type TxClient = Prisma.TransactionClient;
