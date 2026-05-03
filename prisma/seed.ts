@@ -324,13 +324,31 @@ async function seedAnaliticasBase() {
 }
 
 // ============================================================
-// 4. DEPÓSITOS (default minimal)
+// 4. DEPÓSITOS (default — alineado con stock dual W3)
 // ============================================================
-
+// Sunset Tires opera en 2 depósitos físicos:
+//
+//  - NACIONAL: mercadería ya nacionalizada (con DIA cerrado), disponible
+//    para venta. Es el depósito por defecto para emisión de venta.
+//
+//  - ZONA PRIMARIA ADUANEIRA: mercadería que llegó al puerto / zona
+//    primaria pero aún no fue nacionalizada. Bloqueada para venta hasta
+//    que se cierre el despacho. Concepto fiscal AR (ver
+//    `crearAsientoZonaPrimaria` en src/lib/services/asiento-automatico.ts).
+//
+// Idempotente: si ya existe un Deposito con el mismo `nombre`, se
+// actualiza; si no, se crea. NO se elimina ni se renombra ningún
+// Deposito pre-existente con otros nombres (caso de instalaciones
+// previas a W3 con nomenclatura propia).
 const DEPOSITOS_DEFAULT = [
   {
-    nombre: "Depósito Principal — Buenos Aires",
-    direccion: "Av. del Libertador 1234, CABA",
+    nombre: "NACIONAL",
+    direccion: "Depósito propio — mercadería nacionalizada",
+    activo: true,
+  },
+  {
+    nombre: "ZONA PRIMARIA ADUANEIRA",
+    direccion: "Mercadería en zona primaria — pendiente de despacho",
     activo: true,
   },
 ];
