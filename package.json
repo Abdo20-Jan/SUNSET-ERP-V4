@@ -12,7 +12,9 @@
     "db:push": "prisma db push",
     "db:push:force": "prisma db push --force-reset",
     "db:seed": "tsx prisma/seed.ts",
-    "db:setup": "prisma db push && tsx prisma/seed.ts"
+    "db:setup": "prisma db push && tsx prisma/seed.ts",
+    "db:backfill-stock": "tsx prisma/backfill-stock-por-deposito.ts",
+    "db:validar-stock": "tsx prisma/validar-invariantes-stock.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
