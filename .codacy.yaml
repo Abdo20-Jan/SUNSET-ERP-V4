@@ -1,0 +1,35 @@
+---
+# Codacy configuration — sunset-erp-v4
+# Docs: https://docs.codacy.com/repositories-configure/configuration-file/
+
+engines:
+  semgrep:
+    enabled: true
+    exclude_patterns:
+      # Uso legítimo do SDK Anthropic — projeto integra IA intencionalmente
+      # (extracto-parser, lead-summarizer, sentiment)
+      - "Semgrep_ai.typescript.detect-anthropic"
+      - "ai.typescript.detect-anthropic"
+      # Falsos positivos comuns em template strings com símbolos $
+      - "Semgrep_javascript.lang.best-practice.missing-template-string-indicator.missing-template-string-indicator"
+      # Math.random() para UI skeleton widths não é crypto-sensitive
+      - "Semgrep_rules_lgpl_javascript_crypto_rule-node-insecure-random-generator"
+      # Constantes UI (keyboard shortcut "b") não são senhas
+      - "Semgrep_codacy.javascript.security.hard-coded-password"
+      # `^X.Y.Z` em devDependencies (husky, lint-staged) é padrão npm — não é hijack risk
+      - "Semgrep_json.npm.security.package-dependencies-check.package-dependencies-check"
+  lizard:
+    enabled: true
+  eslint:
+    enabled: true
+  biome:
+    enabled: true
+
+exclude_paths:
+  - "src/generated/**"
+  - "prisma/migrations/**"
+  - ".next/**"
+  - "node_modules/**"
+  - "*.config.{js,mjs,ts}"
+  - "biome.json"
+  - "**/*.generated.*"

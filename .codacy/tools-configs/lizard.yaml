@@ -1,0 +1,15 @@
+---
+# Lizard threshold overrides
+# CCN 8 / NLOC 50 padrão do Codacy é restritivo demais para components React
+# com forms (handleSubmit com formData.get repetidos, schema/operadores).
+# Helpers já decompõem o que faz sentido — limit 12/80 mantém disciplina sem ruído.
+
+patterns:
+  - id: Lizard_ccn-medium
+    parameters:
+      - name: threshold
+        value: 12
+  - id: Lizard_nloc-medium
+    parameters:
+      - name: threshold
+        value: 80
