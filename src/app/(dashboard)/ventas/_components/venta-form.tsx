@@ -2,13 +2,7 @@
 
 import { useEffect, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Controller,
-  useFieldArray,
-  useForm,
-  useWatch,
-  type Control,
-} from "react-hook-form";
+import { Controller, useFieldArray, useForm, useWatch, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -25,19 +19,14 @@ import {
   emitirVentaAction,
   guardarVentaAction,
   type ClienteParaVenta,
+  type DepositoParaVenta,
   type ProductoParaVenta,
   type VentaDetalle,
 } from "@/lib/actions/ventas";
 import { fmtMoney } from "@/lib/format";
 import { useCmdShortcut } from "@/lib/hooks/use-cmd-shortcut";
-import {
-  ClienteCombobox,
-  type ClienteOption,
-} from "@/components/cliente-combobox";
-import {
-  ProductoCombobox,
-  type ProductoOption,
-} from "@/components/producto-combobox";
+import { ClienteCombobox, type ClienteOption } from "@/components/cliente-combobox";
+import { ProductoCombobox, type ProductoOption } from "@/components/producto-combobox";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -95,9 +84,8 @@ const formSchema = z
           precioUnitario: z
             .string()
             .regex(precioUnitarioRegex, "Precio inválido (máx. 4 decimales)"),
-          ivaPorcentaje: z
-            .string()
-            .regex(/^\d+(\.\d{1,2})?$/, "IVA% inválido"),
+          ivaPorcentaje: z.string().regex(/^\d+(\.\d{1,2})?$/, "IVA% inválido"),
+          depositoId: z.string().optional(),
         }),
       )
       .min(1, "Agregue al menos un ítem"),
@@ -145,6 +133,7 @@ type Props = {
   initialData?: VentaDetalle;
   clientes: ClienteParaVenta[];
   productos: ProductoParaVenta[];
+  depositos: DepositoParaVenta[];
 };
 
 function todayISO(): string {
@@ -165,6 +154,7 @@ export function VentaForm({
   initialData,
   clientes,
   productos,
+  depositos,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -209,6 +199,7 @@ export function VentaForm({
             cantidad: it.cantidad,
             precioUnitario: it.precioUnitario,
             ivaPorcentaje: pct,
+            depositoId: it.depositoId ?? "",
           };
         }),
         cheques: (initialData!.chequesRecibidos ?? []).map((c) => ({
@@ -240,6 +231,7 @@ export function VentaForm({
             cantidad: 1,
             precioUnitario: "0",
             ivaPorcentaje: "21",
+            depositoId: "",
           },
         ],
         cheques: [],
@@ -371,6 +363,7 @@ export function VentaForm({
         cantidad: 1,
         precioUnitario: "0",
         ivaPorcentaje: "21",
+        depositoId: "",
       },
       { shouldFocus: false },
     );
@@ -399,6 +392,7 @@ export function VentaForm({
           cantidad: Number(it.cantidad),
           precioUnitario: it.precioUnitario,
           ivaPorcentaje: it.ivaPorcentaje,
+          depositoId: it.depositoId && it.depositoId.trim() !== "" ? it.depositoId : undefined,
         })),
         cheques: (values.cheques ?? []).map((c) => ({
           numero: c.numero,
@@ -446,6 +440,7 @@ export function VentaForm({
           cantidad: Number(it.cantidad),
           precioUnitario: it.precioUnitario,
           ivaPorcentaje: it.ivaPorcentaje,
+          depositoId: it.depositoId && it.depositoId.trim() !== "" ? it.depositoId : undefined,
         })),
         cheques: (values.cheques ?? []).map((c) => ({
           numero: c.numero,
@@ -464,9 +459,7 @@ export function VentaForm({
       }
       const emit = await emitirVentaAction(saved.id);
       if (emit.ok) {
-        toast.success(
-          `Venta ${saved.numero} emitida (asiento Nº ${emit.numeroAsiento}).`,
-        );
+        toast.success(`Venta ${saved.numero} emitida (asiento Nº ${emit.numeroAsiento}).`);
         router.push(`/ventas/${saved.id}`);
         router.refresh();
       } else {
@@ -513,10 +506,7 @@ export function VentaForm({
               control={control}
               name="fecha"
               render={({ field }) => (
-                <DatePicker
-                  value={field.value ?? ""}
-                  onChange={field.onChange}
-                />
+                <DatePicker value={field.value ?? ""} onChange={field.onChange} />
               )}
             />
           </Field>
@@ -530,10 +520,7 @@ export function VentaForm({
               control={control}
               name="fechaVencimiento"
               render={({ field }) => (
-                <DatePicker
-                  value={field.value ?? ""}
-                  onChange={field.onChange}
-                />
+                <DatePicker value={field.value ?? ""} onChange={field.onChange} />
               )}
             />
           </Field>
@@ -545,9 +532,7 @@ export function VentaForm({
               render={({ field }) => (
                 <Select
                   value={field.value}
-                  onValueChange={(v) =>
-                    field.onChange(v as (typeof CONDICION_VALUES)[number])
-                  }
+                  onValueChange={(v) => field.onChange(v as (typeof CONDICION_VALUES)[number])}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue />
@@ -590,11 +575,7 @@ export function VentaForm({
             error={errors.tipoCambio?.message}
             hint={moneda === "ARS" ? "ARS: TC = 1" : undefined}
           >
-            <Input
-              {...register("tipoCambio")}
-              disabled={moneda === "ARS"}
-              inputMode="decimal"
-            />
+            <Input {...register("tipoCambio")} disabled={moneda === "ARS"} inputMode="decimal" />
           </Field>
 
           <Field label="IIBB" error={errors.iibb?.message}>
@@ -642,6 +623,7 @@ export function VentaForm({
                 control={control}
                 productos={productoOptions}
                 productosFull={productos}
+                depositos={depositos}
                 onProductoChange={onProductoChange}
                 onRemove={() => remove(index)}
                 canRemove={fields.length > 1}
@@ -662,10 +644,9 @@ export function VentaForm({
             <div className="flex flex-col gap-0.5">
               <h2 className="text-sm font-semibold">Cheques recibidos</h2>
               <p className="text-xs text-muted-foreground">
-                Cheques de terceros (físicos o e-cheques) recibidos como
-                cobro. Quedan en cartera (cuenta 1.1.4.20) hasta que se
-                acrediten en el banco. Cada cheque puede tener su propia
-                fecha de pago.
+                Cheques de terceros (físicos o e-cheques) recibidos como cobro. Quedan en cartera
+                (cuenta 1.1.4.20) hasta que se acrediten en el banco. Cada cheque puede tener su
+                propia fecha de pago.
               </p>
             </div>
             <Button
@@ -694,9 +675,8 @@ export function VentaForm({
 
           {chequeFields.length === 0 ? (
             <p className="rounded-md border border-dashed bg-muted/20 p-3 text-center text-xs text-muted-foreground">
-              Sin cheques. Si recibís cheques de terceros, agregalos aquí —
-              el asiento debitará 1.1.4.20 VALORES A COBRAR en lugar del
-              cliente.
+              Sin cheques. Si recibís cheques de terceros, agregalos aquí — el asiento debitará
+              1.1.4.20 VALORES A COBRAR en lugar del cliente.
             </p>
           ) : (
             <div className="flex flex-col gap-2">
@@ -753,10 +733,7 @@ export function VentaForm({
                       control={control}
                       name={`cheques.${idx}.fechaEmision` as const}
                       render={({ field }) => (
-                        <DatePicker
-                          value={field.value ?? ""}
-                          onChange={field.onChange}
-                        />
+                        <DatePicker value={field.value ?? ""} onChange={field.onChange} />
                       )}
                     />
                   </div>
@@ -766,10 +743,7 @@ export function VentaForm({
                       control={control}
                       name={`cheques.${idx}.fechaPago` as const}
                       render={({ field }) => (
-                        <DatePicker
-                          value={field.value ?? ""}
-                          onChange={field.onChange}
-                        />
+                        <DatePicker value={field.value ?? ""} onChange={field.onChange} />
                       )}
                     />
                   </div>
@@ -815,11 +789,7 @@ export function VentaForm({
 
       {ivaWarning && (
         <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-          <HugeiconsIcon
-            icon={Alert02Icon}
-            strokeWidth={2}
-            className="mt-0.5 size-4 shrink-0"
-          />
+          <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="mt-0.5 size-4 shrink-0" />
           <span>
             <strong>Verifique IVA:</strong> {ivaWarning}
           </span>
@@ -834,16 +804,10 @@ export function VentaForm({
             <Total label="IIBB" value={totals.iibb.toString()} />
             <Total label="Otros" value={totals.otros.toString()} />
             {totals.flete.gt(0) ? (
-              <Total
-                label="Flete"
-                value={`-${totals.flete.toString()}`}
-                tone="negative"
-              />
+              <Total label="Flete" value={`-${totals.flete.toString()}`} tone="negative" />
             ) : null}
             <div className="flex items-baseline gap-1">
-              <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                Total
-              </span>
+              <span className="text-xs uppercase tracking-wide text-muted-foreground">Total</span>
               <span className="font-mono text-lg font-semibold tabular-nums">
                 {fmtMoney(totals.total.toString())} {moneda}
               </span>
@@ -881,20 +845,10 @@ export function VentaForm({
             >
               Cancelar
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={submitGuardar}
-              disabled={isPending}
-            >
+            <Button type="button" variant="outline" onClick={submitGuardar} disabled={isPending}>
               {isPending ? "Guardando…" : "Guardar borrador"}
             </Button>
-            <Button
-              type="button"
-              variant="default"
-              onClick={submitEmitir}
-              disabled={isPending}
-            >
+            <Button type="button" variant="default" onClick={submitEmitir} disabled={isPending}>
               {isPending ? "Procesando…" : "Guardar y emitir"}
             </Button>
           </div>
@@ -926,20 +880,12 @@ function Field({
       {children}
       {error ? (
         <p className="flex items-center gap-1 text-xs text-destructive">
-          <HugeiconsIcon
-            icon={Alert02Icon}
-            strokeWidth={2}
-            className="size-3"
-          />
+          <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="size-3" />
           {error}
         </p>
       ) : hint ? (
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
-          <HugeiconsIcon
-            icon={InformationCircleIcon}
-            strokeWidth={2}
-            className="size-3"
-          />
+          <HugeiconsIcon icon={InformationCircleIcon} strokeWidth={2} className="size-3" />
           {hint}
         </p>
       ) : null}
@@ -958,9 +904,7 @@ function Total({
 }) {
   return (
     <div className="flex items-baseline gap-1">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <span
         className={
           tone === "negative"
@@ -979,6 +923,7 @@ type ItemRowProps = {
   control: Control<FormValues>;
   productos: ProductoOption[];
   productosFull: ProductoParaVenta[];
+  depositos: DepositoParaVenta[];
   onProductoChange: (index: number, id: string) => void;
   onRemove: () => void;
   canRemove: boolean;
@@ -994,6 +939,7 @@ function ItemRow({
   control,
   productos,
   productosFull,
+  depositos,
   onProductoChange,
   onRemove,
   canRemove,
@@ -1068,13 +1014,9 @@ function ItemRow({
           productos={productos}
         />
         {productoSel && (
-          <p className="mt-1 truncate text-xs text-muted-foreground">
-            {productoSel.nombre}
-          </p>
+          <p className="mt-1 truncate text-xs text-muted-foreground">{productoSel.nombre}</p>
         )}
-        {errorProducto && (
-          <p className="mt-1 text-xs text-destructive">{errorProducto}</p>
-        )}
+        {errorProducto && <p className="mt-1 text-xs text-destructive">{errorProducto}</p>}
       </div>
 
       <div className="md:col-span-1">
@@ -1087,38 +1029,24 @@ function ItemRow({
             valueAsNumber: true,
           })}
         />
-        {errorCantidad && (
-          <p className="mt-1 text-xs text-destructive">{errorCantidad}</p>
-        )}
+        {errorCantidad && <p className="mt-1 text-xs text-destructive">{errorCantidad}</p>}
       </div>
 
       <div className="md:col-span-2">
         <Label className="text-xs uppercase tracking-wide">P. unit.</Label>
-        <Input
-          inputMode="decimal"
-          {...register(`items.${index}.precioUnitario` as const)}
-        />
-        {errorPrecio && (
-          <p className="mt-1 text-xs text-destructive">{errorPrecio}</p>
-        )}
+        <Input inputMode="decimal" {...register(`items.${index}.precioUnitario` as const)} />
+        {errorPrecio && <p className="mt-1 text-xs text-destructive">{errorPrecio}</p>}
       </div>
 
       <div className="md:col-span-1">
         <Label className="text-xs uppercase tracking-wide">IVA %</Label>
-        <Input
-          inputMode="decimal"
-          {...register(`items.${index}.ivaPorcentaje` as const)}
-        />
-        {errorIva && (
-          <p className="mt-1 text-xs text-destructive">{errorIva}</p>
-        )}
+        <Input inputMode="decimal" {...register(`items.${index}.ivaPorcentaje` as const)} />
+        {errorIva && <p className="mt-1 text-xs text-destructive">{errorIva}</p>}
       </div>
 
       <div className="md:col-span-2 text-right">
         <Label className="text-xs uppercase tracking-wide">Total línea</Label>
-        <p className="font-mono text-sm tabular-nums">
-          {fmtMoney(total.toString())}
-        </p>
+        <p className="font-mono text-sm tabular-nums">{fmtMoney(total.toString())}</p>
         <p className="font-mono text-xs text-muted-foreground tabular-nums">
           {fmtMoney(subtotal.toString())} + IVA {fmtMoney(iva.toString())}
         </p>
@@ -1127,11 +1055,7 @@ function ItemRow({
             className="mt-1 flex flex-col items-end gap-0"
             title={`Costo total: ${fmtMoney(rentabilidad.costoTotal.toString())} · Provisión Ganancias 35%: ${fmtMoney(rentabilidad.provisionGanancias.toString())}`}
           >
-            <p
-              className={
-                "font-mono text-[11px] tabular-nums text-muted-foreground"
-              }
-            >
+            <p className={"font-mono text-[11px] tabular-nums text-muted-foreground"}>
               Bruto {rentabilidad.margenBrutoPct.toFixed(2)}% ·{" "}
               {rentabilidad.gananciaBruta.gte(0) ? "+" : ""}
               {fmtMoney(rentabilidad.gananciaBruta.toString())}
@@ -1150,9 +1074,7 @@ function ItemRow({
             </p>
           </div>
         ) : (
-          <p className="mt-1 text-xs text-muted-foreground">
-            Margen — (sin costo)
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">Margen — (sin costo)</p>
         )}
       </div>
 
@@ -1167,6 +1089,33 @@ function ItemRow({
         >
           <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
         </Button>
+      </div>
+
+      {/* Segunda fila del grid: depósito por ítem (S3.1). Vacío = default global. */}
+      <div className="md:col-span-4">
+        <Label className="text-xs uppercase tracking-wide">Depósito</Label>
+        <Controller
+          control={control}
+          name={`items.${index}.depositoId`}
+          render={({ field }) => (
+            <Select
+              value={field.value && field.value.length > 0 ? field.value : "__default__"}
+              onValueChange={(v) => field.onChange(v === "__default__" ? "" : v)}
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="Default" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__">Default (NACIONAL)</SelectItem>
+                {depositos.map((d) => (
+                  <SelectItem key={d.id} value={d.id}>
+                    {d.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        />
       </div>
     </div>
   );

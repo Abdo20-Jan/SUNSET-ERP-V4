@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import {
   listarClientesParaVenta,
+  listarDepositosParaVenta,
   listarProductosParaVenta,
   obtenerVentaPorId,
 } from "@/lib/actions/ventas";
@@ -23,9 +24,10 @@ export default async function VentaDetailPage({
   if (!venta) notFound();
 
   if (venta.estado === "BORRADOR") {
-    const [clientes, productos] = await Promise.all([
+    const [clientes, productos, depositos] = await Promise.all([
       listarClientesParaVenta(),
       listarProductosParaVenta(),
+      listarDepositosParaVenta(),
     ]);
     return (
       <VentaForm
@@ -33,11 +35,14 @@ export default async function VentaDetailPage({
         initialData={venta}
         clientes={clientes}
         productos={productos}
+        depositos={depositos}
       />
     );
   }
 
-  const [cliente, productos, asiento] = await Promise.all([
+  const depositoIds = venta.items.map((it) => it.depositoId).filter((d): d is string => d !== null);
+
+  const [cliente, productos, depositos, asiento] = await Promise.all([
     db.cliente.findUnique({
       where: { id: venta.clienteId },
       select: { nombre: true },
@@ -46,6 +51,12 @@ export default async function VentaDetailPage({
       where: { id: { in: venta.items.map((it) => it.productoId) } },
       select: { id: true, codigo: true, nombre: true },
     }),
+    depositoIds.length > 0
+      ? db.deposito.findMany({
+          where: { id: { in: depositoIds } },
+          select: { id: true, nombre: true },
+        })
+      : Promise.resolve([]),
     venta.asientoId
       ? db.asiento.findUnique({
           where: { id: venta.asientoId },
@@ -59,11 +70,17 @@ export default async function VentaDetailPage({
     productosMap[p.id] = { codigo: p.codigo, nombre: p.nombre };
   }
 
+  const depositosMap: Record<string, string> = {};
+  for (const d of depositos) {
+    depositosMap[d.id] = d.nombre;
+  }
+
   return (
     <VentaDetailView
       venta={venta}
       clienteNombre={cliente?.nombre ?? "—"}
       productosMap={productosMap}
+      depositosMap={depositosMap}
       asientoNumero={asiento?.numero ?? null}
     />
   );
