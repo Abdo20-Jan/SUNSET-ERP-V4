@@ -1,0 +1,6 @@
+nombre,empresa,cuit,email,telefono,fuente,estado,notas
+,Sin nombre SA,,,,,,Empresa sin nombre obligatorio
+Test1,,,email-invalido,,,,Email mal formado
+Test2,,,test@test.com,,FUENTE_INEXISTENTE,,Fuente fuera del enum
+Test3,,,test3@test.com,,,ESTADO_INEXISTENTE,Estado fuera del enum
+Test4,Empresa OK,,test4@ok.com,,REFERIDO,NUEVO,Linha válida en medio de los errores

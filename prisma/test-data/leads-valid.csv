@@ -1,0 +1,6 @@
+nombre,empresa,cuit,email,telefono,fuente,estado,notas
+Juan Pérez,Transporte JP SA,30-12345678-9,juan@jp.com.ar,+5491134567890,REFERIDO,NUEVO,Contacto de feria
+María López,Logística ML,,maria@ml.com,,EVENTO,CONTACTADO,
+Carlos García,,,carlos@gmail.com,1145678901,ORGANICO,NUEVO,Sin empresa
+Ana Martínez,Camiones AM SRL,30-99887766-5,ana@am.com.ar,,LINKEDIN,CALIFICADO,
+Pedro Rodríguez,,,,,FERIA,NUEVO,Solo nombre
