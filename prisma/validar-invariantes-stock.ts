@@ -20,12 +20,16 @@
  *
  * Uso:
  *   pnpm db:validar-stock
+ *   pnpm db:validar-stock --recalcular-reservas   (S3.3: reconstruye
+ *     SPD.cantidadReservada desde ventas EMITIDA pendientes antes de
+ *     validar — útil después de un replay de movimientos.)
  */
 
 import "dotenv/config";
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
+import { recalcularReservasPorProducto } from "../src/lib/services/stock";
 
 type Violacion = {
   invariante: string;
@@ -102,12 +106,35 @@ async function validar(prisma: PrismaClient): Promise<Violacion[]> {
   return violaciones;
 }
 
+async function recalcularReservas(prisma: PrismaClient): Promise<void> {
+  const productos = await prisma.producto.findMany({
+    select: { id: true, codigo: true },
+    orderBy: { codigo: "asc" },
+  });
+  console.log(
+    `→ Recalculando reservas para ${productos.length} producto(s)...`,
+  );
+  let n = 0;
+  for (const p of productos) {
+    await prisma.$transaction(async (tx) => {
+      await recalcularReservasPorProducto(tx, p.id);
+    });
+    n++;
+  }
+  console.log(`✓ Reservas recalculadas (${n} productos procesados).`);
+}
+
 async function main(): Promise<void> {
+  const recalcular = process.argv.includes("--recalcular-reservas");
+
   const prisma = new PrismaClient({
     adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
   });
 
   try {
+    if (recalcular) {
+      await recalcularReservas(prisma);
+    }
     const violaciones = await validar(prisma);
     if (violaciones.length === 0) {
       console.log("✓ Todas las invariantes de stock dual están satisfechas.");
