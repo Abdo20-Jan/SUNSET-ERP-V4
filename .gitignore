@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# husky 9 helper dir (regenerated on `prepare`)
+.husky/_
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
