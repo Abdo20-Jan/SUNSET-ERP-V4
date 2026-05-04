@@ -54,16 +54,10 @@ export async function aplicarIngresoEmbarque(
     select: { id: true, activo: true },
   });
   if (!deposito) {
-    throw new AsientoError(
-      "DOMINIO_INVALIDO",
-      "El depósito de destino del embarque no existe.",
-    );
+    throw new AsientoError("DOMINIO_INVALIDO", "El depósito de destino del embarque no existe.");
   }
   if (!deposito.activo) {
-    throw new AsientoError(
-      "DOMINIO_INVALIDO",
-      "El depósito de destino está inactivo.",
-    );
+    throw new AsientoError("DOMINIO_INVALIDO", "El depósito de destino está inactivo.");
   }
 
   for (const item of params.items) {
@@ -84,12 +78,7 @@ export async function aplicarIngresoEmbarque(
       },
     });
 
-    await aplicarIngresoProducto(
-      tx,
-      item.productoId,
-      item.cantidad,
-      item.costoUnitario,
-    );
+    await aplicarIngresoProducto(tx, item.productoId, item.cantidad, item.costoUnitario);
     await aplicarIngresoSPD(
       tx,
       item.productoId,
@@ -111,10 +100,7 @@ async function aplicarIngresoProducto(
     select: { stockActual: true, costoPromedio: true },
   });
   if (!producto) {
-    throw new AsientoError(
-      "DOMINIO_INVALIDO",
-      `El producto ${productoId} no existe.`,
-    );
+    throw new AsientoError("DOMINIO_INVALIDO", `El producto ${productoId} no existe.`);
   }
 
   const stockActual = producto.stockActual;
@@ -160,16 +146,10 @@ export async function aplicarIngresoDespacho(
     select: { id: true, activo: true },
   });
   if (!deposito) {
-    throw new AsientoError(
-      "DOMINIO_INVALIDO",
-      "El depósito de destino del despacho no existe.",
-    );
+    throw new AsientoError("DOMINIO_INVALIDO", "El depósito de destino del despacho no existe.");
   }
   if (!deposito.activo) {
-    throw new AsientoError(
-      "DOMINIO_INVALIDO",
-      "El depósito de destino está inactivo.",
-    );
+    throw new AsientoError("DOMINIO_INVALIDO", "El depósito de destino está inactivo.");
   }
 
   for (const item of params.items) {
@@ -190,12 +170,7 @@ export async function aplicarIngresoDespacho(
       },
     });
 
-    await aplicarIngresoProducto(
-      tx,
-      item.productoId,
-      item.cantidad,
-      item.costoUnitario,
-    );
+    await aplicarIngresoProducto(tx, item.productoId, item.cantidad, item.costoUnitario);
     await aplicarIngresoSPD(
       tx,
       item.productoId,
@@ -212,10 +187,7 @@ export async function aplicarIngresoDespacho(
  * resetea `ItemDespacho.costoUnitario` y replays el resto de movimientos
  * para reconstruir `Producto.stockActual` + `costoPromedio`.
  */
-export async function revertirIngresoDespacho(
-  tx: TxClient,
-  despachoId: string,
-): Promise<void> {
+export async function revertirIngresoDespacho(tx: TxClient, despachoId: string): Promise<void> {
   const items = await tx.itemDespacho.findMany({
     where: { despachoId },
     select: { id: true, itemEmbarque: { select: { productoId: true } } },
@@ -223,9 +195,7 @@ export async function revertirIngresoDespacho(
   if (items.length === 0) return;
 
   const itemIds = items.map((i) => i.id);
-  const productoIds = Array.from(
-    new Set(items.map((i) => i.itemEmbarque.productoId)),
-  );
+  const productoIds = Array.from(new Set(items.map((i) => i.itemEmbarque.productoId)));
 
   await tx.movimientoStock.deleteMany({
     where: { itemDespachoId: { in: itemIds } },
@@ -251,10 +221,7 @@ export async function revertirIngresoDespacho(
  * Reset también `ItemEmbarque.costoUnitario` a 0 para que un re-cierre
  * recompute todo limpio.
  */
-export async function revertirIngresoEmbarque(
-  tx: TxClient,
-  embarqueId: string,
-): Promise<void> {
+export async function revertirIngresoEmbarque(tx: TxClient, embarqueId: string): Promise<void> {
   const items = await tx.itemEmbarque.findMany({
     where: { embarqueId },
     select: { id: true, productoId: true },
@@ -302,12 +269,7 @@ export async function recalcularStockYCostoPromedio(
 
   for (const m of movimientos) {
     if (m.tipo === MovimientoStockTipo.INGRESO) {
-      promedio = calcularNuevoPromedio(
-        stock,
-        promedio,
-        m.cantidad,
-        toDecimal(m.costoUnitario),
-      );
+      promedio = calcularNuevoPromedio(stock, promedio, m.cantidad, toDecimal(m.costoUnitario));
       stock += m.cantidad;
     } else if (m.tipo === MovimientoStockTipo.EGRESO) {
       stock -= m.cantidad;
@@ -554,10 +516,7 @@ export async function aplicarTransferenciaSPD(
  * EntregaVenta pendientes (no implementado en este replay; para
  * recalcular reservas, ver futuro `recalcularReservasPorProducto`).
  */
-export async function recalcularSPDPorProducto(
-  tx: TxClient,
-  productoId: string,
-): Promise<void> {
+export async function recalcularSPDPorProducto(tx: TxClient, productoId: string): Promise<void> {
   const movimientos = await tx.movimientoStock.findMany({
     where: { productoId },
     orderBy: [{ fecha: "asc" }, { id: "asc" }],
@@ -615,4 +574,96 @@ export async function recalcularSPDPorProducto(
       },
     });
   }
+}
+
+/**
+ * S3.3 — Recalcula `StockPorDeposito.cantidadReservada` para un
+ * producto a partir del estado actual de ventas/entregas.
+ *
+ * Reservas vivas = items de Ventas en estado EMITIDA cuya cantidad
+ * todavía no fue cubierta por una entrega no-anulada. Se agrupa por
+ * depósito (default global hasta que S3.1 entregue `ItemVenta.depositoId`,
+ * después se debe usar `it.depositoId ?? defaultDepId`).
+ *
+ * Estrategia:
+ *  1. Zera `cantidadReservada` de todos los SPD del producto.
+ *  2. Itera ItemVenta de ventas EMITIDA y suma cantidad pendiente de
+ *     entrega (cantidad - SUM(itemEntrega.cantidad WHERE estado != ANULADA)).
+ *  3. Upsert el SPD del depósito con la cantidad reservada calculada.
+ *
+ * Útil después de un replay de movimientos (`recalcularSPDPorProducto`),
+ * que zera las reservas para reconstruirlas desde la fuente de verdad.
+ */
+export async function recalcularReservasPorProducto(
+  tx: TxClient,
+  productoId: string,
+): Promise<void> {
+  // 1. Zera reservada para todos los depósitos de este producto.
+  await tx.stockPorDeposito.updateMany({
+    where: { productoId },
+    data: { cantidadReservada: 0 },
+  });
+
+  // 2. Itera ItemVenta de ventas EMITIDA y calcula pendiente.
+  const items = await tx.itemVenta.findMany({
+    where: {
+      productoId,
+      venta: { estado: "EMITIDA" },
+    },
+    select: {
+      cantidad: true,
+      itemsEntrega: {
+        where: { entrega: { estado: { not: "ANULADA" } } },
+        select: { cantidad: true },
+      },
+    },
+  });
+
+  // 3. Suma pendientes por depósito. Pre-S3.1: todos van al default.
+  // Post-S3.1: cambiar a `it.depositoId ?? defaultDepId` cuando el
+  // schema tenga la columna.
+  const defaultDepId = await getDepositoPorDefectoTx(tx);
+  const pendientesPorDep = new Map<string, number>();
+  for (const it of items) {
+    const entregadas = it.itemsEntrega.reduce((sum, ie) => sum + ie.cantidad, 0);
+    const pendiente = it.cantidad - entregadas;
+    if (pendiente <= 0) continue;
+    pendientesPorDep.set(defaultDepId, (pendientesPorDep.get(defaultDepId) ?? 0) + pendiente);
+  }
+
+  // 4. Upsert SPD con la cantidad reservada recalculada.
+  for (const [depositoId, qty] of pendientesPorDep) {
+    await tx.stockPorDeposito.upsert({
+      where: { productoId_depositoId: { productoId, depositoId } },
+      create: {
+        productoId,
+        depositoId,
+        cantidadFisica: 0,
+        cantidadReservada: qty,
+        costoPromedio: 0,
+      },
+      update: { cantidadReservada: qty },
+    });
+  }
+}
+
+/**
+ * Lookup interno del depósito default. Inline para evitar dependencia
+ * circular con `stock-helpers.ts` (que importa cosas de este archivo).
+ */
+async function getDepositoPorDefectoTx(tx: TxClient): Promise<string> {
+  const nacional = await tx.deposito.findFirst({
+    where: { nombre: "NACIONAL", activo: true },
+    select: { id: true },
+  });
+  if (nacional) return nacional.id;
+  const primero = await tx.deposito.findFirst({
+    where: { activo: true },
+    orderBy: { nombre: "asc" },
+    select: { id: true },
+  });
+  if (!primero) {
+    throw new Error("No hay ningún depósito activo configurado.");
+  }
+  return primero.id;
 }
