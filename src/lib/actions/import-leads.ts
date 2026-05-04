@@ -173,65 +173,66 @@ function checarHeadersObrigatorios(headers: string[]): string | null {
   return null;
 }
 
+type ParsedInputs = {
+  csv: Extract<ReturnType<typeof parseCsv>, { ok: true }>;
+  opts: z.output<typeof importOptsSchema>;
+  aviso: ImportLeadError[];
+};
+
+function parseInputs(
+  csvText: string,
+  opts: ImportarLeadsCsvOpts,
+): { ok: true; data: ParsedInputs } | { ok: false; error: string } {
+  const parsedOpts = importOptsSchema.safeParse(opts);
+  if (!parsedOpts.success) {
+    const first = parsedOpts.error.issues[0];
+    return { ok: false, error: first?.message ?? "Opciones inválidas." };
+  }
+  if (typeof csvText !== "string" || csvText.trim().length === 0) {
+    return { ok: false, error: "CSV vacío." };
+  }
+  const csv = parseCsv(csvText);
+  if (!csv.ok) return { ok: false, error: csv.error };
+  const headerError = checarHeadersObrigatorios(csv.headers);
+  if (headerError) return { ok: false, error: headerError };
+  const headersInvalidos = detectarHeadersInvalidos(csv.headers);
+  const aviso: ImportLeadError[] =
+    headersInvalidos.length > 0
+      ? [{ linha: 1, mensaje: `Cabeceras ignoradas: ${headersInvalidos.join(", ")}.` }]
+      : [];
+  return { ok: true, data: { csv, opts: parsedOpts.data, aviso } };
+}
+
+async function executarImport(inputs: ParsedInputs, ownerId: string): Promise<ImportLeadResult> {
+  const { csv, opts, aviso } = inputs;
+  const { validas, errores } = validarRows(csv.rows);
+  const { insertaveis, ignoradas } = await aplicarDedup(validas, opts.dedupBy);
+  const erroresFinal = [...aviso, ...errores, ...ignoradas];
+  const baseResult = {
+    total: csv.rows.length,
+    ignorados: ignoradas.length,
+    errores: erroresFinal,
+  };
+  if (opts.dryRun) {
+    return { ...baseResult, insertados: insertaveis.length };
+  }
+  const insertados = await inserirEmChunks(insertaveis, ownerId);
+  revalidatePath("/crm/leads");
+  revalidatePath("/crm");
+  return { ...baseResult, insertados };
+}
+
 export async function importarLeadsCsvAction(
   csvText: string,
   opts: ImportarLeadsCsvOpts,
 ): Promise<ActionResult<ImportLeadResult>> {
   const guard = await requireCrmAuth();
   if (!guard.ok) return guard;
-
-  const parsedOpts = importOptsSchema.safeParse(opts);
-  if (!parsedOpts.success) {
-    const first = parsedOpts.error.issues[0];
-    return { ok: false, error: first?.message ?? "Opciones inválidas." };
-  }
-
-  if (typeof csvText !== "string" || csvText.trim().length === 0) {
-    return { ok: false, error: "CSV vacío." };
-  }
-
-  const csv = parseCsv(csvText);
-  if (!csv.ok) return csv;
-
-  const headerError = checarHeadersObrigatorios(csv.headers);
-  if (headerError) return { ok: false, error: headerError };
-
-  const headersInvalidos = detectarHeadersInvalidos(csv.headers);
-  const aviso =
-    headersInvalidos.length > 0
-      ? [{ linha: 1, mensaje: `Cabeceras ignoradas: ${headersInvalidos.join(", ")}.` }]
-      : [];
-
-  const { validas, errores } = validarRows(csv.rows);
-  const { insertaveis, ignoradas } = await aplicarDedup(validas, parsedOpts.data.dedupBy);
-
-  const erroresFinal = [...aviso, ...errores, ...ignoradas];
-
-  if (parsedOpts.data.dryRun) {
-    return {
-      ok: true,
-      data: {
-        total: csv.rows.length,
-        insertados: insertaveis.length,
-        ignorados: ignoradas.length,
-        errores: erroresFinal,
-      },
-    };
-  }
-
+  const inputs = parseInputs(csvText, opts);
+  if (!inputs.ok) return inputs;
   try {
-    const insertados = await inserirEmChunks(insertaveis, guard.userId);
-    revalidatePath("/crm/leads");
-    revalidatePath("/crm");
-    return {
-      ok: true,
-      data: {
-        total: csv.rows.length,
-        insertados,
-        ignorados: ignoradas.length,
-        errores: erroresFinal,
-      },
-    };
+    const data = await executarImport(inputs.data, guard.userId);
+    return { ok: true, data };
   } catch (err) {
     console.error("importarLeadsCsvAction failed", err);
     return { ok: false, error: "Error inesperado al importar leads." };
