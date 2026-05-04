@@ -1,0 +1,6 @@
+nombre,empresa,cuit,email,telefono,fuente,estado,notas
+Lead A,Empresa A,30-11111111-1,a@a.com,,REFERIDO,NUEVO,
+Lead B,Empresa B,30-22222222-2,b@b.com,,REFERIDO,NUEVO,
+Lead C,Empresa A duplicada,30-11111111-1,c@c.com,,REFERIDO,NUEVO,Mismo CUIT que Lead A
+Lead D,Empresa D,,a@a.com,,REFERIDO,NUEVO,Mismo email que Lead A
+Lead E,Empresa E,30-33333333-3,e@e.com,,REFERIDO,NUEVO,
