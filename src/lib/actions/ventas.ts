@@ -4,12 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import {
-  money,
-  precioUnitario as toPrecioUnitario,
-  sumMoney,
-  toDecimal,
-} from "@/lib/decimal";
+import { money, precioUnitario as toPrecioUnitario, sumMoney, toDecimal } from "@/lib/decimal";
 import { isStockDualEnabled } from "@/lib/features";
 import {
   AsientoError,
@@ -18,16 +13,8 @@ import {
   crearAsientoVenta,
 } from "@/lib/services/asiento-automatico";
 import { aplicarReservaSPD, liberarReservaSPD } from "@/lib/services/stock";
-import {
-  getDepositoPorDefecto,
-  validarDisponible,
-} from "@/lib/services/stock-helpers";
-import {
-  CondicionPago,
-  Moneda,
-  Prisma,
-  VentaEstado,
-} from "@/generated/prisma/client";
+import { getDepositoPorDefecto, validarDisponible } from "@/lib/services/stock-helpers";
+import { CondicionPago, Moneda, Prisma, VentaEstado } from "@/generated/prisma/client";
 
 export type VentaRow = {
   id: string;
@@ -56,6 +43,11 @@ export type ProductoParaVenta = {
   nombre: string;
   precioVenta: string;
   costoPromedio: string;
+};
+
+export type DepositoParaVenta = {
+  id: string;
+  nombre: string;
 };
 
 export type VentasListPage = {
@@ -146,6 +138,15 @@ export async function listarProductosParaVenta(): Promise<ProductoParaVenta[]> {
   }));
 }
 
+export async function listarDepositosParaVenta(): Promise<DepositoParaVenta[]> {
+  const rows = await db.deposito.findMany({
+    where: { activo: true },
+    orderBy: { nombre: "asc" },
+    select: { id: true, nombre: true },
+  });
+  return rows.map((d) => ({ id: d.id, nombre: d.nombre }));
+}
+
 export type VentaDetalle = {
   id: string;
   numero: string;
@@ -173,6 +174,7 @@ export type VentaDetalle = {
     subtotal: string;
     iva: string;
     total: string;
+    depositoId: string | null;
   }>;
   chequesRecibidos: Array<{
     id: number;
@@ -188,9 +190,7 @@ export type VentaDetalle = {
   }>;
 };
 
-export async function obtenerVentaPorId(
-  id: string,
-): Promise<VentaDetalle | null> {
+export async function obtenerVentaPorId(id: string): Promise<VentaDetalle | null> {
   const v = await db.venta.findUnique({
     where: { id },
     include: {
@@ -226,6 +226,7 @@ export async function obtenerVentaPorId(
       subtotal: it.subtotal.toString(),
       iva: it.iva.toString(),
       total: it.total.toString(),
+      depositoId: it.depositoId,
     })),
     chequesRecibidos: v.chequesRecibidos.map((c) => ({
       id: c.id,
@@ -252,7 +253,7 @@ export async function generarNumeroVenta(): Promise<string> {
   });
   let next = 1;
   if (ultimo) {
-    const parsed = parseInt(ultimo.numero.slice(prefix.length), 10);
+    const parsed = Number.parseInt(ultimo.numero.slice(prefix.length), 10);
     if (!Number.isNaN(parsed)) next = parsed + 1;
   }
   return `${prefix}${String(next).padStart(4, "0")}`;
@@ -271,20 +272,47 @@ const itemSchema = z.object({
   cantidad: z.number().int().positive("Cantidad > 0"),
   precioUnitario: z.string().regex(precioUnitarioRegex, "Precio inválido (máx. 4 decimales)"),
   ivaPorcentaje: z.string().regex(/^\d+(\.\d{1,2})?$/, "IVA% inválido"),
+  // Depósito opcional por ítem (S3.1). Cuando es null/vacío cae al default
+  // global resuelto en runtime (`getDepositoPorDefecto`).
+  depositoId: z
+    .string()
+    .uuid()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
 });
 
 const chequeRecibidoSchema = z.object({
   numero: z.string().trim().min(1).max(40),
   tipo: z.enum(["FISICO", "ECHEQ"]).default("FISICO"),
-  cmc7: z.string().trim().max(40).optional()
+  cmc7: z
+    .string()
+    .trim()
+    .max(40)
+    .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
-  echeqId: z.string().trim().max(40).optional()
+  echeqId: z
+    .string()
+    .trim()
+    .max(40)
+    .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
-  banco: z.string().trim().max(80).optional()
+  banco: z
+    .string()
+    .trim()
+    .max(80)
+    .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
-  emisor: z.string().trim().max(120).optional()
+  emisor: z
+    .string()
+    .trim()
+    .max(120)
+    .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
-  cuitEmisor: z.string().trim().max(20).optional()
+  cuitEmisor: z
+    .string()
+    .trim()
+    .max(20)
+    .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
   importe: z.string().regex(moneyRegex, "Importe inválido"),
   fechaEmision: z.string().min(1, "Fecha emisión requerida"),
@@ -355,9 +383,7 @@ function calcItem(item: {
   };
 }
 
-export async function guardarVentaAction(
-  raw: VentaInput,
-): Promise<VentaActionResult> {
+export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionResult> {
   const parsed = ventaInputSchema.safeParse(raw);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
@@ -380,9 +406,7 @@ export async function guardarVentaAction(
         numero: input.numero,
         clienteId: input.clienteId,
         fecha: new Date(input.fecha),
-        fechaVencimiento: input.fechaVencimiento
-          ? new Date(input.fechaVencimiento)
-          : null,
+        fechaVencimiento: input.fechaVencimiento ? new Date(input.fechaVencimiento) : null,
         condicionPago: input.condicionPago,
         moneda: input.moneda,
         tipoCambio: new Prisma.Decimal(input.tipoCambio),
@@ -424,6 +448,7 @@ export async function guardarVentaAction(
           subtotal: money(it.subtotal),
           iva: money(it.iva),
           total: money(it.total),
+          depositoId: it.depositoId,
         })),
       });
 
@@ -460,10 +485,7 @@ export async function guardarVentaAction(
     revalidatePath(`/ventas/${saved.id}`);
     return { ok: true, id: saved.id, numero: saved.numero };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: `El número "${input.numero}" ya existe.` };
     }
     if (err instanceof Error) return { ok: false, error: err.message };
@@ -471,7 +493,11 @@ export async function guardarVentaAction(
   }
 }
 
-type VentaEmisionItem = { productoId: string; cantidad: number };
+type VentaEmisionItem = {
+  productoId: string;
+  cantidad: number;
+  depositoId: string | null;
+};
 type TxClient = Prisma.TransactionClient;
 
 async function reservarStockEmision(
@@ -479,10 +505,11 @@ async function reservarStockEmision(
   items: readonly VentaEmisionItem[],
 ): Promise<void> {
   if (!isStockDualEnabled()) return;
-  const depositoId = await getDepositoPorDefecto(tx);
+  const defaultDepId = await getDepositoPorDefecto(tx);
   for (const it of items) {
-    await validarDisponible(tx, it.productoId, depositoId, it.cantidad);
-    await aplicarReservaSPD(tx, it.productoId, depositoId, it.cantidad);
+    const depId = it.depositoId ?? defaultDepId;
+    await validarDisponible(tx, it.productoId, depId, it.cantidad);
+    await aplicarReservaSPD(tx, it.productoId, depId, it.cantidad);
   }
 }
 
@@ -491,9 +518,10 @@ async function liberarReservasAnulacion(
   items: readonly VentaEmisionItem[],
 ): Promise<void> {
   if (!isStockDualEnabled()) return;
-  const depositoId = await getDepositoPorDefecto(tx);
+  const defaultDepId = await getDepositoPorDefecto(tx);
   for (const it of items) {
-    await liberarReservaSPD(tx, it.productoId, depositoId, it.cantidad);
+    const depId = it.depositoId ?? defaultDepId;
+    await liberarReservaSPD(tx, it.productoId, depId, it.cantidad);
   }
 }
 
@@ -507,15 +535,14 @@ export async function emitirVentaAction(
         select: {
           asientoId: true,
           numero: true,
-          items: { select: { productoId: true, cantidad: true } },
+          items: {
+            select: { productoId: true, cantidad: true, depositoId: true },
+          },
         },
       });
       if (!v) throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
       if (v.asientoId) {
-        throw new AsientoError(
-          "DOMINIO_INVALIDO",
-          `Venta ${v.numero} ya tiene asiento.`,
-        );
+        throw new AsientoError("DOMINIO_INVALIDO", `Venta ${v.numero} ya tiene asiento.`);
       }
       await reservarStockEmision(tx, v.items);
       const asiento = await crearAsientoVenta(ventaId, tx);
@@ -535,9 +562,7 @@ export async function emitirVentaAction(
   }
 }
 
-function ensureSinEntregasConfirmadas(
-  entregas: readonly { numero: string }[],
-): void {
+function ensureSinEntregasConfirmadas(entregas: readonly { numero: string }[]): void {
   if (entregas.length === 0 || !isStockDualEnabled()) return;
   const numeros = entregas.map((e) => e.numero).join(", ");
   throw new AsientoError(
@@ -555,7 +580,9 @@ export async function anularVentaAction(
         where: { id: ventaId },
         select: {
           asientoId: true,
-          items: { select: { productoId: true, cantidad: true } },
+          items: {
+            select: { productoId: true, cantidad: true, depositoId: true },
+          },
           entregas: {
             where: { estado: "CONFIRMADA" },
             select: { numero: true },

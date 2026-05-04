@@ -33,6 +33,7 @@ type Props = {
   venta: VentaDetalle;
   clienteNombre: string;
   productosMap: Record<string, { codigo: string; nombre: string }>;
+  depositosMap: Record<string, string>;
   asientoNumero: number | null;
 };
 
@@ -62,6 +63,7 @@ export function VentaDetailView({
   venta,
   clienteNombre,
   productosMap,
+  depositosMap,
   asientoNumero,
 }: Props) {
   const router = useRouter();
@@ -88,9 +90,7 @@ export function VentaDetailView({
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <h1 className="text-[15px] font-semibold tracking-tight">
-              Venta {venta.numero}
-            </h1>
+            <h1 className="text-[15px] font-semibold tracking-tight">Venta {venta.numero}</h1>
             <Badge variant={estadoVariant(venta.estado)}>{venta.estado}</Badge>
           </div>
           <p className="text-sm text-muted-foreground">
@@ -100,11 +100,7 @@ export function VentaDetailView({
         </div>
         <div className="flex items-center gap-2">
           {puedeAnular && (
-            <Button
-              variant="destructive"
-              onClick={() => setConfirmOpen(true)}
-              disabled={isPending}
-            >
+            <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={isPending}>
               <HugeiconsIcon icon={CancelCircleIcon} strokeWidth={2} />
               Anular
             </Button>
@@ -121,16 +117,9 @@ export function VentaDetailView({
             (Number(venta.iibb) + Number(venta.otros)).toFixed(2),
           )} ${venta.moneda}`}
         />
-        <Stat
-          label="Total"
-          value={`${fmtMoney(venta.total)} ${venta.moneda}`}
-          emphasis
-        />
+        <Stat label="Total" value={`${fmtMoney(venta.total)} ${venta.moneda}`} emphasis />
         {Number(venta.flete) > 0 ? (
-          <Stat
-            label="Flete (gasto)"
-            value={`-${fmtMoney(venta.flete)} ${venta.moneda}`}
-          />
+          <Stat label="Flete (gasto)" value={`-${fmtMoney(venta.flete)} ${venta.moneda}`} />
         ) : null}
       </div>
 
@@ -141,9 +130,7 @@ export function VentaDetailView({
             <DateBadge fecha={venta.fechaVencimiento} relative />
           </Field>
           <Field label="Tipo de cambio">
-            {venta.moneda === "ARS"
-              ? "—"
-              : `1 USD = ${fmtTipoCambio(venta.tipoCambio)} ARS`}
+            {venta.moneda === "ARS" ? "—" : `1 USD = ${fmtTipoCambio(venta.tipoCambio)} ARS`}
           </Field>
           <Field label="Asiento contable">
             {asientoNumero != null ? (
@@ -162,12 +149,11 @@ export function VentaDetailView({
 
       <Card className="py-0">
         <Table>
-          <caption className="sr-only">
-            Ítems de la venta {venta.numero}
-          </caption>
+          <caption className="sr-only">Ítems de la venta {venta.numero}</caption>
           <TableHeader>
             <TableRow>
               <TableHead>Producto</TableHead>
+              <TableHead>Depósito</TableHead>
               <TableHead className="text-right">Cant.</TableHead>
               <TableHead className="text-right">P. unit.</TableHead>
               <TableHead className="text-right">Subtotal</TableHead>
@@ -183,18 +169,21 @@ export function VentaDetailView({
                   <TableCell>
                     {p ? (
                       <span>
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {p.codigo}
-                        </span>{" "}
+                        <span className="font-mono text-xs text-muted-foreground">{p.codigo}</span>{" "}
                         {p.nombre}
                       </span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">
-                    {it.cantidad}
+                  <TableCell className="text-xs">
+                    {it.depositoId ? (
+                      (depositosMap[it.depositoId] ?? it.depositoId)
+                    ) : (
+                      <span className="text-muted-foreground italic">default</span>
+                    )}
                   </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{it.cantidad}</TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
                     {fmtMoney(it.precioUnitario)}
                   </TableCell>
@@ -224,24 +213,15 @@ export function VentaDetailView({
           <DialogHeader>
             <DialogTitle>Anular venta {venta.numero}</DialogTitle>
             <DialogDescription>
-              Esta acción genera un asiento de reverso, marca la venta como
-              CANCELADA y desvincula el asiento original. El número de venta se
-              mantiene para auditoría.
+              Esta acción genera un asiento de reverso, marca la venta como CANCELADA y desvincula
+              el asiento original. El número de venta se mantiene para auditoría.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmOpen(false)}
-              disabled={isPending}
-            >
+            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={isPending}>
               Cancelar
             </Button>
-            <Button
-              variant="destructive"
-              onClick={handleAnular}
-              disabled={isPending}
-            >
+            <Button variant="destructive" onClick={handleAnular} disabled={isPending}>
               {isPending ? "Procesando…" : "Anular"}
             </Button>
           </DialogFooter>
@@ -263,9 +243,7 @@ function Stat({
   return (
     <Card>
       <CardContent className="flex flex-col gap-1">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">
-          {label}
-        </span>
+        <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
         <span
           className={
             emphasis
@@ -290,16 +268,8 @@ function Field({
   wide?: boolean;
 }) {
   return (
-    <div
-      className={
-        wide
-          ? "col-span-1 flex flex-col gap-1 md:col-span-3"
-          : "flex flex-col gap-1"
-      }
-    >
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
+    <div className={wide ? "col-span-1 flex flex-col gap-1 md:col-span-3" : "flex flex-col gap-1"}>
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <div className="text-sm">{children}</div>
     </div>
   );
