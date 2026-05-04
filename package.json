@@ -7,7 +7,11 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
+    "biome:check": "biome check src/",
+    "biome:format": "biome check --write src/",
+    "biome:ci": "biome ci src/",
     "typecheck": "tsc --noEmit",
+    "prepare": "husky",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
     "db:push:force": "prisma db push --force-reset",
@@ -15,6 +19,11 @@
     "db:setup": "prisma db push && tsx prisma/seed.ts",
     "db:backfill-stock": "tsx prisma/backfill-stock-por-deposito.ts",
     "db:validar-stock": "tsx prisma/validar-invariantes-stock.ts"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,tsx,js,jsx,json,jsonc}": [
+      "biome check --write --no-errors-on-unmatched"
+    ]
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
@@ -49,6 +58,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
@@ -58,6 +68,8 @@
     "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2",
     "prisma": "^7.8.0",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
