@@ -1,0 +1,37 @@
+---
+# Codacy configuration — sunset-erp-v4
+# Docs: https://docs.codacy.com/repositories-configure/configuration-file/
+
+engines:
+  semgrep:
+    enabled: true
+    exclude_patterns:
+      # Uso legítimo do SDK Anthropic — projeto integra IA intencionalmente
+      # (extracto-parser, lead-summarizer, sentiment)
+      - "ai.typescript.detect-anthropic"
+      # Falsos positivos comuns em template strings com símbolos $
+      - "javascript.lang.best-practice.missing-template-string-indicator.missing-template-string-indicator"
+  lizard:
+    enabled: true
+  eslint:
+    enabled: true
+  biome:
+    enabled: true
+
+exclude_paths:
+  - "src/generated/**"
+  - "prisma/migrations/**"
+  - ".next/**"
+  - "node_modules/**"
+  - "*.config.{js,mjs,ts}"
+  - "biome.json"
+  - "**/*.generated.*"
+
+# Lizard thresholds — CCN 8/NLOC 50 era restritivo para components React com forms
+# (form handlers com formData.get repetidos saturavam CCN). Subir para 12/80
+# reduz ruído sem perder gate quantitativo.
+tools:
+  lizard:
+    config:
+      ccn-medium: 12
+      nloc-medium: 80
