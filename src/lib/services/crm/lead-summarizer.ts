@@ -1,6 +1,5 @@
 import "server-only";
 
-// nosemgrep: ai.typescript.detect-anthropic.detect-anthropic
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
@@ -15,7 +14,6 @@ const ResumenSchema = z.object({
 
 export type ResumenLead = z.infer<typeof ResumenSchema>;
 
-// nosemgrep: javascript.lang.correctness.missing-template-string-indicator.missing-template-string-indicator
 const SYSTEM_PROMPT = `Sos un asistente comercial experto en ventas B2B en Argentina (mercado de neumáticos para vehículos).
 
 Recibís información estructurada de un Lead (prospecto comercial) y devolvés un análisis breve en español rioplatense.
@@ -94,7 +92,6 @@ export async function resumirLead(leadId: string): Promise<ResumenLead> {
     2,
   );
 
-  // nosemgrep: ai.typescript.detect-anthropic.detect-anthropic
   const client = new Anthropic({ apiKey });
 
   const response = await client.messages.create({
