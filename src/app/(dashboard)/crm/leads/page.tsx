@@ -15,16 +15,12 @@ type SearchParams = Promise<{
 
 function parseEstado(v: string | undefined): LeadEstado | undefined {
   if (!v) return undefined;
-  return (Object.values(LeadEstado) as string[]).includes(v)
-    ? (v as LeadEstado)
-    : undefined;
+  return (Object.values(LeadEstado) as string[]).includes(v) ? (v as LeadEstado) : undefined;
 }
 
 function parseFuente(v: string | undefined): LeadFuente | undefined {
   if (!v) return undefined;
-  return (Object.values(LeadFuente) as string[]).includes(v)
-    ? (v as LeadFuente)
-    : undefined;
+  return (Object.values(LeadFuente) as string[]).includes(v) ? (v as LeadFuente) : undefined;
 }
 
 export default async function LeadsPage({
@@ -58,12 +54,17 @@ export default async function LeadsPage({
           <h1 className="text-2xl font-semibold">Leads</h1>
           <p className="text-sm text-muted-foreground">{leads.length} lead(s)</p>
         </div>
-        <Link
-          href="/crm/leads/nuevo"
-          className="rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
-        >
-          Nuevo lead
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/crm/leads/import" className="rounded-md border px-4 py-2 hover:bg-muted">
+            Importar CSV
+          </Link>
+          <Link
+            href="/crm/leads/nuevo"
+            className="rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
+          >
+            Nuevo lead
+          </Link>
+        </div>
       </header>
 
       <LeadsFilterBar q={q} estado={estado} fuente={fuente} />
