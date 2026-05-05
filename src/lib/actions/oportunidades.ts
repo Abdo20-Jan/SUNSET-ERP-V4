@@ -318,31 +318,40 @@ const bulkAssignSchema = z.object({
   ownerId: z.string().min(1, "Owner requerido."),
 });
 
-export async function bulkAssignOportunidadesOwnerAction(
+type BulkAssignParsed = z.output<typeof bulkAssignSchema>;
+
+async function validarBulkAssign(
   raw: z.input<typeof bulkAssignSchema>,
-): Promise<ActionResult<{ actualizados: number }>> {
+): Promise<{ ok: true; data: BulkAssignParsed } | { ok: false; error: string }> {
   if (!isCrmEnabled()) return FLAG_OFF_ERROR;
   const session = await auth();
   if (!session?.user.id) return NO_AUTH;
 
   const parsed = bulkAssignSchema.safeParse(raw);
   if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
   }
+  return { ok: true, data: parsed.data };
+}
+
+export async function bulkAssignOportunidadesOwnerAction(
+  raw: z.input<typeof bulkAssignSchema>,
+): Promise<ActionResult<{ actualizados: number }>> {
+  const guard = await validarBulkAssign(raw);
+  if (!guard.ok) return guard;
 
   try {
     const owner = await db.user.findUnique({
-      where: { id: parsed.data.ownerId },
-      select: { id: true, activo: true },
+      where: { id: guard.data.ownerId },
+      select: { activo: true },
     });
-    if (!owner || !owner.activo) {
+    if (!owner?.activo) {
       return { ok: false, error: "Owner inválido o inactivo." };
     }
 
     const result = await db.oportunidad.updateMany({
-      where: { id: { in: parsed.data.ids } },
-      data: { ownerId: parsed.data.ownerId },
+      where: { id: { in: guard.data.ids } },
+      data: { ownerId: guard.data.ownerId },
     });
     revalidatePath("/crm/oportunidades");
     revalidatePath("/crm/oportunidades/pipeline");
