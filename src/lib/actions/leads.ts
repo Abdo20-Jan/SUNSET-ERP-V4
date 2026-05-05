@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
+import { recalcularScoreLead } from "@/lib/services/crm/scoring-engine";
 import {
   CondicionIva,
   LeadEstado,
@@ -14,9 +15,7 @@ import {
   TipoCanal,
 } from "@/generated/prisma/client";
 
-type ActionResult<T = undefined> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
 const nullableStr = z
   .string()
@@ -144,9 +143,7 @@ function parseLeadInput(
   return { ok: true, data: parsed.data };
 }
 
-export async function crearLeadAction(
-  raw: LeadInput,
-): Promise<ActionResult<{ id: string }>> {
+export async function crearLeadAction(raw: LeadInput): Promise<ActionResult<{ id: string }>> {
   const guard = await requireCrmAuth();
   if (!guard.ok) return guard;
 
@@ -158,6 +155,11 @@ export async function crearLeadAction(
       data: { ...validated.data, ownerId: guard.userId },
       select: { id: true },
     });
+    try {
+      await recalcularScoreLead(created.id);
+    } catch (scoringErr) {
+      console.error("recalcularScoreLead post-crear falló", scoringErr);
+    }
     revalidatePath("/crm/leads");
     revalidatePath("/crm");
     return { ok: true, data: { id: created.id } };
@@ -184,6 +186,11 @@ export async function editarLeadAction(
       data: validated.data,
       select: { id: true },
     });
+    try {
+      await recalcularScoreLead(updated.id);
+    } catch (scoringErr) {
+      console.error("recalcularScoreLead post-editar falló", scoringErr);
+    }
     revalidatePath("/crm/leads");
     revalidatePath(`/crm/leads/${id}`);
     return { ok: true, data: { id: updated.id } };
@@ -196,9 +203,7 @@ export async function editarLeadAction(
   }
 }
 
-export async function eliminarLeadAction(
-  id: string,
-): Promise<ActionResult<undefined>> {
+export async function eliminarLeadAction(id: string): Promise<ActionResult<undefined>> {
   const guard = await requireCrmAuth();
   if (!guard.ok) return guard;
   if (!id) return { ok: false, error: "Id requerido." };
