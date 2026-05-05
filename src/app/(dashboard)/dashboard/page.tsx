@@ -28,7 +28,7 @@ import { PageHeader } from "@/components/layout/page-header";
 
 import { AlertasCard } from "./_components/alertas-card";
 import { EmbarquesRecientesCard } from "./_components/embarques-recientes-card";
-import { IngresosEgresosChart } from "./_components/ingresos-egresos-chart";
+import { IngresosEgresosChartLazy } from "./_components/ingresos-egresos-chart-lazy";
 import { KpiCard } from "./_components/kpi-card";
 import { PrestamosActivosCard } from "./_components/prestamos-activos-card";
 import { SaldosBancosCard } from "./_components/saldos-bancos-card";
@@ -116,7 +116,7 @@ async function KpisPrincipales() {
 
 async function IngresosEgresosSection() {
   const data = await getIngresosEgresosUltimos6m();
-  return <IngresosEgresosChart data={data} />;
+  return <IngresosEgresosChartLazy data={data} />;
 }
 
 async function SaldosSection() {
