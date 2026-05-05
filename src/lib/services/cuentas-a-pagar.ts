@@ -321,6 +321,21 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
     return pagado;
   }
 
+  // Pagos registrados por código de embarque — sirven para detectar facturas
+  // ya canceladas via flow "Pago por embarque" o "Pago múltiple", donde la
+  // descripción de la línea DEBE contiene el código del embarque (formato
+  // "AR-YYMMDD-NNNCN") en lugar del numero específico de la factura.
+  function montoPagadoEmbarque(embarqueCodigo: string, cuentaId: number | null) {
+    if (cuentaId === null) return toDecimal(0);
+    const lineas = pagosPorCuentaTokens.get(cuentaId);
+    if (!lineas) return toDecimal(0);
+    let pagado = toDecimal(0);
+    for (const l of lineas) {
+      if (l.tokens.has(embarqueCodigo)) pagado = pagado.plus(l.debe);
+    }
+    return pagado;
+  }
+
   // Compras EMITIDAS o RECIBIDAS, no canceladas
   const compras = await db.compra.findMany({
     where: { estado: { in: [CompraEstado.EMITIDA, CompraEstado.RECIBIDA] } },
@@ -390,27 +405,41 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
     proveedores.map((p) => [p.id, p.cuentaContableId]),
   );
 
-  function emitirSiPendiente(
+  // Estructura interna usada en las 3 pasadas de detección de pagos. Mantiene
+  // el total bruto ARS y los créditos aplicados por cada layer para poder
+  // cruzar pagos por embarque sin doble contabilizar lo ya descontado por
+  // match de número de factura.
+  type FacturaInterna = FacturaPendiente & {
+    totalArs: ReturnType<typeof toDecimal>;
+    pagadoNumero: ReturnType<typeof toDecimal>;
+    pagadoEmbarque: ReturnType<typeof toDecimal>;
+    pagadoFifo: ReturnType<typeof toDecimal>;
+  };
+
+  function registrarFactura(
     factura: FacturaPendiente,
     totalArs: ReturnType<typeof toDecimal>,
     proveedorId: string,
   ) {
     const cuentaId = cuentaPorProveedor.get(proveedorId) ?? null;
-    const pagado = montoPagadoFactura(factura.numero, cuentaId);
-    const pendiente = totalArs.minus(pagado);
-    // Tolerancia de 0.5 centavos para evitar residuos de redondeo
-    if (pendiente.lte(0.005)) return; // factura ya cubierta
+    const pagadoNumero = montoPagadoFactura(factura.numero, cuentaId);
     const arr = facturasPorProveedor.get(proveedorId) ?? [];
-    arr.push({ ...factura, monto: pendiente.toFixed(2) });
+    arr.push({
+      ...factura,
+      totalArs,
+      pagadoNumero,
+      pagadoEmbarque: toDecimal(0),
+      pagadoFifo: toDecimal(0),
+    });
     facturasPorProveedor.set(proveedorId, arr);
   }
 
-  const facturasPorProveedor = new Map<string, FacturaPendiente[]>();
+  const facturasPorProveedor = new Map<string, FacturaInterna[]>();
 
   for (const c of compras) {
     const totalArs = toDecimal(c.total).times(toDecimal(c.tipoCambio));
     const { dias, bucket } = clasificar(c.fechaVencimiento);
-    emitirSiPendiente(
+    registrarFactura(
       {
         origen: "compra",
         id: c.id,
@@ -439,7 +468,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       .plus(toDecimal(c.otros));
     const totalArs = totalMoneda.times(toDecimal(c.tipoCambio));
     const { dias, bucket } = clasificar(c.fechaVencimiento);
-    emitirSiPendiente(
+    registrarFactura(
       {
         origen: "embarque",
         id: String(c.id),
@@ -464,7 +493,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
     // y "referencia" muestra el numero interno del gasto. Si no, ambos son
     // el mismo y la columna referencia queda vacía para no duplicar.
     const tieneFacturaNumero = g.facturaNumero != null && g.facturaNumero !== g.numero;
-    emitirSiPendiente(
+    registrarFactura(
       {
         origen: "gasto",
         id: g.id,
@@ -482,18 +511,108 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
     );
   }
 
+  // ============================================================
+  // Layer 2 — Pago por embarque (origen=embarque):
+  // El flow "Pago por embarque" / "Pago múltiple" registra DEBE en la
+  // cuenta del proveedor con descripción tipo "AR-YYMMDD-NNNCN — proveedor"
+  // — sin numero específico de factura. Para cada par (proveedor, embarque)
+  // distribuimos el pago restante (total − ya descontado por número) entre
+  // las facturas del grupo en orden de fecha ascendente.
+  // ============================================================
+  for (const [proveedorId, fcts] of facturasPorProveedor) {
+    const cuentaId = cuentaPorProveedor.get(proveedorId) ?? null;
+    if (cuentaId === null) continue;
+
+    // Agrupar facturas origen=embarque por código de embarque
+    const porEmbarque = new Map<string, FacturaInterna[]>();
+    for (const f of fcts) {
+      if (f.origen !== "embarque" || !f.referencia) continue;
+      const arr = porEmbarque.get(f.referencia) ?? [];
+      arr.push(f);
+      porEmbarque.set(f.referencia, arr);
+    }
+
+    for (const [embarqueCodigo, grupo] of porEmbarque) {
+      const pagoEmbarqueTotal = montoPagadoEmbarque(embarqueCodigo, cuentaId);
+      // Lo ya atribuido vía match por número (puede ser 0 si los pagos no
+      // mencionan ningún número específico — caso pago por embarque puro)
+      const pagoYaAtribuido = grupo.reduce((acc, f) => acc.plus(f.pagadoNumero), toDecimal(0));
+      let restante = pagoEmbarqueTotal.minus(pagoYaAtribuido);
+      if (restante.lte(0.005)) continue;
+
+      // FIFO por fecha asc — facturas más antiguas se descontan primero
+      grupo.sort((a, b) => a.fecha.localeCompare(b.fecha));
+      for (const f of grupo) {
+        const pendiente = f.totalArs.minus(f.pagadoNumero).minus(f.pagadoEmbarque);
+        if (pendiente.lte(0.005)) continue;
+        const tomar = pendiente.gt(restante) ? restante : pendiente;
+        f.pagadoEmbarque = f.pagadoEmbarque.plus(tomar);
+        restante = restante.minus(tomar);
+        if (restante.lte(0.005)) break;
+      }
+    }
+  }
+
   const result: SaldoProveedorAging[] = [];
   for (const p of proveedores) {
-    let facturas = facturasPorProveedor.get(p.id) ?? [];
+    const facturasInternas = facturasPorProveedor.get(p.id) ?? [];
     const saldoContable =
       p.cuentaContableId != null ? (saldoPorCuenta.get(p.cuentaContableId) ?? "0.00") : "0.00";
+    const saldoContableDec = toDecimal(saldoContable);
 
     // El ledger contable es la verdad: si saldo ≤ 0 (no se debe nada),
-    // descartar facturas residuales — pueden ser legacy pagadas via flows
-    // que no incluyen el número en la descripción de la línea.
-    if (toDecimal(saldoContable).lte(0.005)) facturas = [];
+    // descartar todas las facturas — pagas via flow legacy / pago genérico
+    // sin identificador en descripción.
+    if (saldoContableDec.lte(0.005)) {
+      if (saldoContableDec.lte(0)) continue;
+      // saldo entre 0 y 0.005: tratar como cero
+      continue;
+    }
 
-    if (toDecimal(saldoContable).lte(0) && facturas.length === 0) continue;
+    // Pendientes brutos por factura (después de Layer 1 + Layer 2)
+    type Pendiente = { f: FacturaInterna; pendiente: ReturnType<typeof toDecimal> };
+    const pendientes: Pendiente[] = facturasInternas
+      .map((f) => ({
+        f,
+        pendiente: f.totalArs.minus(f.pagadoNumero).minus(f.pagadoEmbarque),
+      }))
+      .filter((x) => x.pendiente.gt(0.005));
+
+    // ============================================================
+    // Layer 3 — Fallback FIFO contra saldoContable:
+    // Si la suma de pendientes excede el saldo contable de la cuenta del
+    // proveedor (verdad última del ledger), hubo pagos sin identificador
+    // (descripción genérica como "PAGO ARS NNN.NN"). Descontamos del más
+    // antiguo al más nuevo hasta que el residual coincida con saldoContable.
+    // ============================================================
+    const sumaPendientes = pendientes.reduce((acc, x) => acc.plus(x.pendiente), toDecimal(0));
+    if (sumaPendientes.gt(saldoContableDec.plus(0.005))) {
+      let exceso = sumaPendientes.minus(saldoContableDec);
+      pendientes.sort((a, b) => a.f.fecha.localeCompare(b.f.fecha));
+      for (const x of pendientes) {
+        if (exceso.lte(0.005)) break;
+        const tomar = x.pendiente.gt(exceso) ? exceso : x.pendiente;
+        x.f.pagadoFifo = x.f.pagadoFifo.plus(tomar);
+        x.pendiente = x.pendiente.minus(tomar);
+        exceso = exceso.minus(tomar);
+      }
+    }
+
+    // Facturas finales — solo las que aún tienen pendiente > 0.005
+    const facturas: FacturaPendiente[] = pendientes
+      .filter((x) => x.pendiente.gt(0.005))
+      .map(({ f, pendiente }) => ({
+        origen: f.origen,
+        id: f.id,
+        numero: f.numero,
+        referencia: f.referencia,
+        fecha: f.fecha,
+        fechaVencimiento: f.fechaVencimiento,
+        diasParaVencer: f.diasParaVencer,
+        bucket: f.bucket,
+        monto: pendiente.toFixed(2),
+        moneda: f.moneda,
+      }));
 
     let vencido = toDecimal(0);
     let proximo = toDecimal(0);
