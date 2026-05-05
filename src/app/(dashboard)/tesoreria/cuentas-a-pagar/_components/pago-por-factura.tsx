@@ -46,6 +46,7 @@ type FacturaPendiente = {
   origen: "compra" | "embarque" | "gasto";
   id: string;
   numero: string;
+  referencia: string | null;
   fecha: string;
   fechaVencimiento: string | null;
   diasParaVencer: number | null;
@@ -341,6 +342,7 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
                   />
                 </TableHead>
                 <TableHead className="w-20">Origen</TableHead>
+                <TableHead>Referente</TableHead>
                 <TableHead>Nº factura</TableHead>
                 <TableHead>Proveedor</TableHead>
                 <TableHead>Fecha</TableHead>
@@ -352,7 +354,7 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
                     Sin resultados para los filtros aplicados.
                   </TableCell>
                 </TableRow>
@@ -390,6 +392,9 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
                         >
                           {ORIGEN_BADGE[f.origen]}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {f.referencia ?? "—"}
                       </TableCell>
                       <TableCell className="font-mono text-xs">{f.numero}</TableCell>
                       <TableCell className="text-sm">{f.proveedorNombre}</TableCell>
