@@ -259,38 +259,72 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
     }),
   );
 
-  // Pagos aplicados a facturas individuales: LineaAsiento DEBE > 0 en la
-  // cuenta del proveedor cuya descripción mencione el número de la factura.
-  // Permite descontar facturas ya pagadas (parcial o total) por:
-  //   - PagoPorFactura (single + multi-select) → "Pago factura <numero> — ..."
-  //   - Otros flows que sigan ese formato (legacy compatible).
-  const pagosLineas =
+  // Pagos efectivos por (cuenta del proveedor, asiento): se calcula el NETO
+  // (sum DEBE − sum HABER) por asiento en la cuenta del proveedor. Esto
+  // descuenta correctamente flows tipo "Pago múltiple intermediário" donde
+  // un asiento debita el total bruto y luego acredita parte como "Saldo
+  // pendiente con intermediário" en la misma cuenta — el pago real es el
+  // neto que sale del banco, no el DEBE bruto.
+  //
+  // Tokens de match = unión de tokens de las líneas DEBE del asiento en la
+  // cuenta (las líneas HABER suelen ser descripciones genéricas tipo
+  // "Saldo pendiente" sin identificadores).
+  const lineasTodas =
     cuentaIds.length > 0
       ? await db.lineaAsiento.findMany({
           where: {
             cuentaId: { in: cuentaIds },
-            debe: { gt: 0 },
             asiento: { estado: AsientoEstado.CONTABILIZADO },
           },
-          select: { cuentaId: true, debe: true, descripcion: true },
+          select: {
+            cuentaId: true,
+            asientoId: true,
+            debe: true,
+            haber: true,
+            descripcion: true,
+          },
         })
       : [];
 
-  // Por cuentaId, sumar pagos cuya descripcion contenga el número como
-  // token completo. Tokenizamos por whitespace + em-dash + comma para evitar
-  // que "001" matchee a "0014-00006253".
   function tokensDescripcion(desc: string | null): Set<string> {
     if (!desc) return new Set();
     return new Set(desc.split(/[\s—,;]+/).filter((t) => t.length > 0));
   }
+
+  // Map (cuentaId::asientoId) → { neto, tokens }
+  type AsientoCuentaInfo = {
+    neto: ReturnType<typeof toDecimal>;
+    tokens: Set<string>;
+  };
+  const porAsientoCuenta = new Map<string, AsientoCuentaInfo>();
+  for (const l of lineasTodas) {
+    const key = `${l.cuentaId}::${l.asientoId}`;
+    let info = porAsientoCuenta.get(key);
+    if (!info) {
+      info = { neto: toDecimal(0), tokens: new Set() };
+      porAsientoCuenta.set(key, info);
+    }
+    const debe = toDecimal(l.debe);
+    const haber = toDecimal(l.haber);
+    info.neto = info.neto.plus(debe).minus(haber);
+    // Solo líneas DEBE contribuyen tokens — HABER suele ser genérico
+    if (debe.gt(0)) {
+      for (const t of tokensDescripcion(l.descripcion)) info.tokens.add(t);
+    }
+  }
+
+  // Por cuentaId, lista de pagos efectivos (neto > 0). Para Layer 1 y 2 se
+  // usa este "debe" que ya es el neto del asiento.
   const pagosPorCuentaTokens = new Map<
     number,
     Array<{ tokens: Set<string>; debe: ReturnType<typeof toDecimal> }>
   >();
-  for (const l of pagosLineas) {
-    const arr = pagosPorCuentaTokens.get(l.cuentaId) ?? [];
-    arr.push({ tokens: tokensDescripcion(l.descripcion), debe: toDecimal(l.debe) });
-    pagosPorCuentaTokens.set(l.cuentaId, arr);
+  for (const [key, info] of porAsientoCuenta) {
+    if (info.neto.lte(0.005)) continue; // asiento sin pago efectivo neto
+    const cuentaId = Number(key.split("::")[0]);
+    const arr = pagosPorCuentaTokens.get(cuentaId) ?? [];
+    arr.push({ tokens: info.tokens, debe: info.neto });
+    pagosPorCuentaTokens.set(cuentaId, arr);
   }
 
   // Token genéricos que NÃO devem disparar match — protegem contra
@@ -515,10 +549,23 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
   // Layer 2 — Pago por embarque (origen=embarque):
   // El flow "Pago por embarque" / "Pago múltiple" registra DEBE en la
   // cuenta del proveedor con descripción tipo "AR-YYMMDD-NNNCN — proveedor"
-  // — sin numero específico de factura. Para cada par (proveedor, embarque)
-  // distribuimos el pago restante (total − ya descontado por número) entre
-  // las facturas del grupo en orden de fecha ascendente.
+  // — sin numero específico de factura.
+  //
+  // Threshold de cobertura: solo se zera el grupo si el pago efectivo
+  // (neto, computado en pagosPorCuentaTokens vía DEBE − HABER por asiento)
+  // cubre ≥80% del total pendiente del grupo. Esto evita falsos positivos
+  // en flows "Pago múltiple intermediário" donde el asiento debita el
+  // total bruto pero acredita la mayor parte como "Saldo pendiente con
+  // intermediário" en la misma cuenta — el pago real (lo que sale del
+  // banco) puede ser solo 5-10% del bruto, lo que NO debe zerar las
+  // facturas (Layer 3 ajusta el agregado contra saldoContable).
+  //
+  // Cuando supera 80%, se zera todo el grupo aunque sobre un poco de
+  // residuo en saldoContable — ese residuo suele ser comisión o saldo
+  // remanente con despachante que el usuario considera la factura paga.
   // ============================================================
+  const COBERTURA_MINIMA = 0.8;
+
   for (const [proveedorId, fcts] of facturasPorProveedor) {
     const cuentaId = cuentaPorProveedor.get(proveedorId) ?? null;
     if (cuentaId === null) continue;
@@ -537,18 +584,22 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       // Lo ya atribuido vía match por número (puede ser 0 si los pagos no
       // mencionan ningún número específico — caso pago por embarque puro)
       const pagoYaAtribuido = grupo.reduce((acc, f) => acc.plus(f.pagadoNumero), toDecimal(0));
-      let restante = pagoEmbarqueTotal.minus(pagoYaAtribuido);
-      if (restante.lte(0.005)) continue;
+      const pagoExtra = pagoEmbarqueTotal.minus(pagoYaAtribuido);
+      if (pagoExtra.lte(0.005)) continue;
 
-      // FIFO por fecha asc — facturas más antiguas se descontan primero
-      grupo.sort((a, b) => a.fecha.localeCompare(b.fecha));
+      const totalPendienteGrupo = grupo.reduce(
+        (acc, f) => acc.plus(f.totalArs.minus(f.pagadoNumero)),
+        toDecimal(0),
+      );
+      if (totalPendienteGrupo.lte(0.005)) continue;
+
+      // Threshold: cobertura efectiva debe ser ≥ COBERTURA_MINIMA del total
+      const cobertura = pagoExtra.div(totalPendienteGrupo).toNumber();
+      if (cobertura < COBERTURA_MINIMA) continue;
+
+      // Pago efetivo ≥ 80% del total — zerar todo el grupo
       for (const f of grupo) {
-        const pendiente = f.totalArs.minus(f.pagadoNumero).minus(f.pagadoEmbarque);
-        if (pendiente.lte(0.005)) continue;
-        const tomar = pendiente.gt(restante) ? restante : pendiente;
-        f.pagadoEmbarque = f.pagadoEmbarque.plus(tomar);
-        restante = restante.minus(tomar);
-        if (restante.lte(0.005)) break;
+        f.pagadoEmbarque = f.totalArs.minus(f.pagadoNumero);
       }
     }
   }
@@ -598,9 +649,11 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       }
     }
 
-    // Facturas finales — solo las que aún tienen pendiente > 0.005
+    // Facturas finales — umbral 0.50 ARS para descartar residuos de centavo
+    // que vienen del cruce FIFO entre Layer 2 y Layer 3 (drift entre cifras
+    // brutas en haber con dos decimales y pagos efectivos en netos).
     const facturas: FacturaPendiente[] = pendientes
-      .filter((x) => x.pendiente.gt(0.005))
+      .filter((x) => x.pendiente.gt(0.5))
       .map(({ f, pendiente }) => ({
         origen: f.origen,
         id: f.id,
@@ -776,16 +829,20 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
     }),
   );
 
-  // Pagos aplicados por (cuentaProveedorId + embarqueCodigo): suma de
-  // DEBES en la cuenta del proveedor cuyas líneas mencionan el código
-  // del embarque. Esto permite distinguir qué facturas de ese proveedor
-  // ya fueron canceladas — el código del embarque queda en la
-  // descripción al pagar vía multi-pago / intermediario.
+  // Pagos aplicados por (cuentaProveedorId + embarqueCodigo): suma del
+  // NETO (DEBE − HABER) de cada asiento que menciona el código del
+  // embarque en la cuenta del proveedor. Usar NETO en vez de DEBE bruto
+  // descuenta correctamente flows tipo "Pago múltiple intermediário"
+  // donde el asiento debita el total bruto y luego acredita la mayor
+  // parte como "Saldo pendiente con intermediário" en la misma cuenta —
+  // el pago real es lo que sale del banco (neto), no el bruto.
   const pagosPorClave = new Map<string, string>();
   await Promise.all(
     Array.from(groups.values()).map(async (g) => {
       if (!g.proveedorCuentaContableId) return;
-      const agg = await db.lineaAsiento.aggregate({
+      // Asientos que tienen al menos una línea DEBE en la cuenta del
+      // proveedor con el código del embarque en la descripción
+      const lineasConCodigo = await db.lineaAsiento.findMany({
         where: {
           cuentaId: g.proveedorCuentaContableId,
           debe: { gt: 0 },
@@ -795,10 +852,34 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
             { asiento: { descripcion: { contains: g.embarqueCodigo } } },
           ],
         },
-        _sum: { debe: true },
+        select: { asientoId: true },
       });
-      const total = toDecimal(agg._sum.debe ?? 0);
-      pagosPorClave.set(`${g.proveedorCuentaContableId}::${g.embarqueCodigo}`, total.toFixed(2));
+      const asientoIds = Array.from(new Set(lineasConCodigo.map((l) => l.asientoId)));
+      if (asientoIds.length === 0) {
+        pagosPorClave.set(`${g.proveedorCuentaContableId}::${g.embarqueCodigo}`, "0");
+        return;
+      }
+      // Para cada asiento, calcular NETO en la cuenta del proveedor
+      const todasLineas = await db.lineaAsiento.findMany({
+        where: {
+          cuentaId: g.proveedorCuentaContableId,
+          asientoId: { in: asientoIds },
+        },
+        select: { asientoId: true, debe: true, haber: true },
+      });
+      const netoPorAsiento = new Map<string, ReturnType<typeof toDecimal>>();
+      for (const l of todasLineas) {
+        const cur = netoPorAsiento.get(l.asientoId) ?? toDecimal(0);
+        netoPorAsiento.set(l.asientoId, cur.plus(toDecimal(l.debe)).minus(toDecimal(l.haber)));
+      }
+      let netoTotal = toDecimal(0);
+      for (const neto of netoPorAsiento.values()) {
+        if (neto.gt(0)) netoTotal = netoTotal.plus(neto);
+      }
+      pagosPorClave.set(
+        `${g.proveedorCuentaContableId}::${g.embarqueCodigo}`,
+        netoTotal.toFixed(2),
+      );
     }),
   );
 
@@ -811,14 +892,21 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
       : toDecimal(0);
     g.saldoVivoProveedorArs = saldoVivo.toFixed(2);
 
-    // Pagos ya aplicados a este embarque (líneas DEBE en cuenta del
-    // proveedor con el código del embarque en la descripción).
+    // Pagos ya aplicados a este embarque (NETO por asiento — DEBE − HABER
+    // de cada asiento de la cuenta del proveedor que mencione el código
+    // del embarque). El neto descuenta correctamente los flows
+    // "Pago múltiple intermediário" donde parte del DEBE se reclasifica
+    // como "Saldo pendiente con intermediário" en la misma cuenta.
     const pagadoEmbarque = g.proveedorCuentaContableId
       ? toDecimal(pagosPorClave.get(`${g.proveedorCuentaContableId}::${g.embarqueCodigo}`) ?? "0")
       : toDecimal(0);
 
-    // Si los pagos aplicados al embarque ya cubren el total del grupo,
-    // está pago — omitir.
+    // Threshold de cobertura: si el pago neto cubre ≥80% del total del
+    // grupo, considerar pagado y omitir — consistente con el threshold de
+    // Layer 2 en getSaldosPorProveedorConAging. Evita mostrar grupos con
+    // residuo de saldo intermediário que el usuario considera ya pago.
+    if (totalGrupo.gt(0) && pagadoEmbarque.div(totalGrupo).toNumber() >= 0.8) continue;
+
     const pendienteEmbarque = totalGrupo.minus(pagadoEmbarque);
     if (pendienteEmbarque.lte(0.005)) continue;
 
