@@ -192,6 +192,11 @@ export type FacturaPendiente = {
   origen: "compra" | "embarque" | "gasto";
   id: string;
   numero: string;
+  // Documento mãe: código del embarque (origen=embarque), número interno
+  // del gasto (origen=gasto), número del pedido de compra (origen=compra,
+  // null si la compra no fue originada por una OC). Sirve para
+  // trazabilidad — saber de qué viene la factura sin tener que abrirla.
+  referencia: string | null;
   fecha: string;
   fechaVencimiento: string | null;
   diasParaVencer: number | null; // negativo = vencida hace N días
@@ -328,6 +333,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       tipoCambio: true,
       moneda: true,
       proveedorId: true,
+      pedidoCompra: { select: { numero: true } },
     },
   });
 
@@ -346,6 +352,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       iibb: true,
       otros: true,
       lineas: { select: { subtotal: true } },
+      embarque: { select: { codigo: true } },
     },
   });
 
@@ -408,6 +415,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
         origen: "compra",
         id: c.id,
         numero: c.numero,
+        referencia: c.pedidoCompra?.numero ?? null,
         fecha: c.fecha.toISOString(),
         fechaVencimiento: c.fechaVencimiento?.toISOString() ?? null,
         diasParaVencer: dias,
@@ -436,6 +444,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
         origen: "embarque",
         id: String(c.id),
         numero: c.facturaNumero ?? `Factura #${c.id}`,
+        referencia: c.embarque.codigo,
         fecha: (c.fechaFactura ?? new Date()).toISOString(),
         fechaVencimiento: c.fechaVencimiento?.toISOString() ?? null,
         diasParaVencer: dias,
@@ -451,11 +460,16 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
   for (const g of gastos) {
     const totalArs = toDecimal(g.total).times(toDecimal(g.tipoCambio));
     const { dias, bucket } = clasificar(g.fechaVencimiento);
+    // Si facturaNumero existe, "numero" muestra el comprobante del proveedor
+    // y "referencia" muestra el numero interno del gasto. Si no, ambos son
+    // el mismo y la columna referencia queda vacía para no duplicar.
+    const tieneFacturaNumero = g.facturaNumero != null && g.facturaNumero !== g.numero;
     emitirSiPendiente(
       {
         origen: "gasto",
         id: g.id,
         numero: g.facturaNumero ?? g.numero,
+        referencia: tieneFacturaNumero ? g.numero : null,
         fecha: g.fecha.toISOString(),
         fechaVencimiento: g.fechaVencimiento?.toISOString() ?? null,
         diasParaVencer: dias,
