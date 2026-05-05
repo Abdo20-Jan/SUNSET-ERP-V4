@@ -215,9 +215,7 @@ export type SaldoProveedorAging = {
 
 const DAY_MS = 86_400_000;
 
-export async function getSaldosPorProveedorConAging(): Promise<
-  SaldoProveedorAging[]
-> {
+export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAging[]> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -255,6 +253,68 @@ export async function getSaldosPorProveedorConAging(): Promise<
       return [s.cuentaId, haber.minus(debe).toFixed(2)];
     }),
   );
+
+  // Pagos aplicados a facturas individuales: LineaAsiento DEBE > 0 en la
+  // cuenta del proveedor cuya descripción mencione el número de la factura.
+  // Permite descontar facturas ya pagadas (parcial o total) por:
+  //   - PagoPorFactura (single + multi-select) → "Pago factura <numero> — ..."
+  //   - Otros flows que sigan ese formato (legacy compatible).
+  const pagosLineas =
+    cuentaIds.length > 0
+      ? await db.lineaAsiento.findMany({
+          where: {
+            cuentaId: { in: cuentaIds },
+            debe: { gt: 0 },
+            asiento: { estado: AsientoEstado.CONTABILIZADO },
+          },
+          select: { cuentaId: true, debe: true, descripcion: true },
+        })
+      : [];
+
+  // Por cuentaId, sumar pagos cuya descripcion contenga el número como
+  // token completo. Tokenizamos por whitespace + em-dash + comma para evitar
+  // que "001" matchee a "0014-00006253".
+  function tokensDescripcion(desc: string | null): Set<string> {
+    if (!desc) return new Set();
+    return new Set(desc.split(/[\s—,;]+/).filter((t) => t.length > 0));
+  }
+  const pagosPorCuentaTokens = new Map<
+    number,
+    Array<{ tokens: Set<string>; debe: ReturnType<typeof toDecimal> }>
+  >();
+  for (const l of pagosLineas) {
+    const arr = pagosPorCuentaTokens.get(l.cuentaId) ?? [];
+    arr.push({ tokens: tokensDescripcion(l.descripcion), debe: toDecimal(l.debe) });
+    pagosPorCuentaTokens.set(l.cuentaId, arr);
+  }
+
+  // Token genéricos que NÃO devem disparar match — protegem contra
+  // colisão em fallbacks como "Factura #3" (genérico p/ EmbarqueCosto sem
+  // facturaNumero), "Pago", "factura" etc.
+  const TOKENS_GENERICOS = new Set(["Factura", "factura", "Pago", "pago"]);
+
+  function montoPagadoFactura(numero: string, cuentaId: number | null) {
+    if (cuentaId === null) return toDecimal(0);
+    const lineas = pagosPorCuentaTokens.get(cuentaId);
+    if (!lineas) return toDecimal(0);
+    // Tokenizar el numero objetivo igual que la descripción para matchear
+    // multi-token (ex: "Factura #3" → ["Factura", "#3"]).
+    const numeroTokens = numero.split(/[\s—,;]+/).filter((t) => t.length > 0);
+    if (numeroTokens.length === 0) return toDecimal(0);
+    // Token específico = un token que NÃO seja genérico. Exigimos que
+    // pelo menos UM token específico esteja presente para considerar match.
+    // Caso contrário, "Factura #3" pode colidir com qualquer pago a outra
+    // factura genérica do mesmo proveedor.
+    const tokensEspecificos = numeroTokens.filter((t) => !TOKENS_GENERICOS.has(t));
+    if (tokensEspecificos.length === 0) return toDecimal(0);
+
+    let pagado = toDecimal(0);
+    for (const l of lineas) {
+      const todosPresentes = numeroTokens.every((t) => l.tokens.has(t));
+      if (todosPresentes) pagado = pagado.plus(l.debe);
+    }
+    return pagado;
+  }
 
   // Compras EMITIDAS o RECIBIDAS, no canceladas
   const compras = await db.compra.findMany({
@@ -305,9 +365,10 @@ export async function getSaldosPorProveedorConAging(): Promise<
     },
   });
 
-  function clasificar(
-    fechaVenc: Date | null,
-  ): { dias: number | null; bucket: FacturaPendiente["bucket"] } {
+  function clasificar(fechaVenc: Date | null): {
+    dias: number | null;
+    bucket: FacturaPendiente["bucket"];
+  } {
     if (!fechaVenc) return { dias: null, bucket: "sin_fecha" };
     const venc = new Date(fechaVenc);
     venc.setHours(0, 0, 0, 0);
@@ -317,24 +378,46 @@ export async function getSaldosPorProveedorConAging(): Promise<
     return { dias, bucket: "al_dia" };
   }
 
+  // Map proveedorId → cuentaContableId para resolver pagos
+  const cuentaPorProveedor = new Map<string, number | null>(
+    proveedores.map((p) => [p.id, p.cuentaContableId]),
+  );
+
+  function emitirSiPendiente(
+    factura: FacturaPendiente,
+    totalArs: ReturnType<typeof toDecimal>,
+    proveedorId: string,
+  ) {
+    const cuentaId = cuentaPorProveedor.get(proveedorId) ?? null;
+    const pagado = montoPagadoFactura(factura.numero, cuentaId);
+    const pendiente = totalArs.minus(pagado);
+    // Tolerancia de 0.5 centavos para evitar residuos de redondeo
+    if (pendiente.lte(0.005)) return; // factura ya cubierta
+    const arr = facturasPorProveedor.get(proveedorId) ?? [];
+    arr.push({ ...factura, monto: pendiente.toFixed(2) });
+    facturasPorProveedor.set(proveedorId, arr);
+  }
+
   const facturasPorProveedor = new Map<string, FacturaPendiente[]>();
 
   for (const c of compras) {
     const totalArs = toDecimal(c.total).times(toDecimal(c.tipoCambio));
     const { dias, bucket } = clasificar(c.fechaVencimiento);
-    const arr = facturasPorProveedor.get(c.proveedorId) ?? [];
-    arr.push({
-      origen: "compra",
-      id: c.id,
-      numero: c.numero,
-      fecha: c.fecha.toISOString(),
-      fechaVencimiento: c.fechaVencimiento?.toISOString() ?? null,
-      diasParaVencer: dias,
-      bucket,
-      monto: totalArs.toFixed(2),
-      moneda: c.moneda,
-    });
-    facturasPorProveedor.set(c.proveedorId, arr);
+    emitirSiPendiente(
+      {
+        origen: "compra",
+        id: c.id,
+        numero: c.numero,
+        fecha: c.fecha.toISOString(),
+        fechaVencimiento: c.fechaVencimiento?.toISOString() ?? null,
+        diasParaVencer: dias,
+        bucket,
+        monto: totalArs.toFixed(2), // sobrescrito por emitirSiPendiente
+        moneda: c.moneda,
+      },
+      totalArs,
+      c.proveedorId,
+    );
   }
 
   for (const c of costos) {
@@ -348,46 +431,53 @@ export async function getSaldosPorProveedorConAging(): Promise<
       .plus(toDecimal(c.otros));
     const totalArs = totalMoneda.times(toDecimal(c.tipoCambio));
     const { dias, bucket } = clasificar(c.fechaVencimiento);
-    const arr = facturasPorProveedor.get(c.proveedorId) ?? [];
-    arr.push({
-      origen: "embarque",
-      id: String(c.id),
-      numero: c.facturaNumero ?? `Factura #${c.id}`,
-      fecha: (c.fechaFactura ?? new Date()).toISOString(),
-      fechaVencimiento: c.fechaVencimiento?.toISOString() ?? null,
-      diasParaVencer: dias,
-      bucket,
-      monto: totalArs.toFixed(2),
-      moneda: c.moneda,
-    });
-    facturasPorProveedor.set(c.proveedorId, arr);
+    emitirSiPendiente(
+      {
+        origen: "embarque",
+        id: String(c.id),
+        numero: c.facturaNumero ?? `Factura #${c.id}`,
+        fecha: (c.fechaFactura ?? new Date()).toISOString(),
+        fechaVencimiento: c.fechaVencimiento?.toISOString() ?? null,
+        diasParaVencer: dias,
+        bucket,
+        monto: totalArs.toFixed(2),
+        moneda: c.moneda,
+      },
+      totalArs,
+      c.proveedorId,
+    );
   }
 
   for (const g of gastos) {
     const totalArs = toDecimal(g.total).times(toDecimal(g.tipoCambio));
     const { dias, bucket } = clasificar(g.fechaVencimiento);
-    const arr = facturasPorProveedor.get(g.proveedorId) ?? [];
-    arr.push({
-      origen: "gasto",
-      id: g.id,
-      numero: g.facturaNumero ?? g.numero,
-      fecha: g.fecha.toISOString(),
-      fechaVencimiento: g.fechaVencimiento?.toISOString() ?? null,
-      diasParaVencer: dias,
-      bucket,
-      monto: totalArs.toFixed(2),
-      moneda: g.moneda,
-    });
-    facturasPorProveedor.set(g.proveedorId, arr);
+    emitirSiPendiente(
+      {
+        origen: "gasto",
+        id: g.id,
+        numero: g.facturaNumero ?? g.numero,
+        fecha: g.fecha.toISOString(),
+        fechaVencimiento: g.fechaVencimiento?.toISOString() ?? null,
+        diasParaVencer: dias,
+        bucket,
+        monto: totalArs.toFixed(2),
+        moneda: g.moneda,
+      },
+      totalArs,
+      g.proveedorId,
+    );
   }
 
   const result: SaldoProveedorAging[] = [];
   for (const p of proveedores) {
-    const facturas = facturasPorProveedor.get(p.id) ?? [];
+    let facturas = facturasPorProveedor.get(p.id) ?? [];
     const saldoContable =
-      p.cuentaContableId != null
-        ? saldoPorCuenta.get(p.cuentaContableId) ?? "0.00"
-        : "0.00";
+      p.cuentaContableId != null ? (saldoPorCuenta.get(p.cuentaContableId) ?? "0.00") : "0.00";
+
+    // El ledger contable es la verdad: si saldo ≤ 0 (no se debe nada),
+    // descartar facturas residuales — pueden ser legacy pagadas via flows
+    // que no incluyen el número en la descripción de la línea.
+    if (toDecimal(saldoContable).lte(0.005)) facturas = [];
 
     if (toDecimal(saldoContable).lte(0) && facturas.length === 0) continue;
 
@@ -457,9 +547,7 @@ export type CuentaAPagarPorEmbarque = {
   pendienteArs: string;
 };
 
-export async function getCuentasAPagarPorEmbarque(): Promise<
-  CuentaAPagarPorEmbarque[]
-> {
+export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmbarque[]> {
   // EmbarqueCostos cuyo embarque está CERRADO (asientos contabilizados)
   const costos = await db.embarqueCosto.findMany({
     where: { embarque: { estado: EmbarqueEstado.CERRADO } },
@@ -577,18 +665,12 @@ export async function getCuentasAPagarPorEmbarque(): Promise<
         _sum: { debe: true },
       });
       const total = toDecimal(agg._sum.debe ?? 0);
-      pagosPorClave.set(
-        `${g.proveedorCuentaContableId}::${g.embarqueCodigo}`,
-        total.toFixed(2),
-      );
+      pagosPorClave.set(`${g.proveedorCuentaContableId}::${g.embarqueCodigo}`, total.toFixed(2));
     }),
   );
 
   for (const g of groups.values()) {
-    const totalGrupo = g.facturas.reduce(
-      (acc, f) => acc.plus(toDecimal(f.totalArs)),
-      toDecimal(0),
-    );
+    const totalGrupo = g.facturas.reduce((acc, f) => acc.plus(toDecimal(f.totalArs)), toDecimal(0));
     g.totalArs = totalGrupo.toFixed(2);
 
     const saldoVivo = g.proveedorCuentaContableId
@@ -599,11 +681,7 @@ export async function getCuentasAPagarPorEmbarque(): Promise<
     // Pagos ya aplicados a este embarque (líneas DEBE en cuenta del
     // proveedor con el código del embarque en la descripción).
     const pagadoEmbarque = g.proveedorCuentaContableId
-      ? toDecimal(
-          pagosPorClave.get(
-            `${g.proveedorCuentaContableId}::${g.embarqueCodigo}`,
-          ) ?? "0",
-        )
+      ? toDecimal(pagosPorClave.get(`${g.proveedorCuentaContableId}::${g.embarqueCodigo}`) ?? "0")
       : toDecimal(0);
 
     // Si los pagos aplicados al embarque ya cubren el total del grupo,
@@ -617,9 +695,7 @@ export async function getCuentasAPagarPorEmbarque(): Promise<
     // pendienteArs = min(pendienteEmbarque, saldoVivo). Cubre el caso
     // edge donde el embarque tiene pagos sin código pero hubo
     // amortización al proveedor.
-    const pendiente = pendienteEmbarque.gt(saldoVivo)
-      ? saldoVivo
-      : pendienteEmbarque;
+    const pendiente = pendienteEmbarque.gt(saldoVivo) ? saldoVivo : pendienteEmbarque;
     g.pendienteArs = pendiente.toFixed(2);
 
     g.facturas.sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -780,9 +856,7 @@ export type RefuerzoVepPendiente = {
 
 const RE_EMBARQUE_CODIGO = /AR-\d{6}-[A-Z0-9]+/;
 
-export async function getRefuerzosVepPendientes(): Promise<
-  RefuerzoVepPendiente[]
-> {
+export async function getRefuerzosVepPendientes(): Promise<RefuerzoVepPendiente[]> {
   const cuenta = await db.cuentaContable.findFirst({
     where: { codigo: "2.1.5.99" },
     select: { id: true },
