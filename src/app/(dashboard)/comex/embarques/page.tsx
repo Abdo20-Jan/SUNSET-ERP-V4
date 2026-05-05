@@ -2,17 +2,12 @@ import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon } from "@hugeicons/core-free-icons";
 
-import {
-  listarEmbarques,
-  type EmbarqueListFilters,
-} from "@/lib/actions/embarques";
-import {
-  EmbarqueEstado,
-  Moneda,
-} from "@/generated/prisma/client";
+import { listarEmbarques, type EmbarqueListFilters } from "@/lib/actions/embarques";
+import { EmbarqueEstado, Moneda } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Pagination, parsePaginationParams } from "@/components/ui/pagination";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePaginationParams } from "@/components/ui/pagination-params";
 
 import { EmbarquesFilters } from "./embarques-filters";
 import { EmbarquesTable } from "./embarques-table";
@@ -83,28 +78,17 @@ export default async function EmbarquesPage({
               : " · importaciones registradas"}
           </p>
         </div>
-        <Link
-          href="/comex/embarques/nuevo"
-          className={buttonVariants({ variant: "default" })}
-        >
+        <Link href="/comex/embarques/nuevo" className={buttonVariants({ variant: "default" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
           Nuevo embarque
         </Link>
       </div>
 
-      <EmbarquesFilters
-        selectedEstado={estado ?? "all"}
-        selectedMoneda={moneda ?? "all"}
-      />
+      <EmbarquesFilters selectedEstado={estado ?? "all"} selectedMoneda={moneda ?? "all"} />
 
       <Card className="py-0">
         <EmbarquesTable data={rows} />
-        <Pagination
-          page={page}
-          perPage={perPage}
-          total={total}
-          className="border-t"
-        />
+        <Pagination page={page} perPage={perPage} total={total} className="border-t" />
       </Card>
     </div>
   );

@@ -5,7 +5,8 @@ import { Add01Icon } from "@hugeicons/core-free-icons";
 import { listarCompras } from "@/lib/actions/compras";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Pagination, parsePaginationParams } from "@/components/ui/pagination";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePaginationParams } from "@/components/ui/pagination-params";
 
 import { ComprasTable } from "./_components/compras-table";
 
@@ -34,23 +35,17 @@ export default async function ComprasPage({
             {total > 0 && (
               <span>
                 {" "}
-                · {emitidas} emitida{emitidas === 1 ? "" : "s"} · {borradores}{" "}
-                borrador{borradores === 1 ? "" : "es"}
+                · {emitidas} emitida{emitidas === 1 ? "" : "s"} · {borradores} borrador
+                {borradores === 1 ? "" : "es"}
               </span>
             )}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            href="/compras/pedidos"
-            className={buttonVariants({ variant: "outline" })}
-          >
+          <Link href="/compras/pedidos" className={buttonVariants({ variant: "outline" })}>
             Pedidos (OC)
           </Link>
-          <Link
-            href="/compras/nueva"
-            className={buttonVariants({ variant: "default" })}
-          >
+          <Link href="/compras/nueva" className={buttonVariants({ variant: "default" })}>
             <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
             Nueva compra
           </Link>
@@ -59,12 +54,7 @@ export default async function ComprasPage({
 
       <Card className="py-0">
         <ComprasTable data={rows} />
-        <Pagination
-          page={page}
-          perPage={perPage}
-          total={total}
-          className="border-t"
-        />
+        <Pagination page={page} perPage={perPage} total={total} className="border-t" />
       </Card>
     </div>
   );

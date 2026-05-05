@@ -6,6 +6,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 
 import { Button } from "@/components/ui/button";
+import { PER_PAGE_OPTIONS } from "@/components/ui/pagination-params";
 import {
   Select,
   SelectContent,
@@ -14,8 +15,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-
-const PER_PAGE_OPTIONS = [25, 50, 100, 200] as const;
 
 type Props = {
   page: number;
@@ -68,10 +67,7 @@ export function Pagination({ page, perPage, total, className }: Props) {
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1.5">
           <span>Por página</span>
-          <Select
-            value={String(perPage)}
-            onValueChange={(v) => goTo({ perPage: Number(v) })}
-          >
+          <Select value={String(perPage)} onValueChange={(v) => goTo({ perPage: Number(v) })}>
             <SelectTrigger size="sm" className="h-7 min-w-16">
               <SelectValue>{(v) => v as string}</SelectValue>
             </SelectTrigger>
@@ -111,17 +107,4 @@ export function Pagination({ page, perPage, total, className }: Props) {
       </div>
     </div>
   );
-}
-
-export function parsePaginationParams(params: {
-  page?: string;
-  perPage?: string;
-}): { page: number; perPage: number } {
-  const rawPage = Number(params.page);
-  const page = Number.isFinite(rawPage) && rawPage >= 1 ? Math.floor(rawPage) : 1;
-  const rawPerPage = Number(params.perPage);
-  const allowed = new Set<number>(PER_PAGE_OPTIONS as readonly number[] as number[]);
-  const perPage =
-    Number.isFinite(rawPerPage) && allowed.has(rawPerPage) ? rawPerPage : 50;
-  return { page, perPage };
 }

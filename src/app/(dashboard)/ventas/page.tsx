@@ -5,7 +5,8 @@ import { Add01Icon } from "@hugeicons/core-free-icons";
 import { listarVentas } from "@/lib/actions/ventas";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Pagination, parsePaginationParams } from "@/components/ui/pagination";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePaginationParams } from "@/components/ui/pagination-params";
 
 import { VentasTable } from "./_components/ventas-table";
 
@@ -34,23 +35,17 @@ export default async function VentasPage({
             {total > 0 && (
               <span>
                 {" "}
-                · {emitidas} emitida{emitidas === 1 ? "" : "s"} · {borradores}{" "}
-                borrador{borradores === 1 ? "" : "es"}
+                · {emitidas} emitida{emitidas === 1 ? "" : "s"} · {borradores} borrador
+                {borradores === 1 ? "" : "es"}
               </span>
             )}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            href="/ventas/pedidos"
-            className={buttonVariants({ variant: "outline" })}
-          >
+          <Link href="/ventas/pedidos" className={buttonVariants({ variant: "outline" })}>
             Pedidos (OV)
           </Link>
-          <Link
-            href="/ventas/nueva"
-            className={buttonVariants({ variant: "default" })}
-          >
+          <Link href="/ventas/nueva" className={buttonVariants({ variant: "default" })}>
             <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
             Nueva venta
           </Link>
@@ -59,12 +54,7 @@ export default async function VentasPage({
 
       <Card className="py-0">
         <VentasTable data={rows} />
-        <Pagination
-          page={page}
-          perPage={perPage}
-          total={total}
-          className="border-t"
-        />
+        <Pagination page={page} perPage={perPage} total={total} className="border-t" />
       </Card>
     </div>
   );
