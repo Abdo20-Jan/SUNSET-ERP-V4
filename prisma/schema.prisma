@@ -246,14 +246,15 @@ enum AuditAccion {
 // ============================================================
 
 model User {
-  id           String   @id @default(uuid())
-  username     String   @unique
-  passwordHash String
-  nombre       String
-  role         Role     @default(USER)
-  activo       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String   @id @default(uuid())
+  username        String   @unique
+  passwordHash    String
+  nombre          String
+  role            Role     @default(USER)
+  activo          Boolean  @default(true)
+  monedaPreferida Moneda?  @default(USD)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   auditLogs     AuditLog[]
   leads         Lead[]

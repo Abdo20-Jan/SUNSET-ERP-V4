@@ -1,5 +1,5 @@
 import type { DefaultSession } from "next-auth";
-import type { Role } from "@/generated/prisma/enums";
+import type { Moneda, Role } from "@/generated/prisma/enums";
 
 declare module "next-auth" {
   interface User {
@@ -7,6 +7,7 @@ declare module "next-auth" {
     username: string;
     nombre: string;
     role: Role;
+    monedaPreferida: Moneda | null;
   }
 
   interface Session {
@@ -15,6 +16,7 @@ declare module "next-auth" {
       username: string;
       nombre: string;
       role: Role;
+      monedaPreferida: Moneda | null;
     } & DefaultSession["user"];
   }
 }
@@ -25,5 +27,6 @@ declare module "next-auth/jwt" {
     username: string;
     nombre: string;
     role: Role;
+    monedaPreferida: Moneda | null;
   }
 }
