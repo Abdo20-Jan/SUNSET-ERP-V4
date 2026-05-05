@@ -90,27 +90,27 @@ const ORIGEN_BADGE: Record<FacturaPendiente["origen"], string> = {
   embarque: "EMB",
 };
 
-const BUCKET_LABEL: Record<FacturaPendiente["bucket"], string> = {
-  vencida: "Vencidas",
-  proxima: "Próximas a vencer",
-  al_dia: "Al día",
-  sin_fecha: "Sin fecha",
-};
-
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function facturaKey(f: { origen: string; id: string }): string {
+  return `${f.origen}-${f.id}`;
+}
+
+function sumarMontos(facturas: FacturaConProveedor[]): string {
+  let total = 0;
+  for (const f of facturas) total += Number(f.monto);
+  return total.toFixed(2);
 }
 
 export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
   const router = useRouter();
   const [search, setSearch] = useState("");
-  const [bucketFilter, setBucketFilter] = useState<
-    "all" | FacturaPendiente["bucket"]
-  >("all");
-  const [origenFilter, setOrigenFilter] = useState<
-    "all" | FacturaPendiente["origen"]
-  >("all");
-  const [selected, setSelected] = useState<FacturaConProveedor | null>(null);
+  const [bucketFilter, setBucketFilter] = useState<"all" | FacturaPendiente["bucket"]>("all");
+  const [origenFilter, setOrigenFilter] = useState<"all" | FacturaPendiente["origen"]>("all");
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const facturas: FacturaConProveedor[] = useMemo(() => {
     const all: FacturaConProveedor[] = [];
@@ -125,7 +125,6 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
       }
     }
     return all.sort((a, b) => {
-      // vencidas primero (negative días primero), luego sin_fecha al final
       if (a.bucket === "sin_fecha" && b.bucket !== "sin_fecha") return 1;
       if (b.bucket === "sin_fecha" && a.bucket !== "sin_fecha") return -1;
       const av = a.diasParaVencer ?? Number.MAX_SAFE_INTEGER;
@@ -153,14 +152,81 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
     return c;
   }, [facturas]);
 
+  const facturasByKey = useMemo(() => {
+    const m = new Map<string, FacturaConProveedor>();
+    for (const f of facturas) m.set(facturaKey(f), f);
+    return m;
+  }, [facturas]);
+
+  const selectedFacturas = useMemo(() => {
+    const out: FacturaConProveedor[] = [];
+    for (const k of selectedKeys) {
+      const f = facturasByKey.get(k);
+      if (f) out.push(f);
+    }
+    return out;
+  }, [selectedKeys, facturasByKey]);
+
+  const lockedTo = selectedFacturas[0] ?? null;
+
+  const isSelectable = (f: FacturaConProveedor): boolean => {
+    if (f.cuentaContableId === null) return false;
+    if (lockedTo === null) return true;
+    return f.proveedorId === lockedTo.proveedorId && f.moneda === lockedTo.moneda;
+  };
+
+  const toggleOne = (f: FacturaConProveedor) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      const k = facturaKey(f);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  };
+
+  const selectableInFiltered = useMemo(
+    () => filtered.filter(isSelectable),
+    // biome-ignore lint/correctness/useExhaustiveDependencies: lockedTo is derived from selectedKeys
+    [filtered, lockedTo],
+  );
+  const allSelectableSelected =
+    selectableInFiltered.length > 0 &&
+    selectableInFiltered.every((f) => selectedKeys.has(facturaKey(f)));
+  const someSelected =
+    !allSelectableSelected && selectableInFiltered.some((f) => selectedKeys.has(facturaKey(f)));
+
+  const toggleAll = () => {
+    if (allSelectableSelected) {
+      setSelectedKeys((prev) => {
+        const next = new Set(prev);
+        for (const f of selectableInFiltered) next.delete(facturaKey(f));
+        return next;
+      });
+    } else {
+      setSelectedKeys((prev) => {
+        const next = new Set(prev);
+        for (const f of selectableInFiltered) next.add(facturaKey(f));
+        return next;
+      });
+    }
+  };
+
+  const totalSeleccionado = useMemo(() => sumarMontos(selectedFacturas), [selectedFacturas]);
+
+  const abrirDialogParaUna = (f: FacturaConProveedor) => {
+    setSelectedKeys(new Set([facturaKey(f)]));
+    setDialogOpen(true);
+  };
+
   if (facturas.length === 0) {
     return (
       <Card>
         <CardContent className="flex flex-col gap-2">
           <h2 className="text-sm font-semibold">Pago por factura individual</h2>
           <p className="text-xs text-muted-foreground">
-            Pagar una sola factura (Compra, Gasto o costo de Embarque). Click en una
-            fila abre el form de pago.
+            Pagar una o varias facturas (Compra, Gasto o costo de Embarque). Multi-selección
+            restringida al mismo proveedor + moneda.
           </p>
           <p className="rounded-lg border border-dashed bg-muted/30 p-4 text-center text-sm text-muted-foreground">
             Sin facturas pendientes.
@@ -176,8 +242,8 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
         <div className="flex flex-col gap-0.5">
           <h2 className="text-sm font-semibold">Pago por factura individual</h2>
           <p className="text-xs text-muted-foreground">
-            Pagar una sola factura (Compra, Gasto o costo de Embarque). Click en
-            una fila abre el form de pago.
+            Pagar una o varias facturas (Compra, Gasto o costo de Embarque). Multi-selección
+            restringida al mismo proveedor + moneda.
           </p>
         </div>
 
@@ -203,29 +269,17 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
             <Label className="text-xs text-muted-foreground">Vencimiento</Label>
             <Select
               value={bucketFilter}
-              onValueChange={(v) =>
-                setBucketFilter(v as typeof bucketFilter)
-              }
+              onValueChange={(v) => setBucketFilter(v as typeof bucketFilter)}
             >
               <SelectTrigger className="min-w-44">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">
-                  Todas ({facturas.length})
-                </SelectItem>
-                <SelectItem value="vencida">
-                  Vencidas ({counts.vencida})
-                </SelectItem>
-                <SelectItem value="proxima">
-                  Próximas ({counts.proxima})
-                </SelectItem>
-                <SelectItem value="al_dia">
-                  Al día ({counts.al_dia})
-                </SelectItem>
-                <SelectItem value="sin_fecha">
-                  Sin fecha ({counts.sin_fecha})
-                </SelectItem>
+                <SelectItem value="all">Todas ({facturas.length})</SelectItem>
+                <SelectItem value="vencida">Vencidas ({counts.vencida})</SelectItem>
+                <SelectItem value="proxima">Próximas ({counts.proxima})</SelectItem>
+                <SelectItem value="al_dia">Al día ({counts.al_dia})</SelectItem>
+                <SelectItem value="sin_fecha">Sin fecha ({counts.sin_fecha})</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -234,9 +288,7 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
             <Label className="text-xs text-muted-foreground">Origen</Label>
             <Select
               value={origenFilter}
-              onValueChange={(v) =>
-                setOrigenFilter(v as typeof origenFilter)
-              }
+              onValueChange={(v) => setOrigenFilter(v as typeof origenFilter)}
             >
               <SelectTrigger className="min-w-40">
                 <SelectValue />
@@ -251,10 +303,43 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
           </div>
         </div>
 
+        {selectedFacturas.length > 0 && lockedTo && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/40 p-3">
+            <span className="text-sm">
+              <strong>{selectedFacturas.length}</strong> factura
+              {selectedFacturas.length === 1 ? "" : "s"} de{" "}
+              <strong>{lockedTo.proveedorNombre}</strong> · Total{" "}
+              <span className="font-mono tabular-nums">
+                {fmtMoney(totalSeleccionado)} {lockedTo.moneda}
+              </span>
+            </span>
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setSelectedKeys(new Set())}>
+                Limpiar selección
+              </Button>
+              <Button size="sm" onClick={() => setDialogOpen(true)}>
+                Pagar {selectedFacturas.length === 1 ? "factura" : "facturas"}
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    checked={allSelectableSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someSelected;
+                    }}
+                    onChange={toggleAll}
+                    disabled={selectableInFiltered.length === 0}
+                    aria-label="Seleccionar todas las facturas seleccionables"
+                  />
+                </TableHead>
                 <TableHead className="w-20">Origen</TableHead>
                 <TableHead>Nº factura</TableHead>
                 <TableHead>Proveedor</TableHead>
@@ -267,55 +352,70 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="py-8 text-center text-sm text-muted-foreground"
-                  >
+                  <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
                     Sin resultados para los filtros aplicados.
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((f) => (
-                  <TableRow key={`${f.origen}-${f.id}`}>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] uppercase tracking-wide"
-                        title={ORIGEN_LABEL[f.origen]}
-                      >
-                        {ORIGEN_BADGE[f.origen]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {f.numero}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {f.proveedorNombre}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      <DateBadge fecha={f.fecha} />
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      <DateBadge fecha={f.fechaVencimiento} relative />
-                    </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">
-                      {fmtMoney(f.monto)}{" "}
-                      <span className="text-xs text-muted-foreground">
-                        {f.moneda}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setSelected(f)}
-                        disabled={f.cuentaContableId === null}
-                      >
-                        Pagar
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
+                filtered.map((f) => {
+                  const k = facturaKey(f);
+                  const checked = selectedKeys.has(k);
+                  const selectable = isSelectable(f);
+                  const dimmed = !selectable && !checked;
+                  const lockedReason =
+                    !selectable && lockedTo !== null
+                      ? f.cuentaContableId === null
+                        ? "Falta cuenta contable del proveedor"
+                        : f.proveedorId !== lockedTo.proveedorId
+                          ? `Solo facturas de ${lockedTo.proveedorNombre}`
+                          : `Solo moneda ${lockedTo.moneda}`
+                      : undefined;
+                  return (
+                    <TableRow key={k} className={dimmed ? "opacity-50" : undefined}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={!selectable && !checked}
+                          onChange={() => toggleOne(f)}
+                          title={lockedReason}
+                          aria-label={`Seleccionar factura ${f.numero}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] uppercase tracking-wide"
+                          title={ORIGEN_LABEL[f.origen]}
+                        >
+                          {ORIGEN_BADGE[f.origen]}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{f.numero}</TableCell>
+                      <TableCell className="text-sm">{f.proveedorNombre}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        <DateBadge fecha={f.fecha} />
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <DateBadge fecha={f.fechaVencimiento} relative />
+                      </TableCell>
+                      <TableCell className="text-right font-mono tabular-nums">
+                        {fmtMoney(f.monto)}{" "}
+                        <span className="text-xs text-muted-foreground">{f.moneda}</span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => abrirDialogParaUna(f)}
+                          disabled={f.cuentaContableId === null}
+                        >
+                          Pagar
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
@@ -329,11 +429,13 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
       </CardContent>
 
       <PagoFacturaDialog
-        factura={selected}
+        open={dialogOpen}
+        facturas={selectedFacturas}
         cuentasBancarias={cuentasBancarias}
-        onClose={() => setSelected(null)}
+        onClose={() => setDialogOpen(false)}
         onPaid={() => {
-          setSelected(null);
+          setDialogOpen(false);
+          setSelectedKeys(new Set());
           router.refresh();
         }}
       />
@@ -342,12 +444,14 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
 }
 
 function PagoFacturaDialog({
-  factura,
+  open,
+  facturas,
   cuentasBancarias,
   onClose,
   onPaid,
 }: {
-  factura: FacturaConProveedor | null;
+  open: boolean;
+  facturas: FacturaConProveedor[];
   cuentasBancarias: CuentaBancariaOption[];
   onClose: () => void;
   onPaid: () => void;
@@ -357,25 +461,28 @@ function PagoFacturaDialog({
   const [fecha, setFecha] = useState<string>(todayIso());
   const [comprobante, setComprobante] = useState<string>("");
   const [referenciaBanco, setReferenciaBanco] = useState<string>("");
-  const [monto, setMonto] = useState<string>("");
+  const [montoEditable, setMontoEditable] = useState<string>("");
 
-  const open = factura !== null;
+  const sumaFacturas = useMemo(() => sumarMontos(facturas), [facturas]);
+  const proveedor = facturas[0] ?? null;
+  const moneda = facturas[0]?.moneda ?? "ARS";
+  const isMulti = facturas.length > 1;
 
-  // Init monto cuando se abre el dialog con una factura nueva
+  // Reset monto editable cuando cambia la selección al abrir
   useEffect(() => {
-    if (factura) setMonto(factura.monto);
-  }, [factura]);
+    if (open && !isMulti && proveedor) setMontoEditable(proveedor.monto);
+  }, [open, isMulti, proveedor]);
 
   const reset = () => {
     setCuentaBancariaId("");
     setFecha(todayIso());
     setComprobante("");
     setReferenciaBanco("");
-    setMonto("");
+    setMontoEditable("");
   };
 
   const handleSubmit = () => {
-    if (!factura || !factura.cuentaContableId) {
+    if (!proveedor || !proveedor.cuentaContableId) {
       toast.error("Falta cuenta contable del proveedor.");
       return;
     }
@@ -383,26 +490,41 @@ function PagoFacturaDialog({
       toast.error("Seleccioná la cuenta bancaria.");
       return;
     }
-    if (!monto || Number(monto) <= 0) {
-      toast.error("Monto inválido.");
-      return;
+    if (!isMulti) {
+      const m = Number(montoEditable);
+      if (!Number.isFinite(m) || m <= 0) {
+        toast.error("Monto inválido.");
+        return;
+      }
     }
 
     startTransition(async () => {
+      const lineas = isMulti
+        ? facturas.map((f) => ({
+            cuentaContableId: proveedor.cuentaContableId!,
+            monto: f.monto,
+            descripcion: `Pago factura ${f.numero} — ${f.proveedorNombre}`,
+          }))
+        : [
+            {
+              cuentaContableId: proveedor.cuentaContableId!,
+              monto: montoEditable,
+              descripcion: `Pago factura ${proveedor.numero} — ${proveedor.proveedorNombre}`,
+            },
+          ];
+
+      const descripcion = isMulti
+        ? `Pago ${facturas.length} facturas — ${proveedor.proveedorNombre}`
+        : `Pago factura ${proveedor.numero}`;
+
       const r = await crearMovimientoTesoreriaAction({
         tipo: "PAGO",
         cuentaBancariaId,
         fecha: new Date(fecha),
-        moneda: "ARS",
+        moneda: moneda as "ARS" | "USD",
         tipoCambio: "1",
-        lineas: [
-          {
-            cuentaContableId: factura.cuentaContableId!,
-            monto,
-            descripcion: `Pago factura ${factura.numero} — ${factura.proveedorNombre}`,
-          },
-        ],
-        descripcion: `Pago factura ${factura.numero}`.slice(0, 255),
+        lineas,
+        descripcion: descripcion.slice(0, 255),
         comprobante: comprobante || undefined,
         referenciaBanco: referenciaBanco || undefined,
       });
@@ -410,9 +532,7 @@ function PagoFacturaDialog({
         toast.error(r.error);
         return;
       }
-      toast.success(
-        `Pago registrado — Asiento Nº ${r.asientoNumero}`,
-      );
+      toast.success(`Pago registrado — Asiento Nº ${r.asientoNumero}`);
       reset();
       onPaid();
     });
@@ -420,7 +540,7 @@ function PagoFacturaDialog({
 
   return (
     <Dialog
-      open={open}
+      open={open && proveedor !== null}
       onOpenChange={(o) => {
         if (!o && !pending) {
           reset();
@@ -429,17 +549,45 @@ function PagoFacturaDialog({
       }}
     >
       <DialogContent>
-        {factura && (
+        {proveedor && (
           <>
             <DialogHeader>
-              <DialogTitle>Pagar factura {factura.numero}</DialogTitle>
+              <DialogTitle>
+                {isMulti
+                  ? `Pagar ${facturas.length} facturas`
+                  : `Pagar factura ${proveedor.numero}`}
+              </DialogTitle>
               <DialogDescription>
-                {factura.proveedorNombre} — {ORIGEN_LABEL[factura.origen]} ·{" "}
+                {proveedor.proveedorNombre}
+                {!isMulti && <> — {ORIGEN_LABEL[proveedor.origen]}</>}
+                {" · "}Total{" "}
                 <span className="font-mono">
-                  {fmtMoney(factura.monto)} {factura.moneda}
+                  {fmtMoney(sumaFacturas)} {moneda}
                 </span>
               </DialogDescription>
             </DialogHeader>
+
+            {isMulti && (
+              <div className="rounded-md border bg-muted/30 p-3 text-xs">
+                <ul className="flex flex-col gap-1">
+                  {facturas.map((f) => (
+                    <li key={facturaKey(f)} className="flex justify-between gap-2">
+                      <span>
+                        <Badge
+                          variant="outline"
+                          className="mr-1.5 text-[10px] uppercase"
+                          title={ORIGEN_LABEL[f.origen]}
+                        >
+                          {ORIGEN_BADGE[f.origen]}
+                        </Badge>
+                        <span className="font-mono">{f.numero}</span>
+                      </span>
+                      <span className="font-mono tabular-nums">{fmtMoney(f.monto)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-1.5">
@@ -465,20 +613,16 @@ function PagoFacturaDialog({
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="pf-fecha">Fecha</Label>
-                  <DatePicker
-                    id="pf-fecha"
-                    value={fecha}
-                    onChange={setFecha}
-                    max={todayIso()}
-                  />
+                  <DatePicker id="pf-fecha" value={fecha} onChange={setFecha} max={todayIso()} />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="pf-monto">Monto (ARS)</Label>
+                  <Label htmlFor="pf-monto">Monto ({moneda})</Label>
                   <Input
                     id="pf-monto"
                     inputMode="decimal"
-                    value={monto}
-                    onChange={(e) => setMonto(e.target.value)}
+                    value={isMulti ? sumaFacturas : montoEditable}
+                    onChange={(e) => setMontoEditable(e.target.value)}
+                    disabled={isMulti}
                   />
                 </div>
               </div>
@@ -519,11 +663,7 @@ function PagoFacturaDialog({
               >
                 Cancelar
               </Button>
-              <Button
-                type="button"
-                onClick={handleSubmit}
-                disabled={pending}
-              >
+              <Button type="button" onClick={handleSubmit} disabled={pending}>
                 {pending ? "Registrando…" : "Registrar pago"}
               </Button>
             </DialogFooter>
