@@ -8,11 +8,7 @@ import { isStockDualEnabled } from "@/lib/features";
 import { AsientoError } from "@/lib/services/asiento-automatico";
 import { aplicarTransferenciaSPD } from "@/lib/services/stock";
 import { validarDisponible } from "@/lib/services/stock-helpers";
-import {
-  MovimientoStockTipo,
-  type Prisma,
-  TransferenciaEstado,
-} from "@/generated/prisma/client";
+import { MovimientoStockTipo, type Prisma, TransferenciaEstado } from "@/generated/prisma/client";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -32,9 +28,7 @@ const crearTransferenciaSchema = z
 
 export type CrearTransferenciaInput = z.input<typeof crearTransferenciaSchema>;
 
-type ActionResult<T = undefined> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
 const FLAG_OFF_ERROR = {
   ok: false as const,
@@ -52,9 +46,7 @@ async function generarNumeroTransferencia(tx: TxClient): Promise<string> {
     orderBy: { numero: "desc" },
     select: { numero: true },
   });
-  const nextSeq = last
-    ? Number.parseInt(last.numero.slice(`T-${year}-`.length), 10) + 1
-    : 1;
+  const nextSeq = last ? Number.parseInt(last.numero.slice(`T-${year}-`.length), 10) + 1 : 1;
   return `T-${year}-${String(nextSeq).padStart(4, "0")}`;
 }
 
@@ -72,10 +64,7 @@ function parseTransferenciaInput(
   return parse.data;
 }
 
-async function ensureProductoExiste(
-  tx: TxClient,
-  productoId: string,
-): Promise<void> {
+async function ensureProductoExiste(tx: TxClient, productoId: string): Promise<void> {
   const p = await tx.producto.findUnique({
     where: { id: productoId },
     select: { id: true },
@@ -95,10 +84,7 @@ async function ensureDepositoActivoConId(
     select: { id: true, activo: true },
   });
   if (!dep || !dep.activo) {
-    throw new AsientoError(
-      "DOMINIO_INVALIDO",
-      `Depósito ${rol} no existe o está inactivo.`,
-    );
+    throw new AsientoError("DOMINIO_INVALIDO", `Depósito ${rol} no existe o está inactivo.`);
   }
 }
 
@@ -149,12 +135,7 @@ export async function crearTransferenciaAction(
       await ensureProductoExiste(tx, input.productoId);
       await ensureDepositoActivoConId(tx, input.depositoOrigenId, "origen");
       await ensureDepositoActivoConId(tx, input.depositoDestinoId, "destino");
-      await validarDisponible(
-        tx,
-        input.productoId,
-        input.depositoOrigenId,
-        input.cantidad,
-      );
+      await validarDisponible(tx, input.productoId, input.depositoOrigenId, input.cantidad);
 
       const numero = await generarNumeroTransferencia(tx);
       const transferencia = await tx.transferencia.create({
@@ -215,22 +196,14 @@ async function revertirTransferenciaConfirmada(
     },
   });
   // Sentido inverso: origen recibe, destino devuelve.
-  await moverCantidadFisica(
-    tx,
-    t.productoId,
-    t.depositoOrigenId,
-    t.depositoDestinoId,
-    t.cantidad,
-  );
+  await moverCantidadFisica(tx, t.productoId, t.depositoOrigenId, t.depositoDestinoId, t.cantidad);
   await tx.transferencia.update({
     where: { id: t.id },
     data: { estado: TransferenciaEstado.ANULADA },
   });
 }
 
-export async function anularTransferenciaAction(
-  transferenciaId: string,
-): Promise<ActionResult> {
+export async function anularTransferenciaAction(transferenciaId: string): Promise<ActionResult> {
   if (!isStockDualEnabled()) return FLAG_OFF_ERROR;
   try {
     await db.$transaction(async (tx) => {
@@ -249,6 +222,22 @@ export async function anularTransferenciaAction(
         throw new AsientoError("DOMINIO_INVALIDO", "Transferencia no existe.");
       }
       if (t.estado === TransferenciaEstado.ANULADA) return;
+      // S3.2: validar invariante 3 (disponible ≥ 0) en destino antes
+      // del reverse — si entre crear y anular alguien consumió parte
+      // del stock que llegó al destino, revertir la transferencia
+      // dejaría cantidadFisica < cantidadReservada (negativo). Bloquear
+      // con mensaje claro para que operador resuelva manualmente.
+      try {
+        await validarDisponible(tx, t.productoId, t.depositoDestinoId, t.cantidad);
+      } catch (err) {
+        if (err instanceof AsientoError) {
+          throw new AsientoError(
+            "DOMINIO_INVALIDO",
+            `Stock destino insuficiente para revertir transferencia: ${err.message}`,
+          );
+        }
+        throw err;
+      }
       await revertirTransferenciaConfirmada(tx, t);
     });
     revalidatePath("/inventario");
