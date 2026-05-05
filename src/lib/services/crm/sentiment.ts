@@ -3,6 +3,8 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
+import { getOrComputeAi } from "./ai-cache";
+
 const HAIKU_MODEL = "claude-haiku-4-5-20251001";
 
 const SentimentSchema = z.object({
@@ -26,13 +28,10 @@ CRITERIOS:
 - NEGATIVO (sentimiento < -0.3): cliente molesto, queja, deuda impaga, palabras como "furioso", "no paga", "rechazó", "perdimos", "se fue".
 - NEUTRAL (-0.3 ≤ sentimiento ≤ 0.3): información factual sin carga emocional, agenda, pendientes administrativos.`;
 
-export async function analizarSentimiento(texto: string): Promise<Sentiment> {
+async function computeSentiment(texto: string): Promise<Sentiment> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY no configurada.");
-  }
-  if (!texto.trim()) {
-    return { sentimiento: 0, etiqueta: "NEUTRAL" };
   }
 
   const client = new Anthropic({ apiKey });
@@ -40,9 +39,7 @@ export async function analizarSentimiento(texto: string): Promise<Sentiment> {
     model: HAIKU_MODEL,
     max_tokens: 200,
     system: SYSTEM_PROMPT,
-    messages: [
-      { role: "user", content: `Analizá el sentimiento de esta nota:\n\n${texto}` },
-    ],
+    messages: [{ role: "user", content: `Analizá el sentimiento de esta nota:\n\n${texto}` }],
   });
 
   const text = response.content
@@ -53,4 +50,13 @@ export async function analizarSentimiento(texto: string): Promise<Sentiment> {
   const fenced = text.match(/```json\s*([\s\S]+?)\s*```/);
   const payload = fenced ? fenced[1] : (text.match(/\{[\s\S]+\}/)?.[0] ?? "{}");
   return SentimentSchema.parse(JSON.parse(payload));
+}
+
+export async function analizarSentimiento(texto: string): Promise<Sentiment> {
+  const trimmed = texto.trim();
+  if (!trimmed) {
+    return { sentimiento: 0, etiqueta: "NEUTRAL" };
+  }
+  const { value } = await getOrComputeAi("sentiment", trimmed, () => computeSentiment(trimmed));
+  return value;
 }

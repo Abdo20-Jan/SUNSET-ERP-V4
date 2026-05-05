@@ -5,6 +5,8 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 
+import { getOrComputeAi } from "./ai-cache";
+
 const SONNET_MODEL = "claude-sonnet-4-6";
 
 const ResumenSchema = z.object({
@@ -92,27 +94,30 @@ export async function resumirLead(leadId: string): Promise<ResumenLead> {
     2,
   );
 
-  const client = new Anthropic({ apiKey });
+  const { value } = await getOrComputeAi("lead-summary", contexto, async () => {
+    const client = new Anthropic({ apiKey });
 
-  const response = await client.messages.create({
-    model: SONNET_MODEL,
-    max_tokens: 800,
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: `Analizá este lead y devolvé el JSON con resumen y próxima acción:\n\n${contexto}`,
-      },
-    ],
+    const response = await client.messages.create({
+      model: SONNET_MODEL,
+      max_tokens: 800,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: `Analizá este lead y devolvé el JSON con resumen y próxima acción:\n\n${contexto}`,
+        },
+      ],
+    });
+
+    const text = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("\n");
+
+    const fenced = text.match(/```json\s*([\s\S]+?)\s*```/);
+    // nosemgrep: javascript.lang.correctness.no-stringify-keys.no-stringify-keys
+    const payload = fenced ? fenced[1] : (text.match(/\{[\s\S]+\}/)?.[0] ?? "{}");
+    return ResumenSchema.parse(JSON.parse(payload));
   });
-
-  const text = response.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("\n");
-
-  const fenced = text.match(/```json\s*([\s\S]+?)\s*```/);
-  // nosemgrep: javascript.lang.correctness.no-stringify-keys.no-stringify-keys
-  const payload = fenced ? fenced[1] : (text.match(/\{[\s\S]+\}/)?.[0] ?? "{}");
-  return ResumenSchema.parse(JSON.parse(payload));
+  return value;
 }
