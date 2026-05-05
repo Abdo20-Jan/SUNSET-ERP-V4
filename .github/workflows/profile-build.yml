@@ -1,0 +1,88 @@
+name: Profile Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch o commit a buildear"
+        required: false
+        default: "main"
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    name: Build profile (Turbopack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      BUILD_REF: ${{ inputs.ref }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+        with:
+          version: 10
+
+      - name: Setup Node 22
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm prisma generate
+
+      - name: Build (timed)
+        id: build
+        env:
+          DATABASE_URL: postgres://nope:nope@localhost:5432/nope
+          DIRECT_DATABASE_URL: postgres://nope:nope@localhost:5432/nope
+          AUTH_SECRET: ci-profile-build-secret-not-used
+          NEXTAUTH_URL: http://localhost:3000
+        run: |
+          echo "::group::next build"
+          START=$(date +%s)
+          pnpm build 2>&1 | tee build.log
+          END=$(date +%s)
+          echo "::endgroup::"
+          echo "duration_seconds=$((END - START))" >> "$GITHUB_OUTPUT"
+
+      - name: Bundle size summary
+        env:
+          DURATION_SECONDS: ${{ steps.build.outputs.duration_seconds }}
+        run: |
+          {
+            printf '## Build profile · %s\n\n' "$BUILD_REF"
+            printf '**Duration**: %ss\n\n' "$DURATION_SECONDS"
+            printf '### Top 20 chunks por tamaño\n\n```\n'
+            if [ -d ".next/static/chunks" ]; then
+              du -h .next/static/chunks/*.js 2>/dev/null | sort -rh | head -20 || echo "no chunks .js"
+            else
+              echo ".next/static/chunks no existe"
+            fi
+            printf '```\n\n### Server bundle size\n\n```\n'
+            du -sh .next/server 2>/dev/null || echo "no .next/server"
+            du -sh .next/static 2>/dev/null || echo "no .next/static"
+            du -sh .next 2>/dev/null || echo "no .next"
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        if: always()
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 14
+          if-no-files-found: ignore
