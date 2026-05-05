@@ -6,15 +6,9 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { isCrmEnabled } from "@/lib/features";
-import {
-  Moneda,
-  OportunidadEstado,
-  Prisma,
-} from "@/generated/prisma/client";
+import { Moneda, OportunidadEstado, Prisma } from "@/generated/prisma/client";
 
-type ActionResult<T = undefined> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
 const FLAG_OFF_ERROR = {
   ok: false as const,
@@ -52,9 +46,7 @@ const oportunidadSchema = z
 
 export type OportunidadInput = z.input<typeof oportunidadSchema>;
 
-async function generarNumeroOportunidad(
-  tx: Prisma.TransactionClient,
-): Promise<string> {
+async function generarNumeroOportunidad(tx: Prisma.TransactionClient): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `O-${year}-`;
   const ultimo = await tx.oportunidad.findFirst({
@@ -279,10 +271,7 @@ async function cerrarOportunidad(
         select: { id: true },
       });
       if (!stage) throw new Error("STAGE_NOT_FOUND");
-      const estado =
-        resultado === "GANADA"
-          ? OportunidadEstado.GANADA
-          : OportunidadEstado.PERDIDA;
+      const estado = resultado === "GANADA" ? OportunidadEstado.GANADA : OportunidadEstado.PERDIDA;
       await tx.oportunidad.update({
         where: { id },
         data: { estado, stageId: stage.id },
@@ -313,4 +302,53 @@ export async function cerrarGanadaAction(id: string) {
 
 export async function cerrarPerdidaAction(id: string) {
   return cerrarOportunidad(id, "PERDIDA");
+}
+
+export async function listarUsuariosParaAsignar(): Promise<Array<{ id: string; nombre: string }>> {
+  const users = await db.user.findMany({
+    where: { activo: true },
+    orderBy: { nombre: "asc" },
+    select: { id: true, nombre: true },
+  });
+  return users;
+}
+
+const bulkAssignSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1, "Seleccioná al menos una oportunidad.").max(500),
+  ownerId: z.string().min(1, "Owner requerido."),
+});
+
+export async function bulkAssignOportunidadesOwnerAction(
+  raw: z.input<typeof bulkAssignSchema>,
+): Promise<ActionResult<{ actualizados: number }>> {
+  if (!isCrmEnabled()) return FLAG_OFF_ERROR;
+  const session = await auth();
+  if (!session?.user.id) return NO_AUTH;
+
+  const parsed = bulkAssignSchema.safeParse(raw);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    return { ok: false, error: first?.message ?? "Datos inválidos." };
+  }
+
+  try {
+    const owner = await db.user.findUnique({
+      where: { id: parsed.data.ownerId },
+      select: { id: true, activo: true },
+    });
+    if (!owner || !owner.activo) {
+      return { ok: false, error: "Owner inválido o inactivo." };
+    }
+
+    const result = await db.oportunidad.updateMany({
+      where: { id: { in: parsed.data.ids } },
+      data: { ownerId: parsed.data.ownerId },
+    });
+    revalidatePath("/crm/oportunidades");
+    revalidatePath("/crm/oportunidades/pipeline");
+    return { ok: true, data: { actualizados: result.count } };
+  } catch (err) {
+    console.error("bulkAssignOportunidadesOwnerAction failed", err);
+    return { ok: false, error: "Error inesperado al asignar oportunidades." };
+  }
 }

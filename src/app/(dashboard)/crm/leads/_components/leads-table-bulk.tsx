@@ -8,12 +8,12 @@ import { bulkUpdateLeadsEstadoAction } from "@/lib/actions/leads";
 import type { LeadRow } from "@/lib/actions/leads";
 import { LEAD_ESTADOS } from "@/lib/crm-enums";
 import { fmtDate } from "@/lib/format";
-import { LeadEstado } from "@/generated/prisma/client";
+import type { LeadEstado } from "@/generated/prisma/client";
 
 function estadoCls(estado: LeadEstado): string {
-  if (estado === LeadEstado.CONVERTIDO) return "font-medium text-green-700";
-  if (estado === LeadEstado.DESCALIFICADO) return "text-red-700";
-  if (estado === LeadEstado.CALIFICADO) return "font-medium text-blue-700";
+  if (estado === "CONVERTIDO") return "font-medium text-green-700";
+  if (estado === "DESCALIFICADO") return "text-red-700";
+  if (estado === "CALIFICADO") return "font-medium text-blue-700";
   return "";
 }
 
@@ -35,7 +35,7 @@ function ClienteCell({
 export function LeadsTableBulk({ leads }: { leads: LeadRow[] }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [estado, setEstado] = useState<LeadEstado>(LeadEstado.CALIFICADO);
+  const [estado, setEstado] = useState<LeadEstado>("CALIFICADO");
   const [isPending, startTransition] = useTransition();
 
   const allSelected = leads.length > 0 && selected.size === leads.length;
