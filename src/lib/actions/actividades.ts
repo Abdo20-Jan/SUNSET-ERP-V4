@@ -1,15 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
+import { analizarSentimiento } from "@/lib/services/crm/sentiment";
 import { ActividadTipo, Prisma } from "@/generated/prisma/client";
 
-type ActionResult<T = undefined> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
 const optionalStr = z
   .string()
@@ -25,10 +25,9 @@ const actividadSchema = z
     clienteId: optionalStr,
     oportunidadId: optionalStr,
   })
-  .refine(
-    (v) => v.leadId !== null || v.clienteId !== null || v.oportunidadId !== null,
-    { message: "Debe asociarse a un lead, cliente u oportunidad." },
-  );
+  .refine((v) => v.leadId !== null || v.clienteId !== null || v.oportunidadId !== null, {
+    message: "Debe asociarse a un lead, cliente u oportunidad.",
+  });
 
 export type ActividadInput = z.input<typeof actividadSchema>;
 
@@ -56,6 +55,22 @@ function buildActividadData(parsed: ParsedActividad) {
     clienteId: parsed.clienteId,
     oportunidadId: parsed.oportunidadId,
   };
+}
+
+function scheduleAutoSentiment(actividadId: string, tipo: ActividadTipo, contenido: string) {
+  if (tipo !== ActividadTipo.NOTA) return;
+  if (process.env.AI_AUTO_SENTIMENT !== "true") return;
+  after(async () => {
+    try {
+      const result = await analizarSentimiento(contenido);
+      await db.actividad.update({
+        where: { id: actividadId },
+        data: { sentimiento: result.sentimiento },
+      });
+    } catch (err) {
+      console.error("auto-sentiment failed", { actividadId, err });
+    }
+  });
 }
 
 export async function listarActividadesPendientes(ownerId: string) {
@@ -100,6 +115,7 @@ export async function crearActividadAction(
       data: { ...buildActividadData(validated.data), ownerId: guard.userId },
       select: { id: true, leadId: true, clienteId: true, oportunidadId: true },
     });
+    scheduleAutoSentiment(created.id, validated.data.tipo, validated.data.contenido);
     revalidatePathsActividad(created.leadId, created.clienteId, created.oportunidadId);
     return { ok: true, data: { id: created.id } };
   } catch (err) {
@@ -125,6 +141,7 @@ export async function editarActividadAction(
       data: buildActividadData(validated.data),
       select: { id: true, leadId: true, clienteId: true, oportunidadId: true },
     });
+    scheduleAutoSentiment(updated.id, validated.data.tipo, validated.data.contenido);
     revalidatePathsActividad(updated.leadId, updated.clienteId, updated.oportunidadId);
     return { ok: true, data: { id: updated.id } };
   } catch (err) {
@@ -136,9 +153,7 @@ export async function editarActividadAction(
   }
 }
 
-export async function completarActividadAction(
-  id: string,
-): Promise<ActionResult<undefined>> {
+export async function completarActividadAction(id: string): Promise<ActionResult<undefined>> {
   const guard = await requireCrmAuth();
   if (!guard.ok) return guard;
   if (!id) return { ok: false, error: "Id requerido." };
@@ -161,9 +176,7 @@ export async function completarActividadAction(
   }
 }
 
-export async function eliminarActividadAction(
-  id: string,
-): Promise<ActionResult<undefined>> {
+export async function eliminarActividadAction(id: string): Promise<ActionResult<undefined>> {
   const guard = await requireCrmAuth();
   if (!guard.ok) return guard;
   if (!id) return { ok: false, error: "Id requerido." };
