@@ -1,3 +1,4 @@
+import { auth } from "@/lib/auth";
 import { getEstadoResultadosByFecha } from "@/lib/services/reportes";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,9 +37,7 @@ function todayIso(): string {
 
 function firstOfMonthIso(): string {
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1)
-    .toISOString()
-    .slice(0, 10);
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 }
 
 export default async function EstadoResultadosPage({
@@ -55,11 +54,13 @@ export default async function EstadoResultadosPage({
 
   const er = await getEstadoResultadosByFecha({ fechaDesde, fechaHasta });
 
-  const moneda: Moneda = params.moneda === "ARS" ? "ARS" : "USD";
+  const session = await auth();
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    params.moneda === "ARS" ? "ARS" : params.moneda === "USD" ? "USD" : monedaPreferida;
   const fechaCorte = fechaHasta ?? new Date();
   const cotizacion = await getCotizacionParaFecha(fechaCorte);
-  const tcParaUsd =
-    moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
+  const tcParaUsd = moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
   const tcInfo = cotizacion
     ? {
         valor: cotizacion.valor.toString(),
@@ -83,17 +84,12 @@ export default async function EstadoResultadosPage({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-[15px] font-semibold tracking-tight">
-          Estado de Resultados
-        </h1>
+        <h1 className="text-[15px] font-semibold tracking-tight">Estado de Resultados</h1>
         <p className="text-sm text-muted-foreground">{rangoLabel}</p>
       </div>
 
       <div className="flex flex-col gap-3">
-        <DateRangeFilter
-          initialDesde={desdeStr}
-          initialHasta={hastaStr}
-        />
+        <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
         <MonedaToggle current={moneda} tcInfo={tcInfo} />
       </div>
 
@@ -126,9 +122,7 @@ export default async function EstadoResultadosPage({
           <span className="text-xs uppercase tracking-wide text-muted-foreground">
             Resultado del Período
           </span>
-          <span className="text-xs text-muted-foreground">
-            Ingresos − Egresos
-          </span>
+          <span className="text-xs text-muted-foreground">Ingresos − Egresos</span>
         </div>
         <span
           className={cn(

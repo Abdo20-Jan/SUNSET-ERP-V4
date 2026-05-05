@@ -1,3 +1,4 @@
+import { auth } from "@/lib/auth";
 import { getBalanceGeneralByFecha } from "@/lib/services/reportes";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { Badge } from "@/components/ui/badge";
@@ -50,15 +51,17 @@ export default async function BalanceGeneralPage({
   const fechaDesde = parseDate(desdeStr);
   const fechaHasta = endOfDay(hastaStr);
 
-  const moneda: Moneda = params.moneda === "ARS" ? "ARS" : "USD";
+  const session = await auth();
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    params.moneda === "ARS" ? "ARS" : params.moneda === "USD" ? "USD" : monedaPreferida;
 
   const [bg, cotizacion] = await Promise.all([
     getBalanceGeneralByFecha({ fechaDesde, fechaHasta }),
     getCotizacionParaFecha(fechaHasta ?? new Date()),
   ]);
 
-  const tcParaUsd =
-    moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
+  const tcParaUsd = moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
   const showSaldoInicial = Boolean(fechaDesde);
   const tcInfo = cotizacion
     ? {
@@ -81,16 +84,11 @@ export default async function BalanceGeneralPage({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h1 className="text-[15px] font-semibold tracking-tight">
-            Balance General
-          </h1>
+          <h1 className="text-[15px] font-semibold tracking-tight">Balance General</h1>
           <p className="text-sm text-muted-foreground">{titulo}</p>
         </div>
         {bg.cuadra ? (
-          <Badge
-            variant="default"
-            className="bg-emerald-600 text-white hover:bg-emerald-600"
-          >
+          <Badge variant="default" className="bg-emerald-600 text-white hover:bg-emerald-600">
             ✓ Cuadra
           </Badge>
         ) : (
@@ -101,10 +99,7 @@ export default async function BalanceGeneralPage({
       </div>
 
       <div className="flex flex-col gap-3">
-        <BalanceFechaFilter
-          initialDesde={desdeStr}
-          initialHasta={hastaStr}
-        />
+        <BalanceFechaFilter initialDesde={desdeStr} initialHasta={hastaStr} />
         <MonedaToggle current={moneda} tcInfo={tcInfo} />
       </div>
 
@@ -162,9 +157,7 @@ export default async function BalanceGeneralPage({
           />
           <Summary
             label="Patrimonio Ajustado"
-            value={fmtMoney(
-              convertirAUsd(bg.totalPatrimonioAjustado.toFixed(2), tcParaUsd),
-            )}
+            value={fmtMoney(convertirAUsd(bg.totalPatrimonioAjustado.toFixed(2), tcParaUsd))}
             hint={
               bg.resultadoEjercicio.isZero()
                 ? undefined
@@ -174,10 +167,7 @@ export default async function BalanceGeneralPage({
           <Summary
             label="Pasivo + Patrimonio"
             value={fmtMoney(
-              convertirAUsd(
-                bg.totalPasivo.plus(bg.totalPatrimonioAjustado).toFixed(2),
-                tcParaUsd,
-              ),
+              convertirAUsd(bg.totalPasivo.plus(bg.totalPatrimonioAjustado).toFixed(2), tcParaUsd),
             )}
             emphasis={bg.cuadra ? "positive" : "negative"}
           />
@@ -204,16 +194,13 @@ function Summary({
       <span
         className={cn(
           "font-mono text-lg tabular-nums",
-          emphasis === "positive" &&
-            "text-emerald-700 dark:text-emerald-400",
+          emphasis === "positive" && "text-emerald-700 dark:text-emerald-400",
           emphasis === "negative" && "text-destructive",
         )}
       >
         {value}
       </span>
-      {hint ? (
-        <span className="text-xs text-muted-foreground">{hint}</span>
-      ) : null}
+      {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
     </div>
   );
 }
