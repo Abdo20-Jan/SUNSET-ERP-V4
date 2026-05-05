@@ -1,10 +1,10 @@
 import Link from "next/link";
 
-import { listarOportunidades } from "@/lib/actions/oportunidades";
+import { listarOportunidades, listarUsuariosParaAsignar } from "@/lib/actions/oportunidades";
 import { isCrmEnabled } from "@/lib/features";
 import { OportunidadEstado } from "@/generated/prisma/client";
 
-import { OportunidadesTable } from "./_components/oportunidades-table";
+import { OportunidadesTableBulk } from "./_components/oportunidades-table-bulk";
 
 type SearchParams = Promise<{ estado?: string }>;
 
@@ -32,7 +32,10 @@ export default async function OportunidadesPage({
   }
 
   const { estado } = await searchParams;
-  const ops = await listarOportunidades({ estado: parseEstado(estado) });
+  const [ops, usuarios] = await Promise.all([
+    listarOportunidades({ estado: parseEstado(estado) }),
+    listarUsuariosParaAsignar(),
+  ]);
 
   return (
     <main className="container mx-auto space-y-6 p-6">
@@ -67,14 +70,13 @@ export default async function OportunidadesPage({
           >
             <option value="">Todos</option>
             {Object.values(OportunidadEstado).map((e) => (
-              <option key={e} value={e}>{e}</option>
+              <option key={e} value={e}>
+                {e}
+              </option>
             ))}
           </select>
         </label>
-        <button
-          type="submit"
-          className="rounded-md border px-3 py-1.5 hover:bg-muted"
-        >
+        <button type="submit" className="rounded-md border px-3 py-1.5 hover:bg-muted">
           Filtrar
         </button>
       </form>
@@ -82,7 +84,7 @@ export default async function OportunidadesPage({
       {ops.length === 0 ? (
         <p className="text-muted-foreground">Sin oportunidades.</p>
       ) : (
-        <OportunidadesTable ops={ops} />
+        <OportunidadesTableBulk ops={ops} usuarios={usuarios} />
       )}
     </main>
   );
