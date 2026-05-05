@@ -5,7 +5,7 @@ import { isCrmEnabled } from "@/lib/features";
 import { LeadEstado, LeadFuente } from "@/generated/prisma/client";
 
 import { LeadsFilterBar } from "./_components/leads-filter-bar";
-import { LeadsTable } from "./_components/leads-table";
+import { LeadsTableBulk } from "./_components/leads-table-bulk";
 
 type SearchParams = Promise<{
   estado?: string;
@@ -72,7 +72,7 @@ export default async function LeadsPage({
       {leads.length === 0 ? (
         <p className="text-muted-foreground">No hay leads.</p>
       ) : (
-        <LeadsTable leads={leads} />
+        <LeadsTableBulk leads={leads} />
       )}
     </main>
   );

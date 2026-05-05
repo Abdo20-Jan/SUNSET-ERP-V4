@@ -203,6 +203,36 @@ export async function editarLeadAction(
   }
 }
 
+const bulkLeadsEstadoSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1, "Seleccioná al menos un lead.").max(500),
+  estado: z.nativeEnum(LeadEstado),
+});
+
+export async function bulkUpdateLeadsEstadoAction(
+  raw: z.input<typeof bulkLeadsEstadoSchema>,
+): Promise<ActionResult<{ actualizados: number }>> {
+  const guard = await requireCrmAuth();
+  if (!guard.ok) return guard;
+
+  const parsed = bulkLeadsEstadoSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+  }
+
+  try {
+    const result = await db.lead.updateMany({
+      where: { id: { in: parsed.data.ids } },
+      data: { estado: parsed.data.estado },
+    });
+    revalidatePath("/crm/leads");
+    revalidatePath("/crm");
+    return { ok: true, data: { actualizados: result.count } };
+  } catch (err) {
+    console.error("bulkUpdateLeadsEstadoAction failed", err);
+    return { ok: false, error: "Error inesperado al actualizar los leads." };
+  }
+}
+
 export async function eliminarLeadAction(id: string): Promise<ActionResult<undefined>> {
   const guard = await requireCrmAuth();
   if (!guard.ok) return guard;
