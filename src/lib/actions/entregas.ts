@@ -13,11 +13,7 @@ import {
 } from "@/lib/services/asiento-automatico";
 import { aplicarEgresoSPD } from "@/lib/services/stock";
 import { getStockPorDeposito } from "@/lib/services/stock-helpers";
-import {
-  EntregaEstado,
-  MovimientoStockTipo,
-  type Prisma,
-} from "@/generated/prisma/client";
+import { EntregaEstado, MovimientoStockTipo, type Prisma } from "@/generated/prisma/client";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -36,9 +32,7 @@ const crearEntregaSchema = z.object({
 
 export type CrearEntregaInput = z.input<typeof crearEntregaSchema>;
 
-type ActionResult<T = undefined> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
 const FLAG_OFF_ERROR = {
   ok: false as const,
@@ -56,9 +50,7 @@ async function generarNumeroEntrega(tx: TxClient): Promise<string> {
     orderBy: { numero: "desc" },
     select: { numero: true },
   });
-  const nextSeq = last
-    ? Number.parseInt(last.numero.slice(`R-${year}-`.length), 10) + 1
-    : 1;
+  const nextSeq = last ? Number.parseInt(last.numero.slice(`R-${year}-`.length), 10) + 1 : 1;
   return `R-${year}-${String(nextSeq).padStart(4, "0")}`;
 }
 
@@ -72,10 +64,7 @@ async function validarTopeItemVenta(
     select: { id: true, cantidad: true },
   });
   if (!itemVenta) {
-    throw new AsientoError(
-      "DOMINIO_INVALIDO",
-      `ItemVenta ${itemVentaId} no existe.`,
-    );
+    throw new AsientoError("DOMINIO_INVALIDO", `ItemVenta ${itemVentaId} no existe.`);
   }
   const yaEntregado = await tx.itemEntrega.aggregate({
     where: {
@@ -93,9 +82,7 @@ async function validarTopeItemVenta(
   }
 }
 
-function parseEntregaInput(
-  raw: CrearEntregaInput,
-): z.infer<typeof crearEntregaSchema> {
+function parseEntregaInput(raw: CrearEntregaInput): z.infer<typeof crearEntregaSchema> {
   const parse = crearEntregaSchema.safeParse(raw);
   if (!parse.success) {
     const first = parse.error.issues[0];
@@ -123,19 +110,13 @@ async function ensureVentaEmitida(tx: TxClient, ventaId: string): Promise<void> 
   }
 }
 
-async function ensureDepositoActivo(
-  tx: TxClient,
-  depositoId: string,
-): Promise<void> {
+async function ensureDepositoActivo(tx: TxClient, depositoId: string): Promise<void> {
   const dep = await tx.deposito.findUnique({
     where: { id: depositoId },
     select: { id: true, activo: true },
   });
   if (!dep || !dep.activo) {
-    throw new AsientoError(
-      "DOMINIO_INVALIDO",
-      "Depósito de entrega no existe o está inactivo.",
-    );
+    throw new AsientoError("DOMINIO_INVALIDO", "Depósito de entrega no existe o está inactivo.");
   }
 }
 
@@ -188,9 +169,7 @@ export async function crearEntregaAction(
 // Confirmar entrega (BORRADOR → CONFIRMADA)
 // ---------------------------------------------------------------
 
-type EntregaEnConfirmacion = NonNullable<
-  Awaited<ReturnType<typeof loadEntregaForConfirm>>
->;
+type EntregaEnConfirmacion = NonNullable<Awaited<ReturnType<typeof loadEntregaForConfirm>>>;
 
 async function loadEntregaForConfirm(tx: TxClient, entregaId: string) {
   return tx.entregaVenta.findUnique({
@@ -211,6 +190,7 @@ async function loadEntregaForConfirm(tx: TxClient, entregaId: string) {
           itemVenta: {
             select: {
               productoId: true,
+              depositoId: true,
               producto: { select: { codigo: true } },
             },
           },
@@ -228,10 +208,7 @@ function ensureEntregaConfirmable(entrega: EntregaEnConfirmacion): void {
     );
   }
   if (entrega.asientoId) {
-    throw new AsientoError(
-      "DOMINIO_INVALIDO",
-      `Entrega ${entrega.numero} ya tiene asiento.`,
-    );
+    throw new AsientoError("DOMINIO_INVALIDO", `Entrega ${entrega.numero} ya tiene asiento.`);
   }
 }
 
@@ -241,6 +218,17 @@ async function aplicarEgresoFisicoItem(
   it: EntregaEnConfirmacion["items"][number],
 ): Promise<void> {
   const productoId = it.itemVenta.productoId;
+  // S3.1: cuando el ItemVenta tiene depósito explícito, la entrega debe
+  // hacerse desde ese mismo depósito — caso contrario, la reserva quedó
+  // en un depósito y el egreso saldría de otro, dejando los stocks
+  // desincronizados.
+  const itemDepId = it.itemVenta.depositoId;
+  if (itemDepId && itemDepId !== entrega.depositoId) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Item ${it.itemVenta.producto.codigo}: la venta lo reservó en otro depósito (${itemDepId}); cree una entrega separada desde ese depósito.`,
+    );
+  }
   const stock = await getStockPorDeposito(tx, productoId, entrega.depositoId);
   if (!stock || stock.cantidadFisica < it.cantidad) {
     throw new AsientoError(
@@ -303,9 +291,7 @@ export async function confirmarEntregaAction(
 // Anular entrega
 // ---------------------------------------------------------------
 
-type EntregaEnAnulacion = NonNullable<
-  Awaited<ReturnType<typeof loadEntregaForAnular>>
->;
+type EntregaEnAnulacion = NonNullable<Awaited<ReturnType<typeof loadEntregaForAnular>>>;
 
 async function loadEntregaForAnular(tx: TxClient, entregaId: string) {
   return tx.entregaVenta.findUnique({
@@ -351,10 +337,7 @@ async function restaurarSPDPorItemAnulacion(
   });
 }
 
-async function revertirEntregaConfirmada(
-  tx: TxClient,
-  entrega: EntregaEnAnulacion,
-): Promise<void> {
+async function revertirEntregaConfirmada(tx: TxClient, entrega: EntregaEnAnulacion): Promise<void> {
   for (const it of entrega.items) {
     await restaurarSPDPorItemAnulacion(tx, entrega.depositoId, it);
   }
@@ -367,9 +350,7 @@ async function revertirEntregaConfirmada(
   });
 }
 
-export async function anularEntregaAction(
-  entregaId: string,
-): Promise<ActionResult> {
+export async function anularEntregaAction(entregaId: string): Promise<ActionResult> {
   if (!isStockDualEnabled()) return FLAG_OFF_ERROR;
   try {
     await db.$transaction(async (tx) => {
@@ -449,9 +430,7 @@ export async function saldoPendientePorItemVenta(ventaId: string) {
     },
     _sum: { cantidad: true },
   });
-  const entregadoPorItem = new Map(
-    aggregados.map((a) => [a.itemVentaId, a._sum.cantidad ?? 0]),
-  );
+  const entregadoPorItem = new Map(aggregados.map((a) => [a.itemVentaId, a._sum.cantidad ?? 0]));
   return venta.items.map((it) => {
     const entregado = entregadoPorItem.get(it.id) ?? 0;
     return {

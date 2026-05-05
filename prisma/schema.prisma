@@ -813,6 +813,7 @@ model Deposito {
   embarques             Embarque[]
   stockPorDeposito      StockPorDeposito[]
   entregas              EntregaVenta[]
+  itemsVenta            ItemVenta[]
   transferenciasOrigen  Transferencia[]    @relation("TransferenciaOrigen")
   transferenciasDestino Transferencia[]    @relation("TransferenciaDestino")
 }
@@ -942,10 +943,17 @@ model ItemVenta {
   subtotal       Decimal @db.Decimal(18, 2)
   iva            Decimal @db.Decimal(18, 2)
   total          Decimal @db.Decimal(18, 2)
+  // Depósito desde el cual se reserva/entrega este item. Nullable:
+  // cuando es null, cae al default global (`getDepositoPorDefecto`),
+  // manteniendo retrocompatibilidad con ventas pre-S3.1.
+  depositoId     String?
 
   venta        Venta         @relation(fields: [ventaId], references: [id], onDelete: Cascade)
   producto     Producto      @relation(fields: [productoId], references: [id])
+  deposito     Deposito?     @relation(fields: [depositoId], references: [id])
   itemsEntrega ItemEntrega[]
+
+  @@index([depositoId])
 }
 
 // ============================================================
