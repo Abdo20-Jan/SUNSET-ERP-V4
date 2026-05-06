@@ -58,6 +58,35 @@ type DialogState =
   | { mode: "registrar"; row: GastoFijoRow }
   | null;
 
+// Extrair valores de form a partir de uma row (ou {} para criar novo).
+// Usa destructuring com defaults — sem branches `??`/`?.` na função, mantém
+// CCN baixo (Codacy/Lizard threshold é 8).
+function rowToFormValues({
+  descripcion = "",
+  proveedorId = "",
+  cuentaGastoContableId = null,
+  moneda = "ARS" as "ARS" | "USD",
+  montoNeto = "",
+  ivaPorcentaje = "21",
+  iibbPorcentaje = "0",
+  diaVencimiento = null as number | null,
+  activo = true,
+  notas = null as string | null,
+}: Partial<GastoFijoRow>) {
+  return {
+    descripcion,
+    proveedorId,
+    cuentaGastoId: cuentaGastoContableId,
+    moneda,
+    montoNeto,
+    ivaPorcentaje,
+    iibbPorcentaje,
+    diaVencimiento: diaVencimiento != null ? String(diaVencimiento) : "",
+    activo,
+    notas: notas ?? "",
+  };
+}
+
 const MESES = [
   "Enero",
   "Febrero",
@@ -242,18 +271,18 @@ function GastoFijoFormDialog({
   // para remontar o form e eliminar este prop-sync effect.
   useEffect(() => {
     if (!state) return;
-    const r = state.mode === "edit" ? state.row : null;
+    const v = rowToFormValues(state.mode === "edit" ? state.row : {});
     // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-sync pattern, refactor pendente
-    setDescripcion(r?.descripcion ?? "");
-    setProveedorId(r?.proveedorId ?? "");
-    setCuentaGastoId(r?.cuentaGastoContableId ?? null);
-    setMoneda(r?.moneda ?? "ARS");
-    setMontoNeto(r?.montoNeto ?? "");
-    setIvaPorcentaje(r?.ivaPorcentaje ?? "21");
-    setIibbPorcentaje(r?.iibbPorcentaje ?? "0");
-    setDiaVencimiento(r?.diaVencimiento != null ? String(r.diaVencimiento) : "");
-    setActivo(r?.activo ?? true);
-    setNotas(r?.notas ?? "");
+    setDescripcion(v.descripcion);
+    setProveedorId(v.proveedorId);
+    setCuentaGastoId(v.cuentaGastoId);
+    setMoneda(v.moneda);
+    setMontoNeto(v.montoNeto);
+    setIvaPorcentaje(v.ivaPorcentaje);
+    setIibbPorcentaje(v.iibbPorcentaje);
+    setDiaVencimiento(v.diaVencimiento);
+    setActivo(v.activo);
+    setNotas(v.notas);
   }, [state]);
 
   if (!state) return null;
