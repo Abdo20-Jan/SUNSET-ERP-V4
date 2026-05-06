@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { eqMoney, gtZero, money, sumMoney, toDecimal } from "@/lib/decimal";
 import { isStockDualEnabled } from "@/lib/features";
+import { secureRandomInt } from "@/lib/secure-random";
 import { ensureCuentasMap, getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { revertirIngresoEmbarque } from "@/lib/services/stock";
 import {
@@ -87,7 +88,7 @@ async function withNumeracionRetry<T>(run: () => Promise<T>): Promise<T> {
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
         lastErr = err;
-        await sleep(5 + Math.floor(Math.random() * 20));
+        await sleep(5 + secureRandomInt(20));
         continue;
       }
       throw err;
