@@ -20,9 +20,13 @@ export const authConfig = {
         token.nombre = user.nombre;
         token.role = user.role;
         token.monedaPreferida = user.monedaPreferida;
+        token.modoRetroactivo = user.modoRetroactivo;
       }
       if (trigger === "update" && session?.user?.monedaPreferida !== undefined) {
         token.monedaPreferida = session.user.monedaPreferida as Session["user"]["monedaPreferida"];
+      }
+      if (trigger === "update" && session?.user?.modoRetroactivo !== undefined) {
+        token.modoRetroactivo = session.user.modoRetroactivo as Session["user"]["modoRetroactivo"];
       }
       return token;
     },
@@ -32,6 +36,7 @@ export const authConfig = {
       session.user.nombre = token.nombre as string;
       session.user.role = token.role as Session["user"]["role"];
       session.user.monedaPreferida = token.monedaPreferida as Session["user"]["monedaPreferida"];
+      session.user.modoRetroactivo = token.modoRetroactivo as Session["user"]["modoRetroactivo"];
       return session;
     },
   },

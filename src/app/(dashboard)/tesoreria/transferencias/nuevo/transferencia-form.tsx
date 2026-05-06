@@ -8,11 +8,7 @@ import { z } from "zod";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Alert02Icon,
-  ArrowRight02Icon,
-  Calendar03Icon,
-} from "@hugeicons/core-free-icons";
+import { Alert02Icon, ArrowRight02Icon, Calendar03Icon } from "@hugeicons/core-free-icons";
 
 import {
   crearTransferenciaAction,
@@ -23,11 +19,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -42,25 +34,13 @@ const FX_RE = /^\d+(\.\d{1,6})?$/;
 
 const formSchema = z
   .object({
-    cuentaBancariaOrigenId: z
-      .string()
-      .uuid({ message: "Seleccione la cuenta origen" }),
-    cuentaBancariaDestinoId: z
-      .string()
-      .uuid({ message: "Seleccione la cuenta destino" }),
+    cuentaBancariaOrigenId: z.string().uuid({ message: "Seleccione la cuenta origen" }),
+    cuentaBancariaDestinoId: z.string().uuid({ message: "Seleccione la cuenta destino" }),
     fecha: z.date({ message: "Seleccione la fecha" }),
-    montoOrigen: z
-      .string()
-      .regex(DECIMAL_RE, "Monto origen inválido (máx. 2 decimales)"),
-    montoDestino: z
-      .string()
-      .regex(DECIMAL_RE, "Monto destino inválido (máx. 2 decimales)"),
-    tipoCambioOrigen: z
-      .string()
-      .regex(FX_RE, "Tipo de cambio origen inválido"),
-    tipoCambioDestino: z
-      .string()
-      .regex(FX_RE, "Tipo de cambio destino inválido"),
+    montoOrigen: z.string().regex(DECIMAL_RE, "Monto origen inválido (máx. 2 decimales)"),
+    montoDestino: z.string().regex(DECIMAL_RE, "Monto destino inválido (máx. 2 decimales)"),
+    tipoCambioOrigen: z.string().regex(FX_RE, "Tipo de cambio origen inválido"),
+    tipoCambioDestino: z.string().regex(FX_RE, "Tipo de cambio destino inválido"),
     descripcion: z.string().trim().max(255).optional(),
   })
   .superRefine((data, ctx) => {
@@ -108,8 +88,10 @@ type FormValues = z.infer<typeof formSchema>;
 
 export function TransferenciaForm({
   cuentasBancarias,
+  defaultFecha,
 }: {
   cuentasBancarias: CuentaBancariaOption[];
+  defaultFecha?: string;
 }) {
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
@@ -126,7 +108,12 @@ export function TransferenciaForm({
     defaultValues: {
       cuentaBancariaOrigenId: "",
       cuentaBancariaDestinoId: "",
-      fecha: new Date(),
+      fecha:
+        defaultFecha === undefined
+          ? new Date()
+          : defaultFecha === ""
+            ? (undefined as unknown as Date)
+            : new Date(defaultFecha),
       montoOrigen: "0",
       montoDestino: "0",
       tipoCambioOrigen: "1",
@@ -196,9 +183,7 @@ export function TransferenciaForm({
       });
 
       if (result.ok) {
-        toast.success(
-          `Transferencia registrada — Asiento Nº ${result.asientoNumero}`,
-        );
+        toast.success(`Transferencia registrada — Asiento Nº ${result.asientoNumero}`);
         router.push("/tesoreria/movimientos");
       } else {
         toast.error(result.error);
@@ -217,17 +202,12 @@ export function TransferenciaForm({
                 control={control}
                 name="cuentaBancariaOrigenId"
                 render={({ field }) => (
-                  <Select
-                    value={field.value || undefined}
-                    onValueChange={field.onChange}
-                  >
+                  <Select value={field.value || undefined} onValueChange={field.onChange}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Seleccione cuenta">
                         {(value) => {
                           const c = cuentasBancarias.find((c) => c.id === value);
-                          return c
-                            ? `${c.banco} · ${c.numero} · ${c.moneda}`
-                            : "Seleccione cuenta";
+                          return c ? `${c.banco} · ${c.numero} · ${c.moneda}` : "Seleccione cuenta";
                         }}
                       </SelectValue>
                     </SelectTrigger>
@@ -242,16 +222,12 @@ export function TransferenciaForm({
                 )}
               />
               {errors.cuentaBancariaOrigenId && (
-                <FieldError
-                  message={errors.cuentaBancariaOrigenId.message}
-                />
+                <FieldError message={errors.cuentaBancariaOrigenId.message} />
               )}
               {origen && (
                 <p className="text-xs text-muted-foreground">
-                  <span className="font-mono">
-                    {origen.cuentaContableCodigo}
-                  </span>{" "}
-                  — {origen.cuentaContableNombre}
+                  <span className="font-mono">{origen.cuentaContableCodigo}</span> —{" "}
+                  {origen.cuentaContableNombre}
                 </p>
               )}
             </div>
@@ -266,17 +242,12 @@ export function TransferenciaForm({
                 control={control}
                 name="cuentaBancariaDestinoId"
                 render={({ field }) => (
-                  <Select
-                    value={field.value || undefined}
-                    onValueChange={field.onChange}
-                  >
+                  <Select value={field.value || undefined} onValueChange={field.onChange}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Seleccione cuenta">
                         {(value) => {
                           const c = destinoOptions.find((c) => c.id === value);
-                          return c
-                            ? `${c.banco} · ${c.numero} · ${c.moneda}`
-                            : "Seleccione cuenta";
+                          return c ? `${c.banco} · ${c.numero} · ${c.moneda}` : "Seleccione cuenta";
                         }}
                       </SelectValue>
                     </SelectTrigger>
@@ -291,16 +262,12 @@ export function TransferenciaForm({
                 )}
               />
               {errors.cuentaBancariaDestinoId && (
-                <FieldError
-                  message={errors.cuentaBancariaDestinoId.message}
-                />
+                <FieldError message={errors.cuentaBancariaDestinoId.message} />
               )}
               {destino && (
                 <p className="text-xs text-muted-foreground">
-                  <span className="font-mono">
-                    {destino.cuentaContableCodigo}
-                  </span>{" "}
-                  — {destino.cuentaContableNombre}
+                  <span className="font-mono">{destino.cuentaContableCodigo}</span> —{" "}
+                  {destino.cuentaContableNombre}
                 </p>
               )}
             </div>
@@ -311,9 +278,7 @@ export function TransferenciaForm({
             <Controller
               control={control}
               name="fecha"
-              render={({ field }) => (
-                <DatePicker value={field.value} onChange={field.onChange} />
-              )}
+              render={({ field }) => <DatePicker value={field.value} onChange={field.onChange} />}
             />
             {errors.fecha && <FieldError message={errors.fecha.message} />}
           </div>
@@ -341,9 +306,7 @@ export function TransferenciaForm({
                   aria-invalid={!!errors.montoOrigen}
                   {...register("montoOrigen")}
                 />
-                {errors.montoOrigen && (
-                  <FieldError message={errors.montoOrigen.message} />
-                )}
+                {errors.montoOrigen && <FieldError message={errors.montoOrigen.message} />}
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="tipoCambioOrigen" className="text-xs">
@@ -361,9 +324,7 @@ export function TransferenciaForm({
                   <FieldError message={errors.tipoCambioOrigen.message} />
                 )}
                 {origen?.moneda === "ARS" && (
-                  <p className="text-xs text-muted-foreground">
-                    Fijo en 1 para ARS.
-                  </p>
+                  <p className="text-xs text-muted-foreground">Fijo en 1 para ARS.</p>
                 )}
               </div>
               {preview && (
@@ -395,9 +356,7 @@ export function TransferenciaForm({
                   aria-invalid={!!errors.montoDestino}
                   {...register("montoDestino")}
                 />
-                {errors.montoDestino && (
-                  <FieldError message={errors.montoDestino.message} />
-                )}
+                {errors.montoDestino && <FieldError message={errors.montoDestino.message} />}
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="tipoCambioDestino" className="text-xs">
@@ -415,9 +374,7 @@ export function TransferenciaForm({
                   <FieldError message={errors.tipoCambioDestino.message} />
                 )}
                 {destino?.moneda === "ARS" && (
-                  <p className="text-xs text-muted-foreground">
-                    Fijo en 1 para ARS.
-                  </p>
+                  <p className="text-xs text-muted-foreground">Fijo en 1 para ARS.</p>
                 )}
               </div>
               {preview && (
@@ -448,11 +405,7 @@ export function TransferenciaForm({
               Partida doble · se generará en estado CONTABILIZADO
             </span>
           </div>
-          <AsientoPreview
-            origen={origen}
-            destino={destino}
-            preview={preview}
-          />
+          <AsientoPreview origen={origen} destino={destino} preview={preview} />
         </CardContent>
       </Card>
 
@@ -572,21 +525,13 @@ function AsientoPreview({
         <tbody>
           {rows.map((r, i) => (
             <tr key={i} className="border-t">
-              <td className="py-2 pl-3 text-xs text-muted-foreground">
-                {r.role}
-              </td>
+              <td className="py-2 pl-3 text-xs text-muted-foreground">{r.role}</td>
               <td className="py-2 pl-3">
-                <span className="font-mono text-xs text-muted-foreground">
-                  {r.codigo}
-                </span>{" "}
+                <span className="font-mono text-xs text-muted-foreground">{r.codigo}</span>{" "}
                 <span>{r.label}</span>
               </td>
-              <td className="py-2 pr-3 text-right font-mono tabular-nums">
-                {r.debe}
-              </td>
-              <td className="py-2 pr-3 text-right font-mono tabular-nums">
-                {r.haber}
-              </td>
+              <td className="py-2 pr-3 text-right font-mono tabular-nums">{r.debe}</td>
+              <td className="py-2 pr-3 text-right font-mono tabular-nums">{r.haber}</td>
             </tr>
           ))}
         </tbody>
@@ -630,11 +575,7 @@ function DatePicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full justify-start font-normal"
-          />
+          <Button type="button" variant="outline" className="w-full justify-start font-normal" />
         }
       >
         <HugeiconsIcon

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/layout/page-header";
 
 import { MonedaPreferidaForm } from "./_components/moneda-preferida-form";
+import { ModoRetroactivoForm } from "./_components/modo-retroactivo-form";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ export default async function PerfilPage() {
   }
 
   const initial = session.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const modoRetroactivo = session.user.modoRetroactivo ?? false;
 
   return (
     <div className="flex flex-col gap-3">
@@ -31,6 +33,15 @@ export default async function PerfilPage() {
         </CardHeader>
         <CardContent>
           <MonedaPreferidaForm initial={initial} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Carga de documentos</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ModoRetroactivoForm initial={modoRetroactivo} />
         </CardContent>
       </Card>
     </div>

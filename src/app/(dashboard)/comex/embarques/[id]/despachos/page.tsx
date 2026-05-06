@@ -1,21 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import {
-  obtenerEmbarquePorId,
-} from "@/lib/actions/embarques";
-import {
-  listarDespachosDeEmbarque,
-} from "@/lib/actions/despachos";
+import { obtenerEmbarquePorId } from "@/lib/actions/embarques";
+import { listarDespachosDeEmbarque } from "@/lib/actions/despachos";
 import { db } from "@/lib/db";
+import { getDefaultFecha } from "@/lib/server/fecha-default";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/layout/page-header";
 import { fmtMoney } from "@/lib/format";
@@ -34,8 +25,8 @@ export default async function DespachosEmbarquePage({
   const embarque = await obtenerEmbarquePorId(id);
   if (!embarque) notFound();
 
-  const [despachos, productos, facturasDespachoLibres, depositos] =
-    await Promise.all([
+  const [despachos, productos, facturasDespachoLibres, depositos, defaultFecha] = await Promise.all(
+    [
       listarDespachosDeEmbarque(id),
       db.producto.findMany({
         where: { id: { in: embarque.items.map((i) => i.productoId) } },
@@ -58,7 +49,9 @@ export default async function DespachosEmbarquePage({
         select: { id: true, nombre: true },
         orderBy: { nombre: "asc" },
       }),
-    ]);
+      getDefaultFecha(),
+    ],
+  );
 
   const productosMap = new Map(productos.map((p) => [p.id, p]));
 
@@ -95,15 +88,8 @@ export default async function DespachosEmbarquePage({
 
   const facturasOptions = facturasDespachoLibres.map((f) => {
     const tc = Number(f.tipoCambio);
-    const subtotal = f.lineas.reduce(
-      (s, l) => s + Number(l.subtotal) * tc,
-      0,
-    );
-    const total =
-      subtotal +
-      Number(f.iva) * tc +
-      Number(f.iibb) * tc +
-      Number(f.otros) * tc;
+    const subtotal = f.lineas.reduce((s, l) => s + Number(l.subtotal) * tc, 0);
+    const total = subtotal + Number(f.iva) * tc + Number(f.iibb) * tc + Number(f.otros) * tc;
     return {
       id: f.id,
       label: `${f.proveedor.nombre}${f.facturaNumero ? ` Fact.${f.facturaNumero}` : ""}`,
@@ -167,9 +153,7 @@ export default async function DespachosEmbarquePage({
                       <td className="px-2.5 py-1.5">
                         {new Date(d.fecha).toLocaleDateString("es-AR")}
                       </td>
-                      <td className="px-2.5 py-1.5 font-mono text-[12px]">
-                        {d.numeroOM ?? "—"}
-                      </td>
+                      <td className="px-2.5 py-1.5 font-mono text-[12px]">{d.numeroOM ?? "—"}</td>
                       <td className="px-2.5 py-1.5 text-right">{d.itemsCount}</td>
                       <td className="px-2.5 py-1.5 text-right">{d.facturasCount}</td>
                       <td className="px-2.5 py-1.5">
@@ -198,11 +182,7 @@ export default async function DespachosEmbarquePage({
                         )}
                       </td>
                       <td className="px-2.5 py-1.5 text-right">
-                        <DespachoActions
-                          despachoId={d.id}
-                          estado={d.estado}
-                          codigo={d.codigo}
-                        />
+                        <DespachoActions despachoId={d.id} estado={d.estado} codigo={d.codigo} />
                       </td>
                     </tr>
                   ))}
@@ -218,9 +198,8 @@ export default async function DespachosEmbarquePage({
           <CardHeader>
             <CardTitle className="text-[14px]">Nuevo despacho parcial</CardTitle>
             <CardDescription>
-              Seleccioná los ítems a nacionalizar + tributos del despacho +
-              facturas DESPACHO linkadas. Al contabilizar genera asiento +
-              ingreso de stock.
+              Seleccioná los ítems a nacionalizar + tributos del despacho + facturas DESPACHO
+              linkadas. Al contabilizar genera asiento + ingreso de stock.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -233,6 +212,7 @@ export default async function DespachosEmbarquePage({
               depositos={depositos}
               items={itemsDisponibles}
               facturas={facturasOptions}
+              defaultFecha={defaultFecha}
             />
             {!embarque.depositoDestinoId && (
               <p className="mt-3 rounded-md border border-amber-300/60 bg-amber-50/60 p-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
@@ -246,8 +226,7 @@ export default async function DespachosEmbarquePage({
       {puedeCrear && itemsDisponibles.length === 0 && despachos.length > 0 && (
         <Card>
           <CardContent className="text-[13px] text-muted-foreground">
-            Toda la mercadería ya fue despachada o asignada a despachos en
-            BORRADOR/CONTABILIZADO.
+            Toda la mercadería ya fue despachada o asignada a despachos en BORRADOR/CONTABILIZADO.
           </CardContent>
         </Card>
       )}
@@ -255,8 +234,8 @@ export default async function DespachosEmbarquePage({
       {/* Hint footer (totals etc) */}
       <div className="text-[11px] text-muted-foreground">
         <p>
-          FOB total: {embarque.moneda} {fmtMoney(embarque.fobTotal)} · TC
-          embarque: {Number(embarque.tipoCambio).toFixed(2)}
+          FOB total: {embarque.moneda} {fmtMoney(embarque.fobTotal)} · TC embarque:{" "}
+          {Number(embarque.tipoCambio).toFixed(2)}
         </p>
       </div>
     </div>

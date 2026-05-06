@@ -11,9 +11,11 @@ type Deposito = { id: string; nombre: string };
 export function NuevaTransferenciaForm({
   productos,
   depositos,
+  defaultFecha,
 }: {
   productos: Producto[];
   depositos: Deposito[];
+  defaultFecha?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -21,7 +23,7 @@ export function NuevaTransferenciaForm({
   const [origenId, setOrigenId] = useState(depositos[0]?.id ?? "");
   const [destinoId, setDestinoId] = useState(depositos[1]?.id ?? "");
   const [cantidad, setCantidad] = useState(1);
-  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState(defaultFecha ?? new Date().toISOString().slice(0, 10));
   const [observacion, setObservacion] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -51,11 +53,7 @@ export function NuevaTransferenciaForm({
   };
 
   if (productos.length === 0) {
-    return (
-      <p className="text-muted-foreground">
-        No hay productos con stock disponible.
-      </p>
-    );
+    return <p className="text-muted-foreground">No hay productos con stock disponible.</p>;
   }
   if (depositos.length < 2) {
     return (
@@ -123,9 +121,7 @@ export function NuevaTransferenciaForm({
             type="number"
             min={1}
             value={cantidad}
-            onChange={(e) =>
-              setCantidad(Math.max(1, Number.parseInt(e.target.value, 10) || 0))
-            }
+            onChange={(e) => setCantidad(Math.max(1, Number.parseInt(e.target.value, 10) || 0))}
             className="mt-1 w-full rounded-md border bg-background px-3 py-2"
             required
           />

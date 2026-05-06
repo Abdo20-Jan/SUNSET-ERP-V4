@@ -22,11 +22,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { CuentaCombobox } from "@/components/cuenta-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -40,18 +36,10 @@ const FX_RE = /^\d+(\.\d{1,6})?$/;
 
 const formSchema = z
   .object({
-    prestamista: z
-      .string()
-      .trim()
-      .min(1, "Prestamista requerido")
-      .max(150, "Máx. 150 caracteres"),
-    cuentaBancariaId: z
-      .string()
-      .uuid({ message: "Seleccione la cuenta bancaria" }),
+    prestamista: z.string().trim().min(1, "Prestamista requerido").max(150, "Máx. 150 caracteres"),
+    cuentaBancariaId: z.string().uuid({ message: "Seleccione la cuenta bancaria" }),
     fecha: z.date({ message: "Seleccione la fecha" }),
-    principal: z
-      .string()
-      .regex(DECIMAL_RE, "Principal inválido (máx. 2 decimales)"),
+    principal: z.string().regex(DECIMAL_RE, "Principal inválido (máx. 2 decimales)"),
     moneda: z.enum(["ARS", "USD"]),
     tipoCambio: z.string().regex(FX_RE, "Tipo de cambio inválido"),
     clasificacion: z.enum(["CORTO_PLAZO", "LARGO_PLAZO"]),
@@ -97,11 +85,13 @@ export function PrestamoForm({
   cuentasCortoPlazo,
   cuentasLargoPlazo,
   proveedoresExterior,
+  defaultFecha,
 }: {
   cuentasBancarias: CuentaBancariaOption[];
   cuentasCortoPlazo: CuentaPrestamoOption[];
   cuentasLargoPlazo: CuentaPrestamoOption[];
   proveedoresExterior: ProveedorPrestamistaOption[];
+  defaultFecha?: string;
 }) {
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
@@ -118,7 +108,12 @@ export function PrestamoForm({
     defaultValues: {
       prestamista: "",
       cuentaBancariaId: "",
-      fecha: new Date(),
+      fecha:
+        defaultFecha === undefined
+          ? new Date()
+          : defaultFecha === ""
+            ? (undefined as unknown as Date)
+            : new Date(defaultFecha),
       principal: "0",
       moneda: "ARS",
       tipoCambio: "1",
@@ -148,24 +143,19 @@ export function PrestamoForm({
   }, [moneda, setValue]);
 
   const cuentasPorClasificacion = useMemo(
-    () =>
-      clasificacion === "CORTO_PLAZO" ? cuentasCortoPlazo : cuentasLargoPlazo,
+    () => (clasificacion === "CORTO_PLAZO" ? cuentasCortoPlazo : cuentasLargoPlazo),
     [clasificacion, cuentasCortoPlazo, cuentasLargoPlazo],
   );
 
   // Si cambió la clasificación y la cuenta seleccionada ya no está disponible, resetear
   useEffect(() => {
-    if (
-      cuentaContableId &&
-      !cuentasPorClasificacion.some((c) => c.id === cuentaContableId)
-    ) {
+    if (cuentaContableId && !cuentasPorClasificacion.some((c) => c.id === cuentaContableId)) {
       setValue("cuentaContableId", null, { shouldValidate: false });
     }
   }, [cuentasPorClasificacion, cuentaContableId, setValue]);
 
   const cuentaContableSeleccionada = useMemo(
-    () =>
-      cuentasPorClasificacion.find((c) => c.id === cuentaContableId) ?? null,
+    () => cuentasPorClasificacion.find((c) => c.id === cuentaContableId) ?? null,
     [cuentasPorClasificacion, cuentaContableId],
   );
 
@@ -179,15 +169,11 @@ export function PrestamoForm({
         moneda: values.moneda,
         tipoCambio: values.tipoCambio,
         clasificacion: values.clasificacion,
-        cuentaContableId: values.crearCuentaAuto
-          ? null
-          : values.cuentaContableId,
+        cuentaContableId: values.crearCuentaAuto ? null : values.cuentaContableId,
       });
 
       if (result.ok) {
-        toast.success(
-          `Préstamo registrado — Asiento Nº ${result.asientoNumero}`,
-        );
+        toast.success(`Préstamo registrado — Asiento Nº ${result.asientoNumero}`);
         router.push("/tesoreria/prestamos");
       } else {
         toast.error(result.error);
@@ -206,10 +192,7 @@ export function PrestamoForm({
                 control={control}
                 name="prestamista"
                 render={({ field }) => (
-                  <Select
-                    value={field.value || undefined}
-                    onValueChange={field.onChange}
-                  >
+                  <Select value={field.value || undefined} onValueChange={field.onChange}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Seleccione proveedor del exterior" />
                     </SelectTrigger>
@@ -222,9 +205,7 @@ export function PrestamoForm({
                         proveedoresExterior.map((p) => (
                           <SelectItem key={p.id} value={p.nombre}>
                             {p.nombre}{" "}
-                            <span className="text-xs text-muted-foreground">
-                              · {p.pais}
-                            </span>
+                            <span className="text-xs text-muted-foreground">· {p.pais}</span>
                           </SelectItem>
                         ))
                       )}
@@ -232,9 +213,7 @@ export function PrestamoForm({
                   </Select>
                 )}
               />
-              {errors.prestamista && (
-                <FieldError message={errors.prestamista.message} />
-              )}
+              {errors.prestamista && <FieldError message={errors.prestamista.message} />}
               <p className="text-xs text-muted-foreground">
                 Solo proveedores con país ≠ Argentina (cargados en Maestros).
               </p>
@@ -245,9 +224,7 @@ export function PrestamoForm({
               <Controller
                 control={control}
                 name="fecha"
-                render={({ field }) => (
-                  <DatePicker value={field.value} onChange={field.onChange} />
-                )}
+                render={({ field }) => <DatePicker value={field.value} onChange={field.onChange} />}
               />
               {errors.fecha && <FieldError message={errors.fecha.message} />}
             </div>
@@ -259,10 +236,7 @@ export function PrestamoForm({
               control={control}
               name="cuentaBancariaId"
               render={({ field }) => (
-                <Select
-                  value={field.value || undefined}
-                  onValueChange={field.onChange}
-                >
+                <Select value={field.value || undefined} onValueChange={field.onChange}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Seleccione la cuenta donde entra el dinero">
                       {(value) => {
@@ -283,16 +257,12 @@ export function PrestamoForm({
                 </Select>
               )}
             />
-            {errors.cuentaBancariaId && (
-              <FieldError message={errors.cuentaBancariaId.message} />
-            )}
+            {errors.cuentaBancariaId && <FieldError message={errors.cuentaBancariaId.message} />}
             {bancoSeleccionado && (
               <p className="text-xs text-muted-foreground">
                 Cuenta contable:{" "}
-                <span className="font-mono">
-                  {bancoSeleccionado.cuentaContableCodigo}
-                </span>{" "}
-                — {bancoSeleccionado.cuentaContableNombre}
+                <span className="font-mono">{bancoSeleccionado.cuentaContableCodigo}</span> —{" "}
+                {bancoSeleccionado.cuentaContableNombre}
               </p>
             )}
           </div>
@@ -307,9 +277,7 @@ export function PrestamoForm({
                 aria-invalid={!!errors.principal}
                 {...register("principal")}
               />
-              {errors.principal && (
-                <FieldError message={errors.principal.message} />
-              )}
+              {errors.principal && <FieldError message={errors.principal.message} />}
             </div>
 
             <div className="flex flex-col gap-2">
@@ -318,10 +286,7 @@ export function PrestamoForm({
                 control={control}
                 name="moneda"
                 render={({ field }) => (
-                  <Select
-                    value={field.value}
-                    onValueChange={field.onChange}
-                  >
+                  <Select value={field.value} onValueChange={field.onChange}>
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
@@ -334,8 +299,7 @@ export function PrestamoForm({
               />
               {bancoSeleccionado && moneda !== bancoSeleccionado.moneda && (
                 <p className="text-xs text-muted-foreground">
-                  El préstamo se liquida a {bancoSeleccionado.moneda} aplicando
-                  el tipo de cambio.
+                  El préstamo se liquida a {bancoSeleccionado.moneda} aplicando el tipo de cambio.
                 </p>
               )}
             </div>
@@ -349,9 +313,7 @@ export function PrestamoForm({
                 aria-invalid={!!errors.tipoCambio}
                 {...register("tipoCambio")}
               />
-              {errors.tipoCambio && (
-                <FieldError message={errors.tipoCambio.message} />
-              )}
+              {errors.tipoCambio && <FieldError message={errors.tipoCambio.message} />}
             </div>
           </div>
 
@@ -362,20 +324,13 @@ export function PrestamoForm({
                 control={control}
                 name="clasificacion"
                 render={({ field }) => (
-                  <Select
-                    value={field.value}
-                    onValueChange={field.onChange}
-                  >
+                  <Select value={field.value} onValueChange={field.onChange}>
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="CORTO_PLAZO">
-                        Corto plazo (2.1.7.*)
-                      </SelectItem>
-                      <SelectItem value="LARGO_PLAZO">
-                        Largo plazo (2.2.1.*)
-                      </SelectItem>
+                      <SelectItem value="CORTO_PLAZO">Corto plazo (2.1.7.*)</SelectItem>
+                      <SelectItem value="LARGO_PLAZO">Largo plazo (2.2.1.*)</SelectItem>
                     </SelectContent>
                   </Select>
                 )}
@@ -385,18 +340,12 @@ export function PrestamoForm({
             <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
               <Label className="text-sm">Cuenta de pasivo</Label>
               <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  {...register("crearCuentaAuto")}
-                />
+                <input type="checkbox" className="mt-1" {...register("crearCuentaAuto")} />
                 <span>
-                  <span className="font-medium">Crear automáticamente</span>{" "}
-                  una cuenta analítica para este préstamo
+                  <span className="font-medium">Crear automáticamente</span> una cuenta analítica
+                  para este préstamo
                   <span className="ml-1 text-xs text-muted-foreground">
-                    (rango{" "}
-                    {clasificacion === "CORTO_PLAZO" ? "2.1.7.10–99" : "2.2.1.10–99"}
-                    )
+                    (rango {clasificacion === "CORTO_PLAZO" ? "2.1.7.10–99" : "2.2.1.10–99"})
                   </span>
                 </span>
               </label>
@@ -415,9 +364,7 @@ export function PrestamoForm({
                   )}
                 />
               )}
-              {errors.cuentaContableId && (
-                <FieldError message={errors.cuentaContableId.message} />
-              )}
+              {errors.cuentaContableId && <FieldError message={errors.cuentaContableId.message} />}
             </div>
           </div>
         </CardContent>
@@ -473,8 +420,7 @@ function AsientoPreview({
 }) {
   const p = Number(principal);
   const tc = Number(tipoCambio);
-  const valor =
-    Number.isFinite(p) && Number.isFinite(tc) && p > 0 && tc > 0 ? p * tc : 0;
+  const valor = Number.isFinite(p) && Number.isFinite(tc) && p > 0 && tc > 0 ? p * tc : 0;
   const valorFmt =
     valor > 0
       ? valor.toLocaleString("es-AR", {
@@ -509,9 +455,7 @@ function AsientoPreview({
                 <span className="text-muted-foreground">—</span>
               )}
             </td>
-            <td className="py-2 pr-3 text-right font-mono tabular-nums">
-              {valorFmt}
-            </td>
+            <td className="py-2 pr-3 text-right font-mono tabular-nums">{valorFmt}</td>
             <td className="py-2 pr-3 text-right font-mono tabular-nums">—</td>
           </tr>
           <tr className="border-t">
@@ -529,9 +473,7 @@ function AsientoPreview({
               )}
             </td>
             <td className="py-2 pr-3 text-right font-mono tabular-nums">—</td>
-            <td className="py-2 pr-3 text-right font-mono tabular-nums">
-              {valorFmt}
-            </td>
+            <td className="py-2 pr-3 text-right font-mono tabular-nums">{valorFmt}</td>
           </tr>
         </tbody>
         <tfoot className="border-t bg-muted/30 text-xs">
@@ -539,12 +481,8 @@ function AsientoPreview({
             <td colSpan={2} className="py-2 pl-3 text-muted-foreground">
               Moneda: {moneda} · Principal × TC = Valor en ARS
             </td>
-            <td className="py-2 pr-3 text-right font-mono tabular-nums">
-              {valorFmt}
-            </td>
-            <td className="py-2 pr-3 text-right font-mono tabular-nums">
-              {valorFmt}
-            </td>
+            <td className="py-2 pr-3 text-right font-mono tabular-nums">{valorFmt}</td>
+            <td className="py-2 pr-3 text-right font-mono tabular-nums">{valorFmt}</td>
           </tr>
         </tfoot>
       </table>
@@ -574,11 +512,7 @@ function DatePicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full justify-start font-normal"
-          />
+          <Button type="button" variant="outline" className="w-full justify-start font-normal" />
         }
       >
         <HugeiconsIcon

@@ -20,15 +20,17 @@ export function NuevaEntregaForm({
   ventaId,
   depositos,
   pendientes,
+  defaultFecha,
 }: {
   ventaId: string;
   depositos: Deposito[];
   pendientes: Pendiente[];
+  defaultFecha?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [depositoId, setDepositoId] = useState(depositos[0]?.id ?? "");
-  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState(defaultFecha ?? new Date().toISOString().slice(0, 10));
   const [observacion, setObservacion] = useState("");
   const [cantidades, setCantidades] = useState<Record<number, number>>(
     Object.fromEntries(pendientes.map((p) => [p.itemVentaId, p.pendiente])),
@@ -139,10 +141,7 @@ export function NuevaEntregaForm({
                     onChange={(e) =>
                       setCantidades((cur) => ({
                         ...cur,
-                        [p.itemVentaId]: Math.max(
-                          0,
-                          Math.min(p.pendiente, Number(e.target.value)),
-                        ),
+                        [p.itemVentaId]: Math.max(0, Math.min(p.pendiente, Number(e.target.value))),
                       }))
                     }
                     className="w-20 rounded-md border bg-background px-2 py-1 text-right"

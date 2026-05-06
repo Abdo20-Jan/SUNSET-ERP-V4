@@ -4,15 +4,17 @@ import {
   listarDepositosParaVenta,
   listarProductosParaVenta,
 } from "@/lib/actions/ventas";
+import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { VentaForm } from "../_components/venta-form";
 
 export default async function NuevaVentaPage() {
-  const [clientes, productos, depositos, numeroSugerido] = await Promise.all([
+  const [clientes, productos, depositos, numeroSugerido, defaultFecha] = await Promise.all([
     listarClientesParaVenta(),
     listarProductosParaVenta(),
     listarDepositosParaVenta(),
     generarNumeroVenta(),
+    getDefaultFecha(),
   ]);
 
   return (
@@ -22,6 +24,7 @@ export default async function NuevaVentaPage() {
       clientes={clientes}
       productos={productos}
       depositos={depositos}
+      defaultFecha={defaultFecha}
     />
   );
 }

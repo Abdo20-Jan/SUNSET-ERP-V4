@@ -64,3 +64,41 @@ export async function actualizarMonedaPreferidaAction(
     return { ok: false, error: "Error inesperado al guardar la preferencia." };
   }
 }
+
+const modoRetroactivoSchema = z.object({
+  modoRetroactivo: z.boolean(),
+});
+
+export async function actualizarModoRetroactivoAction(
+  raw: z.input<typeof modoRetroactivoSchema>,
+): Promise<ActionResult<{ modoRetroactivo: boolean }>> {
+  const session = await auth();
+  if (!session?.user.id) {
+    return { ok: false, error: "No autorizado." };
+  }
+  const parsed = modoRetroactivoSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Datos inválidos.",
+    };
+  }
+  try {
+    await db.user.update({
+      where: { id: session.user.id },
+      data: { modoRetroactivo: parsed.data.modoRetroactivo },
+    });
+    await unstable_update({
+      user: { modoRetroactivo: parsed.data.modoRetroactivo },
+    });
+    revalidatePath("/perfil");
+    revalidatePath("/", "layout");
+    return { ok: true, data: { modoRetroactivo: parsed.data.modoRetroactivo } };
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+      return { ok: false, error: "Usuario no encontrado." };
+    }
+    console.error("actualizarModoRetroactivoAction failed", err);
+    return { ok: false, error: "Error inesperado al guardar la preferencia." };
+  }
+}

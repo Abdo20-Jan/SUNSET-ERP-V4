@@ -33,6 +33,7 @@ type Props = {
   embarqueCodigo: string;
   disabled?: boolean;
   previewTotalDebe: string;
+  defaultFecha?: string;
 };
 
 function todayIso(): string {
@@ -44,11 +45,12 @@ export function CerrarEmbarqueDialog({
   embarqueCodigo,
   disabled,
   previewTotalDebe,
+  defaultFecha,
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [fecha, setFecha] = useState<string>(todayIso);
+  const [fecha, setFecha] = useState<string>(defaultFecha ?? todayIso());
 
   const handleConfirm = () => {
     if (!fecha) {
@@ -74,11 +76,7 @@ export function CerrarEmbarqueDialog({
       <DialogTrigger
         render={
           <Button type="button" disabled={disabled}>
-            <HugeiconsIcon
-              icon={LockIcon}
-              strokeWidth={2}
-              className="size-4"
-            />
+            <HugeiconsIcon icon={LockIcon} strokeWidth={2} className="size-4" />
             Cerrar y Contabilizar
           </Button>
         }
@@ -87,9 +85,9 @@ export function CerrarEmbarqueDialog({
         <DialogHeader>
           <DialogTitle>Cerrar embarque {embarqueCodigo}</DialogTitle>
           <DialogDescription>
-            Esta acción generará un <strong>asiento contable de nacionalización</strong>{" "}
-            en estado CONTABILIZADO y transicionará el embarque a{" "}
-            <strong>CERRADO</strong>. No podrá editarse después.
+            Esta acción generará un <strong>asiento contable de nacionalización</strong> en estado
+            CONTABILIZADO y transicionará el embarque a <strong>CERRADO</strong>. No podrá editarse
+            después.
           </DialogDescription>
         </DialogHeader>
 
@@ -114,36 +112,24 @@ export function CerrarEmbarqueDialog({
           <ul className="mt-2 space-y-1 text-muted-foreground">
             <li>
               <span className="inline-block w-24 font-mono">DEBE</span>
-              Mercaderías en tránsito (FOB) + cuentas de gasto + créditos
-              fiscales (IVA, IIBB importación) + tributos aduaneros
+              Mercaderías en tránsito (FOB) + cuentas de gasto + créditos fiscales (IVA, IIBB
+              importación) + tributos aduaneros
             </li>
             <li>
               <span className="inline-block w-24 font-mono">HABER</span>
-              Proveedor exterior + 1 línea por proveedor logístico (flete,
-              despachante, operador, etc.) + Aduana (DIE, tasa, arancel, IVA
-              importación, IIBB, Ganancias)
+              Proveedor exterior + 1 línea por proveedor logístico (flete, despachante, operador,
+              etc.) + Aduana (DIE, tasa, arancel, IVA importación, IIBB, Ganancias)
             </li>
-            <li className="pt-2 font-medium text-foreground">
-              Total: {previewTotalDebe}
-            </li>
+            <li className="pt-2 font-medium text-foreground">Total: {previewTotalDebe}</li>
           </ul>
         </div>
 
         <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setOpen(false)}
-            disabled={pending}
-          >
+          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
             Cancelar
           </Button>
           <Button type="button" onClick={handleConfirm} disabled={pending}>
-            <HugeiconsIcon
-              icon={CheckmarkCircle02Icon}
-              strokeWidth={2}
-              className="size-4"
-            />
+            <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} className="size-4" />
             {pending ? "Contabilizando…" : "Confirmar cierre"}
           </Button>
         </DialogFooter>
@@ -189,11 +175,7 @@ export function RevertirZonaPrimariaDialog({
       <DialogTrigger
         render={
           <Button type="button" variant="outline" disabled={disabled}>
-            <HugeiconsIcon
-              icon={ArrowReloadHorizontalIcon}
-              strokeWidth={2}
-              className="size-4"
-            />
+            <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={2} className="size-4" />
             Revertir zona primaria
           </Button>
         }
@@ -202,35 +184,24 @@ export function RevertirZonaPrimariaDialog({
         <DialogHeader>
           <DialogTitle>Revertir zona primaria — {embarqueCodigo}</DialogTitle>
           <DialogDescription>
-            Anula el asiento #{asientoZpNumero} de zona primaria y deja el
-            embarque editable nuevamente. Útil si detectaste un error en una
-            factura ZP o en el FOB. <strong>No</strong> afecta stock — en zona
-            primaria no se generan movimientos de stock.
+            Anula el asiento #{asientoZpNumero} de zona primaria y deja el embarque editable
+            nuevamente. Útil si detectaste un error en una factura ZP o en el FOB.{" "}
+            <strong>No</strong> afecta stock — en zona primaria no se generan movimientos de stock.
           </DialogDescription>
         </DialogHeader>
 
         <div className="rounded-md border border-amber-300/60 bg-amber-50/60 p-3 text-[13px] dark:border-amber-700/50 dark:bg-amber-950/20">
           <p className="text-amber-900 dark:text-amber-200">
-            Sólo permitido si el embarque <strong>no</strong> tiene cierre
-            contabilizado. Si ya cerraste, anulá primero el asiento de cierre.
+            Sólo permitido si el embarque <strong>no</strong> tiene cierre contabilizado. Si ya
+            cerraste, anulá primero el asiento de cierre.
           </p>
         </div>
 
         <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setOpen(false)}
-            disabled={pending}
-          >
+          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
             Cancelar
           </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={handleConfirm}
-            disabled={pending}
-          >
+          <Button type="button" variant="destructive" onClick={handleConfirm} disabled={pending}>
             {pending ? "Revirtiendo…" : "Sí, revertir"}
           </Button>
         </DialogFooter>
@@ -266,6 +237,7 @@ type ZPProps = {
   disabled?: boolean;
   totalProveedorExterior: string; // FOB + flete/seguro origen, en ARS
   cantFacturasZP: number;
+  defaultFecha?: string;
 };
 
 export function ConfirmarZonaPrimariaDialog({
@@ -274,11 +246,12 @@ export function ConfirmarZonaPrimariaDialog({
   disabled,
   totalProveedorExterior,
   cantFacturasZP,
+  defaultFecha,
 }: ZPProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [fecha, setFecha] = useState<string>(todayIso);
+  const [fecha, setFecha] = useState<string>(defaultFecha ?? todayIso());
 
   const handleConfirm = () => {
     if (!fecha) {
@@ -310,14 +283,11 @@ export function ConfirmarZonaPrimariaDialog({
       />
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            Confirmar zona primaria — {embarqueCodigo}
-          </DialogTitle>
+          <DialogTitle>Confirmar zona primaria — {embarqueCodigo}</DialogTitle>
           <DialogDescription>
-            Genera el asiento de la mercadería en{" "}
-            <strong>1.1.5.02 Mercaderías en Tránsito</strong> (FOB + facturas
-            de zona primaria). La mercadería <strong>NO</strong> queda
-            disponible para venta — eso requiere el despacho final.
+            Genera el asiento de la mercadería en <strong>1.1.5.02 Mercaderías en Tránsito</strong>{" "}
+            (FOB + facturas de zona primaria). La mercadería <strong>NO</strong> queda disponible
+            para venta — eso requiere el despacho final.
           </DialogDescription>
         </DialogHeader>
 
@@ -342,8 +312,7 @@ export function ConfirmarZonaPrimariaDialog({
           <ul className="mt-2 space-y-1 text-muted-foreground">
             <li>
               <span className="inline-block w-24 font-mono">DEBE</span>
-              1.1.5.02 Mercaderías en tránsito (FOB ARS{" "}
-              {totalProveedorExterior})
+              1.1.5.02 Mercaderías en tránsito (FOB ARS {totalProveedorExterior})
             </li>
             <li>
               <span className="inline-block w-24 font-mono">HABER</span>
@@ -354,20 +323,11 @@ export function ConfirmarZonaPrimariaDialog({
         </div>
 
         <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setOpen(false)}
-            disabled={pending}
-          >
+          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
             Cancelar
           </Button>
           <Button type="button" onClick={handleConfirm} disabled={pending}>
-            <HugeiconsIcon
-              icon={CheckmarkCircle02Icon}
-              strokeWidth={2}
-              className="size-4"
-            />
+            <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} className="size-4" />
             {pending ? "Contabilizando…" : "Confirmar zona primaria"}
           </Button>
         </DialogFooter>

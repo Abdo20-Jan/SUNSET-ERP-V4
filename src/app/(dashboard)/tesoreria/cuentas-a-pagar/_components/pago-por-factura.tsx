@@ -77,6 +77,7 @@ type FacturaConProveedor = FacturaPendiente & {
 type Props = {
   proveedores: SaldoProveedorAging[];
   cuentasBancarias: CuentaBancariaOption[];
+  defaultFecha?: string;
 };
 
 const ORIGEN_LABEL: Record<FacturaPendiente["origen"], string> = {
@@ -105,7 +106,7 @@ function sumarMontos(facturas: FacturaConProveedor[]): string {
   return total.toFixed(2);
 }
 
-export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
+export function PagoPorFactura({ proveedores, cuentasBancarias, defaultFecha }: Props) {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [bucketFilter, setBucketFilter] = useState<"all" | FacturaPendiente["bucket"]>("all");
@@ -443,6 +444,7 @@ export function PagoPorFactura({ proveedores, cuentasBancarias }: Props) {
           setSelectedKeys(new Set());
           router.refresh();
         }}
+        defaultFecha={defaultFecha}
       />
     </Card>
   );
@@ -454,16 +456,18 @@ function PagoFacturaDialog({
   cuentasBancarias,
   onClose,
   onPaid,
+  defaultFecha,
 }: {
   open: boolean;
   facturas: FacturaConProveedor[];
   cuentasBancarias: CuentaBancariaOption[];
   onClose: () => void;
   onPaid: () => void;
+  defaultFecha?: string;
 }) {
   const [pending, startTransition] = useTransition();
   const [cuentaBancariaId, setCuentaBancariaId] = useState<string>("");
-  const [fecha, setFecha] = useState<string>(todayIso());
+  const [fecha, setFecha] = useState<string>(defaultFecha ?? todayIso());
   const [comprobante, setComprobante] = useState<string>("");
   const [referenciaBanco, setReferenciaBanco] = useState<string>("");
   const [montoEditable, setMontoEditable] = useState<string>("");
@@ -482,7 +486,7 @@ function PagoFacturaDialog({
 
   const reset = () => {
     setCuentaBancariaId("");
-    setFecha(todayIso());
+    setFecha(defaultFecha ?? todayIso());
     setComprobante("");
     setReferenciaBanco("");
     setMontoEditable("");

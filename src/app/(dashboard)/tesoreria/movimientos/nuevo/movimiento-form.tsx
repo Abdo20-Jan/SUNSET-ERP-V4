@@ -31,11 +31,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { CuentaCombobox } from "@/components/cuenta-combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -49,10 +45,7 @@ const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
 const FX_RE = /^\d+(\.\d{1,6})?$/;
 
 const lineaSchema = z.object({
-  cuentaContableId: z
-    .number()
-    .int()
-    .positive({ message: "Seleccione la cuenta" }),
+  cuentaContableId: z.number().int().positive({ message: "Seleccione la cuenta" }),
   monto: z.string().regex(DECIMAL_RE, "Monto inválido (máx. 2 decimales)"),
   descripcion: z.string().trim().max(255).optional(),
 });
@@ -126,18 +119,18 @@ export function MovimientoForm({
   initial,
   contextoAmortizacion,
   modoInicial,
+  defaultFecha,
 }: {
   cuentasBancarias: CuentaBancariaOption[];
   cuentasContrapartida: CuentaContableContrapartidaOption[];
   initial?: MovimientoFormInitial;
   contextoAmortizacion?: ContextoAmortizacion | null;
   modoInicial?: ModoAmortizacion;
+  defaultFecha?: string;
 }) {
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
-  const [modo, setModo] = useState<ModoAmortizacion>(
-    modoInicial ?? "amortizacion",
-  );
+  const [modo, setModo] = useState<ModoAmortizacion>(modoInicial ?? "amortizacion");
 
   const {
     control,
@@ -151,7 +144,12 @@ export function MovimientoForm({
     defaultValues: {
       tipo: initial?.tipo ?? "COBRO",
       cuentaBancariaId: "",
-      fecha: new Date(),
+      fecha:
+        defaultFecha === undefined
+          ? new Date()
+          : defaultFecha === ""
+            ? (undefined as unknown as Date)
+            : new Date(defaultFecha),
       moneda: "ARS",
       tipoCambio: "1",
       lineas: [
@@ -201,15 +199,12 @@ export function MovimientoForm({
 
   const contrapartidasFiltradas = useMemo(() => {
     if (!bancoSeleccionado) return cuentasContrapartida;
-    return cuentasContrapartida.filter(
-      (c) => c.id !== bancoSeleccionado.cuentaContableId,
-    );
+    return cuentasContrapartida.filter((c) => c.id !== bancoSeleccionado.cuentaContableId);
   }, [cuentasContrapartida, bancoSeleccionado]);
 
   const primeraLineaCuentaId = lineas?.[0]?.cuentaContableId ?? 0;
   const contrapartidaSeleccionada = useMemo(
-    () =>
-      cuentasContrapartida.find((c) => c.id === primeraLineaCuentaId) ?? null,
+    () => cuentasContrapartida.find((c) => c.id === primeraLineaCuentaId) ?? null,
     [cuentasContrapartida, primeraLineaCuentaId],
   );
 
@@ -252,14 +247,8 @@ export function MovimientoForm({
       });
 
       if (result.ok) {
-        toast.success(
-          `Movimiento registrado — Asiento Nº ${result.asientoNumero}`,
-        );
-        router.push(
-          contextoAmortizacion
-            ? "/tesoreria/prestamos"
-            : "/tesoreria/movimientos",
-        );
+        toast.success(`Movimiento registrado — Asiento Nº ${result.asientoNumero}`);
+        router.push(contextoAmortizacion ? "/tesoreria/prestamos" : "/tesoreria/movimientos");
       } else {
         toast.error(result.error);
       }
@@ -314,10 +303,7 @@ export function MovimientoForm({
                 control={control}
                 name="cuentaBancariaId"
                 render={({ field }) => (
-                  <Select
-                    value={field.value || undefined}
-                    onValueChange={field.onChange}
-                  >
+                  <Select value={field.value || undefined} onValueChange={field.onChange}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Seleccione una cuenta">
                         {(value) => {
@@ -338,16 +324,12 @@ export function MovimientoForm({
                   </Select>
                 )}
               />
-              {errors.cuentaBancariaId && (
-                <FieldError message={errors.cuentaBancariaId.message} />
-              )}
+              {errors.cuentaBancariaId && <FieldError message={errors.cuentaBancariaId.message} />}
               {bancoSeleccionado && (
                 <p className="text-xs text-muted-foreground">
                   Cuenta contable:{" "}
-                  <span className="font-mono">
-                    {bancoSeleccionado.cuentaContableCodigo}
-                  </span>{" "}
-                  — {bancoSeleccionado.cuentaContableNombre}
+                  <span className="font-mono">{bancoSeleccionado.cuentaContableCodigo}</span> —{" "}
+                  {bancoSeleccionado.cuentaContableNombre}
                 </p>
               )}
             </div>
@@ -357,9 +339,7 @@ export function MovimientoForm({
               <Controller
                 control={control}
                 name="fecha"
-                render={({ field }) => (
-                  <DatePicker value={field.value} onChange={field.onChange} />
-                )}
+                render={({ field }) => <DatePicker value={field.value} onChange={field.onChange} />}
               />
               {errors.fecha && <FieldError message={errors.fecha.message} />}
             </div>
@@ -403,9 +383,7 @@ export function MovimientoForm({
                 aria-invalid={!!errors.tipoCambio}
                 {...register("tipoCambio")}
               />
-              {errors.tipoCambio && (
-                <FieldError message={errors.tipoCambio.message} />
-              )}
+              {errors.tipoCambio && <FieldError message={errors.tipoCambio.message} />}
             </div>
           </div>
 
@@ -456,11 +434,7 @@ export function MovimientoForm({
                     )
                   }
                 >
-                  <HugeiconsIcon
-                    icon={Add01Icon}
-                    strokeWidth={2}
-                    className="size-3.5"
-                  />
+                  <HugeiconsIcon icon={Add01Icon} strokeWidth={2} className="size-3.5" />
                   Agregar línea
                 </Button>
               </div>
@@ -487,11 +461,7 @@ export function MovimientoForm({
                         )}
                       />
                       {errors.lineas?.[idx]?.cuentaContableId && (
-                        <FieldError
-                          message={
-                            errors.lineas[idx]?.cuentaContableId?.message
-                          }
-                        />
+                        <FieldError message={errors.lineas[idx]?.cuentaContableId?.message} />
                       )}
                     </div>
                     <div className="flex flex-col gap-1">
@@ -505,19 +475,14 @@ export function MovimientoForm({
                         {...register(`lineas.${idx}.monto`)}
                       />
                       {errors.lineas?.[idx]?.monto && (
-                        <FieldError
-                          message={errors.lineas[idx]?.monto?.message}
-                        />
+                        <FieldError message={errors.lineas[idx]?.monto?.message} />
                       )}
                     </div>
                     <div className="flex flex-col gap-1">
                       <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
                         Descripción
                       </Label>
-                      <Input
-                        placeholder="opcional"
-                        {...register(`lineas.${idx}.descripcion`)}
-                      />
+                      <Input placeholder="opcional" {...register(`lineas.${idx}.descripcion`)} />
                     </div>
                     <div className="flex items-end">
                       {lineaFields.length > 1 && (
@@ -528,11 +493,7 @@ export function MovimientoForm({
                           onClick={() => removeLinea(idx)}
                           aria-label="Eliminar línea"
                         >
-                          <HugeiconsIcon
-                            icon={Delete02Icon}
-                            strokeWidth={2}
-                            className="size-3.5"
-                          />
+                          <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} className="size-3.5" />
                         </Button>
                       )}
                     </div>
@@ -578,9 +539,7 @@ export function MovimientoForm({
                 placeholder="Factura A-00001234"
                 {...register("comprobante")}
               />
-              <p className="text-[11px] text-muted-foreground">
-                Nº de cheque, factura o recibo.
-              </p>
+              <p className="text-[11px] text-muted-foreground">Nº de cheque, factura o recibo.</p>
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="referenciaBanco">Referencia banco (opcional)</Label>
@@ -612,9 +571,8 @@ export function MovimientoForm({
               ? contrapartidaSeleccionada.cuentaContableCodigo
               : contrapartidaSeleccionada.codigo) === "5.8.1.06" && (
               <div className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
-                <strong>Imp. Ley 25413 (IDCB)</strong> — el sistema dividirá
-                automáticamente: 67% como gasto (5.8.1.06) y 33% como crédito
-                pago a cuenta de Ganancias (1.1.4.12).
+                <strong>Imp. Ley 25413 (IDCB)</strong> — el sistema dividirá automáticamente: 67%
+                como gasto (5.8.1.06) y 33% como crédito pago a cuenta de Ganancias (1.1.4.12).
               </div>
             )}
           <AsientoPreview
@@ -622,10 +580,7 @@ export function MovimientoForm({
             moneda={moneda}
             banco={bancoSeleccionado}
             lineas={(lineas ?? []).map((l) => ({
-              cuenta:
-                cuentasContrapartida.find(
-                  (c) => c.id === l?.cuentaContableId,
-                ) ?? null,
+              cuenta: cuentasContrapartida.find((c) => c.id === l?.cuentaContableId) ?? null,
               monto: l?.monto ?? "0",
               descripcion: l?.descripcion ?? "",
             }))}
@@ -722,8 +677,7 @@ function AsientoPreview({
   // El backend divide 33% a 1.1.4.12 (crédito Ganancias) + 67% a gasto.
   const unicaLineaCodigo =
     lineas.length === 1 && lineas[0]?.cuenta ? lineas[0].cuenta.codigo : null;
-  const esImpuestoLey25413 =
-    tipo === "PAGO" && unicaLineaCodigo === "5.8.1.06";
+  const esImpuestoLey25413 = tipo === "PAGO" && unicaLineaCodigo === "5.8.1.06";
 
   let rows: Array<{
     role: string;
@@ -733,11 +687,7 @@ function AsientoPreview({
     haber: string;
   }>;
 
-  if (
-    esImpuestoLey25413 &&
-    Number.isFinite(totalCalculado) &&
-    totalCalculado > 0
-  ) {
+  if (esImpuestoLey25413 && Number.isFinite(totalCalculado) && totalCalculado > 0) {
     const credito = Math.round(totalCalculado * 0.33 * 100) / 100;
     const gasto = Math.round((totalCalculado - credito) * 100) / 100;
     rows = [
@@ -801,9 +751,7 @@ function AsientoPreview({
         <tbody>
           {rows.map((r, i) => (
             <tr key={i} className="border-t">
-              <td className="py-2 pl-3 text-xs text-muted-foreground">
-                {r.role}
-              </td>
+              <td className="py-2 pl-3 text-xs text-muted-foreground">{r.role}</td>
               <td className="py-2 pl-3">
                 {r.cuentaOverride ? (
                   <span>
@@ -823,12 +771,8 @@ function AsientoPreview({
                   <span className="text-muted-foreground">—</span>
                 )}
               </td>
-              <td className="py-2 pr-3 text-right font-mono tabular-nums">
-                {r.debe}
-              </td>
-              <td className="py-2 pr-3 text-right font-mono tabular-nums">
-                {r.haber}
-              </td>
+              <td className="py-2 pr-3 text-right font-mono tabular-nums">{r.debe}</td>
+              <td className="py-2 pr-3 text-right font-mono tabular-nums">{r.haber}</td>
             </tr>
           ))}
         </tbody>
@@ -837,12 +781,8 @@ function AsientoPreview({
             <td colSpan={2} className="py-2 pl-3 text-muted-foreground">
               Moneda: {moneda}
             </td>
-            <td className="py-2 pr-3 text-right font-mono tabular-nums">
-              {valorFmt}
-            </td>
-            <td className="py-2 pr-3 text-right font-mono tabular-nums">
-              {valorFmt}
-            </td>
+            <td className="py-2 pr-3 text-right font-mono tabular-nums">{valorFmt}</td>
+            <td className="py-2 pr-3 text-right font-mono tabular-nums">{valorFmt}</td>
           </tr>
         </tfoot>
       </table>
@@ -850,15 +790,11 @@ function AsientoPreview({
   );
 }
 
-function renderCuentaCodigo(
-  c: CuentaBancariaOption | CuentaContableContrapartidaOption,
-): string {
+function renderCuentaCodigo(c: CuentaBancariaOption | CuentaContableContrapartidaOption): string {
   return "cuentaContableCodigo" in c ? c.cuentaContableCodigo : c.codigo;
 }
 
-function renderCuentaNombre(
-  c: CuentaBancariaOption | CuentaContableContrapartidaOption,
-): string {
+function renderCuentaNombre(c: CuentaBancariaOption | CuentaContableContrapartidaOption): string {
   return "cuentaContableNombre" in c ? c.cuentaContableNombre : c.nombre;
 }
 
@@ -885,24 +821,16 @@ function PrestamoContextBanner({
       <CardContent className="flex flex-col gap-4">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
-            <HugeiconsIcon
-              icon={InformationCircleIcon}
-              strokeWidth={2}
-              className="size-4"
-            />
+            <HugeiconsIcon icon={InformationCircleIcon} strokeWidth={2} className="size-4" />
           </div>
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium">
               Pagando préstamo de{" "}
-              <span className="font-semibold">
-                {contexto.prestamo.prestamista}
-              </span>
+              <span className="font-semibold">{contexto.prestamo.prestamista}</span>
             </p>
             <p className="text-xs text-muted-foreground">
               Saldo pendiente:{" "}
-              <span className="font-mono font-medium text-foreground">
-                ARS {saldoFmt}
-              </span>
+              <span className="font-mono font-medium text-foreground">ARS {saldoFmt}</span>
               {" · "}Principal:{" "}
               <span className="font-mono">
                 {contexto.prestamo.principal} {contexto.prestamo.moneda}
@@ -956,16 +884,12 @@ function ModoButton({
       disabled={disabled}
       className={cn(
         "flex flex-col gap-0.5 rounded-xl border px-4 py-3 text-left transition-colors",
-        selected
-          ? "border-primary bg-primary/10"
-          : "border-input bg-background hover:bg-accent",
+        selected ? "border-primary bg-primary/10" : "border-input bg-background hover:bg-accent",
         disabled && "cursor-not-allowed opacity-50 hover:bg-background",
       )}
     >
       <span className="text-sm font-medium">{label}</span>
-      <span className="font-mono text-xs text-muted-foreground">
-        {sublabel}
-      </span>
+      <span className="font-mono text-xs text-muted-foreground">{sublabel}</span>
     </button>
   );
 }
@@ -992,11 +916,7 @@ function DatePicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full justify-start font-normal"
-          />
+          <Button type="button" variant="outline" className="w-full justify-start font-normal" />
         }
       >
         <HugeiconsIcon

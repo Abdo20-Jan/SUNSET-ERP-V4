@@ -5,17 +5,19 @@ import {
   listarProductosParaEmbarque,
   listarProveedoresParaEmbarque,
 } from "@/lib/actions/embarques";
+import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { EmbarqueForm } from "../_components/embarque-form";
 
 export default async function NuevoEmbarquePage() {
-  const [proveedores, productos, depositos, cuentasGasto, codigoSugerido] =
+  const [proveedores, productos, depositos, cuentasGasto, codigoSugerido, defaultFecha] =
     await Promise.all([
       listarProveedoresParaEmbarque(),
       listarProductosParaEmbarque(),
       listarDepositosParaEmbarque(),
       listarCuentasParaCostoLogistico(),
       generarCodigoEmbarque(),
+      getDefaultFecha(),
     ]);
 
   return (
@@ -26,6 +28,7 @@ export default async function NuevoEmbarquePage() {
       depositos={depositos}
       cuentasGasto={cuentasGasto}
       codigoSugerido={codigoSugerido}
+      defaultFecha={defaultFecha}
     />
   );
 }

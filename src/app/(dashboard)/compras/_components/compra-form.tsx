@@ -2,13 +2,7 @@
 
 import { useEffect, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Controller,
-  useFieldArray,
-  useForm,
-  useWatch,
-  type Control,
-} from "react-hook-form";
+import { Controller, useFieldArray, useForm, useWatch, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -30,19 +24,14 @@ import {
 } from "@/lib/actions/compras";
 import { fmtMoney } from "@/lib/format";
 import { useCmdShortcut } from "@/lib/hooks/use-cmd-shortcut";
-import {
-  ProductoCombobox,
-  type ProductoOption,
-} from "@/components/producto-combobox";
-import {
-  ProveedorCombobox,
-  type ProveedorOption,
-} from "@/components/proveedor-combobox";
+import { ProductoCombobox, type ProductoOption } from "@/components/producto-combobox";
+import { ProveedorCombobox, type ProveedorOption } from "@/components/proveedor-combobox";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RetroactivoBadge } from "@/components/ui/retroactivo-badge";
 import {
   Select,
   SelectContent,
@@ -91,9 +80,7 @@ const formSchema = z
           productoId: z.string().uuid("Seleccione un producto"),
           cantidad: z.coerce.number().int().positive("Cantidad > 0"),
           precioUnitario: z.string().regex(moneyRegex, "Precio inválido"),
-          ivaPorcentaje: z
-            .string()
-            .regex(/^\d+(\.\d{1,2})?$/, "IVA% inválido"),
+          ivaPorcentaje: z.string().regex(/^\d+(\.\d{1,2})?$/, "IVA% inválido"),
         }),
       )
       .min(1, "Agregue al menos un ítem"),
@@ -127,6 +114,8 @@ type Props = {
   initialData?: CompraDetalle;
   proveedores: ProveedorParaCompra[];
   productos: ProductoParaCompra[];
+  /** Default para campo `fecha` en modo create. "" si modo retroactivo activo en User. */
+  defaultFecha?: string;
 };
 
 function todayISO(): string {
@@ -147,6 +136,7 @@ export function CompraForm({
   initialData,
   proveedores,
   productos,
+  defaultFecha,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -196,7 +186,7 @@ export function CompraForm({
     : {
         numero: numeroSugerido ?? "",
         proveedorId: "",
-        fecha: todayISO(),
+        fecha: defaultFecha ?? todayISO(),
         fechaVencimiento: "",
         condicionPago: "CUENTA_CORRIENTE",
         moneda: "ARS",
@@ -358,9 +348,7 @@ export function CompraForm({
       }
       const emit = await emitirCompraAction(saved.id);
       if (emit.ok) {
-        toast.success(
-          `Compra ${saved.numero} emitida (asiento Nº ${emit.numeroAsiento}).`,
-        );
+        toast.success(`Compra ${saved.numero} emitida (asiento Nº ${emit.numeroAsiento}).`);
         router.push(`/compras/${saved.id}`);
         router.refresh();
       } else {
@@ -402,17 +390,21 @@ export function CompraForm({
             />
           </Field>
 
-          <Field label="Fecha" error={errors.fecha?.message}>
-            <Controller
-              control={control}
-              name="fecha"
-              render={({ field }) => (
-                <DatePicker
-                  value={field.value ?? ""}
-                  onChange={field.onChange}
-                />
-              )}
-            />
+          <Field
+            label="Fecha"
+            error={errors.fecha?.message}
+            hint="Fecha del documento físico — no la del registro"
+          >
+            <div className="flex items-center gap-2">
+              <Controller
+                control={control}
+                name="fecha"
+                render={({ field }) => (
+                  <DatePicker value={field.value ?? ""} onChange={field.onChange} />
+                )}
+              />
+              <RetroactivoBadge fecha={fecha} />
+            </div>
           </Field>
 
           <Field
@@ -424,10 +416,7 @@ export function CompraForm({
               control={control}
               name="fechaVencimiento"
               render={({ field }) => (
-                <DatePicker
-                  value={field.value ?? ""}
-                  onChange={field.onChange}
-                />
+                <DatePicker value={field.value ?? ""} onChange={field.onChange} />
               )}
             />
           </Field>
@@ -439,9 +428,7 @@ export function CompraForm({
               render={({ field }) => (
                 <Select
                   value={field.value}
-                  onValueChange={(v) =>
-                    field.onChange(v as (typeof CONDICION_VALUES)[number])
-                  }
+                  onValueChange={(v) => field.onChange(v as (typeof CONDICION_VALUES)[number])}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue />
@@ -484,11 +471,7 @@ export function CompraForm({
             error={errors.tipoCambio?.message}
             hint={moneda === "ARS" ? "ARS: TC = 1" : undefined}
           >
-            <Input
-              {...register("tipoCambio")}
-              disabled={moneda === "ARS"}
-              inputMode="decimal"
-            />
+            <Input {...register("tipoCambio")} disabled={moneda === "ARS"} inputMode="decimal" />
           </Field>
 
           <Field label="IIBB" error={errors.iibb?.message}>
@@ -558,11 +541,7 @@ export function CompraForm({
 
       {ivaWarning && (
         <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-          <HugeiconsIcon
-            icon={Alert02Icon}
-            strokeWidth={2}
-            className="mt-0.5 size-4 shrink-0"
-          />
+          <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="mt-0.5 size-4 shrink-0" />
           <span>
             <strong>Verifique IVA:</strong> {ivaWarning}
           </span>
@@ -577,9 +556,7 @@ export function CompraForm({
             <Total label="IIBB" value={totals.iibb.toString()} />
             <Total label="Otros" value={totals.otros.toString()} />
             <div className="flex items-baseline gap-1">
-              <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                Total
-              </span>
+              <span className="text-xs uppercase tracking-wide text-muted-foreground">Total</span>
               <span className="font-mono text-lg font-semibold tabular-nums">
                 {fmtMoney(totals.total.toString())} {moneda}
               </span>
@@ -594,20 +571,10 @@ export function CompraForm({
             >
               Cancelar
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={submitGuardar}
-              disabled={isPending}
-            >
+            <Button type="button" variant="outline" onClick={submitGuardar} disabled={isPending}>
               {isPending ? "Guardando…" : "Guardar borrador"}
             </Button>
-            <Button
-              type="button"
-              variant="default"
-              onClick={submitEmitir}
-              disabled={isPending}
-            >
+            <Button type="button" variant="default" onClick={submitEmitir} disabled={isPending}>
               {isPending ? "Procesando…" : "Guardar y emitir"}
             </Button>
           </div>
@@ -639,20 +606,12 @@ function Field({
       {children}
       {error ? (
         <p className="flex items-center gap-1 text-xs text-destructive">
-          <HugeiconsIcon
-            icon={Alert02Icon}
-            strokeWidth={2}
-            className="size-3"
-          />
+          <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="size-3" />
           {error}
         </p>
       ) : hint ? (
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
-          <HugeiconsIcon
-            icon={InformationCircleIcon}
-            strokeWidth={2}
-            className="size-3"
-          />
+          <HugeiconsIcon icon={InformationCircleIcon} strokeWidth={2} className="size-3" />
           {hint}
         </p>
       ) : null}
@@ -663,9 +622,7 @@ function Field({
 function Total({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-1">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <span className="font-mono text-sm tabular-nums">{fmtMoney(value)}</span>
     </div>
   );
@@ -733,13 +690,9 @@ function ItemRow({
           productos={productos}
         />
         {productoSel && (
-          <p className="mt-1 truncate text-xs text-muted-foreground">
-            {productoSel.nombre}
-          </p>
+          <p className="mt-1 truncate text-xs text-muted-foreground">{productoSel.nombre}</p>
         )}
-        {errorProducto && (
-          <p className="mt-1 text-xs text-destructive">{errorProducto}</p>
-        )}
+        {errorProducto && <p className="mt-1 text-xs text-destructive">{errorProducto}</p>}
       </div>
 
       <div className="md:col-span-1">
@@ -752,38 +705,24 @@ function ItemRow({
             valueAsNumber: true,
           })}
         />
-        {errorCantidad && (
-          <p className="mt-1 text-xs text-destructive">{errorCantidad}</p>
-        )}
+        {errorCantidad && <p className="mt-1 text-xs text-destructive">{errorCantidad}</p>}
       </div>
 
       <div className="md:col-span-2">
         <Label className="text-xs uppercase tracking-wide">P. unit.</Label>
-        <Input
-          inputMode="decimal"
-          {...register(`items.${index}.precioUnitario` as const)}
-        />
-        {errorPrecio && (
-          <p className="mt-1 text-xs text-destructive">{errorPrecio}</p>
-        )}
+        <Input inputMode="decimal" {...register(`items.${index}.precioUnitario` as const)} />
+        {errorPrecio && <p className="mt-1 text-xs text-destructive">{errorPrecio}</p>}
       </div>
 
       <div className="md:col-span-1">
         <Label className="text-xs uppercase tracking-wide">IVA %</Label>
-        <Input
-          inputMode="decimal"
-          {...register(`items.${index}.ivaPorcentaje` as const)}
-        />
-        {errorIva && (
-          <p className="mt-1 text-xs text-destructive">{errorIva}</p>
-        )}
+        <Input inputMode="decimal" {...register(`items.${index}.ivaPorcentaje` as const)} />
+        {errorIva && <p className="mt-1 text-xs text-destructive">{errorIva}</p>}
       </div>
 
       <div className="md:col-span-2 text-right">
         <Label className="text-xs uppercase tracking-wide">Total línea</Label>
-        <p className="font-mono text-sm tabular-nums">
-          {fmtMoney(total.toString())}
-        </p>
+        <p className="font-mono text-sm tabular-nums">{fmtMoney(total.toString())}</p>
         <p className="font-mono text-xs text-muted-foreground tabular-nums">
           {fmtMoney(subtotal.toString())} + IVA {fmtMoney(iva.toString())}
         </p>
