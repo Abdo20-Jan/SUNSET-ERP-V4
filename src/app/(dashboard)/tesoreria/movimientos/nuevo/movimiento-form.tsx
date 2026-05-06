@@ -125,24 +125,25 @@ const FORM_INITIAL_DEFAULTS = {
   referenciaBanco: "",
 } satisfies Required<MovimientoFormInitial>;
 
-// `defaultFecha === ""` desativa o pre-fill (campo fica vazio para o user).
-function getInitialFecha(defaultFecha: string | undefined): Date | undefined {
-  if (defaultFecha === undefined) return new Date();
-  if (defaultFecha === "") return undefined;
-  return new Date(defaultFecha);
-}
-
 function getDefaultFormValues(args: {
   initial?: MovimientoFormInitial;
   defaultFecha?: string;
 }): FormValues {
   const i = { ...FORM_INITIAL_DEFAULTS, ...args.initial };
+  // `defaultFecha === ""` desativa o pre-fill (campo fica vazio para o user).
+  // Cast undefined→Date é intencional: Zod valida depois e o picker abre vazio.
+  let fecha: Date;
+  if (args.defaultFecha === undefined) {
+    fecha = new Date();
+  } else if (args.defaultFecha === "") {
+    fecha = undefined as unknown as Date;
+  } else {
+    fecha = new Date(args.defaultFecha);
+  }
   return {
     tipo: i.tipo,
     cuentaBancariaId: "",
-    // `undefined` aqui é intencional quando defaultFecha === "" — Zod valida
-    // depois e o picker abre vazio. Cast porque FormValues exige `Date`.
-    fecha: getInitialFecha(args.defaultFecha) as Date,
+    fecha,
     moneda: "ARS",
     tipoCambio: "1",
     lineas: [
