@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -237,10 +237,13 @@ function GastoFijoFormDialog({
   const [activo, setActivo] = useState(editing?.activo ?? true);
   const [notas, setNotas] = useState(editing?.notas ?? "");
 
-  // Reset state when dialog opens with different state
-  useMemo(() => {
+  // Reset state when dialog opens with different state.
+  // TODO(fase-4): substituir por `key={state?.row?.id ?? state?.mode}` no parent
+  // para remontar o form e eliminar este prop-sync effect.
+  useEffect(() => {
     if (!state) return;
     const r = state.mode === "edit" ? state.row : null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-sync pattern, refactor pendente
     setDescripcion(r?.descripcion ?? "");
     setProveedorId(r?.proveedorId ?? "");
     setCuentaGastoId(r?.cuentaGastoContableId ?? null);
@@ -312,9 +315,9 @@ function GastoFijoFormDialog({
             {state.mode === "edit" ? "Editar gasto fijo" : "Nuevo gasto fijo"}
           </DialogTitle>
           <DialogDescription>
-            Configurá un template para gastos recurrentes (ej: "Alquiler
-            escritorio", "Honorarios contador"). Después registrá cada mes
-            con el botón "Registrar".
+            Configurá un template para gastos recurrentes (ej: &quot;Alquiler
+            escritorio&quot;, &quot;Honorarios contador&quot;). Después registrá cada mes
+            con el botón &quot;Registrar&quot;.
           </DialogDescription>
         </DialogHeader>
 
