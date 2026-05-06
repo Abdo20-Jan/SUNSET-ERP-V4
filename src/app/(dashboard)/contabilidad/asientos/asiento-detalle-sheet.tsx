@@ -50,10 +50,12 @@ export function AsientoDetalleSheet({ asientoId, open, onOpenChange }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
+  // TODO(fase-4): substituir por `key={asientoId}` no parent pra remontar o sheet limpo.
   useEffect(() => {
     if (!open || !asientoId) {
       return;
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset state antes de fetch dependente de prop
     setDetalle(null);
     setError(null);
     startTransition(async () => {

@@ -473,8 +473,10 @@ function PagoFacturaDialog({
   const moneda = facturas[0]?.moneda ?? "ARS";
   const isMulti = facturas.length > 1;
 
-  // Reset monto editable cuando cambia la selección al abrir
+  // Reset monto editable cuando cambia la selección al abrir.
+  // TODO(fase-3.4): absorver na extração `<BatchPaymentDialog>` genérico.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-sync, refactor pendente na extração
     if (open && !isMulti && proveedor) setMontoEditable(proveedor.monto);
   }, [open, isMulti, proveedor]);
 

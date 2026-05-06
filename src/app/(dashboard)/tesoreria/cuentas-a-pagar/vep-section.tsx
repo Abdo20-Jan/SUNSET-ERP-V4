@@ -285,9 +285,11 @@ function PagarVepDialog({
 
   const saldoCreditoNum = Number(saldoCreditoAduana);
 
-  // Reset valores when vep changes
+  // Reset valores when vep changes.
+  // TODO(fase-3.4): absorver na extração `<BatchPaymentDialog>` genérico.
   useEffect(() => {
     if (vep) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-sync ao mudar vep
       setMontoPagado(vep.totalArs);
       setCreditoAplicado("0");
     }
@@ -582,8 +584,10 @@ function PagarRefuerzoVepDialog({
 
   const saldoCreditoNum = Number(saldoCreditoAduana);
 
+  // TODO(fase-3.4): absorver na extração `<BatchPaymentDialog>` genérico.
   useEffect(() => {
     if (refuerzo) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-sync ao mudar refuerzo
       setMontoBanco(refuerzo.saldoPendiente);
       setCreditoAplicado("0");
     }

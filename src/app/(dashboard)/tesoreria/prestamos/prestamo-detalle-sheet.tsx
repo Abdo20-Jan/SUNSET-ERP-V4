@@ -68,10 +68,12 @@ export function PrestamoDetalleSheet({
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
+  // TODO(fase-4): substituir por `key={prestamoId}` no parent.
   useEffect(() => {
     if (!open || !prestamoId) {
       return;
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset state antes de fetch
     setDetalle(null);
     setError(null);
     startTransition(async () => {

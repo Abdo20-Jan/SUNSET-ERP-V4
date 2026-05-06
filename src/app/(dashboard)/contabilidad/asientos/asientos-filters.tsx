@@ -35,7 +35,9 @@ export function AsientosFilters({ selectedEstado, query }: Props) {
   const [qDraft, setQDraft] = useState(query);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // TODO(fase-5): refatorar pra `key={query}` ou `useState` lazy com ref-based comparison.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-sync de input controlled com URL state
     setQDraft(query);
   }, [query]);
 

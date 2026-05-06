@@ -60,10 +60,12 @@ export function MovimientoDetalleSheet({
 
   const asientoId = movimiento?.asiento?.id ?? null;
 
+  // TODO(fase-4): substituir por `key={asientoId}` no parent.
   useEffect(() => {
     if (!open || !asientoId) {
       return;
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset state antes de fetch
     setAsiento(null);
     setError(null);
     startTransition(async () => {
