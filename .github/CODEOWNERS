@@ -1,0 +1,27 @@
+# CODEOWNERS — quem precisa aprovar o quê.
+# Combinado com "Require review from Code Owners" na proteção de branch,
+# nada entra em main sem o crivo do dono.
+# Sintaxe: https://docs.github.com/articles/about-code-owners
+
+# Default: tudo precisa de Abdo20-Jan
+*                                           @Abdo20-Jan
+
+# Governance / CI / segurança — owner-only sempre
+/.github/                                   @Abdo20-Jan
+/.codacy/                                   @Abdo20-Jan
+/.husky/                                    @Abdo20-Jan
+/biome.json                                 @Abdo20-Jan
+/eslint.config.mjs                          @Abdo20-Jan
+/tsconfig.json                              @Abdo20-Jan
+/next.config.ts                             @Abdo20-Jan
+/package.json                               @Abdo20-Jan
+/pnpm-lock.yaml                             @Abdo20-Jan
+/prisma.config.ts                           @Abdo20-Jan
+
+# Schema / migrations — owner-only por blast radius (memória: schema-bound vs logic-only)
+/prisma/                                    @Abdo20-Jan
+
+# Camadas de domínio mais sensíveis
+/src/lib/services/                          @Abdo20-Jan
+/src/lib/actions/                           @Abdo20-Jan
+/src/lib/auth/                              @Abdo20-Jan
