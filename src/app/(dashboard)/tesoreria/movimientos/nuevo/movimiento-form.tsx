@@ -114,6 +114,17 @@ export type MovimientoFormInitial = {
 export type ModoAmortizacion = "amortizacion" | "intereses";
 
 // Helpers extraídos para manter CCN < 8 (Codacy/Lizard threshold).
+// Defaults externos (constantes top-level) — Lizard não conta como branches
+// dentro da função consumidora.
+const FORM_INITIAL_DEFAULTS = {
+  tipo: "COBRO" as "COBRO" | "PAGO",
+  cuentaContableId: 0,
+  monto: "0",
+  descripcion: "",
+  comprobante: "",
+  referenciaBanco: "",
+} satisfies Required<MovimientoFormInitial>;
+
 // `defaultFecha === ""` desativa o pre-fill (campo fica vazio para o user).
 function getInitialFecha(defaultFecha: string | undefined): Date | undefined {
   if (defaultFecha === undefined) return new Date();
@@ -121,33 +132,29 @@ function getInitialFecha(defaultFecha: string | undefined): Date | undefined {
   return new Date(defaultFecha);
 }
 
-// Destructuring com defaults — defaults não contam como branches no Lizard.
-function getDefaultFormValues({
-  initial: {
-    tipo = "COBRO",
-    cuentaContableId = 0,
-    monto = "0",
-    descripcion: lineaDescripcion = "",
-    comprobante = "",
-    referenciaBanco = "",
-  } = {},
-  defaultFecha,
-}: {
+function getDefaultFormValues(args: {
   initial?: MovimientoFormInitial;
   defaultFecha?: string;
 }): FormValues {
+  const i = { ...FORM_INITIAL_DEFAULTS, ...args.initial };
   return {
-    tipo,
+    tipo: i.tipo,
     cuentaBancariaId: "",
     // `undefined` aqui é intencional quando defaultFecha === "" — Zod valida
     // depois e o picker abre vazio. Cast porque FormValues exige `Date`.
-    fecha: getInitialFecha(defaultFecha) as Date,
+    fecha: getInitialFecha(args.defaultFecha) as Date,
     moneda: "ARS",
     tipoCambio: "1",
-    lineas: [{ cuentaContableId, monto, descripcion: lineaDescripcion }],
+    lineas: [
+      {
+        cuentaContableId: i.cuentaContableId,
+        monto: i.monto,
+        descripcion: i.descripcion,
+      },
+    ],
     descripcion: "",
-    comprobante,
-    referenciaBanco,
+    comprobante: i.comprobante,
+    referenciaBanco: i.referenciaBanco,
   };
 }
 
