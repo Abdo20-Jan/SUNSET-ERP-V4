@@ -253,6 +253,11 @@ model User {
   role            Role     @default(USER)
   activo          Boolean  @default(true)
   monedaPreferida Moneda?  @default(USD)
+  // Cuando true, los formularios no autocompletan la fecha con hoy. Útil
+  // al cargar facturas históricas en lote para no contaminar la fecha
+  // del documento físico. Definido en PR #41 (Layer A); este branch lo
+  // preserva para coexistir con la migración de EmbarqueCosto.
+  modoRetroactivo Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -326,6 +331,7 @@ model Asiento {
   compra               Compra?
   embarqueCierre       Embarque?            @relation("EmbarqueAsientoCierre")
   embarqueZonaPrimaria Embarque?            @relation("EmbarqueAsientoZP")
+  embarqueCosto        EmbarqueCosto?
   despacho             Despacho?
   gastoFijoRegistro    GastoFijoRegistro?
   gasto                Gasto?
@@ -502,6 +508,19 @@ model EmbarqueCosto {
   iibb             Decimal       @default(0) @db.Decimal(18, 2)
   otros            Decimal       @default(0) @db.Decimal(18, 2)
   notas            String?
+
+  // Lifecycle del documento factura:
+  //  - BORRADOR        creado, sin asiento todavía
+  //  - EMITIDA         factura emitida con asiento propio en fechaFactura
+  //                    (DEBE lineas + IVA + IIBB + Otros / HABER proveedor)
+  //  - ANULADA         asiento anulado, factura cancelada
+  //  - LEGACY_BUNDLED  registros previos al PR de standalone — fueron
+  //                    contabilizados via asiento de cierre/despacho.
+  //                    El cierre/despacho los incluye, el flujo nuevo los ignora.
+  estado           EmbarqueCostoEstado @default(BORRADOR)
+  // Asiento individual de la factura emitida (sólo cuando estado === EMITIDA).
+  asientoId        String?       @unique
+
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -514,12 +533,21 @@ model EmbarqueCosto {
   embarque  Embarque             @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
   proveedor Proveedor            @relation(fields: [proveedorId], references: [id])
   despacho  Despacho?            @relation(fields: [despachoId], references: [id], onDelete: SetNull)
+  asiento   Asiento?             @relation(fields: [asientoId], references: [id])
   lineas    EmbarqueCostoLinea[]
 
   @@index([embarqueId])
   @@index([proveedorId])
   @@index([fechaVencimiento])
   @@index([despachoId])
+  @@index([estado])
+}
+
+enum EmbarqueCostoEstado {
+  BORRADOR
+  EMITIDA
+  ANULADA
+  LEGACY_BUNDLED
 }
 
 // Concepto/gasto individual dentro de una factura: su cuenta contable

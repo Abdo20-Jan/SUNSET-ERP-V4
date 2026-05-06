@@ -2,13 +2,7 @@
 
 import { memo, useEffect, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Controller,
-  useFieldArray,
-  useForm,
-  useWatch,
-  type Control,
-} from "react-hook-form";
+import { Controller, useFieldArray, useForm, useWatch, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -23,7 +17,10 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import {
+  anularEmbarqueCostoFacturaAction,
+  emitirEmbarqueCostoFacturaAction,
   guardarEmbarqueAction,
+  type EmbarqueCostoDetalle,
   type EmbarqueDetalle,
 } from "@/lib/actions/embarques";
 import {
@@ -32,18 +29,9 @@ import {
   ConfirmarZonaPrimariaDialog,
   RevertirZonaPrimariaDialog,
 } from "./cerrar-embarque-dialog";
-import {
-  ProveedorCombobox,
-  type ProveedorOption,
-} from "@/components/proveedor-combobox";
-import {
-  ProductoCombobox,
-  type ProductoOption,
-} from "@/components/producto-combobox";
-import {
-  CuentaCombobox,
-  type CuentaOption,
-} from "@/components/cuenta-combobox";
+import { ProveedorCombobox, type ProveedorOption } from "@/components/proveedor-combobox";
+import { ProductoCombobox, type ProductoOption } from "@/components/producto-combobox";
+import { CuentaCombobox, type CuentaOption } from "@/components/cuenta-combobox";
 import Decimal from "decimal.js";
 
 import { calcularTributosSugeridos } from "@/lib/services/comex";
@@ -141,23 +129,28 @@ const TIPO_COSTO_LABELS: Record<TipoCosto, string> = {
  * de gasto en el embarque). Sirve para auto-poblar la categoría al
  * seleccionar un proveedor en una factura.
  */
-function mapTipoProveedorACostoEmbarque(
-  tipoProveedor: string | null,
-): TipoCosto | null {
+function mapTipoProveedorACostoEmbarque(tipoProveedor: string | null): TipoCosto | null {
   switch (tipoProveedor) {
-    case "DESPACHANTE":              return "HONORARIOS_DESPACHANTE";
-    case "LOGISTICA":                return "FLETE_NACIONAL";
-    case "ALMACENAJE":               return "ALMACENAJE";
-    case "GASTOS_PORTUARIOS":        return "GASTOS_PORTUARIOS";
-    case "SERVICIOS_EXTERIOR":       return "FLETE_INTERNACIONAL";
-    case "SERVICIOS_PROFESIONALES":  return "GASTOS_EXTRAS";
+    case "DESPACHANTE":
+      return "HONORARIOS_DESPACHANTE";
+    case "LOGISTICA":
+      return "FLETE_NACIONAL";
+    case "ALMACENAJE":
+      return "ALMACENAJE";
+    case "GASTOS_PORTUARIOS":
+      return "GASTOS_PORTUARIOS";
+    case "SERVICIOS_EXTERIOR":
+      return "FLETE_INTERNACIONAL";
+    case "SERVICIOS_PROFESIONALES":
+      return "GASTOS_EXTRAS";
     case "MERCADERIA_LOCAL":
     case "MERCADERIA_EXTERIOR":
     case "ALQUILERES":
     case "IT_SOFTWARE":
     case "MARKETING":
     case "OTRO":
-    default:                         return "GASTOS_LOCALES";
+    default:
+      return "GASTOS_LOCALES";
   }
 }
 
@@ -169,36 +162,18 @@ const formSchema = z
     moneda: z.enum(["ARS", "USD"]),
     tipoCambio: z.string().regex(rateRegex, "Tipo de cambio inválido"),
     incoterm: z
-      .enum([
-        "EXW",
-        "FCA",
-        "FAS",
-        "FOB",
-        "CFR",
-        "CIF",
-        "CPT",
-        "CIP",
-        "DAP",
-        "DPU",
-        "DDP",
-      ])
+      .enum(["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP"])
       .nullable()
       .optional(),
     lugarIncoterm: z.string().max(80).optional(),
     valorFleteOrigen: z
       .string()
       .optional()
-      .refine(
-        (v) => !v || v.length === 0 || moneyRegex.test(v),
-        "Valor de flete inválido",
-      ),
+      .refine((v) => !v || v.length === 0 || moneyRegex.test(v), "Valor de flete inválido"),
     valorSeguroOrigen: z
       .string()
       .optional()
-      .refine(
-        (v) => !v || v.length === 0 || moneyRegex.test(v),
-        "Valor de seguro inválido",
-      ),
+      .refine((v) => !v || v.length === 0 || moneyRegex.test(v), "Valor de seguro inválido"),
     nombreBuque: z.string().max(120).optional(),
     lineaMaritima: z.string().max(120).optional(),
     fechaEmpaque: z.string().optional(),
@@ -223,9 +198,7 @@ const formSchema = z
             .number({ message: "Cantidad inválida" })
             .int("Debe ser entero")
             .positive("Cantidad > 0"),
-          precioUnitarioFob: z
-            .string()
-            .regex(moneyRegex, "Precio FOB inválido"),
+          precioUnitarioFob: z.string().regex(moneyRegex, "Precio FOB inválido"),
         }),
       )
       .min(1, "Agregue al menos un ítem"),
@@ -246,10 +219,7 @@ const formSchema = z
           .array(
             z.object({
               tipo: z.enum(TIPO_COSTO_VALUES),
-              cuentaContableGastoId: z
-                .number()
-                .int()
-                .positive("Seleccione la cuenta"),
+              cuentaContableGastoId: z.number().int().positive("Seleccione la cuenta"),
               descripcion: z.string().max(200).optional(),
               subtotal: z.string().regex(moneyRegex, "Subtotal inválido"),
             }),
@@ -263,8 +233,7 @@ const formSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["estado"],
-        message:
-          "Para cerrar el embarque utilice el botón 'Cerrar y Contabilizar'.",
+        message: "Para cerrar el embarque utilice el botón 'Cerrar y Contabilizar'.",
       });
     }
     if (data.moneda === "ARS" && data.tipoCambio !== "1") {
@@ -388,10 +357,7 @@ export function EmbarqueForm(props: Props) {
             props.initialData.diasPagoDespuesLlegada != null
               ? String(props.initialData.diasPagoDespuesLlegada)
               : "",
-          estado:
-            props.initialData.estado === "CERRADO"
-              ? "BORRADOR"
-              : props.initialData.estado,
+          estado: props.initialData.estado === "CERRADO" ? "BORRADOR" : props.initialData.estado,
           die: props.initialData.die,
           tasaEstadistica: props.initialData.tasaEstadistica,
           arancelSim: props.initialData.arancelSim,
@@ -451,8 +417,7 @@ export function EmbarqueForm(props: Props) {
   });
 
   const moneda = useWatch({ control, name: "moneda" });
-  const tipoCambioEmbarque =
-    useWatch({ control, name: "tipoCambio" }) ?? "0";
+  const tipoCambioEmbarque = useWatch({ control, name: "tipoCambio" }) ?? "0";
   const incotermSelected = useWatch({ control, name: "incoterm" });
 
   useEffect(() => {
@@ -476,8 +441,7 @@ export function EmbarqueForm(props: Props) {
   const items = useWatch({ control, name: "items" }) ?? [];
   const costos = useWatch({ control, name: "costos" }) ?? [];
   const die = useWatch({ control, name: "die" }) ?? "0";
-  const tasaEstadistica =
-    useWatch({ control, name: "tasaEstadistica" }) ?? "0";
+  const tasaEstadistica = useWatch({ control, name: "tasaEstadistica" }) ?? "0";
   const arancelSim = useWatch({ control, name: "arancelSim" }) ?? "0";
   const iva = useWatch({ control, name: "iva" }) ?? "0";
   const ivaAdicional = useWatch({ control, name: "ivaAdicional" }) ?? "0";
@@ -541,10 +505,7 @@ export function EmbarqueForm(props: Props) {
         const tc = new Decimal(safeMoney(factura?.tipoCambio));
         const sub = (factura?.lineas ?? [])
           .filter((l) => l?.tipo === tipo)
-          .reduce(
-            (a, l) => a.plus(new Decimal(safeMoney(l?.subtotal))),
-            new Decimal(0),
-          );
+          .reduce((a, l) => a.plus(new Decimal(safeMoney(l?.subtotal))), new Decimal(0));
         return acc.plus(sub.times(tc));
       }, new Decimal(0));
     }
@@ -555,12 +516,7 @@ export function EmbarqueForm(props: Props) {
 
   const totalCreditosFiscales = useMemo(
     () =>
-      sumAs2dp([
-        safeMoney(iva),
-        safeMoney(ivaAdicional),
-        safeMoney(iibb),
-        safeMoney(ganancias),
-      ]),
+      sumAs2dp([safeMoney(iva), safeMoney(ivaAdicional), safeMoney(iibb), safeMoney(ganancias)]),
     [iva, ivaAdicional, iibb, ganancias],
   );
 
@@ -574,8 +530,7 @@ export function EmbarqueForm(props: Props) {
   }, [die, tasaEstadistica, arancelSim, tipoCambioEmbarque]);
 
   const costoTotal = useMemo(
-    () =>
-      sumAs2dp([fobTotalArs, costosSubtotalArs, costosFiscalesArs, tributosArs]),
+    () => sumAs2dp([fobTotalArs, costosSubtotalArs, costosFiscalesArs, tributosArs]),
     [fobTotalArs, costosSubtotalArs, costosFiscalesArs, tributosArs],
   );
 
@@ -605,10 +560,7 @@ export function EmbarqueForm(props: Props) {
   };
 
   const addItem = () => {
-    append(
-      { productoId: "", cantidad: 1, precioUnitarioFob: "0" },
-      { shouldFocus: false },
-    );
+    append({ productoId: "", cantidad: 1, precioUnitarioFob: "0" }, { shouldFocus: false });
   };
 
   const onSubmit = handleSubmit((values) => {
@@ -619,9 +571,7 @@ export function EmbarqueForm(props: Props) {
       });
       if (result.ok) {
         toast.success(
-          isEdit
-            ? `Embarque ${result.codigo} actualizado.`
-            : `Embarque ${result.codigo} creado.`,
+          isEdit ? `Embarque ${result.codigo} actualizado.` : `Embarque ${result.codigo} creado.`,
         );
         router.push("/comex/embarques");
         router.refresh();
@@ -658,8 +608,7 @@ export function EmbarqueForm(props: Props) {
               Embarque CERRADO — solo lectura
             </p>
             <p className="mt-1 text-amber-800/80 dark:text-amber-200/80">
-              Este embarque ya fue contabilizado. Los valores no pueden
-              modificarse.
+              Este embarque ya fue contabilizado. Los valores no pueden modificarse.
               {props.mode === "edit" && props.initialData.asiento && (
                 <>
                   {" "}
@@ -703,9 +652,7 @@ export function EmbarqueForm(props: Props) {
                   />
                 )}
               />
-              {errors.proveedorId && (
-                <FieldError message={errors.proveedorId.message} />
-              )}
+              {errors.proveedorId && <FieldError message={errors.proveedorId.message} />}
             </div>
 
             <div className="flex flex-col gap-2">
@@ -745,18 +692,12 @@ export function EmbarqueForm(props: Props) {
                 control={control}
                 name="moneda"
                 render={({ field }) => (
-                  <Select
-                    value={field.value}
-                    onValueChange={field.onChange}
-                    disabled={readonly}
-                  >
+                  <Select value={field.value} onValueChange={field.onChange} disabled={readonly}>
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={"ARS"}>
-                        ARS — Peso argentino
-                      </SelectItem>
+                      <SelectItem value={"ARS"}>ARS — Peso argentino</SelectItem>
                       <SelectItem value={"USD"}>USD — Dólar</SelectItem>
                     </SelectContent>
                   </Select>
@@ -774,9 +715,7 @@ export function EmbarqueForm(props: Props) {
                 aria-invalid={!!errors.tipoCambio}
                 {...register("tipoCambio")}
               />
-              {errors.tipoCambio && (
-                <FieldError message={errors.tipoCambio.message} />
-              )}
+              {errors.tipoCambio && <FieldError message={errors.tipoCambio.message} />}
             </div>
 
             <div className="flex flex-col gap-2">
@@ -785,11 +724,7 @@ export function EmbarqueForm(props: Props) {
                 control={control}
                 name="estado"
                 render={({ field }) => (
-                  <Select
-                    value={field.value}
-                    onValueChange={field.onChange}
-                    disabled={readonly}
-                  >
+                  <Select value={field.value} onValueChange={field.onChange} disabled={readonly}>
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
@@ -816,9 +751,7 @@ export function EmbarqueForm(props: Props) {
                 render={({ field }) => (
                   <Select
                     value={field.value ?? "NONE"}
-                    onValueChange={(v) =>
-                      field.onChange(v === "NONE" ? null : v)
-                    }
+                    onValueChange={(v) => field.onChange(v === "NONE" ? null : v)}
                     disabled={readonly}
                   >
                     <SelectTrigger className="w-full">
@@ -828,27 +761,15 @@ export function EmbarqueForm(props: Props) {
                       <SelectItem value="NONE">— Sin definir —</SelectItem>
                       <SelectItem value="EXW">EXW — Ex Works</SelectItem>
                       <SelectItem value="FCA">FCA — Free Carrier</SelectItem>
-                      <SelectItem value="FAS">
-                        FAS — Free Alongside Ship
-                      </SelectItem>
+                      <SelectItem value="FAS">FAS — Free Alongside Ship</SelectItem>
                       <SelectItem value="FOB">FOB — Free On Board</SelectItem>
                       <SelectItem value="CFR">CFR — Cost &amp; Freight</SelectItem>
-                      <SelectItem value="CIF">
-                        CIF — Cost, Insurance &amp; Freight
-                      </SelectItem>
+                      <SelectItem value="CIF">CIF — Cost, Insurance &amp; Freight</SelectItem>
                       <SelectItem value="CPT">CPT — Carriage Paid To</SelectItem>
-                      <SelectItem value="CIP">
-                        CIP — Carriage &amp; Insurance Paid
-                      </SelectItem>
-                      <SelectItem value="DAP">
-                        DAP — Delivered At Place
-                      </SelectItem>
-                      <SelectItem value="DPU">
-                        DPU — Delivered At Place Unloaded
-                      </SelectItem>
-                      <SelectItem value="DDP">
-                        DDP — Delivered Duty Paid
-                      </SelectItem>
+                      <SelectItem value="CIP">CIP — Carriage &amp; Insurance Paid</SelectItem>
+                      <SelectItem value="DAP">DAP — Delivered At Place</SelectItem>
+                      <SelectItem value="DPU">DPU — Delivered At Place Unloaded</SelectItem>
+                      <SelectItem value="DDP">DDP — Delivered Duty Paid</SelectItem>
                     </SelectContent>
                   </Select>
                 )}
@@ -869,8 +790,7 @@ export function EmbarqueForm(props: Props) {
           {(incotermSelected === "CIF" || incotermSelected === "CFR") && (
             <div className="rounded-md border border-dashed bg-muted/10 p-3">
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Valores en origen incluidos en el precio{" "}
-                {incotermSelected}
+                Valores en origen incluidos en el precio {incotermSelected}
               </h3>
               <p className="mb-3 text-xs text-muted-foreground">
                 {incotermSelected === "CIF"
@@ -1022,10 +942,7 @@ export function EmbarqueForm(props: Props) {
                 />
               </div>
               <div className="flex flex-col gap-1 md:col-span-2">
-                <Label
-                  htmlFor="diasPagoDespuesLlegada"
-                  className="text-xs"
-                >
+                <Label htmlFor="diasPagoDespuesLlegada" className="text-xs">
                   Plazo de pago (días después de la llegada)
                 </Label>
                 <Input
@@ -1053,12 +970,7 @@ export function EmbarqueForm(props: Props) {
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">Ítems del embarque</h2>
             {!readonly && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addItem}
-              >
+              <Button type="button" variant="outline" size="sm" onClick={addItem}>
                 <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
                 Agregar ítem
               </Button>
@@ -1074,18 +986,10 @@ export function EmbarqueForm(props: Props) {
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-xs text-muted-foreground">
                   <tr>
-                    <th className="w-[40%] py-2 pl-3 text-left font-medium">
-                      Producto
-                    </th>
-                    <th className="py-2 pr-3 text-right font-medium">
-                      Cantidad
-                    </th>
-                    <th className="py-2 pr-3 text-right font-medium">
-                      Precio FOB
-                    </th>
-                    <th className="py-2 pr-3 text-right font-medium">
-                      Subtotal
-                    </th>
+                    <th className="w-[40%] py-2 pl-3 text-left font-medium">Producto</th>
+                    <th className="py-2 pr-3 text-right font-medium">Cantidad</th>
+                    <th className="py-2 pr-3 text-right font-medium">Precio FOB</th>
+                    <th className="py-2 pr-3 text-right font-medium">Subtotal</th>
                     {!readonly && <th className="w-12 py-2 pr-3"></th>}
                   </tr>
                 </thead>
@@ -1105,10 +1009,7 @@ export function EmbarqueForm(props: Props) {
                 </tbody>
                 <tfoot className="border-t bg-muted/30">
                   <tr>
-                    <td
-                      colSpan={3}
-                      className="py-2 pl-3 text-right text-xs text-muted-foreground"
-                    >
+                    <td colSpan={3} className="py-2 pl-3 text-right text-xs text-muted-foreground">
                       FOB Total
                     </td>
                     <td className="py-2 pr-3 text-right font-mono text-sm tabular-nums">
@@ -1172,16 +1073,12 @@ export function EmbarqueForm(props: Props) {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Una <strong>factura por proveedor local</strong> (despachante,
-            operador portuario, fletes, almacenaje, etc.). Dentro de cada
-            factura agregue tantos <strong>gastos</strong> como conceptos
-            tenga — cada uno con su <strong>cuenta analítica</strong>
-            propia. <strong>IVA, IIBB y otros</strong> se cargan a nivel
-            factura (van directo al proveedor — no son gastos). CIF (FOB +
-            flete intl + seguro marítimo) ={" "}
-            <span className="font-mono font-medium">
-              ARS {formatMoney(cifTotalArs.toString())}
-            </span>
+            Una <strong>factura por proveedor local</strong> (despachante, operador portuario,
+            fletes, almacenaje, etc.). Dentro de cada factura agregue tantos <strong>gastos</strong>{" "}
+            como conceptos tenga — cada uno con su <strong>cuenta analítica</strong>
+            propia. <strong>IVA, IIBB y otros</strong> se cargan a nivel factura (van directo al
+            proveedor — no son gastos). CIF (FOB + flete intl + seguro marítimo) ={" "}
+            <span className="font-mono font-medium">ARS {formatMoney(cifTotalArs.toString())}</span>
             .
           </p>
 
@@ -1191,20 +1088,25 @@ export function EmbarqueForm(props: Props) {
             </p>
           ) : (
             <div className="flex flex-col gap-4">
-              {costoFields.map((field, index) => (
-                <FacturaCard
-                  key={field.id}
-                  index={index}
-                  control={control}
-                  register={register}
-                  setValue={setValue}
-                  proveedores={props.proveedores}
-                  cuentasGasto={props.cuentasGasto}
-                  disabled={readonly}
-                  removeCosto={removeCosto}
-                  errors={errors.costos?.[index] as FacturaErrors | undefined}
-                />
-              ))}
+              {costoFields.map((field, index) => {
+                const meta = props.mode === "edit" ? props.initialData.costos[index] : undefined;
+                return (
+                  <div key={field.id} className="flex flex-col gap-2">
+                    {meta ? <CostoEstadoBadge meta={meta} /> : null}
+                    <FacturaCard
+                      index={index}
+                      control={control}
+                      register={register}
+                      setValue={setValue}
+                      proveedores={props.proveedores}
+                      cuentasGasto={props.cuentasGasto}
+                      disabled={readonly || meta?.estado === "EMITIDA"}
+                      removeCosto={removeCosto}
+                      errors={errors.costos?.[index] as FacturaErrors | undefined}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>
@@ -1214,16 +1116,9 @@ export function EmbarqueForm(props: Props) {
       <Card>
         <CardContent className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">
-              Nacionalización — tributos y gastos
-            </h2>
+            <h2 className="text-sm font-semibold">Nacionalización — tributos y gastos</h2>
             {!readonly && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={handleCalcularTributos}
-              >
+              <Button type="button" variant="secondary" size="sm" onClick={handleCalcularTributos}>
                 <HugeiconsIcon icon={Calculator01Icon} strokeWidth={2} />
                 Calcular tributos sugeridos
               </Button>
@@ -1239,16 +1134,14 @@ export function EmbarqueForm(props: Props) {
             <div className="space-y-0.5">
               <p>
                 Ingrese estos valores en la <strong>moneda del embarque</strong>
-                {moneda && <> ({moneda})</>} tal como aparecen en el despacho.
-                Al cerrar el embarque se convierten a ARS multiplicando por el
-                TC del embarque ({tipoCambioEmbarque || "—"}) — la AFIP cobra en
-                pesos.
+                {moneda && <> ({moneda})</>} tal como aparecen en el despacho. Al cerrar el embarque
+                se convierten a ARS multiplicando por el TC del embarque (
+                {tipoCambioEmbarque || "—"}) — la AFIP cobra en pesos.
               </p>
               <p>
-                <strong>Tributos aduaneros</strong> (DIE, Tasa, Arancel SIM):
-                componen el costo del producto.{" "}
-                <strong>Créditos fiscales</strong> (IVA, IVA Adicional, IIBB,
-                Ganancias): van al ACTIVO, no al costo.
+                <strong>Tributos aduaneros</strong> (DIE, Tasa, Arancel SIM): componen el costo del
+                producto. <strong>Créditos fiscales</strong> (IVA, IVA Adicional, IIBB, Ganancias):
+                van al ACTIVO, no al costo.
               </p>
             </div>
           </div>
@@ -1325,14 +1218,8 @@ export function EmbarqueForm(props: Props) {
         <CardContent className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold">Resumen</h2>
           <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-            <ResumenLinha
-              label="FOB Total (moneda)"
-              value={formatMoney(fobTotal.toString())}
-            />
-            <ResumenLinha
-              label="FOB Total (ARS)"
-              value={formatMoney(fobTotalArs.toString())}
-            />
+            <ResumenLinha label="FOB Total (moneda)" value={formatMoney(fobTotal.toString())} />
+            <ResumenLinha label="FOB Total (ARS)" value={formatMoney(fobTotalArs.toString())} />
             <ResumenLinha
               label="CIF (FOB + Flete intl + Seguro)"
               value={formatMoney(cifTotalArs.toString())}
@@ -1353,8 +1240,8 @@ export function EmbarqueForm(props: Props) {
           </div>
           <p className="rounded-md border border-dashed bg-muted/30 p-3 text-xs text-muted-foreground">
             La contabilización de nacionalización se genera al usar{" "}
-            <strong>Cerrar y Contabilizar</strong>. El rateio del{" "}
-            <em>costo unitario</em> por ítem será ejecutado en el PASO 5.
+            <strong>Cerrar y Contabilizar</strong>. El rateio del <em>costo unitario</em> por ítem
+            será ejecutado en el PASO 5.
           </p>
         </CardContent>
       </Card>
@@ -1367,9 +1254,7 @@ export function EmbarqueForm(props: Props) {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-xs text-muted-foreground">
             <span className="text-muted-foreground">FOB:</span>{" "}
-            <span className="font-mono font-medium">
-              {formatMoney(fobTotal.toString())}
-            </span>
+            <span className="font-mono font-medium">{formatMoney(fobTotal.toString())}</span>
             {" · "}
             <span className="text-muted-foreground">Costo total:</span>{" "}
             <span className="font-mono font-semibold">
@@ -1387,11 +1272,7 @@ export function EmbarqueForm(props: Props) {
             </Button>
             {!readonly && (
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting
-                  ? "Guardando…"
-                  : isEdit
-                    ? "Guardar cambios"
-                    : "Crear embarque"}
+                {isSubmitting ? "Guardando…" : isEdit ? "Guardar cambios" : "Crear embarque"}
               </Button>
             )}
             {!readonly &&
@@ -1401,12 +1282,8 @@ export function EmbarqueForm(props: Props) {
                 <ConfirmarZonaPrimariaDialog
                   embarqueId={props.initialData.id}
                   embarqueCodigo={props.initialData.codigo}
-                  totalProveedorExterior={formatMoney(
-                    fobTotalArs.toString(),
-                  )}
-                  cantFacturasZP={
-                    costos.filter((f) => f.momento === "ZONA_PRIMARIA").length
-                  }
+                  totalProveedorExterior={formatMoney(fobTotalArs.toString())}
+                  cantFacturasZP={costos.filter((f) => f.momento === "ZONA_PRIMARIA").length}
                   disabled={isSubmitting}
                 />
               )}
@@ -1418,18 +1295,14 @@ export function EmbarqueForm(props: Props) {
                   <RevertirZonaPrimariaDialog
                     embarqueId={props.initialData.id}
                     embarqueCodigo={props.initialData.codigo}
-                    asientoZpNumero={
-                      props.initialData.asientoZonaPrimaria.numero
-                    }
+                    asientoZpNumero={props.initialData.asientoZonaPrimaria.numero}
                     disabled={isSubmitting}
                   />
                   <Button
                     type="button"
                     variant="secondary"
                     onClick={() =>
-                      router.push(
-                        `/comex/embarques/${props.initialData.id}/despachos`,
-                      )
+                      router.push(`/comex/embarques/${props.initialData.id}/despachos`)
                     }
                     disabled={isSubmitting}
                   >
@@ -1437,16 +1310,14 @@ export function EmbarqueForm(props: Props) {
                   </Button>
                 </>
               )}
-            {!readonly &&
-              props.mode === "edit" &&
-              !props.initialData.asiento && (
-                <CerrarEmbarqueDialog
-                  embarqueId={props.initialData.id}
-                  embarqueCodigo={props.initialData.codigo}
-                  previewTotalDebe={formatMoney(costoTotal.toString())}
-                  disabled={isSubmitting}
-                />
-              )}
+            {!readonly && props.mode === "edit" && !props.initialData.asiento && (
+              <CerrarEmbarqueDialog
+                embarqueId={props.initialData.id}
+                embarqueCodigo={props.initialData.codigo}
+                previewTotalDebe={formatMoney(costoTotal.toString())}
+                disabled={isSubmitting}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -1509,9 +1380,7 @@ function ItemRow({
             />
           )}
         />
-        {errors?.productoId?.message && (
-          <FieldError message={errors.productoId.message} />
-        )}
+        {errors?.productoId?.message && <FieldError message={errors.productoId.message} />}
       </td>
       <td className="py-2 pr-3">
         <Input
@@ -1526,9 +1395,7 @@ function ItemRow({
             valueAsNumber: true,
           })}
         />
-        {errors?.cantidad?.message && (
-          <FieldError message={errors.cantidad.message} />
-        )}
+        {errors?.cantidad?.message && <FieldError message={errors.cantidad.message} />}
       </td>
       <td className="py-2 pr-3">
         <Input
@@ -1554,11 +1421,7 @@ function ItemRow({
             onClick={onRemove}
             aria-label="Remover ítem"
           >
-            <HugeiconsIcon
-              icon={Delete02Icon}
-              strokeWidth={2}
-              className="size-4"
-            />
+            <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} className="size-4" />
           </Button>
         </td>
       )}
@@ -1625,9 +1488,7 @@ const CATEGORIA_STYLES: Record<
   },
 };
 
-function categoriaParaProveedor(
-  tipo: ProveedorOption["tipoProveedor"] | null,
-): CategoriaCosto {
+function categoriaParaProveedor(tipo: ProveedorOption["tipoProveedor"] | null): CategoriaCosto {
   if (!tipo) return "GENERAL";
   if (tipo === "DESPACHANTE") return "DESPACHANTE";
   if (tipo === "LOGISTICA") return "OPERADOR_LOGISTICO";
@@ -1637,9 +1498,91 @@ function categoriaParaProveedor(
   return "GENERAL";
 }
 
+// Badge de estado de la factura (EmbarqueCosto) + botones emit/anular.
+// Sólo aparece cuando la factura ya existe en BD (mode=edit).
+function CostoEstadoBadge({ meta }: { meta: EmbarqueCostoDetalle }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  const onEmit = () => {
+    startTransition(async () => {
+      const r = await emitirEmbarqueCostoFacturaAction(meta.id, meta.fechaFactura ?? undefined);
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(`Factura emitida — Asiento Nº ${r.asientoNumero}`);
+      router.refresh();
+    });
+  };
+
+  const onAnular = () => {
+    if (!confirm("¿Anular el asiento de esta factura? La factura quedará cancelada.")) {
+      return;
+    }
+    startTransition(async () => {
+      const r = await anularEmbarqueCostoFacturaAction(meta.id);
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success("Factura anulada");
+      router.refresh();
+    });
+  };
+
+  const styles: Record<EmbarqueCostoDetalle["estado"], { bg: string; label: string }> = {
+    BORRADOR: { bg: "bg-muted text-muted-foreground", label: "Borrador" },
+    EMITIDA: { bg: "bg-emerald-100 text-emerald-900", label: "Emitida" },
+    ANULADA: { bg: "bg-red-100 text-red-900", label: "Anulada" },
+    LEGACY_BUNDLED: {
+      bg: "bg-amber-100 text-amber-900",
+      label: "Legacy bundled (cierre)",
+    },
+  };
+  const s = styles[meta.estado];
+
+  return (
+    <div className="flex items-center gap-2 px-1 text-xs">
+      <span className={`inline-flex items-center rounded-md px-2 py-0.5 font-medium ${s.bg}`}>
+        {s.label}
+      </span>
+      {meta.asientoNumero ? (
+        <a
+          href={`/contabilidad/asientos/${meta.asientoId}`}
+          className="font-mono underline-offset-2 hover:underline"
+        >
+          Asiento #{meta.asientoNumero}
+        </a>
+      ) : null}
+      <span className="flex-1" />
+      {meta.estado === "BORRADOR" ? (
+        <button
+          type="button"
+          onClick={onEmit}
+          disabled={pending}
+          className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
+        >
+          {pending ? "Emitiendo…" : "Emitir factura"}
+        </button>
+      ) : null}
+      {meta.estado === "EMITIDA" ? (
+        <button
+          type="button"
+          onClick={onAnular}
+          disabled={pending}
+          className="rounded-md border border-red-300 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-900 hover:bg-red-100 disabled:opacity-50"
+        >
+          {pending ? "Anulando…" : "Anular asiento"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 // Memoizamos FacturaCard porque o EmbarqueForm faz `useWatch` em
 // `costos`, lo que dispara re-render del padre en cada keystroke. Sin
-// memo, todas las facturas se re-renderizan y los selects/comboboxes
+// memo, todas las facturas se re-renderizan e os selects/comboboxes
 // pierden foco o "contaminan" entre índices visualmente.
 const FacturaCard = memo(function FacturaCard({
   index,
@@ -1713,9 +1656,7 @@ const FacturaCard = memo(function FacturaCard({
     if (!proveedorId) return;
     const prov = proveedores.find((p) => p.id === proveedorId);
     if (!prov) return;
-    const tipoDefault = mapTipoProveedorACostoEmbarque(
-      prov.tipoProveedor ?? null,
-    );
+    const tipoDefault = mapTipoProveedorACostoEmbarque(prov.tipoProveedor ?? null);
     const lineasActuales = (lineas ?? []) as Array<{
       cuentaContableGastoId?: number;
       tipo?: string;
@@ -1733,11 +1674,9 @@ const FacturaCard = memo(function FacturaCard({
         );
       }
       if (tipoDefault) {
-        setValue(
-          `costos.${index}.lineas.${i}.tipo` as const,
-          tipoDefault,
-          { shouldValidate: false },
-        );
+        setValue(`costos.${index}.lineas.${i}.tipo` as const, tipoDefault, {
+          shouldValidate: false,
+        });
       }
     });
     // Solo dispara cuando cambia el proveedorId — no en cada keystroke de lineas.
@@ -1769,15 +1708,11 @@ const FacturaCard = memo(function FacturaCard({
     [proveedores, proveedorId],
   );
   const proveedorNombre = proveedorActual?.nombre ?? "Sin proveedor";
-  const categoria = categoriaParaProveedor(
-    proveedorActual?.tipoProveedor ?? null,
-  );
+  const categoria = categoriaParaProveedor(proveedorActual?.tipoProveedor ?? null);
   const estilo = CATEGORIA_STYLES[categoria];
 
   return (
-    <div
-      className={`rounded-lg border border-l-4 bg-card shadow-sm ${estilo.borderLeft}`}
-    >
+    <div className={`rounded-lg border border-l-4 bg-card shadow-sm ${estilo.borderLeft}`}>
       <div
         className={`flex items-center justify-between gap-2 border-b px-4 py-3 ${estilo.headerBg}`}
       >
@@ -1795,11 +1730,7 @@ const FacturaCard = memo(function FacturaCard({
             onClick={() => removeCosto(index)}
             aria-label="Remover factura"
           >
-            <HugeiconsIcon
-              icon={Delete02Icon}
-              strokeWidth={2}
-              className="size-4"
-            />
+            <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} className="size-4" />
             Quitar factura
           </Button>
         )}
@@ -1822,9 +1753,7 @@ const FacturaCard = memo(function FacturaCard({
                 />
               )}
             />
-            {errors?.proveedorId?.message && (
-              <FieldError message={errors.proveedorId.message} />
-            )}
+            {errors?.proveedorId?.message && <FieldError message={errors.proveedorId.message} />}
           </div>
 
           <div className="flex flex-col gap-1">
@@ -1833,11 +1762,7 @@ const FacturaCard = memo(function FacturaCard({
               control={control}
               name={`costos.${index}.moneda` as const}
               render={({ field }) => (
-                <Select
-                  value={field.value}
-                  onValueChange={field.onChange}
-                  disabled={disabled}
-                >
+                <Select value={field.value} onValueChange={field.onChange} disabled={disabled}>
                   <SelectTrigger className="h-9 w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -1858,9 +1783,7 @@ const FacturaCard = memo(function FacturaCard({
               disabled={disabled || moneda === "ARS"}
               {...register(`costos.${index}.tipoCambio` as const)}
             />
-            {errors?.tipoCambio?.message && (
-              <FieldError message={errors.tipoCambio.message} />
-            )}
+            {errors?.tipoCambio?.message && <FieldError message={errors.tipoCambio.message} />}
           </div>
 
           <div className="flex flex-col gap-1">
@@ -1907,9 +1830,7 @@ const FacturaCard = memo(function FacturaCard({
                     <SelectItem value="ZONA_PRIMARIA">
                       Zona primaria (puerto, frete, op. log., línea marítima)
                     </SelectItem>
-                    <SelectItem value="DESPACHO">
-                      Despacho (despachante, DIA, op. log.)
-                    </SelectItem>
+                    <SelectItem value="DESPACHO">Despacho (despachante, DIA, op. log.)</SelectItem>
                   </SelectContent>
                 </Select>
               )}
@@ -1930,8 +1851,7 @@ const FacturaCard = memo(function FacturaCard({
         <div className="grid grid-cols-3 gap-3 rounded-md border bg-muted/20 p-3">
           <div className="flex flex-col gap-1">
             <Label className="text-xs">
-              IVA ({moneda})
-              <span className="ml-1 text-muted-foreground">— factura</span>
+              IVA ({moneda})<span className="ml-1 text-muted-foreground">— factura</span>
             </Label>
             <Input
               inputMode="decimal"
@@ -1943,8 +1863,7 @@ const FacturaCard = memo(function FacturaCard({
           </div>
           <div className="flex flex-col gap-1">
             <Label className="text-xs">
-              IIBB ({moneda})
-              <span className="ml-1 text-muted-foreground">— factura</span>
+              IIBB ({moneda})<span className="ml-1 text-muted-foreground">— factura</span>
             </Label>
             <Input
               inputMode="decimal"
@@ -1952,14 +1871,11 @@ const FacturaCard = memo(function FacturaCard({
               disabled={disabled}
               {...register(`costos.${index}.iibb` as const)}
             />
-            {errors?.iibb?.message && (
-              <FieldError message={errors.iibb.message} />
-            )}
+            {errors?.iibb?.message && <FieldError message={errors.iibb.message} />}
           </div>
           <div className="flex flex-col gap-1">
             <Label className="text-xs">
-              Otros ({moneda})
-              <span className="ml-1 text-muted-foreground">— factura</span>
+              Otros ({moneda})<span className="ml-1 text-muted-foreground">— factura</span>
             </Label>
             <Input
               inputMode="decimal"
@@ -1967,9 +1883,7 @@ const FacturaCard = memo(function FacturaCard({
               disabled={disabled}
               {...register(`costos.${index}.otros` as const)}
             />
-            {errors?.otros?.message && (
-              <FieldError message={errors.otros.message} />
-            )}
+            {errors?.otros?.message && <FieldError message={errors.otros.message} />}
           </div>
         </div>
 
@@ -2011,18 +1925,10 @@ const FacturaCard = memo(function FacturaCard({
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-xs text-muted-foreground">
                 <tr>
-                  <th className="w-44 py-2 pl-3 text-left font-medium">
-                    Tipo
-                  </th>
-                  <th className="py-2 px-2 text-left font-medium">
-                    Cuenta analítica
-                  </th>
-                  <th className="py-2 px-2 text-left font-medium">
-                    Descripción
-                  </th>
-                  <th className="w-32 py-2 px-2 text-right font-medium">
-                    Subtotal ({moneda})
-                  </th>
+                  <th className="w-44 py-2 pl-3 text-left font-medium">Tipo</th>
+                  <th className="py-2 px-2 text-left font-medium">Cuenta analítica</th>
+                  <th className="py-2 px-2 text-left font-medium">Descripción</th>
+                  <th className="w-32 py-2 px-2 text-right font-medium">Subtotal ({moneda})</th>
                   {!disabled && <th className="w-10"></th>}
                 </tr>
               </thead>
@@ -2119,11 +2025,7 @@ const LineaRow = memo(function LineaRow({
           control={control}
           name={`${path}.tipo` as const}
           render={({ field }) => (
-            <Select
-              value={field.value}
-              onValueChange={field.onChange}
-              disabled={disabled}
-            >
+            <Select value={field.value} onValueChange={field.onChange} disabled={disabled}>
               <SelectTrigger className="h-8 w-full text-xs">
                 <SelectValue />
               </SelectTrigger>
@@ -2171,9 +2073,7 @@ const LineaRow = memo(function LineaRow({
           disabled={disabled}
           {...register(`${path}.subtotal` as const)}
         />
-        {errors?.subtotal?.message && (
-          <FieldError message={errors.subtotal.message} />
-        )}
+        {errors?.subtotal?.message && <FieldError message={errors.subtotal.message} />}
       </td>
       {!disabled && (
         <td className="py-2 pr-2 text-right">
@@ -2185,11 +2085,7 @@ const LineaRow = memo(function LineaRow({
             onClick={() => removeLinea(lineaIndex)}
             aria-label="Quitar línea"
           >
-            <HugeiconsIcon
-              icon={Delete02Icon}
-              strokeWidth={2}
-              className="size-3.5"
-            />
+            <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} className="size-3.5" />
           </Button>
         </td>
       )}
