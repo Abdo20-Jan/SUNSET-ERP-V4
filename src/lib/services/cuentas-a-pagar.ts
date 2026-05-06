@@ -560,11 +560,14 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
   // banco) puede ser solo 5-10% del bruto, lo que NO debe zerar las
   // facturas (Layer 3 ajusta el agregado contra saldoContable).
   //
-  // Cuando supera 80%, se zera todo el grupo aunque sobre un poco de
+  // Cuando supera 98%, se zera todo el grupo aunque sobre un poco de
   // residuo en saldoContable — ese residuo suele ser comisión o saldo
   // remanente con despachante que el usuario considera la factura paga.
+  // (Threshold subido de 80% a 98% en 2026-05-06: 80% escondía facturas
+  // con ~20% de saldo intermediário aún pendiente — el user necesita
+  // verlas en pendentes para liquidar.)
   // ============================================================
-  const COBERTURA_MINIMA = 0.8;
+  const COBERTURA_MINIMA = 0.98;
 
   for (const [proveedorId, fcts] of facturasPorProveedor) {
     const cuentaId = cuentaPorProveedor.get(proveedorId) ?? null;
@@ -901,11 +904,13 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
       ? toDecimal(pagosPorClave.get(`${g.proveedorCuentaContableId}::${g.embarqueCodigo}`) ?? "0")
       : toDecimal(0);
 
-    // Threshold de cobertura: si el pago neto cubre ≥80% del total del
+    // Threshold de cobertura: si el pago neto cubre ≥98% del total del
     // grupo, considerar pagado y omitir — consistente con el threshold de
     // Layer 2 en getSaldosPorProveedorConAging. Evita mostrar grupos con
     // residuo de saldo intermediário que el usuario considera ya pago.
-    if (totalGrupo.gt(0) && pagadoEmbarque.div(totalGrupo).toNumber() >= 0.8) continue;
+    // (Subido de 80% a 98% en 2026-05-06 para que facturas con saldo
+    // intermediário ~20% reaparezcan como pendientes.)
+    if (totalGrupo.gt(0) && pagadoEmbarque.div(totalGrupo).toNumber() >= 0.98) continue;
 
     const pendienteEmbarque = totalGrupo.minus(pagadoEmbarque);
     if (pendienteEmbarque.lte(0.005)) continue;
