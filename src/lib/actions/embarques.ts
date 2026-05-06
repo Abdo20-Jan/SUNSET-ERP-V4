@@ -8,9 +8,11 @@ import { money, sumMoney, toDecimal } from "@/lib/decimal";
 import { calcularRateioEmbarque } from "@/lib/services/comex";
 import {
   anularAsiento,
+  anularAsientoEmbarqueCosto,
   AsientoError,
   contabilizarAsiento,
   crearAsientoEmbarque,
+  crearAsientoEmbarqueCosto,
   crearAsientoZonaPrimaria,
 } from "@/lib/services/asiento-automatico";
 import { aplicarIngresoEmbarque } from "@/lib/services/stock";
@@ -174,6 +176,8 @@ export type EmbarqueCostoLineaDetalle = {
   subtotal: string;
 };
 
+export type EmbarqueCostoEstadoUi = "BORRADOR" | "EMITIDA" | "ANULADA" | "LEGACY_BUNDLED";
+
 export type EmbarqueCostoDetalle = {
   id: number;
   proveedorId: string;
@@ -187,6 +191,9 @@ export type EmbarqueCostoDetalle = {
   otros: string;
   notas: string | null;
   lineas: EmbarqueCostoLineaDetalle[];
+  estado: EmbarqueCostoEstadoUi;
+  asientoId: string | null;
+  asientoNumero: number | null;
 };
 
 export type EmbarqueDetalle = {
@@ -238,16 +245,17 @@ export type EmbarqueDetalle = {
   costos: EmbarqueCostoDetalle[];
 };
 
-export async function obtenerEmbarquePorId(
-  id: string,
-): Promise<EmbarqueDetalle | null> {
+export async function obtenerEmbarquePorId(id: string): Promise<EmbarqueDetalle | null> {
   const embarque = await db.embarque.findUnique({
     where: { id },
     include: {
       items: { orderBy: { id: "asc" } },
       costos: {
         orderBy: { id: "asc" },
-        include: { lineas: { orderBy: { id: "asc" } } },
+        include: {
+          lineas: { orderBy: { id: "asc" } },
+          asiento: { select: { numero: true } },
+        },
       },
       asiento: { select: { id: true, numero: true, estado: true } },
       asientoZonaPrimaria: { select: { id: true, numero: true, estado: true } },
@@ -267,13 +275,9 @@ export async function obtenerEmbarquePorId(
     incoterm: embarque.incoterm,
     lugarIncoterm: embarque.lugarIncoterm,
     valorFleteOrigen:
-      embarque.valorFleteOrigen !== null
-        ? embarque.valorFleteOrigen.toString()
-        : null,
+      embarque.valorFleteOrigen !== null ? embarque.valorFleteOrigen.toString() : null,
     valorSeguroOrigen:
-      embarque.valorSeguroOrigen !== null
-        ? embarque.valorSeguroOrigen.toString()
-        : null,
+      embarque.valorSeguroOrigen !== null ? embarque.valorSeguroOrigen.toString() : null,
     nombreBuque: embarque.nombreBuque,
     lineaMaritima: embarque.lineaMaritima,
     fechaEmpaque: embarque.fechaEmpaque?.toISOString() ?? null,
@@ -331,6 +335,9 @@ export async function obtenerEmbarquePorId(
         descripcion: l.descripcion,
         subtotal: l.subtotal.toString(),
       })),
+      estado: c.estado,
+      asientoId: c.asientoId,
+      asientoNumero: c.asiento?.numero ?? null,
     })),
   };
 }
@@ -348,7 +355,7 @@ export async function generarCodigoEmbarque(): Promise<string> {
   let next = 1;
   if (ultimo) {
     const suffix = ultimo.codigo.slice(prefix.length);
-    const parsed = parseInt(suffix, 10);
+    const parsed = Number.parseInt(suffix, 10);
     if (!Number.isNaN(parsed)) next = parsed + 1;
   }
 
@@ -426,18 +433,12 @@ const inputSchema = z
       .string()
       .optional()
       .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
-      .refine(
-        (v) => v === null || moneyRegex.test(v),
-        "Valor de flete inválido",
-      ),
+      .refine((v) => v === null || moneyRegex.test(v), "Valor de flete inválido"),
     valorSeguroOrigen: z
       .string()
       .optional()
       .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
-      .refine(
-        (v) => v === null || moneyRegex.test(v),
-        "Valor de seguro inválido",
-      ),
+      .refine((v) => v === null || moneyRegex.test(v), "Valor de seguro inválido"),
     // Datos de transporte
     nombreBuque: z
       .string()
@@ -491,7 +492,7 @@ const inputSchema = z
       .optional()
       .transform((v) => {
         if (v === undefined || v === null || v === "") return null;
-        const n = typeof v === "string" ? parseInt(v, 10) : v;
+        const n = typeof v === "string" ? Number.parseInt(v, 10) : v;
         return Number.isFinite(n) && n >= 0 ? n : null;
       }),
     estado: z.nativeEnum(EmbarqueEstado),
@@ -518,8 +519,7 @@ const inputSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["estado"],
-        message:
-          "Para cerrar el embarque utilice la acción 'Cerrar y Contabilizar'.",
+        message: "Para cerrar el embarque utilice la acción 'Cerrar y Contabilizar'.",
       });
     }
     if (data.moneda === Moneda.ARS && data.tipoCambio !== "1") {
@@ -560,9 +560,7 @@ export async function guardarEmbarqueAction(
   const input = parsed.data;
 
   const fobTotal = sumMoney(
-    input.items.map((it) =>
-      toDecimal(it.precioUnitarioFob).times(it.cantidad),
-    ),
+    input.items.map((it) => toDecimal(it.precioUnitarioFob).times(it.cantidad)),
   );
 
   // costoTotal del embarque (en ARS) = FOB×TC + flete/seguro origen×TC
@@ -628,13 +626,9 @@ export async function guardarEmbarqueAction(
     incoterm: input.incoterm,
     lugarIncoterm: input.lugarIncoterm,
     valorFleteOrigen:
-      input.valorFleteOrigen !== null
-        ? new Prisma.Decimal(input.valorFleteOrigen)
-        : null,
+      input.valorFleteOrigen !== null ? new Prisma.Decimal(input.valorFleteOrigen) : null,
     valorSeguroOrigen:
-      input.valorSeguroOrigen !== null
-        ? new Prisma.Decimal(input.valorSeguroOrigen)
-        : null,
+      input.valorSeguroOrigen !== null ? new Prisma.Decimal(input.valorSeguroOrigen) : null,
     nombreBuque: input.nombreBuque,
     lineaMaritima: input.lineaMaritima,
     fechaEmpaque: input.fechaEmpaque,
@@ -692,6 +686,10 @@ export async function guardarEmbarqueAction(
         });
       }
 
+      // IDs de costos recién creados que tengan fechaFactura — candidatos
+      // a auto-emisión (asiento standalone, ADR fato gerador).
+      const costosParaAutoEmitir: number[] = [];
+
       for (const factura of input.costos) {
         const created = await tx.embarqueCosto.create({
           data: {
@@ -706,6 +704,8 @@ export async function guardarEmbarqueAction(
             iibb: money(factura.iibb),
             otros: money(factura.otros),
             notas: factura.notas,
+            // Estado por defecto BORRADOR. Se promueve a EMITIDA al final
+            // del transaction si los campos están completos.
           },
         });
         if (factura.lineas.length > 0) {
@@ -718,6 +718,28 @@ export async function guardarEmbarqueAction(
               subtotal: money(l.subtotal),
             })),
           });
+        }
+        // Auto-emit cuando: fechaFactura presente + lineas > 0 + proveedor con cuenta.
+        if (factura.fechaFactura && factura.lineas.length > 0) {
+          costosParaAutoEmitir.push(created.id);
+        }
+      }
+
+      // Auto-emit fuera del create loop para que las lineas estén persistidas.
+      // Si la emisión falla (período cerrado, proveedor sin cuenta), el costo
+      // queda en BORRADOR y se puede emitir manualmente desde la UI.
+      for (const costoId of costosParaAutoEmitir) {
+        try {
+          await crearAsientoEmbarqueCosto(costoId, tx);
+        } catch (err) {
+          // Loggeado pero no abortamos el guardado del embarque.
+          // costoId fica como argumento separado (não interpolado) pra evitar
+          // log injection — Opengrep flags string concat com não-literal em log.
+          console.warn(
+            "No se pudo auto-emitir EmbarqueCosto:",
+            costoId,
+            err instanceof Error ? err.message : err,
+          );
         }
       }
 
@@ -732,10 +754,7 @@ export async function guardarEmbarqueAction(
 
     return { ok: true, id: saved.id, codigo: saved.codigo };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return {
         ok: false,
         error: `El código "${input.codigo}" ya está en uso.`,
@@ -749,6 +768,57 @@ export async function guardarEmbarqueAction(
       ok: false,
       error: "No se pudo guardar el embarque. Intente nuevamente.",
     };
+  }
+}
+
+// ============================================================
+// EmbarqueCosto factura standalone — emitir / anular
+// ============================================================
+
+export type EmitirEmbarqueCostoActionResult =
+  | { ok: true; asientoId: string; asientoNumero: number }
+  | { ok: false; error: string };
+
+export async function emitirEmbarqueCostoFacturaAction(
+  costoId: number,
+  fechaIso?: string,
+): Promise<EmitirEmbarqueCostoActionResult> {
+  let fecha: Date | undefined;
+  if (fechaIso) {
+    const d = new Date(fechaIso);
+    if (Number.isNaN(d.getTime())) {
+      return { ok: false, error: "Fecha inválida." };
+    }
+    fecha = d;
+  }
+  try {
+    const asiento = await crearAsientoEmbarqueCosto(costoId, undefined, fecha);
+    revalidatePath("/comex/embarques");
+    revalidatePath("/tesoreria/cuentas-a-pagar");
+    return { ok: true, asientoId: asiento.id, asientoNumero: asiento.numero };
+  } catch (err) {
+    if (err instanceof AsientoError) {
+      return { ok: false, error: err.message };
+    }
+    console.error("emitirEmbarqueCostoFacturaAction", err);
+    return { ok: false, error: "No se pudo emitir la factura." };
+  }
+}
+
+export async function anularEmbarqueCostoFacturaAction(
+  costoId: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await anularAsientoEmbarqueCosto(costoId);
+    revalidatePath("/comex/embarques");
+    revalidatePath("/tesoreria/cuentas-a-pagar");
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof AsientoError) {
+      return { ok: false, error: err.message };
+    }
+    console.error("anularEmbarqueCostoFacturaAction", err);
+    return { ok: false, error: "No se pudo anular la factura." };
   }
 }
 
@@ -854,9 +924,7 @@ export async function confirmarZonaPrimariaAction(
 // stock (en ZP no se generan MovimientoStock). Sólo permitido si el
 // embarque NO tiene cierre (asientoId) — primero anular el cierre.
 
-export type RevertirZonaPrimariaResult =
-  | { ok: true }
-  | { ok: false; error: string };
+export type RevertirZonaPrimariaResult = { ok: true } | { ok: false; error: string };
 
 export async function revertirZonaPrimariaAction(
   embarqueId: string,

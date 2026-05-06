@@ -86,10 +86,7 @@ async function withNumeracionRetry<T>(run: () => Promise<T>): Promise<T> {
     try {
       return await run();
     } catch (err) {
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === "P2002"
-      ) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
         lastErr = err;
         await sleep(5 + secureRandomInt(20));
         continue;
@@ -104,10 +101,7 @@ async function withNumeracionRetry<T>(run: () => Promise<T>): Promise<T> {
   );
 }
 
-async function obtenerProximoNumero(
-  tx: TxClient,
-  periodoId: number,
-): Promise<number> {
+async function obtenerProximoNumero(tx: TxClient, periodoId: number): Promise<number> {
   const agg = await tx.asiento.aggregate({
     where: { periodoId },
     _max: { numero: true },
@@ -152,10 +146,7 @@ async function resolverPeriodo(
   return periodo;
 }
 
-async function validarCuentas(
-  tx: TxClient,
-  cuentaIds: number[],
-): Promise<void> {
+async function validarCuentas(tx: TxClient, cuentaIds: number[]): Promise<void> {
   const ids = Array.from(new Set(cuentaIds));
   const cuentas = await tx.cuentaContable.findMany({
     where: { id: { in: ids } },
@@ -224,26 +215,17 @@ function validarLineasYBalance(lineas: LineaInput[]): {
   };
 }
 
-async function crearAsientoEnTx(
-  tx: TxClient,
-  input: CrearAsientoInput,
-): Promise<Asiento> {
+async function crearAsientoEnTx(tx: TxClient, input: CrearAsientoInput): Promise<Asiento> {
   const parsed = crearAsientoSchema.parse(input);
 
   const { totalDebe, totalHaber } = validarLineasYBalance(parsed.lineas);
 
   const tcDec = toDecimal(parsed.tipoCambio);
   if (tcDec.lte(0)) {
-    throw new AsientoError(
-      "LINEA_INVALIDA",
-      "tipoCambio debe ser mayor a cero.",
-    );
+    throw new AsientoError("LINEA_INVALIDA", "tipoCambio debe ser mayor a cero.");
   }
   if (parsed.moneda === Moneda.ARS && !tcDec.eq(1)) {
-    throw new AsientoError(
-      "LINEA_INVALIDA",
-      "tipoCambio debe ser 1 cuando moneda=ARS.",
-    );
+    throw new AsientoError("LINEA_INVALIDA", "tipoCambio debe ser 1 cuando moneda=ARS.");
   }
 
   const periodo = await resolverPeriodo(tx, parsed.fecha);
@@ -285,25 +267,17 @@ export async function crearAsientoManual(
   if (tx) {
     return crearAsientoEnTx(tx, input);
   }
-  return withNumeracionRetry(() =>
-    db.$transaction((innerTx) => crearAsientoEnTx(innerTx, input)),
-  );
+  return withNumeracionRetry(() => db.$transaction((innerTx) => crearAsientoEnTx(innerTx, input)));
 }
 
-async function contabilizarEnTx(
-  tx: TxClient,
-  asientoId: string,
-): Promise<Asiento> {
+async function contabilizarEnTx(tx: TxClient, asientoId: string): Promise<Asiento> {
   const asiento = await tx.asiento.findUnique({
     where: { id: asientoId },
     include: { periodo: { select: { estado: true } } },
   });
 
   if (!asiento) {
-    throw new AsientoError(
-      "ASIENTO_INEXISTENTE",
-      `El asiento ${asientoId} no existe.`,
-    );
+    throw new AsientoError("ASIENTO_INEXISTENTE", `El asiento ${asientoId} no existe.`);
   }
 
   if (asiento.estado !== AsientoEstado.BORRADOR) {
@@ -333,10 +307,7 @@ async function contabilizarEnTx(
   });
 }
 
-export async function contabilizarAsiento(
-  asientoId: string,
-  tx?: TxClient,
-): Promise<Asiento> {
+export async function contabilizarAsiento(asientoId: string, tx?: TxClient): Promise<Asiento> {
   if (tx) return contabilizarEnTx(tx, asientoId);
   return db.$transaction((innerTx) => contabilizarEnTx(innerTx, asientoId));
 }
@@ -348,10 +319,7 @@ async function anularEnTx(tx: TxClient, asientoId: string): Promise<Asiento> {
   });
 
   if (!asiento) {
-    throw new AsientoError(
-      "ASIENTO_INEXISTENTE",
-      `El asiento ${asientoId} no existe.`,
-    );
+    throw new AsientoError("ASIENTO_INEXISTENTE", `El asiento ${asientoId} no existe.`);
   }
 
   if (asiento.estado !== AsientoEstado.CONTABILIZADO) {
@@ -410,6 +378,12 @@ async function anularEnTx(tx: TxClient, asientoId: string): Promise<Asiento> {
     where: { asientoId },
     data: { asientoId: null, estado: "ANULADO" },
   });
+  // EmbarqueCosto factura standalone: si su asiento es anulado directamente
+  // (no via anularAsientoEmbarqueCosto), también marcar el costo como ANULADA.
+  await tx.embarqueCosto.updateMany({
+    where: { asientoId },
+    data: { asientoId: null, estado: "ANULADA" },
+  });
 
   return tx.asiento.update({
     where: { id: asientoId },
@@ -417,10 +391,7 @@ async function anularEnTx(tx: TxClient, asientoId: string): Promise<Asiento> {
   });
 }
 
-export async function anularAsiento(
-  asientoId: string,
-  tx?: TxClient,
-): Promise<Asiento> {
+export async function anularAsiento(asientoId: string, tx?: TxClient): Promise<Asiento> {
   if (tx) return anularEnTx(tx, asientoId);
   return db.$transaction((innerTx) => anularEnTx(innerTx, asientoId));
 }
@@ -441,10 +412,7 @@ export async function crearAsientoPrestamo(
     });
 
     if (!prestamo) {
-      throw new AsientoError(
-        "DOMINIO_INVALIDO",
-        `PrestamoExterno ${prestamoId} no existe.`,
-      );
+      throw new AsientoError("DOMINIO_INVALIDO", `PrestamoExterno ${prestamoId} no existe.`);
     }
 
     if (prestamo.asientoId) {
@@ -454,9 +422,7 @@ export async function crearAsientoPrestamo(
       );
     }
 
-    const valor = money(
-      toDecimal(prestamo.principal).mul(toDecimal(prestamo.tipoCambio)),
-    );
+    const valor = money(toDecimal(prestamo.principal).mul(toDecimal(prestamo.tipoCambio)));
 
     const asiento = await crearAsientoEnTx(inner, {
       fecha,
@@ -504,10 +470,7 @@ export async function crearAsientoMovimientoTesoreria(
     });
 
     if (!mov) {
-      throw new AsientoError(
-        "DOMINIO_INVALIDO",
-        `MovimientoTesoreria ${movimientoId} no existe.`,
-      );
+      throw new AsientoError("DOMINIO_INVALIDO", `MovimientoTesoreria ${movimientoId} no existe.`);
     }
 
     if (mov.asientoId) {
@@ -526,8 +489,7 @@ export async function crearAsientoMovimientoTesoreria(
     // 67% como gasto (5.8.1.06). Aplica sólo en PAGO y cuando la
     // contrapartida elegida es la cuenta del impuesto.
     const esImpuestoLey25413 =
-      mov.tipo === MovimientoTesoreriaTipo.PAGO &&
-      mov.cuentaContable?.codigo === "5.8.1.06";
+      mov.tipo === MovimientoTesoreriaTipo.PAGO && mov.cuentaContable?.codigo === "5.8.1.06";
 
     let lineas: LineaInput[];
 
@@ -537,8 +499,7 @@ export async function crearAsientoMovimientoTesoreria(
         EXTRACTO_BANCARIO_CODIGOS.CREDITO_LEY_25413_GANANCIAS,
       );
       const montoAbs = toDecimal(mov.monto).toNumber();
-      const creditoMonto =
-        Math.round(montoAbs * PORCENTAJE_LEY_25413_COMPUTABLE * 100) / 100;
+      const creditoMonto = Math.round(montoAbs * PORCENTAJE_LEY_25413_COMPUTABLE * 100) / 100;
       const gastoMonto = Math.round((montoAbs - creditoMonto) * 100) / 100;
       lineas = [
         {
@@ -615,14 +576,9 @@ export async function crearAsientoTransferencia(
   input: CrearTransferenciaInput,
   tx?: TxClient,
 ): Promise<{ asiento: Asiento; movimientoId: string }> {
-  const run = async (
-    inner: TxClient,
-  ): Promise<{ asiento: Asiento; movimientoId: string }> => {
+  const run = async (inner: TxClient): Promise<{ asiento: Asiento; movimientoId: string }> => {
     if (input.cuentaBancariaOrigenId === input.cuentaBancariaDestinoId) {
-      throw new AsientoError(
-        "DOMINIO_INVALIDO",
-        "La cuenta origen y destino deben ser distintas.",
-      );
+      throw new AsientoError("DOMINIO_INVALIDO", "La cuenta origen y destino deben ser distintas.");
     }
 
     const [origen, destino] = await Promise.all([
@@ -667,22 +623,13 @@ export async function crearAsientoTransferencia(
     const tcDestinoDec = toDecimal(input.tipoCambioDestino);
 
     if (montoOrigenDec.lte(0)) {
-      throw new AsientoError(
-        "LINEA_INVALIDA",
-        "El monto origen debe ser mayor a cero.",
-      );
+      throw new AsientoError("LINEA_INVALIDA", "El monto origen debe ser mayor a cero.");
     }
     if (montoDestinoDec.lte(0)) {
-      throw new AsientoError(
-        "LINEA_INVALIDA",
-        "El monto destino debe ser mayor a cero.",
-      );
+      throw new AsientoError("LINEA_INVALIDA", "El monto destino debe ser mayor a cero.");
     }
     if (tcOrigenDec.lte(0) || tcDestinoDec.lte(0)) {
-      throw new AsientoError(
-        "LINEA_INVALIDA",
-        "Los tipos de cambio deben ser mayores a cero.",
-      );
+      throw new AsientoError("LINEA_INVALIDA", "Los tipos de cambio deben ser mayores a cero.");
     }
     if (origen.moneda === Moneda.ARS && !tcOrigenDec.eq(1)) {
       throw new AsientoError(
@@ -727,9 +674,7 @@ export async function crearAsientoTransferencia(
         cuentaId: cuentaDifId,
         debe: diff.gt(0) ? 0 : absDiff,
         haber: diff.gt(0) ? absDiff : 0,
-        descripcion: diff.gt(0)
-          ? "Diferencia de cambio positiva"
-          : "Diferencia de cambio negativa",
+        descripcion: diff.gt(0) ? "Diferencia de cambio positiva" : "Diferencia de cambio negativa",
       });
     }
 
@@ -791,10 +736,7 @@ export async function crearAsientoEmbarque(
     });
 
     if (!embarque) {
-      throw new AsientoError(
-        "DOMINIO_INVALIDO",
-        `Embarque ${embarqueId} no existe.`,
-      );
+      throw new AsientoError("DOMINIO_INVALIDO", `Embarque ${embarqueId} no existe.`);
     }
 
     if (embarque.asientoId) {
@@ -817,30 +759,18 @@ export async function crearAsientoEmbarque(
     const seguroOrigenArs = embarque.valorSeguroOrigen
       ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
       : toDecimal(0);
-    const totalProveedorExteriorArs = fobArs
-      .plus(fleteOrigenArs)
-      .plus(seguroOrigenArs);
+    const totalProveedorExteriorArs = fobArs.plus(fleteOrigenArs).plus(seguroOrigenArs);
 
     // Tributos vienen en moneda del embarque (despacho en USD); se convierten
     // a ARS aplicando el TC del embarque. Cada uno se redondea a 2dp ANTES
     // de sumarlos para el HABER consolidado, garantizando DEBE = HABER.
     const die = toDecimal(embarque.die).times(tcEmb).toDecimalPlaces(2);
-    const te = toDecimal(embarque.tasaEstadistica)
-      .times(tcEmb)
-      .toDecimalPlaces(2);
-    const arancelSim = toDecimal(embarque.arancelSim)
-      .times(tcEmb)
-      .toDecimalPlaces(2);
+    const te = toDecimal(embarque.tasaEstadistica).times(tcEmb).toDecimalPlaces(2);
+    const arancelSim = toDecimal(embarque.arancelSim).times(tcEmb).toDecimalPlaces(2);
     const ivaAduana = toDecimal(embarque.iva).times(tcEmb).toDecimalPlaces(2);
-    const ivaAdicional = toDecimal(embarque.ivaAdicional)
-      .times(tcEmb)
-      .toDecimalPlaces(2);
-    const iibbAduana = toDecimal(embarque.iibb)
-      .times(tcEmb)
-      .toDecimalPlaces(2);
-    const ganancias = toDecimal(embarque.ganancias)
-      .times(tcEmb)
-      .toDecimalPlaces(2);
+    const ivaAdicional = toDecimal(embarque.ivaAdicional).times(tcEmb).toDecimalPlaces(2);
+    const iibbAduana = toDecimal(embarque.iibb).times(tcEmb).toDecimalPlaces(2);
+    const ganancias = toDecimal(embarque.ganancias).times(tcEmb).toDecimalPlaces(2);
 
     type Linea = {
       cuentaId: number;
@@ -903,11 +833,7 @@ export async function crearAsientoEmbarque(
 
     // 2) Tributos aduaneros (DEBE gasto/crédito, HABER AFIP/Aduana por pagar)
     pushDebe(porCodigo.get(EMBARQUE_CODIGOS.DIE_EGRESO.codigo)!, die, "DIE");
-    pushHaber(
-      porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO.codigo)!,
-      die,
-      "DIE por pagar (Aduana)",
-    );
+    pushHaber(porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO.codigo)!, die, "DIE por pagar (Aduana)");
 
     pushDebe(
       porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_EGRESO.codigo)!,
@@ -920,11 +846,7 @@ export async function crearAsientoEmbarque(
       "Tasa estadística por pagar",
     );
 
-    pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO.codigo)!,
-      arancelSim,
-      "Arancel SIM",
-    );
+    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO.codigo)!, arancelSim, "Arancel SIM");
     pushHaber(
       porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO.codigo)!,
       arancelSim,
@@ -978,9 +900,17 @@ export async function crearAsientoEmbarque(
     //    Si ya hay asiento de Zona Primaria, sólo procesamos facturas
     //    con momento === DESPACHO (las de ZONA_PRIMARIA ya están en
     //    el asiento de ZP).
-    const facturasParaCierre = tieneZonaPrimaria
-      ? embarque.costos.filter((f) => f.momento !== "ZONA_PRIMARIA")
-      : embarque.costos;
+    //
+    //    Estado de la factura: sólo se incluyen BORRADOR y LEGACY_BUNDLED.
+    //    Las EMITIDA tienen su asiento standalone propio en fechaFactura
+    //    (PR #2 de "Fato gerador para livro razão"); las ANULADA fueron
+    //    canceladas explícitamente. LEGACY_BUNDLED preserva el flujo previo
+    //    para registros creados antes del cambio.
+    const facturasParaCierre = (
+      tieneZonaPrimaria
+        ? embarque.costos.filter((f) => f.momento !== "ZONA_PRIMARIA")
+        : embarque.costos
+    ).filter((f) => f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED");
     for (const factura of facturasParaCierre) {
       if (factura.lineas.length === 0) continue;
 
@@ -997,19 +927,11 @@ export async function crearAsientoEmbarque(
       // Subtotales por línea (cada gasto a su cuenta analítica)
       let subtotalFacturaArs = toDecimal(0);
       for (const linea of factura.lineas) {
-        const subtotalArs = toDecimal(linea.subtotal)
-          .times(tc)
-          .toDecimalPlaces(2);
+        const subtotalArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
         if (!subtotalArs.gt(0)) continue;
 
-        const lineaLabel =
-          linea.descripcion?.trim() ||
-          linea.tipo.replace(/_/g, " ").toLowerCase();
-        pushDebe(
-          linea.cuentaContableGastoId,
-          subtotalArs,
-          `${facturaLabel} — ${lineaLabel}`,
-        );
+        const lineaLabel = linea.descripcion?.trim() || linea.tipo.replace(/_/g, " ").toLowerCase();
+        pushDebe(linea.cuentaContableGastoId, subtotalArs, `${facturaLabel} — ${lineaLabel}`);
         subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
       }
 
@@ -1032,17 +954,10 @@ export async function crearAsientoEmbarque(
       // del primer line) por falta de una cuenta dedicada. Si quiere
       // separar, abra una línea propia para otros.
       if (otrosArs.gt(0) && factura.lineas.length > 0) {
-        pushDebe(
-          factura.lineas[0].cuentaContableGastoId,
-          otrosArs,
-          `${facturaLabel} — otros`,
-        );
+        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros`);
       }
 
-      const totalFacturaArs = subtotalFacturaArs
-        .plus(ivaArs)
-        .plus(iibbArs)
-        .plus(otrosArs);
+      const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
 
       if (totalFacturaArs.gt(0)) {
         pushHaber(
@@ -1122,10 +1037,7 @@ export async function crearAsientoZonaPrimaria(
     });
 
     if (!embarque) {
-      throw new AsientoError(
-        "DOMINIO_INVALIDO",
-        `Embarque ${embarqueId} no existe.`,
-      );
+      throw new AsientoError("DOMINIO_INVALIDO", `Embarque ${embarqueId} no existe.`);
     }
 
     if (embarque.asientoZonaPrimariaId) {
@@ -1152,9 +1064,7 @@ export async function crearAsientoZonaPrimaria(
     const seguroOrigenArs = embarque.valorSeguroOrigen
       ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
       : toDecimal(0);
-    const totalProveedorExteriorArs = fobArs
-      .plus(fleteOrigenArs)
-      .plus(seguroOrigenArs);
+    const totalProveedorExteriorArs = fobArs.plus(fleteOrigenArs).plus(seguroOrigenArs);
 
     type Linea = {
       cuentaId: number;
@@ -1200,8 +1110,13 @@ export async function crearAsientoZonaPrimaria(
     );
 
     // 2) Facturas con momento === ZONA_PRIMARIA (puerto, frete terrestre,
-    //    op. logístico, gastos línea marítima local).
-    const facturasZP = embarque.costos.filter((f) => f.momento === "ZONA_PRIMARIA");
+    //    op. logístico, gastos línea marítima local). Filtra estado:
+    //    sólo BORRADOR y LEGACY_BUNDLED. EMITIDA tienen asiento standalone
+    //    propio (ADR fato gerador), ANULADA fueron canceladas.
+    const facturasZP = embarque.costos.filter(
+      (f) =>
+        f.momento === "ZONA_PRIMARIA" && (f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED"),
+    );
     for (const factura of facturasZP) {
       if (factura.lineas.length === 0) continue;
       if (!factura.proveedor.cuentaContableId) {
@@ -1218,8 +1133,7 @@ export async function crearAsientoZonaPrimaria(
       for (const linea of factura.lineas) {
         const subtotalArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
         if (!subtotalArs.gt(0)) continue;
-        const lineaLabel =
-          linea.descripcion?.trim() || linea.tipo.replace(/_/g, " ").toLowerCase();
+        const lineaLabel = linea.descripcion?.trim() || linea.tipo.replace(/_/g, " ").toLowerCase();
         pushDebe(linea.cuentaContableGastoId, subtotalArs, `${facturaLabel} — ${lineaLabel} (ZP)`);
         subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
       }
@@ -1239,11 +1153,7 @@ export async function crearAsientoZonaPrimaria(
         `${facturaLabel} — IIBB crédito (ZP)`,
       );
       if (otrosArs.gt(0) && factura.lineas.length > 0) {
-        pushDebe(
-          factura.lineas[0].cuentaContableGastoId,
-          otrosArs,
-          `${facturaLabel} — otros (ZP)`,
-        );
+        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros (ZP)`);
       }
 
       const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
@@ -1334,10 +1244,7 @@ export async function crearAsientoZonaPrimaria(
 // facturas ZP) ARS / cantidad_TOTAL_embarque, prorateado FOB-proporcional
 // por ItemEmbarque.
 
-export async function crearAsientoDespacho(
-  despachoId: string,
-  tx?: TxClient,
-): Promise<Asiento> {
+export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): Promise<Asiento> {
   const run = async (inner: TxClient) => {
     const despacho = await inner.despacho.findUnique({
       where: { id: despachoId },
@@ -1374,10 +1281,7 @@ export async function crearAsientoDespacho(
     });
 
     if (!despacho) {
-      throw new AsientoError(
-        "DOMINIO_INVALIDO",
-        `Despacho ${despachoId} no existe.`,
-      );
+      throw new AsientoError("DOMINIO_INVALIDO", `Despacho ${despachoId} no existe.`);
     }
     if (despacho.estado !== "BORRADOR") {
       throw new AsientoError(
@@ -1456,9 +1360,7 @@ export async function crearAsientoDespacho(
     const seguroOrigenArs = embarque.valorSeguroOrigen
       ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
       : toDecimal(0);
-    const facturasZP = embarque.costos.filter(
-      (f) => f.momento === "ZONA_PRIMARIA",
-    );
+    const facturasZP = embarque.costos.filter((f) => f.momento === "ZONA_PRIMARIA");
     let zpFacturasArs = toDecimal(0);
     for (const f of facturasZP) {
       const tc = toDecimal(f.tipoCambio);
@@ -1489,13 +1391,9 @@ export async function crearAsientoDespacho(
       const fobItemUsd = toDecimal(ie.precioUnitarioFob).times(ie.cantidad);
       const proporcion = fobTotalUsd.gt(0)
         ? fobItemUsd.dividedBy(fobTotalUsd)
-        : toDecimal(ie.cantidad).dividedBy(
-            embarque.items.reduce((s, x) => s + x.cantidad, 0) || 1,
-          );
+        : toDecimal(ie.cantidad).dividedBy(embarque.items.reduce((s, x) => s + x.cantidad, 0) || 1);
       const costoItemArs = costoEnTransitoTotalArs.times(proporcion);
-      const costoUnit = costoItemArs
-        .dividedBy(ie.cantidad)
-        .toDecimalPlaces(2);
+      const costoUnit = costoItemArs.dividedBy(ie.cantidad).toDecimalPlaces(2);
       itemEmbCostoUnit.set(ie.id, costoUnit);
     }
 
@@ -1545,27 +1443,15 @@ export async function crearAsientoDespacho(
 
     // 2) Tributos aduaneros del despacho (mismo patrón que cierre legacy).
     const die = toDecimal(despacho.die).times(tcDsp).toDecimalPlaces(2);
-    const te = toDecimal(despacho.tasaEstadistica)
-      .times(tcDsp)
-      .toDecimalPlaces(2);
-    const arancelSim = toDecimal(despacho.arancelSim)
-      .times(tcDsp)
-      .toDecimalPlaces(2);
+    const te = toDecimal(despacho.tasaEstadistica).times(tcDsp).toDecimalPlaces(2);
+    const arancelSim = toDecimal(despacho.arancelSim).times(tcDsp).toDecimalPlaces(2);
     const ivaAduana = toDecimal(despacho.iva).times(tcDsp).toDecimalPlaces(2);
-    const ivaAdicional = toDecimal(despacho.ivaAdicional)
-      .times(tcDsp)
-      .toDecimalPlaces(2);
+    const ivaAdicional = toDecimal(despacho.ivaAdicional).times(tcDsp).toDecimalPlaces(2);
     const iibbAduana = toDecimal(despacho.iibb).times(tcDsp).toDecimalPlaces(2);
-    const ganancias = toDecimal(despacho.ganancias)
-      .times(tcDsp)
-      .toDecimalPlaces(2);
+    const ganancias = toDecimal(despacho.ganancias).times(tcDsp).toDecimalPlaces(2);
 
     pushDebe(porCodigo.get(EMBARQUE_CODIGOS.DIE_EGRESO.codigo)!, die, "DIE");
-    pushHaber(
-      porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO.codigo)!,
-      die,
-      "DIE por pagar (Aduana)",
-    );
+    pushHaber(porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO.codigo)!, die, "DIE por pagar (Aduana)");
     pushDebe(
       porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_EGRESO.codigo)!,
       te,
@@ -1576,11 +1462,7 @@ export async function crearAsientoDespacho(
       te,
       "Tasa estadística por pagar",
     );
-    pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO.codigo)!,
-      arancelSim,
-      "Arancel SIM",
-    );
+    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO.codigo)!, arancelSim, "Arancel SIM");
     pushHaber(
       porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO.codigo)!,
       arancelSim,
@@ -1622,9 +1504,14 @@ export async function crearAsientoDespacho(
       "Ganancias importación por pagar",
     );
 
-    // 3) Facturas linkadas a este despacho (DESPACHO).
+    // 3) Facturas linkadas a este despacho (DESPACHO). Filtra estado:
+    //    sólo BORRADOR y LEGACY_BUNDLED. EMITIDA tienen asiento standalone
+    //    propio (ADR fato gerador); ANULADA fueron canceladas.
     const facturasDespacho = embarque.costos.filter(
-      (f) => f.despachoId === despacho.id && f.momento !== "ZONA_PRIMARIA",
+      (f) =>
+        f.despachoId === despacho.id &&
+        f.momento !== "ZONA_PRIMARIA" &&
+        (f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED"),
     );
     for (const factura of facturasDespacho) {
       if (factura.lineas.length === 0) continue;
@@ -1639,18 +1526,10 @@ export async function crearAsientoDespacho(
 
       let subtotalFacturaArs = toDecimal(0);
       for (const linea of factura.lineas) {
-        const subtotalArs = toDecimal(linea.subtotal)
-          .times(tc)
-          .toDecimalPlaces(2);
+        const subtotalArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
         if (!subtotalArs.gt(0)) continue;
-        const lineaLabel =
-          linea.descripcion?.trim() ||
-          linea.tipo.replace(/_/g, " ").toLowerCase();
-        pushDebe(
-          linea.cuentaContableGastoId,
-          subtotalArs,
-          `${facturaLabel} — ${lineaLabel}`,
-        );
+        const lineaLabel = linea.descripcion?.trim() || linea.tipo.replace(/_/g, " ").toLowerCase();
+        pushDebe(linea.cuentaContableGastoId, subtotalArs, `${facturaLabel} — ${lineaLabel}`);
         subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
       }
       const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
@@ -1667,16 +1546,9 @@ export async function crearAsientoDespacho(
         `${facturaLabel} — IIBB crédito`,
       );
       if (otrosArs.gt(0) && factura.lineas.length > 0) {
-        pushDebe(
-          factura.lineas[0].cuentaContableGastoId,
-          otrosArs,
-          `${facturaLabel} — otros`,
-        );
+        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros`);
       }
-      const totalFacturaArs = subtotalFacturaArs
-        .plus(ivaArs)
-        .plus(iibbArs)
-        .plus(otrosArs);
+      const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
       if (totalFacturaArs.gt(0)) {
         pushHaber(
           factura.proveedor.cuentaContableId,
@@ -1744,10 +1616,7 @@ export async function crearAsientoDespacho(
 // El cliente es la contraparte deudora; la venta genera la cuenta a cobrar.
 // Cada componente se redondea a 2dp ANTES de sumar para que DEBE = HABER exacto.
 
-export async function crearAsientoVenta(
-  ventaId: string,
-  tx?: TxClient,
-): Promise<Asiento> {
+export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise<Asiento> {
   const run = async (inner: TxClient) => {
     const venta = await inner.venta.findUnique({
       where: { id: ventaId },
@@ -1775,10 +1644,7 @@ export async function crearAsientoVenta(
       },
     });
     if (!venta) {
-      throw new AsientoError(
-        "DOMINIO_INVALIDO",
-        `Venta ${ventaId} no existe.`,
-      );
+      throw new AsientoError("DOMINIO_INVALIDO", `Venta ${ventaId} no existe.`);
     }
     if (venta.asientoId) {
       throw new AsientoError(
@@ -1802,8 +1668,7 @@ export async function crearAsientoVenta(
     // mantiene en pesos (capitalización post-rateio embarque).
     const totalCosto = venta.items
       .reduce(
-        (acc, it) =>
-          acc.plus(toDecimal(it.producto.costoPromedio).times(it.cantidad)),
+        (acc, it) => acc.plus(toDecimal(it.producto.costoPromedio).times(it.cantidad)),
         toDecimal(0),
       )
       .toDecimalPlaces(2);
@@ -1813,14 +1678,11 @@ export async function crearAsientoVenta(
     // gravable porque es un gasto comercial deducible. Solo si > 0.
     const utilidadBruta = subtotal.minus(totalCosto).minus(flete);
     const provisionGanancias = utilidadBruta.gt(0)
-      ? utilidadBruta
-          .times(TASA_PROVISION_GANANCIAS)
-          .toDecimalPlaces(2)
+      ? utilidadBruta.times(TASA_PROVISION_GANANCIAS).toDecimalPlaces(2)
       : toDecimal(0);
 
     const clienteCuentaId =
-      venta.cliente.cuentaContableId ??
-      porCodigo.get(VENTA_CODIGOS.CLIENTE_FALLBACK.codigo)!;
+      venta.cliente.cuentaContableId ?? porCodigo.get(VENTA_CODIGOS.CLIENTE_FALLBACK.codigo)!;
 
     // Cheques recibidos como cobro: van a 1.1.4.20 VALORES A COBRAR.
     // El residual (total - cheques) queda como saldo del cliente.
@@ -1969,10 +1831,7 @@ export async function crearAsientoVenta(
 // contra CMV. Después de este asiento, el contable está alineado con
 // el stock físico (que también baja vía MovimientoStock EGRESO).
 
-export async function crearAsientoEntrega(
-  entregaId: string,
-  tx?: TxClient,
-): Promise<Asiento> {
+export async function crearAsientoEntrega(entregaId: string, tx?: TxClient): Promise<Asiento> {
   const run = async (inner: TxClient) => {
     const entrega = await inner.entregaVenta.findUnique({
       where: { id: entregaId },
@@ -1988,10 +1847,7 @@ export async function crearAsientoEntrega(
       },
     });
     if (!entrega) {
-      throw new AsientoError(
-        "DOMINIO_INVALIDO",
-        `Entrega ${entregaId} no existe.`,
-      );
+      throw new AsientoError("DOMINIO_INVALIDO", `Entrega ${entregaId} no existe.`);
     }
     if (entrega.asientoId) {
       throw new AsientoError(
@@ -2001,10 +1857,7 @@ export async function crearAsientoEntrega(
     }
 
     const totalCosto = entrega.items
-      .reduce(
-        (acc, it) => acc.plus(toDecimal(it.costoUnitario).times(it.cantidad)),
-        toDecimal(0),
-      )
+      .reduce((acc, it) => acc.plus(toDecimal(it.costoUnitario).times(it.cantidad)), toDecimal(0))
       .toDecimalPlaces(2);
 
     if (!totalCosto.gt(0)) {
@@ -2057,10 +1910,7 @@ export async function crearAsientoEntrega(
 // DEBE  1.1.4.11 Crédito IIBB Compras         iibb × TC (si > 0)
 // HABER proveedor.cuentaContableId (or 2.1.1.01)   total × TC
 
-export async function crearAsientoCompra(
-  compraId: string,
-  tx?: TxClient,
-): Promise<Asiento> {
+export async function crearAsientoCompra(compraId: string, tx?: TxClient): Promise<Asiento> {
   const run = async (inner: TxClient) => {
     const compra = await inner.compra.findUnique({
       where: { id: compraId },
@@ -2077,10 +1927,7 @@ export async function crearAsientoCompra(
       },
     });
     if (!compra) {
-      throw new AsientoError(
-        "DOMINIO_INVALIDO",
-        `Compra ${compraId} no existe.`,
-      );
+      throw new AsientoError("DOMINIO_INVALIDO", `Compra ${compraId} no existe.`);
     }
     if (compra.asientoId) {
       throw new AsientoError(
@@ -2096,8 +1943,7 @@ export async function crearAsientoCompra(
     //   2. tipoProveedor → GASTO_POR_TIPO_PROVEEDOR (default por categoría)
     const gastoDef = GASTO_POR_TIPO_PROVEEDOR[compra.proveedor.tipoProveedor];
     const gastoCuentaId =
-      compra.proveedor.cuentaGastoContableId ??
-      (await getOrCreateCuenta(inner, gastoDef));
+      compra.proveedor.cuentaGastoContableId ?? (await getOrCreateCuenta(inner, gastoDef));
 
     const tc = toDecimal(compra.tipoCambio);
     const subtotal = toDecimal(compra.subtotal).times(tc).toDecimalPlaces(2);
@@ -2108,8 +1954,7 @@ export async function crearAsientoCompra(
 
     let proveedorCuentaId = compra.proveedor.cuentaContableId;
     if (!proveedorCuentaId) {
-      proveedorCuentaId =
-        porCodigo.get(COMPRA_CODIGOS.PROVEEDOR_FALLBACK.codigo) ?? null;
+      proveedorCuentaId = porCodigo.get(COMPRA_CODIGOS.PROVEEDOR_FALLBACK.codigo) ?? null;
       if (!proveedorCuentaId) {
         throw new AsientoError(
           "CUENTA_INVALIDA",
@@ -2192,10 +2037,7 @@ export async function crearAsientoCompra(
 //
 // Usa las mismas cuentas IVA/IIBB de COMPRA_CODIGOS (no son de
 // importación). Total proveedor = subtotal + iva + iibb + otros.
-export async function crearAsientoGasto(
-  gastoId: string,
-  tx?: TxClient,
-): Promise<Asiento> {
+export async function crearAsientoGasto(gastoId: string, tx?: TxClient): Promise<Asiento> {
   const run = async (inner: TxClient) => {
     const gasto = await inner.gasto.findUnique({
       where: { id: gastoId },
@@ -2211,10 +2053,7 @@ export async function crearAsientoGasto(
       },
     });
     if (!gasto) {
-      throw new AsientoError(
-        "DOMINIO_INVALIDO",
-        `Gasto ${gastoId} no existe.`,
-      );
+      throw new AsientoError("DOMINIO_INVALIDO", `Gasto ${gastoId} no existe.`);
     }
     if (gasto.asientoId) {
       throw new AsientoError(
@@ -2233,8 +2072,7 @@ export async function crearAsientoGasto(
 
     let proveedorCuentaId = gasto.proveedor.cuentaContableId;
     if (!proveedorCuentaId) {
-      proveedorCuentaId =
-        porCodigo.get(COMPRA_CODIGOS.PROVEEDOR_FALLBACK.codigo) ?? null;
+      proveedorCuentaId = porCodigo.get(COMPRA_CODIGOS.PROVEEDOR_FALLBACK.codigo) ?? null;
       if (!proveedorCuentaId) {
         throw new AsientoError(
           "CUENTA_INVALIDA",
@@ -2319,4 +2157,177 @@ export async function crearAsientoGasto(
   };
   if (tx) return run(tx);
   return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
+// EMBARQUE COSTO — Factura standalone (ADR fato gerador)
+// ============================================================
+//
+// Genera asiento individual para una EmbarqueCosto en `fechaFactura`
+// (ADR 2026-05-06-fato-gerador-livro-razao). Reemplaza el bundling
+// previo en el asiento de cierre/despacho.
+//
+// Estado lifecycle:
+//  - BORRADOR        creado, sin asiento
+//  - EMITIDA         con asiento standalone (DEBE lineas+IVA+IIBB+otros / HABER proveedor)
+//  - ANULADA         asiento anulado, factura cancelada
+//  - LEGACY_BUNDLED  contabilizado en cierre/despacho (pre-PR)
+
+export async function crearAsientoEmbarqueCosto(
+  costoId: number,
+  tx?: TxClient,
+  fecha?: Date,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const costo = await inner.embarqueCosto.findUnique({
+      where: { id: costoId },
+      include: {
+        proveedor: { select: { id: true, nombre: true, cuentaContableId: true } },
+        embarque: { select: { codigo: true } },
+        lineas: { orderBy: { id: "asc" } },
+      },
+    });
+    if (!costo) {
+      throw new AsientoError("DOMINIO_INVALIDO", `EmbarqueCosto ${costoId} no existe.`);
+    }
+    if (costo.asientoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `EmbarqueCosto ${costoId} ya tiene asiento contable.`,
+      );
+    }
+    if (costo.estado === "EMITIDA") {
+      throw new AsientoError("ESTADO_INVALIDO", `EmbarqueCosto ${costoId} ya está EMITIDA.`);
+    }
+    if (costo.estado === "LEGACY_BUNDLED") {
+      throw new AsientoError(
+        "ESTADO_INVALIDO",
+        `EmbarqueCosto ${costoId} es LEGACY_BUNDLED — ya fue contabilizado en el cierre/despacho.`,
+      );
+    }
+    if (!costo.fechaFactura) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `EmbarqueCosto ${costoId}: fechaFactura es requerida para emitir.`,
+      );
+    }
+    if (costo.lineas.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `EmbarqueCosto ${costoId}: agregá al menos una línea con cuenta de gasto.`,
+      );
+    }
+    if (!costo.proveedor.cuentaContableId) {
+      throw new AsientoError(
+        "CUENTA_INVALIDA",
+        `Proveedor ${costo.proveedor.nombre} no tiene cuenta contable asociada.`,
+      );
+    }
+
+    const porCodigo = await ensureCuentasMap(inner, EMBARQUE_CODIGOS);
+    const tc = toDecimal(costo.tipoCambio);
+    const ivaArs = toDecimal(costo.iva).times(tc).toDecimalPlaces(2);
+    const iibbArs = toDecimal(costo.iibb).times(tc).toDecimalPlaces(2);
+    const otrosArs = toDecimal(costo.otros).times(tc).toDecimalPlaces(2);
+
+    const facturaLabel = `${costo.proveedor.nombre}${costo.facturaNumero ? ` Fact.${costo.facturaNumero}` : ` EmbarqueCosto#${costo.id}`} — ${costo.embarque.codigo}`;
+
+    const lineas: LineaInput[] = [];
+    let subtotalArs = toDecimal(0);
+    for (const linea of costo.lineas) {
+      const lineaArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
+      if (!gtZero(lineaArs)) continue;
+      const lineaLabel = linea.descripcion?.trim() || linea.tipo.replace(/_/g, " ").toLowerCase();
+      lineas.push({
+        cuentaId: linea.cuentaContableGastoId,
+        debe: money(lineaArs).toString(),
+        haber: 0,
+        descripcion: `${facturaLabel} — ${lineaLabel}`,
+      });
+      subtotalArs = subtotalArs.plus(lineaArs);
+    }
+    if (lineas.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `EmbarqueCosto ${costoId}: la suma de las líneas es cero.`,
+      );
+    }
+    if (ivaArs.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS.codigo)!,
+        debe: money(ivaArs).toString(),
+        haber: 0,
+        descripcion: `${facturaLabel} — IVA crédito`,
+      });
+    }
+    if (iibbArs.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS.codigo)!,
+        debe: money(iibbArs).toString(),
+        haber: 0,
+        descripcion: `${facturaLabel} — IIBB crédito`,
+      });
+    }
+    if (otrosArs.gt(0)) {
+      // "Otros" se imputa al primer gasto de la factura (consistente con
+      // crearAsientoEmbarque legacy bundling).
+      lineas.push({
+        cuentaId: costo.lineas[0].cuentaContableGastoId,
+        debe: money(otrosArs).toString(),
+        haber: 0,
+        descripcion: `${facturaLabel} — otros`,
+      });
+    }
+    const totalArs = subtotalArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+    lineas.push({
+      cuentaId: costo.proveedor.cuentaContableId,
+      debe: 0,
+      haber: money(totalArs).toString(),
+      descripcion: `${facturaLabel} — total a pagar${costo.fechaVencimiento ? ` (vence ${costo.fechaVencimiento.toISOString().slice(0, 10)})` : ""}`,
+    });
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: fecha ?? costo.fechaFactura,
+      descripcion: `Factura emitida ${costo.facturaNumero ?? `EmbarqueCosto#${costo.id}`} — ${costo.embarque.codigo}`,
+      origen: AsientoOrigen.COMEX,
+      moneda: Moneda.ARS,
+      tipoCambio: 1,
+      lineas,
+    });
+    await contabilizarEnTx(inner, asiento.id);
+    await inner.embarqueCosto.update({
+      where: { id: costoId },
+      data: { asientoId: asiento.id, estado: "EMITIDA" },
+    });
+    return asiento;
+  };
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+export async function anularAsientoEmbarqueCosto(costoId: number, tx?: TxClient): Promise<void> {
+  const run = async (inner: TxClient) => {
+    const costo = await inner.embarqueCosto.findUnique({
+      where: { id: costoId },
+      select: { id: true, asientoId: true, estado: true },
+    });
+    if (!costo) {
+      throw new AsientoError("DOMINIO_INVALIDO", `EmbarqueCosto ${costoId} no existe.`);
+    }
+    if (costo.estado !== "EMITIDA" || !costo.asientoId) {
+      throw new AsientoError(
+        "ESTADO_INVALIDO",
+        `EmbarqueCosto ${costoId} no está EMITIDA — nada para anular.`,
+      );
+    }
+    await anularEnTx(inner, costo.asientoId);
+    // anularEnTx ya hace updateMany sobre EmbarqueCosto vía detach, pero
+    // duplicamos por idempotencia (caso anularEnTx haya cambiado).
+    await inner.embarqueCosto.update({
+      where: { id: costoId },
+      data: { estado: "ANULADA", asientoId: null },
+    });
+  };
+  if (tx) return run(tx);
+  await db.$transaction(run);
 }
