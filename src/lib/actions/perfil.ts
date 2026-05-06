@@ -69,6 +69,16 @@ const modoRetroactivoSchema = z.object({
   modoRetroactivo: z.boolean(),
 });
 
+function isPrismaUserNotFound(err: unknown): boolean {
+  return (
+    err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025"
+  );
+}
+
+function firstZodMessage(error: z.ZodError): string {
+  return error.issues[0]?.message ?? "Datos inválidos.";
+}
+
 export async function actualizarModoRetroactivoAction(
   raw: z.input<typeof modoRetroactivoSchema>,
 ): Promise<ActionResult<{ modoRetroactivo: boolean }>> {
@@ -78,10 +88,7 @@ export async function actualizarModoRetroactivoAction(
   }
   const parsed = modoRetroactivoSchema.safeParse(raw);
   if (!parsed.success) {
-    return {
-      ok: false,
-      error: parsed.error.issues[0]?.message ?? "Datos inválidos.",
-    };
+    return { ok: false, error: firstZodMessage(parsed.error) };
   }
   try {
     await db.user.update({
@@ -95,7 +102,7 @@ export async function actualizarModoRetroactivoAction(
     revalidatePath("/", "layout");
     return { ok: true, data: { modoRetroactivo: parsed.data.modoRetroactivo } };
   } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+    if (isPrismaUserNotFound(err)) {
       return { ok: false, error: "Usuario no encontrado." };
     }
     console.error("actualizarModoRetroactivoAction failed", err);
