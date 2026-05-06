@@ -1,0 +1,74 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: "America/Argentina/Buenos_Aires"
+    open-pull-requests-limit: 10
+    versioning-strategy: increase
+    labels:
+      - dependencies
+      - npm
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    groups:
+      next-react:
+        patterns:
+          - "next"
+          - "next-*"
+          - "@next/*"
+          - "react"
+          - "react-*"
+          - "@types/react"
+          - "@types/react-dom"
+      prisma:
+        patterns:
+          - "@prisma/*"
+          - "prisma"
+      tooling:
+        patterns:
+          - "eslint"
+          - "eslint-*"
+          - "@eslint/*"
+          - "@biomejs/*"
+          - "typescript"
+          - "@types/node"
+      auth:
+        patterns:
+          - "next-auth"
+          - "@auth/*"
+          - "bcryptjs"
+      ui:
+        patterns:
+          - "@base-ui/*"
+          - "@hugeicons/*"
+          - "@tanstack/*"
+          - "tailwindcss"
+          - "@tailwindcss/*"
+          - "tailwind-merge"
+          - "tw-animate-css"
+          - "class-variance-authority"
+          - "clsx"
+          - "cmdk"
+          - "sonner"
+          - "shadcn"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: "America/Argentina/Buenos_Aires"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "chore(actions)"
+      include: scope
