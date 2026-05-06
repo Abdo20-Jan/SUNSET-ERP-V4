@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -57,6 +57,35 @@ type DialogState =
   | { mode: "edit"; row: GastoFijoRow }
   | { mode: "registrar"; row: GastoFijoRow }
   | null;
+
+// Extrair valores de form a partir de uma row (ou {} para criar novo).
+// Usa destructuring com defaults — sem branches `??`/`?.` na função, mantém
+// CCN baixo (Codacy/Lizard threshold é 8).
+function rowToFormValues({
+  descripcion = "",
+  proveedorId = "",
+  cuentaGastoContableId = null,
+  moneda = "ARS" as "ARS" | "USD",
+  montoNeto = "",
+  ivaPorcentaje = "21",
+  iibbPorcentaje = "0",
+  diaVencimiento = null as number | null,
+  activo = true,
+  notas = null as string | null,
+}: Partial<GastoFijoRow>) {
+  return {
+    descripcion,
+    proveedorId,
+    cuentaGastoId: cuentaGastoContableId,
+    moneda,
+    montoNeto,
+    ivaPorcentaje,
+    iibbPorcentaje,
+    diaVencimiento: diaVencimiento != null ? String(diaVencimiento) : "",
+    activo,
+    notas: notas ?? "",
+  };
+}
 
 const MESES = [
   "Enero",
@@ -237,20 +266,23 @@ function GastoFijoFormDialog({
   const [activo, setActivo] = useState(editing?.activo ?? true);
   const [notas, setNotas] = useState(editing?.notas ?? "");
 
-  // Reset state when dialog opens with different state
-  useMemo(() => {
+  // Reset state when dialog opens with different state.
+  // TODO(fase-4): substituir por `key={state?.row?.id ?? state?.mode}` no parent
+  // para remontar o form e eliminar este prop-sync effect.
+  useEffect(() => {
     if (!state) return;
-    const r = state.mode === "edit" ? state.row : null;
-    setDescripcion(r?.descripcion ?? "");
-    setProveedorId(r?.proveedorId ?? "");
-    setCuentaGastoId(r?.cuentaGastoContableId ?? null);
-    setMoneda(r?.moneda ?? "ARS");
-    setMontoNeto(r?.montoNeto ?? "");
-    setIvaPorcentaje(r?.ivaPorcentaje ?? "21");
-    setIibbPorcentaje(r?.iibbPorcentaje ?? "0");
-    setDiaVencimiento(r?.diaVencimiento != null ? String(r.diaVencimiento) : "");
-    setActivo(r?.activo ?? true);
-    setNotas(r?.notas ?? "");
+    const v = rowToFormValues(state.mode === "edit" ? state.row : {});
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-sync pattern, refactor pendente
+    setDescripcion(v.descripcion);
+    setProveedorId(v.proveedorId);
+    setCuentaGastoId(v.cuentaGastoId);
+    setMoneda(v.moneda);
+    setMontoNeto(v.montoNeto);
+    setIvaPorcentaje(v.ivaPorcentaje);
+    setIibbPorcentaje(v.iibbPorcentaje);
+    setDiaVencimiento(v.diaVencimiento);
+    setActivo(v.activo);
+    setNotas(v.notas);
   }, [state]);
 
   if (!state) return null;
@@ -312,9 +344,9 @@ function GastoFijoFormDialog({
             {state.mode === "edit" ? "Editar gasto fijo" : "Nuevo gasto fijo"}
           </DialogTitle>
           <DialogDescription>
-            Configurá un template para gastos recurrentes (ej: "Alquiler
-            escritorio", "Honorarios contador"). Después registrá cada mes
-            con el botón "Registrar".
+            Configurá un template para gastos recurrentes (ej: &quot;Alquiler
+            escritorio&quot;, &quot;Honorarios contador&quot;). Después registrá cada mes
+            con el botón &quot;Registrar&quot;.
           </DialogDescription>
         </DialogHeader>
 

@@ -85,7 +85,10 @@ export function DatePicker({
   const [open, setOpen] = React.useState(false);
   const [text, setText] = React.useState(() => isoToDisplay(value));
 
+  // Prop-sync: text input visual reflete o `value` externo (controlled).
+  // TODO(fase-5): considerar refatoração com `useState` lazy + ref-based comparison.
   React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-sync de input controlled
     setText(isoToDisplay(value));
   }, [value]);
 

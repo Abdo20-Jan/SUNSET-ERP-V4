@@ -26,6 +26,7 @@ export default async function ActividadesPage() {
   }
 
   const actividades = await listarActividadesPendientes(session.user.id);
+  // eslint-disable-next-line react-hooks/purity -- server component, valor capturado no momento do request
   const ahora = Date.now();
 
   return (

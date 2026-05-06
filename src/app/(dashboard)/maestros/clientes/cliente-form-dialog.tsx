@@ -405,7 +405,7 @@ export function ClienteFormDialog({
               <p className="text-xs text-muted-foreground">
                 Solo cuentas analíticas bajo{" "}
                 <span className="font-mono">1.1.3 CRÉDITOS POR VENTAS</span>.
-                Si elige "Crear automáticamente", el sistema asigna el
+                Si elige &quot;Crear automáticamente&quot;, el sistema asigna el
                 próximo código disponible al guardar.
               </p>
             </div>

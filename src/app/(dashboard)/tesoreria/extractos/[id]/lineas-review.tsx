@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -453,9 +453,11 @@ function EditarLineaDialog({
   );
   const [notas, setNotas] = useState<string>(linea?.notas ?? "");
 
-  // Re-sync when changing line
-  useMemo(() => {
+  // Re-sync when changing line.
+  // TODO(fase-4): substituir por `key={linea?.id}` no parent pra remontar e eliminar prop-sync.
+  useEffect(() => {
     if (linea) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-sync pattern, refactor pendente
       setCuentaId(linea.cuentaSugeridaId);
       setProveedorId(linea.proveedorSugeridoId);
       setClienteId(linea.clienteSugeridoId);

@@ -77,6 +77,11 @@ export function EmbarqueBatchPago({
   >(null);
   const [montoTransferido, setMontoTransferido] = useState<string>("");
 
+  const cuentasArs = useMemo(
+    () => cuentasBancarias.filter((c) => c.moneda === "ARS"),
+    [cuentasBancarias],
+  );
+
   if (rows.length === 0) return null;
 
   const rowByKey = new Map(rows.map((r) => [rowKey(r), r]));
@@ -90,11 +95,6 @@ export function EmbarqueBatchPago({
     const monto = override !== undefined ? Number(override) : Number(r.pendienteArs);
     return s + (Number.isFinite(monto) ? monto : 0);
   }, 0);
-
-  const cuentasArs = useMemo(
-    () => cuentasBancarias.filter((c) => c.moneda === "ARS"),
-    [cuentasBancarias],
-  );
 
   const toggle = (key: string) => {
     setSelected((prev) => {
@@ -249,7 +249,7 @@ export function EmbarqueBatchPago({
         <div className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
           <strong>¿Ya pagaste y la línea sigue acá?</strong> Verificá que el
           asiento del pago haya usado la <strong>cuenta del proveedor</strong>{" "}
-          (2.1.x) como contrapartida. La columna "Saldo proveedor" muestra la
+          (2.1.x) como contrapartida. La columna &quot;Saldo proveedor&quot; muestra la
           deuda viva real (haber − debe en su cuenta).
         </div>
 

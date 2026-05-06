@@ -514,7 +514,7 @@ export function ProveedorFormDialog({
               <p className="text-xs text-muted-foreground">
                 Solo cuentas analíticas bajo{" "}
                 <span className="font-mono">2.1.1 DEUDAS COMERCIALES</span>.
-                Si elige "Crear automáticamente", el sistema asigna el
+                Si elige &quot;Crear automáticamente&quot;, el sistema asigna el
                 próximo código disponible al guardar.
               </p>
             </div>

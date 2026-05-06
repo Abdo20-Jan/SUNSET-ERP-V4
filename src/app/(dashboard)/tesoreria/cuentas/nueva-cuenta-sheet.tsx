@@ -291,7 +291,7 @@ function NuevaCuentaSheet({
                 />
               )}
               <p className="text-xs text-muted-foreground">
-                Si elige "Crear automáticamente", el sistema asigna el próximo
+                Si elige &quot;Crear automáticamente&quot;, el sistema asigna el próximo
                 código disponible al guardar.
               </p>
             </div>
