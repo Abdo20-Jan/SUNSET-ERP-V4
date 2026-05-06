@@ -255,8 +255,7 @@ model User {
   monedaPreferida Moneda?  @default(USD)
   // Cuando true, los formularios no autocompletan la fecha con hoy. Útil
   // al cargar facturas históricas en lote para no contaminar la fecha
-  // del documento físico. Definido en PR #41 (Layer A); este branch lo
-  // preserva para coexistir con la migración de EmbarqueCosto.
+  // del documento físico.
   modoRetroactivo Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

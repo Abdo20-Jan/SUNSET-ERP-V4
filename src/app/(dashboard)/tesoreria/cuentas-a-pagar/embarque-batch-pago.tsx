@@ -46,35 +46,26 @@ type Props = {
   rows: CuentaAPagarPorEmbarque[];
   cuentasBancarias: CuentaBancariaOption[];
   proveedores: ProveedorOption[];
+  defaultFecha?: string;
 };
 
 function rowKey(r: CuentaAPagarPorEmbarque): string {
   return `${r.embarqueId}::${r.proveedorId}`;
 }
 
-export function EmbarqueBatchPago({
-  rows,
-  cuentasBancarias,
-  proveedores,
-}: Props) {
+export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, defaultFecha }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [montosOverride, setMontosOverride] = useState<
-    Record<string, string>
-  >({});
+  const [montosOverride, setMontosOverride] = useState<Record<string, string>>({});
   const [cuentaBancariaId, setCuentaBancariaId] = useState<string>("");
-  const [fecha, setFecha] = useState<string>(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [fecha, setFecha] = useState<string>(defaultFecha ?? new Date().toISOString().slice(0, 10));
   const [comprobante, setComprobante] = useState("");
   const [referenciaBanco, setReferenciaBanco] = useState("");
   const [descripcion, setDescripcion] = useState("");
   // Pago via intermediário (despachante que paga las facturas seleccionadas)
   const [conIntermediario, setConIntermediario] = useState(false);
-  const [intermediarioCuentaId, setIntermediarioCuentaId] = useState<
-    number | null
-  >(null);
+  const [intermediarioCuentaId, setIntermediarioCuentaId] = useState<number | null>(null);
   const [montoTransferido, setMontoTransferido] = useState<string>("");
 
   const cuentasArs = useMemo(
@@ -114,9 +105,7 @@ export function EmbarqueBatchPago({
   };
 
   const subtotalFacturas = totalSeleccionado;
-  const montoTransferidoNum = conIntermediario
-    ? Number(montoTransferido) || 0
-    : subtotalFacturas;
+  const montoTransferidoNum = conIntermediario ? Number(montoTransferido) || 0 : subtotalFacturas;
   const diferencia = montoTransferidoNum - subtotalFacturas;
 
   const onSubmit = () => {
@@ -219,9 +208,7 @@ export function EmbarqueBatchPago({
         toast.error(r.error);
         return;
       }
-      toast.success(
-        `Pago múltiple registrado — Asiento Nº ${r.asientoNumero}`,
-      );
+      toast.success(`Pago múltiple registrado — Asiento Nº ${r.asientoNumero}`);
       setSelected(new Set());
       setMontosOverride({});
       setComprobante("");
@@ -239,18 +226,16 @@ export function EmbarqueBatchPago({
         <div className="flex flex-col gap-0.5">
           <h2 className="text-sm font-semibold">Por embarque · Multi-pago</h2>
           <p className="text-xs text-muted-foreground">
-            Seleccioná uno o varios embarques/proveedores para pagar todos en
-            un único movimiento bancario (1 cheque o transferencia, N
-            beneficiarios). El asiento generado tiene 1 línea HABER al banco
-            y N líneas DEBE (una por cada proveedor seleccionado).
+            Seleccioná uno o varios embarques/proveedores para pagar todos en un único movimiento
+            bancario (1 cheque o transferencia, N beneficiarios). El asiento generado tiene 1 línea
+            HABER al banco y N líneas DEBE (una por cada proveedor seleccionado).
           </p>
         </div>
 
         <div className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
-          <strong>¿Ya pagaste y la línea sigue acá?</strong> Verificá que el
-          asiento del pago haya usado la <strong>cuenta del proveedor</strong>{" "}
-          (2.1.x) como contrapartida. La columna &quot;Saldo proveedor&quot; muestra la
-          deuda viva real (haber − debe en su cuenta).
+          <strong>¿Ya pagaste y la línea sigue acá?</strong> Verificá que el asiento del pago haya
+          usado la <strong>cuenta del proveedor</strong> (2.1.x) como contrapartida. La columna
+          &quot;Saldo proveedor&quot; muestra la deuda viva real (haber − debe en su cuenta).
         </div>
 
         <Table>
@@ -289,18 +274,16 @@ export function EmbarqueBatchPago({
                     tipo: "PAGO",
                     cuentaContableId: String(r.proveedorCuentaContableId),
                     monto: r.pendienteArs,
-                    descripcion: `Pago embarque ${r.embarqueCodigo} — ${r.proveedorNombre} — Fact: ${numerosFacturas}`.slice(
-                      0,
-                      255,
-                    ),
+                    descripcion:
+                      `Pago embarque ${r.embarqueCodigo} — ${r.proveedorNombre} — Fact: ${numerosFacturas}`.slice(
+                        0,
+                        255,
+                      ),
                   }).toString()}`
                 : null;
 
               return (
-                <TableRow
-                  key={k}
-                  className={isChecked ? "bg-primary/5" : undefined}
-                >
+                <TableRow key={k} className={isChecked ? "bg-primary/5" : undefined}>
                   <TableCell>
                     <Checkbox
                       checked={isChecked}
@@ -309,31 +292,23 @@ export function EmbarqueBatchPago({
                       aria-label={`Seleccionar ${r.embarqueCodigo}`}
                     />
                   </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {r.embarqueCodigo}
-                  </TableCell>
+                  <TableCell className="font-mono text-xs">{r.embarqueCodigo}</TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-0.5">
                       <span>{r.proveedorNombre}</span>
                       <span className="text-xs text-muted-foreground">
                         {r.proveedorCuentaCodigo && (
-                          <span className="font-mono">
-                            {r.proveedorCuentaCodigo} ·{" "}
-                          </span>
+                          <span className="font-mono">{r.proveedorCuentaCodigo} · </span>
                         )}
                         {r.facturas
                           .map((f) => f.numero)
                           .slice(0, 4)
                           .join(", ")}
-                        {r.facturas.length > 4
-                          ? ` (+${r.facturas.length - 4})`
-                          : ""}
+                        {r.facturas.length > 4 ? ` (+${r.facturas.length - 4})` : ""}
                       </span>
                     </div>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {r.facturas.length}
-                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{r.facturas.length}</TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
                     {fmtMoney(r.totalArs)}
                   </TableCell>
@@ -355,9 +330,7 @@ export function EmbarqueBatchPago({
                       </div>
                     )}
                     {partial && (
-                      <div className="text-[10px] font-normal text-muted-foreground">
-                        (parcial)
-                      </div>
+                      <div className="text-[10px] font-normal text-muted-foreground">(parcial)</div>
                     )}
                   </TableCell>
                   <TableCell className="text-right">
@@ -366,9 +339,7 @@ export function EmbarqueBatchPago({
                         type="text"
                         inputMode="decimal"
                         className="h-7 text-right font-mono text-xs tabular-nums"
-                        value={
-                          montosOverride[k] ?? r.pendienteArs
-                        }
+                        value={montosOverride[k] ?? r.pendienteArs}
                         onChange={(e) =>
                           setMontosOverride((prev) => ({
                             ...prev,
@@ -391,9 +362,7 @@ export function EmbarqueBatchPago({
                         Pagar
                       </Link>
                     ) : (
-                      <span className="text-xs text-muted-foreground">
-                        sin cuenta
-                      </span>
+                      <span className="text-xs text-muted-foreground">sin cuenta</span>
                     )}
                   </TableCell>
                 </TableRow>
@@ -419,14 +388,8 @@ export function EmbarqueBatchPago({
                   })}
                 </span>
               </div>
-              <Button
-                type="button"
-                onClick={onSubmit}
-                disabled={pending || !cuentaBancariaId}
-              >
-                {pending
-                  ? "Procesando…"
-                  : `Pagar ${seleccionados.length} con un movimiento`}
+              <Button type="button" onClick={onSubmit} disabled={pending || !cuentaBancariaId}>
+                {pending ? "Procesando…" : `Pagar ${seleccionados.length} con un movimiento`}
               </Button>
             </div>
 
@@ -444,14 +407,11 @@ export function EmbarqueBatchPago({
                 className="mt-0.5"
               />
               <div className="flex flex-col gap-0.5">
-                <span className="font-medium">
-                  Pago vía intermediário (despachante / agente)
-                </span>
+                <span className="font-medium">Pago vía intermediário (despachante / agente)</span>
                 <span className="text-muted-foreground">
-                  Activá si transferís a un despachante (ej: CYSAR) que paga
-                  estas facturas a TRP/EXOLGAN/etc en tu nombre. La diferencia
-                  entre el monto transferido y el subtotal queda como anticipo
-                  (a tu favor) o saldo pendiente con el intermediário.
+                  Activá si transferís a un despachante (ej: CYSAR) que paga estas facturas a
+                  TRP/EXOLGAN/etc en tu nombre. La diferencia entre el monto transferido y el
+                  subtotal queda como anticipo (a tu favor) o saldo pendiente con el intermediário.
                 </span>
               </div>
             </label>
@@ -460,28 +420,17 @@ export function EmbarqueBatchPago({
               <div className="flex flex-col gap-2 rounded-md border-2 border-amber-300/70 bg-amber-50/50 px-3 py-2 dark:border-amber-700/50 dark:bg-amber-950/20">
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                   <div className="flex flex-col gap-1">
-                    <Label className="text-[11px]">
-                      Beneficiário (intermediário) *
-                    </Label>
+                    <Label className="text-[11px]">Beneficiário (intermediário) *</Label>
                     <Select
-                      value={
-                        intermediarioCuentaId
-                          ? String(intermediarioCuentaId)
-                          : undefined
-                      }
-                      onValueChange={(v) =>
-                        setIntermediarioCuentaId(v ? Number(v) : null)
-                      }
+                      value={intermediarioCuentaId ? String(intermediarioCuentaId) : undefined}
+                      onValueChange={(v) => setIntermediarioCuentaId(v ? Number(v) : null)}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Seleccione proveedor intermediário">
                           {(value) => {
-                            if (!value)
-                              return "Seleccione proveedor intermediário";
+                            if (!value) return "Seleccione proveedor intermediário";
                             const id = Number(value);
-                            const p = proveedores.find(
-                              (x) => x.cuentaContableId === id,
-                            );
+                            const p = proveedores.find((x) => x.cuentaContableId === id);
                             return p ? p.proveedorNombre : `Cuenta #${id}`;
                           }}
                         </SelectValue>
@@ -493,10 +442,7 @@ export function EmbarqueBatchPago({
                               p.cuentaContableId !== null,
                           )
                           .map((p) => (
-                            <SelectItem
-                              key={p.proveedorId}
-                              value={String(p.cuentaContableId)}
-                            >
+                            <SelectItem key={p.proveedorId} value={String(p.cuentaContableId)}>
                               {p.proveedorNombre}
                             </SelectItem>
                           ))}
@@ -504,9 +450,7 @@ export function EmbarqueBatchPago({
                     </Select>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label className="text-[11px]">
-                      Monto efectivamente transferido (ARS) *
-                    </Label>
+                    <Label className="text-[11px]">Monto efectivamente transferido (ARS) *</Label>
                     <Input
                       type="text"
                       inputMode="decimal"
@@ -553,9 +497,7 @@ export function EmbarqueBatchPago({
                           : "border-rose-400 bg-rose-50/60 dark:bg-rose-950/30")
                     }
                   >
-                    <div className="text-[10px] uppercase text-muted-foreground">
-                      Diferencia
-                    </div>
+                    <div className="text-[10px] uppercase text-muted-foreground">Diferencia</div>
                     <div className="font-mono tabular-nums">
                       {Math.abs(diferencia) < 0.01 ? (
                         <span>—</span>
@@ -640,9 +582,7 @@ export function EmbarqueBatchPago({
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <Label className="text-[11px]">
-                  Referencia banco (opcional)
-                </Label>
+                <Label className="text-[11px]">Referencia banco (opcional)</Label>
                 <Input
                   placeholder="Cód. Op. del banco"
                   value={referenciaBanco}
@@ -661,9 +601,7 @@ export function EmbarqueBatchPago({
             </div>
 
             <div className="rounded-md border bg-card px-3 py-2 text-[12px]">
-              <p className="mb-1 font-medium">
-                Asiento que se generará (vista previa):
-              </p>
+              <p className="mb-1 font-medium">Asiento que se generará (vista previa):</p>
               <ul className="space-y-0.5 font-mono text-[11px]">
                 {seleccionados.map((r) => {
                   const k = rowKey(r);
@@ -673,8 +611,7 @@ export function EmbarqueBatchPago({
                       : Number(r.pendienteArs);
                   return (
                     <li key={k}>
-                      DEBE {r.proveedorCuentaCodigo ?? "?.?.?.?"}{" "}
-                      {r.proveedorNombre} —{" "}
+                      DEBE {r.proveedorCuentaCodigo ?? "?.?.?.?"} {r.proveedorNombre} —{" "}
                       <span className="tabular-nums">
                         ARS{" "}
                         {monto.toLocaleString("es-AR", {
@@ -682,62 +619,50 @@ export function EmbarqueBatchPago({
                           maximumFractionDigits: 2,
                         })}
                       </span>{" "}
-                      <span className="text-muted-foreground">
-                        ({r.embarqueCodigo})
-                      </span>
+                      <span className="text-muted-foreground">({r.embarqueCodigo})</span>
                     </li>
                   );
                 })}
-                {conIntermediario &&
-                  intermediarioCuentaId &&
-                  Math.abs(diferencia) >= 0.01 && (
-                    <li
-                      className={
-                        diferencia > 0
-                          ? "text-emerald-700 dark:text-emerald-400"
-                          : "text-rose-700 dark:text-rose-400"
-                      }
-                    >
-                      {diferencia > 0 ? "DEBE" : "HABER"}{" "}
-                      {(() => {
-                        const p = proveedores.find(
-                          (x) => x.cuentaContableId === intermediarioCuentaId,
-                        );
-                        return (
-                          p?.proveedorNombre ?? `Cuenta #${intermediarioCuentaId}`
-                        );
-                      })()}{" "}
-                      —{" "}
-                      <span className="tabular-nums">
-                        ARS{" "}
-                        {Math.abs(diferencia).toLocaleString("es-AR", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </span>{" "}
-                      <span className="text-muted-foreground">
-                        ({diferencia > 0 ? "anticipo" : "saldo pendiente"})
-                      </span>
-                    </li>
-                  )}
+                {conIntermediario && intermediarioCuentaId && Math.abs(diferencia) >= 0.01 && (
+                  <li
+                    className={
+                      diferencia > 0
+                        ? "text-emerald-700 dark:text-emerald-400"
+                        : "text-rose-700 dark:text-rose-400"
+                    }
+                  >
+                    {diferencia > 0 ? "DEBE" : "HABER"} {(() => {
+                      const p = proveedores.find(
+                        (x) => x.cuentaContableId === intermediarioCuentaId,
+                      );
+                      return p?.proveedorNombre ?? `Cuenta #${intermediarioCuentaId}`;
+                    })()} —{" "}
+                    <span className="tabular-nums">
+                      ARS{" "}
+                      {Math.abs(diferencia).toLocaleString("es-AR", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>{" "}
+                    <span className="text-muted-foreground">
+                      ({diferencia > 0 ? "anticipo" : "saldo pendiente"})
+                    </span>
+                  </li>
+                )}
                 <li className="border-t pt-0.5">
-                  HABER{" "}
-                  {(() => {
+                  HABER {(() => {
                     const c = cuentasArs.find((x) => x.id === cuentaBancariaId);
-                    return c
-                      ? `${c.cuentaContableCodigo} ${c.banco}`
-                      : "(elegí cuenta bancaria)";
-                  })()}{" "}
-                  —{" "}
+                    return c ? `${c.cuentaContableCodigo} ${c.banco}` : "(elegí cuenta bancaria)";
+                  })()} —{" "}
                   <span className="tabular-nums">
                     ARS{" "}
-                    {(conIntermediario
-                      ? montoTransferidoNum
-                      : subtotalFacturas
-                    ).toLocaleString("es-AR", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {(conIntermediario ? montoTransferidoNum : subtotalFacturas).toLocaleString(
+                      "es-AR",
+                      {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      },
+                    )}
                   </span>
                 </li>
               </ul>

@@ -8,6 +8,7 @@ declare module "next-auth" {
     nombre: string;
     role: Role;
     monedaPreferida: Moneda | null;
+    modoRetroactivo: boolean;
   }
 
   interface Session {
@@ -17,6 +18,7 @@ declare module "next-auth" {
       nombre: string;
       role: Role;
       monedaPreferida: Moneda | null;
+      modoRetroactivo: boolean;
     } & DefaultSession["user"];
   }
 }
@@ -28,5 +30,6 @@ declare module "next-auth/jwt" {
     nombre: string;
     role: Role;
     monedaPreferida: Moneda | null;
+    modoRetroactivo: boolean;
   }
 }

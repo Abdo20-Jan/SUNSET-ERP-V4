@@ -21,6 +21,7 @@ import {
 } from "@/lib/services/cuentas-a-pagar";
 import { listarCuentasBancariasParaVep } from "@/lib/actions/vep-embarque";
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
+import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { VepSection } from "./vep-section";
 import { EmbarqueBatchPago } from "./embarque-batch-pago";
@@ -38,6 +39,7 @@ export default async function CuentasAPagarPage() {
     cuentasBancariasArs,
     cuentasBancariasMov,
     saldoCreditoAduana,
+    defaultFecha,
   ] = await Promise.all([
     getCuentasAPagar(),
     getCuentasAPagarPorEmbarque(),
@@ -47,23 +49,20 @@ export default async function CuentasAPagarPage() {
     listarCuentasBancariasParaVep(),
     listarCuentasBancariasParaMovimiento(),
     getSaldoCreditoAduana(),
+    getDefaultFecha(),
   ]);
 
   // Filtrar 2.1.5.99 de la sección Aduana genérica — el saldo pendiente
   // de refuerzo se gestiona en la sección VEP con flujo dedicado.
-  const aduanaSinRefuerzo = data.aduana.filter(
-    (r) => r.cuentaCodigo !== "2.1.5.99",
-  );
+  const aduanaSinRefuerzo = data.aduana.filter((r) => r.cuentaCodigo !== "2.1.5.99");
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-[15px] font-semibold tracking-tight">
-          Cuentas a pagar
-        </h1>
+        <h1 className="text-[15px] font-semibold tracking-tight">Cuentas a pagar</h1>
         <p className="text-sm text-muted-foreground">
-          Saldos acreedores derivados de los asientos contabilizados. Para
-          dar de baja una deuda registre un pago en{" "}
+          Saldos acreedores derivados de los asientos contabilizados. Para dar de baja una deuda
+          registre un pago en{" "}
           <Link
             href="/tesoreria/movimientos/nuevo?tipo=PAGO"
             className="underline underline-offset-2"
@@ -86,12 +85,14 @@ export default async function CuentasAPagarPage() {
       <PagoPorFactura
         proveedores={saldosProveedores}
         cuentasBancarias={cuentasBancariasMov}
+        defaultFecha={defaultFecha}
       />
 
       <EmbarqueBatchPago
         rows={porEmbarque}
         cuentasBancarias={cuentasBancariasMov}
         proveedores={saldosProveedores}
+        defaultFecha={defaultFecha}
       />
 
       <VepSection
@@ -99,6 +100,7 @@ export default async function CuentasAPagarPage() {
         refuerzos={refuerzos}
         cuentasBancarias={cuentasBancariasArs}
         saldoCreditoAduana={saldoCreditoAduana.saldo}
+        defaultFecha={defaultFecha}
       />
 
       <Section
@@ -119,7 +121,6 @@ export default async function CuentasAPagarPage() {
         subtitle="Retenciones y percepciones a depositar (cuenta 2.1.3.x)."
         rows={data.fiscales}
       />
-
     </div>
   );
 }
@@ -168,15 +169,11 @@ function Section({
           </TableHeader>
           <TableBody>
             {rows.map((r) => {
-              const proveedoresActivos = r.proveedores.filter(
-                (p) => p.estado === "activo",
-              );
+              const proveedoresActivos = r.proveedores.filter((p) => p.estado === "activo");
               const pagarHref = buildPagarHref(r);
               return (
                 <TableRow key={r.cuentaId}>
-                  <TableCell className="font-mono text-xs">
-                    {r.cuentaCodigo}
-                  </TableCell>
+                  <TableCell className="font-mono text-xs">{r.cuentaCodigo}</TableCell>
                   <TableCell>{r.cuentaNombre}</TableCell>
                   {showProveedores && (
                     <TableCell className="text-xs text-muted-foreground">
@@ -211,13 +208,9 @@ function Section({
 function buildPagarHref(row: CxPRow): string {
   // Si la cuenta corresponde a un único proveedor activo, lo nombramos en
   // la descripción para dar contexto del pago.
-  const proveedoresActivos = row.proveedores.filter(
-    (p) => p.estado === "activo",
-  );
+  const proveedoresActivos = row.proveedores.filter((p) => p.estado === "activo");
   const refProveedor =
-    proveedoresActivos.length === 1
-      ? proveedoresActivos[0].nombre
-      : row.cuentaNombre;
+    proveedoresActivos.length === 1 ? proveedoresActivos[0].nombre : row.cuentaNombre;
 
   const params = new URLSearchParams({
     tipo: "PAGO",

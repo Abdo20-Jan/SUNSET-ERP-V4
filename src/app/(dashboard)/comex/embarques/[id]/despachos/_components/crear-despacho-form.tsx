@@ -4,15 +4,13 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
-import {
-  crearDespachoAction,
-  contabilizarDespachoAction,
-} from "@/lib/actions/despachos";
+import { crearDespachoAction, contabilizarDespachoAction } from "@/lib/actions/despachos";
 import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { RetroactivoBadge } from "@/components/ui/retroactivo-badge";
 import { fmtMoney } from "@/lib/format";
 
 type ItemDisponible = {
@@ -39,6 +37,7 @@ type Props = {
   depositos: Array<{ id: string; nombre: string }>;
   items: ItemDisponible[];
   facturas: FacturaOption[];
+  defaultFecha?: string;
 };
 
 export function CrearDespachoForm({
@@ -50,13 +49,14 @@ export function CrearDespachoForm({
   depositos,
   items,
   facturas,
+  defaultFecha,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const [fecha, setFecha] = useState(today);
+  const [fecha, setFecha] = useState(defaultFecha ?? today);
   const [numeroOM, setNumeroOM] = useState("");
   const [tipoCambio, setTipoCambio] = useState(embarqueTipoCambio);
   const [die, setDie] = useState("0");
@@ -88,9 +88,7 @@ export function CrearDespachoForm({
     }
     for (const it of itemsSeleccionados) {
       if (it.cantidad <= 0 || it.cantidad > it.remanente) {
-        toast.error(
-          `Cantidad inválida para ${it.productoCodigo}: máximo ${it.remanente}.`,
-        );
+        toast.error(`Cantidad inválida para ${it.productoCodigo}: máximo ${it.remanente}.`);
         return;
       }
     }
@@ -140,7 +138,10 @@ export function CrearDespachoForm({
       <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
         <div className="flex flex-col gap-1">
           <Label className="text-[11px]">Fecha despacho</Label>
-          <DatePicker value={fecha} onChange={setFecha} />
+          <div className="flex items-center gap-2">
+            <DatePicker value={fecha} onChange={setFecha} />
+            <RetroactivoBadge fecha={fecha} />
+          </div>
         </div>
         <div className="flex flex-col gap-1">
           <Label className="text-[11px]">Nº OM oficializado</Label>
@@ -163,8 +164,7 @@ export function CrearDespachoForm({
           <Label className="text-[11px]">Depósito destino</Label>
           <div className="flex h-8 items-center rounded-md border px-2.5 text-[13px] text-muted-foreground">
             {depositoDestinoId
-              ? (depositos.find((d) => d.id === depositoDestinoId)?.nombre ??
-                "—")
+              ? (depositos.find((d) => d.id === depositoDestinoId)?.nombre ?? "—")
               : "(definir en el embarque)"}
           </div>
         </div>
@@ -177,24 +177,12 @@ export function CrearDespachoForm({
         </legend>
         <div className="grid grid-cols-2 gap-2 md:grid-cols-7">
           <DecimalInput label="DIE" value={die} onChange={setDie} />
-          <DecimalInput
-            label="Tasa Estad."
-            value={tasaEstadistica}
-            onChange={setTasa}
-          />
-          <DecimalInput
-            label="Arancel SIM"
-            value={arancelSim}
-            onChange={setArancel}
-          />
+          <DecimalInput label="Tasa Estad." value={tasaEstadistica} onChange={setTasa} />
+          <DecimalInput label="Arancel SIM" value={arancelSim} onChange={setArancel} />
           <DecimalInput label="IVA" value={iva} onChange={setIva} />
           <DecimalInput label="IVA Ad." value={ivaAdicional} onChange={setIvaAd} />
           <DecimalInput label="IIBB" value={iibb} onChange={setIibb} />
-          <DecimalInput
-            label="Ganancias"
-            value={ganancias}
-            onChange={setGanancias}
-          />
+          <DecimalInput label="Ganancias" value={ganancias} onChange={setGanancias} />
         </div>
         <p className="mt-1.5 text-[11px] text-muted-foreground">
           Subtotal tributos: {embarqueMoneda} {fmtMoney(String(totalTributosEmb))}
@@ -220,35 +208,26 @@ export function CrearDespachoForm({
             </thead>
             <tbody className="divide-y">
               {itemsState.map((it, idx) => (
-                <tr
-                  key={it.itemEmbarqueId}
-                  className={it.selected ? "bg-primary/5" : undefined}
-                >
+                <tr key={it.itemEmbarqueId} className={it.selected ? "bg-primary/5" : undefined}>
                   <td className="px-2.5 py-1.5">
                     <Checkbox
                       checked={it.selected}
                       onCheckedChange={(v) => {
                         setItemsState((arr) =>
-                          arr.map((x, i) =>
-                            i === idx ? { ...x, selected: !!v } : x,
-                          ),
+                          arr.map((x, i) => (i === idx ? { ...x, selected: !!v } : x)),
                         );
                       }}
                     />
                   </td>
                   <td className="px-2.5 py-1.5">
-                    <span className="font-mono text-[11px]">
-                      {it.productoCodigo}
-                    </span>{" "}
+                    <span className="font-mono text-[11px]">{it.productoCodigo}</span>{" "}
                     {it.productoNombre}
                   </td>
                   <td className="px-2.5 py-1.5 text-right">{it.cantidadTotal}</td>
                   <td className="px-2.5 py-1.5 text-right text-muted-foreground">
                     {it.yaDespachado}
                   </td>
-                  <td className="px-2.5 py-1.5 text-right font-semibold">
-                    {it.remanente}
-                  </td>
+                  <td className="px-2.5 py-1.5 text-right font-semibold">{it.remanente}</td>
                   <td className="px-2.5 py-1.5 text-right">
                     <Input
                       type="number"
@@ -259,9 +238,7 @@ export function CrearDespachoForm({
                       onChange={(e) => {
                         const n = Number(e.target.value);
                         setItemsState((arr) =>
-                          arr.map((x, i) =>
-                            i === idx ? { ...x, cantidad: n } : x,
-                          ),
+                          arr.map((x, i) => (i === idx ? { ...x, cantidad: n } : x)),
                         );
                       }}
                       className="h-7 text-right"
@@ -291,9 +268,7 @@ export function CrearDespachoForm({
                   <Checkbox
                     checked={checked}
                     onCheckedChange={(v) => {
-                      setFacturasIds((cur) =>
-                        v ? [...cur, f.id] : cur.filter((x) => x !== f.id),
-                      );
+                      setFacturasIds((cur) => (v ? [...cur, f.id] : cur.filter((x) => x !== f.id)));
                     }}
                   />
                   <span className="flex-1">{f.label}</span>
@@ -310,11 +285,7 @@ export function CrearDespachoForm({
       {/* Notas */}
       <div className="flex flex-col gap-1">
         <Label className="text-[11px]">Notas</Label>
-        <Input
-          value={notas}
-          onChange={(e) => setNotas(e.target.value)}
-          placeholder="opcional"
-        />
+        <Input value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="opcional" />
       </div>
 
       {/* Actions */}
@@ -322,8 +293,8 @@ export function CrearDespachoForm({
         <span className="flex-1 text-[12px] text-muted-foreground">
           {embarqueCodigo} · {itemsSeleccionados.length} ítem
           {itemsSeleccionados.length === 1 ? "" : "s"} seleccionado
-          {itemsSeleccionados.length === 1 ? "" : "s"} · {facturasIds.length}{" "}
-          factura{facturasIds.length === 1 ? "" : "s"}
+          {itemsSeleccionados.length === 1 ? "" : "s"} · {facturasIds.length} factura
+          {facturasIds.length === 1 ? "" : "s"}
         </span>
         <Button
           type="button"
@@ -336,11 +307,7 @@ export function CrearDespachoForm({
         <Button
           type="button"
           onClick={() => handleSubmit(true)}
-          disabled={
-            pending ||
-            itemsSeleccionados.length === 0 ||
-            !depositoDestinoId
-          }
+          disabled={pending || itemsSeleccionados.length === 0 || !depositoDestinoId}
         >
           {pending ? "Procesando…" : "Crear y contabilizar"}
         </Button>

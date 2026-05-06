@@ -3,6 +3,7 @@ import {
   listarCuentasContablesParaContrapartida,
 } from "@/lib/actions/movimientos-tesoreria";
 import { obtenerContextoAmortizacion } from "@/lib/actions/prestamos";
+import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { MovimientoForm, type MovimientoFormInitial } from "./movimiento-form";
 
@@ -28,22 +29,19 @@ export default async function NuevoMovimientoPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const [cuentasBancarias, cuentasContrapartida] = await Promise.all([
+  const [cuentasBancarias, cuentasContrapartida, defaultFecha] = await Promise.all([
     listarCuentasBancariasParaMovimiento(),
     listarCuentasContablesParaContrapartida(),
+    getDefaultFecha(),
   ]);
 
   const params = await searchParams;
 
   const prestamoId = parseUuid(params.prestamoId);
-  const contexto = prestamoId
-    ? await obtenerContextoAmortizacion(prestamoId)
-    : null;
+  const contexto = prestamoId ? await obtenerContextoAmortizacion(prestamoId) : null;
 
   const modoInicial: "amortizacion" | "intereses" =
-    params.modo === "intereses" && contexto?.cuentaIntereses
-      ? "intereses"
-      : "amortizacion";
+    params.modo === "intereses" && contexto?.cuentaIntereses ? "intereses" : "amortizacion";
 
   const initial: MovimientoFormInitial = {};
 
@@ -104,6 +102,7 @@ export default async function NuevoMovimientoPage({
         initial={initial}
         contextoAmortizacion={contexto}
         modoInicial={modoInicial}
+        defaultFecha={defaultFecha}
       />
     </div>
   );

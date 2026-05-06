@@ -37,6 +37,7 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
           nombre: user.nombre,
           role: user.role,
           monedaPreferida: user.monedaPreferida,
+          modoRetroactivo: user.modoRetroactivo,
         };
       },
     }),

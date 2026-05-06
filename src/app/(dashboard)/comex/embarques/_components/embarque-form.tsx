@@ -271,6 +271,7 @@ type Props =
       depositos: DepositoOption[];
       cuentasGasto: CuentaOption[];
       codigoSugerido: string;
+      defaultFecha?: string;
     }
   | {
       mode: "edit";
@@ -280,6 +281,7 @@ type Props =
       cuentasGasto: CuentaOption[];
       initialData: EmbarqueDetalle;
       readonly: boolean;
+      defaultFecha?: string;
     };
 
 export function EmbarqueForm(props: Props) {
@@ -1277,6 +1279,7 @@ export function EmbarqueForm(props: Props) {
                   totalProveedorExterior={formatMoney(fobTotalArs.toString())}
                   cantFacturasZP={costos.filter((f) => f.momento === "ZONA_PRIMARIA").length}
                   disabled={isSubmitting}
+                  defaultFecha={props.defaultFecha}
                 />
               )}
             {!readonly &&
@@ -1308,6 +1311,7 @@ export function EmbarqueForm(props: Props) {
                 embarqueCodigo={props.initialData.codigo}
                 previewTotalDebe={formatMoney(costoTotal.toString())}
                 disabled={isSubmitting}
+                defaultFecha={props.defaultFecha}
               />
             )}
           </div>

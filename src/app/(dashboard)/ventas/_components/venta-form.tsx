@@ -134,6 +134,7 @@ type Props = {
   clientes: ClienteParaVenta[];
   productos: ProductoParaVenta[];
   depositos: DepositoParaVenta[];
+  defaultFecha?: string;
 };
 
 function todayISO(): string {
@@ -155,6 +156,7 @@ export function VentaForm({
   clientes,
   productos,
   depositos,
+  defaultFecha,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -216,7 +218,7 @@ export function VentaForm({
     : {
         numero: numeroSugerido ?? "",
         clienteId: "",
-        fecha: todayISO(),
+        fecha: defaultFecha ?? todayISO(),
         fechaVencimiento: "",
         condicionPago: "CONTADO",
         moneda: "ARS",

@@ -8,6 +8,7 @@ import {
   obtenerEmbarquePorId,
 } from "@/lib/actions/embarques";
 import { EmbarqueEstado } from "@/generated/prisma/client";
+import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { EmbarqueForm } from "../_components/embarque-form";
 
@@ -20,13 +21,14 @@ export default async function EditarEmbarquePage({
 }) {
   const { id } = await params;
 
-  const [embarque, proveedores, productos, depositos, cuentasGasto] =
+  const [embarque, proveedores, productos, depositos, cuentasGasto, defaultFecha] =
     await Promise.all([
       obtenerEmbarquePorId(id),
       listarProveedoresParaEmbarque(),
       listarProductosParaEmbarque(),
       listarDepositosParaEmbarque(),
       listarCuentasParaCostoLogistico(),
+      getDefaultFecha(),
     ]);
 
   if (!embarque) notFound();
@@ -42,6 +44,7 @@ export default async function EditarEmbarquePage({
       cuentasGasto={cuentasGasto}
       initialData={embarque}
       readonly={readonly}
+      defaultFecha={defaultFecha}
     />
   );
 }

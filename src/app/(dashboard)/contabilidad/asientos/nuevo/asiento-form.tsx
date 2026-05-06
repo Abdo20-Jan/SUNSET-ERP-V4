@@ -2,13 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Controller,
-  useFieldArray,
-  useForm,
-  useWatch,
-  type Control,
-} from "react-hook-form";
+import { Controller, useFieldArray, useForm, useWatch, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Decimal from "decimal.js";
@@ -30,7 +24,7 @@ import { cn } from "@/lib/utils";
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
 
 function parseMoney(value: string): Decimal {
-  if (!value || Number.isNaN(parseFloat(value))) return new Decimal(0);
+  if (!value || Number.isNaN(Number.parseFloat(value))) return new Decimal(0);
   try {
     return new Decimal(value);
   } catch {
@@ -55,11 +49,7 @@ import {
 } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -76,19 +66,16 @@ const FX_RE = /^\d+(\.\d{1,6})?$/;
 
 const lineaSchema = z
   .object({
-    cuentaId: z
-      .number()
-      .int()
-      .positive({ message: "Seleccione una cuenta" }),
+    cuentaId: z.number().int().positive({ message: "Seleccione una cuenta" }),
     debe: z.string().regex(DECIMAL_RE, "Valor inválido"),
     haber: z.string().regex(DECIMAL_RE, "Valor inválido"),
     referencia: z.string().optional(),
   })
   .refine(
     (l) => {
-      const debe = parseFloat(l.debe) || 0;
-      const haber = parseFloat(l.haber) || 0;
-      return (debe > 0) !== (haber > 0);
+      const debe = Number.parseFloat(l.debe) || 0;
+      const haber = Number.parseFloat(l.haber) || 0;
+      return debe > 0 !== haber > 0;
     },
     { message: "Complete Debe o Haber (no ambos)", path: ["debe"] },
   );
@@ -102,7 +89,7 @@ const formSchema = z
     lineas: z.array(lineaSchema).min(2, "Mínimo 2 líneas"),
   })
   .superRefine((data, ctx) => {
-    const tc = parseFloat(data.tipoCambio);
+    const tc = Number.parseFloat(data.tipoCambio);
     if (data.moneda === "ARS" && tc !== 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -117,14 +104,8 @@ const formSchema = z
         message: "TC debe ser mayor a cero",
       });
     }
-    const debeSum = data.lineas.reduce(
-      (s, l) => s + (parseFloat(l.debe) || 0),
-      0,
-    );
-    const haberSum = data.lineas.reduce(
-      (s, l) => s + (parseFloat(l.haber) || 0),
-      0,
-    );
+    const debeSum = data.lineas.reduce((s, l) => s + (Number.parseFloat(l.debe) || 0), 0);
+    const haberSum = data.lineas.reduce((s, l) => s + (Number.parseFloat(l.haber) || 0), 0);
     if (Math.abs(debeSum - haberSum) > 0.009) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -143,7 +124,13 @@ const EMPTY_LINEA = {
   referencia: "",
 } as const;
 
-export function AsientoForm({ cuentas }: { cuentas: Cuenta[] }) {
+export function AsientoForm({
+  cuentas,
+  defaultFecha,
+}: {
+  cuentas: Cuenta[];
+  defaultFecha?: string;
+}) {
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
 
@@ -151,7 +138,12 @@ export function AsientoForm({ cuentas }: { cuentas: Cuenta[] }) {
     resolver: zodResolver(formSchema),
     mode: "onBlur",
     defaultValues: {
-      fecha: new Date(),
+      fecha:
+        defaultFecha === undefined
+          ? new Date()
+          : defaultFecha === ""
+            ? (undefined as unknown as Date)
+            : new Date(defaultFecha),
       moneda: "ARS",
       tipoCambio: "1",
       descripcion: "",
@@ -214,13 +206,9 @@ export function AsientoForm({ cuentas }: { cuentas: Cuenta[] }) {
               <Controller
                 control={control}
                 name="fecha"
-                render={({ field }) => (
-                  <DatePicker value={field.value} onChange={field.onChange} />
-                )}
+                render={({ field }) => <DatePicker value={field.value} onChange={field.onChange} />}
               />
-              {errors.fecha && (
-                <FieldError message={errors.fecha.message} />
-              )}
+              {errors.fecha && <FieldError message={errors.fecha.message} />}
             </div>
 
             <div className="flex flex-col gap-2">
@@ -229,10 +217,7 @@ export function AsientoForm({ cuentas }: { cuentas: Cuenta[] }) {
                 control={control}
                 name="moneda"
                 render={({ field }) => (
-                  <Select
-                    value={field.value}
-                    onValueChange={(v) => field.onChange(v)}
-                  >
+                  <Select value={field.value} onValueChange={(v) => field.onChange(v)}>
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
@@ -254,9 +239,7 @@ export function AsientoForm({ cuentas }: { cuentas: Cuenta[] }) {
                 aria-invalid={!!errors.tipoCambio}
                 {...register("tipoCambio")}
               />
-              {errors.tipoCambio && (
-                <FieldError message={errors.tipoCambio.message} />
-              )}
+              {errors.tipoCambio && <FieldError message={errors.tipoCambio.message} />}
             </div>
           </div>
 
@@ -268,9 +251,7 @@ export function AsientoForm({ cuentas }: { cuentas: Cuenta[] }) {
               aria-invalid={!!errors.descripcion}
               {...register("descripcion")}
             />
-            {errors.descripcion && (
-              <FieldError message={errors.descripcion.message} />
-            )}
+            {errors.descripcion && <FieldError message={errors.descripcion.message} />}
           </div>
         </CardContent>
       </Card>
@@ -303,25 +284,17 @@ export function AsientoForm({ cuentas }: { cuentas: Cuenta[] }) {
             <tbody>
               {fields.map((field, index) => (
                 <tr key={field.id} className="border-b align-top last:border-0">
-                  <td className="py-2 pr-3 pt-3 text-muted-foreground tabular-nums">
-                    {index + 1}
-                  </td>
+                  <td className="py-2 pr-3 pt-3 text-muted-foreground tabular-nums">{index + 1}</td>
                   <td className="py-2 pr-3 pt-2 min-w-70">
                     <Controller
                       control={control}
                       name={`lineas.${index}.cuentaId`}
                       render={({ field: f }) => (
-                        <CuentaCombobox
-                          value={f.value}
-                          onChange={f.onChange}
-                          cuentas={cuentas}
-                        />
+                        <CuentaCombobox value={f.value} onChange={f.onChange} cuentas={cuentas} />
                       )}
                     />
                     {errors.lineas?.[index]?.cuentaId && (
-                      <FieldError
-                        message={errors.lineas[index]?.cuentaId?.message}
-                      />
+                      <FieldError message={errors.lineas[index]?.cuentaId?.message} />
                     )}
                   </td>
                   <td className="py-2 pr-3 pt-2 text-right">
@@ -332,9 +305,7 @@ export function AsientoForm({ cuentas }: { cuentas: Cuenta[] }) {
                       {...register(`lineas.${index}.debe`)}
                     />
                     {errors.lineas?.[index]?.debe && (
-                      <FieldError
-                        message={errors.lineas[index]?.debe?.message}
-                      />
+                      <FieldError message={errors.lineas[index]?.debe?.message} />
                     )}
                   </td>
                   <td className="py-2 pr-3 pt-2 text-right">
@@ -345,16 +316,11 @@ export function AsientoForm({ cuentas }: { cuentas: Cuenta[] }) {
                       {...register(`lineas.${index}.haber`)}
                     />
                     {errors.lineas?.[index]?.haber && (
-                      <FieldError
-                        message={errors.lineas[index]?.haber?.message}
-                      />
+                      <FieldError message={errors.lineas[index]?.haber?.message} />
                     )}
                   </td>
                   <td className="py-2 pr-3 pt-2">
-                    <Input
-                      placeholder="Opcional"
-                      {...register(`lineas.${index}.referencia`)}
-                    />
+                    <Input placeholder="Opcional" {...register(`lineas.${index}.referencia`)} />
                   </td>
                   <td className="py-2 pt-2">
                     <Button
@@ -458,9 +424,7 @@ function TotalsFooter({ control }: { control: Control<FormValues> }) {
       <div
         className={cn(
           "flex items-center gap-1.5 rounded-4xl px-3 py-1 text-xs font-medium",
-          balanced
-            ? "bg-primary/10 text-primary"
-            : "bg-destructive/10 text-destructive",
+          balanced ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive",
         )}
       >
         <HugeiconsIcon
@@ -486,11 +450,7 @@ function DatePicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full justify-start font-normal"
-          />
+          <Button type="button" variant="outline" className="w-full justify-start font-normal" />
         }
       >
         <HugeiconsIcon
@@ -500,10 +460,7 @@ function DatePicker({
         />
         {value ? format(value, "dd/MM/yyyy") : "Seleccione fecha"}
       </PopoverTrigger>
-      <PopoverContent
-        className="w-auto p-0"
-        align="start"
-      >
+      <PopoverContent className="w-auto p-0" align="start">
         <Calendar
           mode="single"
           selected={value}
@@ -534,22 +491,11 @@ function CuentaCombobox({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full justify-between font-normal"
-          />
+          <Button type="button" variant="outline" className="w-full justify-between font-normal" />
         }
       >
-        <span
-          className={cn(
-            "truncate text-left",
-            !selected && "text-muted-foreground",
-          )}
-        >
-          {selected
-            ? `${selected.codigo} — ${selected.nombre}`
-            : "Seleccione cuenta analítica"}
+        <span className={cn("truncate text-left", !selected && "text-muted-foreground")}>
+          {selected ? `${selected.codigo} — ${selected.nombre}` : "Seleccione cuenta analítica"}
         </span>
         <HugeiconsIcon
           icon={UnfoldMoreIcon}
@@ -571,9 +517,7 @@ function CuentaCombobox({
                   setOpen(false);
                 }}
               >
-                <span className="font-mono text-xs text-muted-foreground">
-                  {c.codigo}
-                </span>
+                <span className="font-mono text-xs text-muted-foreground">{c.codigo}</span>
                 <span className="truncate">{c.nombre}</span>
               </CommandItem>
             ))}

@@ -6,10 +6,7 @@ import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 
-import {
-  pagarRefuerzoVepAction,
-  pagarVepEmbarqueAction,
-} from "@/lib/actions/vep-embarque";
+import { pagarRefuerzoVepAction, pagarVepEmbarqueAction } from "@/lib/actions/vep-embarque";
 import { fmtMoney } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,10 +39,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import type {
-  RefuerzoVepPendiente,
-  VepEmbarque,
-} from "@/lib/services/cuentas-a-pagar";
+import type { RefuerzoVepPendiente, VepEmbarque } from "@/lib/services/cuentas-a-pagar";
 
 export type CuentaBancariaArsOption = {
   id: string;
@@ -58,15 +52,16 @@ export function VepSection({
   refuerzos,
   cuentasBancarias,
   saldoCreditoAduana,
+  defaultFecha,
 }: {
   veps: VepEmbarque[];
   refuerzos: RefuerzoVepPendiente[];
   cuentasBancarias: CuentaBancariaArsOption[];
   saldoCreditoAduana: string;
+  defaultFecha?: string;
 }) {
   const [pagar, setPagar] = useState<VepEmbarque | null>(null);
-  const [pagarRefuerzo, setPagarRefuerzo] =
-    useState<RefuerzoVepPendiente | null>(null);
+  const [pagarRefuerzo, setPagarRefuerzo] = useState<RefuerzoVepPendiente | null>(null);
 
   const pendientes = veps.filter((v) => !v.pagado);
   const pagados = veps.filter((v) => v.pagado);
@@ -81,21 +76,19 @@ export function VepSection({
       <Card>
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-col gap-0.5">
-            <h2 className="text-sm font-semibold">
-              VEP / Despacho aduanero por embarque
-            </h2>
+            <h2 className="text-sm font-semibold">VEP / Despacho aduanero por embarque</h2>
             <p className="text-xs text-muted-foreground">
-              Cada embarque CERRADO genera un VEP que agrupa todos los tributos
-              aduaneros (DIE, Tasa, IVA imp, IIBB, Ganancias, etc). Pagá el VEP
-              completo con un único movimiento contable.
+              Cada embarque CERRADO genera un VEP que agrupa todos los tributos aduaneros (DIE,
+              Tasa, IVA imp, IIBB, Ganancias, etc). Pagá el VEP completo con un único movimiento
+              contable.
             </p>
           </div>
 
           {tieneCredito && (
             <div className="flex items-center justify-between rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
               <span>
-                Crédito a favor Aduana disponible (cuenta 1.1.4.13). Aplicable
-                contra cualquier VEP pendiente al momento de pagar.
+                Crédito a favor Aduana disponible (cuenta 1.1.4.13). Aplicable contra cualquier VEP
+                pendiente al momento de pagar.
               </span>
               <span className="font-mono font-semibold tabular-nums">
                 ARS {fmtMoney(saldoCreditoAduana)}
@@ -132,9 +125,7 @@ export function VepSection({
                             className="inline-flex items-center gap-1 rounded-md border bg-muted/30 px-2 py-0.5 text-[11px]"
                           >
                             <span className="font-mono">{c.cuentaCodigo}</span>
-                            <span className="tabular-nums">
-                              {fmtMoney(c.monto)}
-                            </span>
+                            <span className="tabular-nums">{fmtMoney(c.monto)}</span>
                           </span>
                         ))}
                       </div>
@@ -174,9 +165,7 @@ export function VepSection({
                 <TableBody>
                   {pagados.map((v) => (
                     <TableRow key={v.embarqueId}>
-                      <TableCell className="font-mono text-xs">
-                        {v.embarqueCodigo}
-                      </TableCell>
+                      <TableCell className="font-mono text-xs">{v.embarqueCodigo}</TableCell>
                       <TableCell className="text-right font-mono tabular-nums">
                         {fmtMoney(v.totalArs)}
                       </TableCell>
@@ -198,14 +187,11 @@ export function VepSection({
         <Card>
           <CardContent className="flex flex-col gap-3">
             <div className="flex flex-col gap-0.5">
-              <h2 className="text-sm font-semibold">
-                VEP complementarios / refuerzos pendientes
-              </h2>
+              <h2 className="text-sm font-semibold">VEP complementarios / refuerzos pendientes</h2>
               <p className="text-xs text-muted-foreground">
-                Saldo HABER de la cuenta 2.1.5.99 — diferencias generadas
-                cuando el VEP original se pagó por menos que la liquidación
-                final del despacho. Cancelá con un VEP de refuerzo. Podés
-                aplicar crédito a favor (1.1.4.13) si lo tenés.
+                Saldo HABER de la cuenta 2.1.5.99 — diferencias generadas cuando el VEP original se
+                pagó por menos que la liquidación final del despacho. Cancelá con un VEP de
+                refuerzo. Podés aplicar crédito a favor (1.1.4.13) si lo tenés.
               </p>
             </div>
             <Table>
@@ -220,9 +206,7 @@ export function VepSection({
               <TableBody>
                 {refuerzos.map((r) => (
                   <TableRow key={r.embarqueCodigo}>
-                    <TableCell className="font-mono text-xs">
-                      {r.embarqueCodigo}
-                    </TableCell>
+                    <TableCell className="font-mono text-xs">{r.embarqueCodigo}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       desde {r.fechaOrigen.slice(0, 10)}
                     </TableCell>
@@ -230,10 +214,7 @@ export function VepSection({
                       {fmtMoney(r.saldoPendiente)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        onClick={() => setPagarRefuerzo(r)}
-                      >
+                      <Button size="sm" onClick={() => setPagarRefuerzo(r)}>
                         Pagar refuerzo
                       </Button>
                     </TableCell>
@@ -250,12 +231,14 @@ export function VepSection({
         cuentasBancarias={cuentasBancarias}
         saldoCreditoAduana={saldoCreditoAduana}
         onClose={() => setPagar(null)}
+        defaultFecha={defaultFecha}
       />
       <PagarRefuerzoVepDialog
         refuerzo={pagarRefuerzo}
         cuentasBancarias={cuentasBancarias}
         saldoCreditoAduana={saldoCreditoAduana}
         onClose={() => setPagarRefuerzo(null)}
+        defaultFecha={defaultFecha}
       />
     </>
   );
@@ -266,18 +249,18 @@ function PagarVepDialog({
   cuentasBancarias,
   saldoCreditoAduana,
   onClose,
+  defaultFecha,
 }: {
   vep: VepEmbarque | null;
   cuentasBancarias: CuentaBancariaArsOption[];
   saldoCreditoAduana: string;
   onClose: () => void;
+  defaultFecha?: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [cuentaBancariaId, setCuentaBancariaId] = useState<string>("");
-  const [fecha, setFecha] = useState<string>(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [fecha, setFecha] = useState<string>(defaultFecha ?? new Date().toISOString().slice(0, 10));
   const [comprobante, setComprobante] = useState<string>("");
   const [referenciaBanco, setReferenciaBanco] = useState<string>("");
   const [montoPagado, setMontoPagado] = useState<string>(vep?.totalArs ?? "");
@@ -301,8 +284,7 @@ function PagarVepDialog({
   const bancoNum = Number(montoPagado || "0");
   const creditoNum = Number(creditoAplicado || "0");
   const totalPagoNum =
-    (Number.isFinite(bancoNum) ? bancoNum : 0) +
-    (Number.isFinite(creditoNum) ? creditoNum : 0);
+    (Number.isFinite(bancoNum) ? bancoNum : 0) + (Number.isFinite(creditoNum) ? creditoNum : 0);
   const diff = totalPagoNum - totalNum;
   const tipoDiff: "credito" | "deuda" | "exacto" =
     Math.abs(diff) < 0.005 ? "exacto" : diff > 0 ? "credito" : "deuda";
@@ -355,14 +337,10 @@ function PagarVepDialog({
       if (result.tipoDiferencia === "credito") {
         partes.push(`nueva diferencia a favor ARS ${fmtMoney(result.diferencia)}`);
       } else if (result.tipoDiferencia === "deuda") {
-        partes.push(
-          `saldo pendiente (refuerzo) ARS ${fmtMoney(result.diferencia)}`,
-        );
+        partes.push(`saldo pendiente (refuerzo) ARS ${fmtMoney(result.diferencia)}`);
       }
       const msgDiff = partes.length > 0 ? ` · ${partes.join(" · ")}` : "";
-      toast.success(
-        `VEP registrado — asiento #${result.asientoNumero}${msgDiff}`,
-      );
+      toast.success(`VEP registrado — asiento #${result.asientoNumero}${msgDiff}`);
       onClose();
       router.refresh();
     });
@@ -374,8 +352,8 @@ function PagarVepDialog({
         <DialogHeader>
           <DialogTitle>Pagar VEP del embarque {vep.embarqueCodigo}</DialogTitle>
           <DialogDescription>
-            Genera un único asiento contable con DEBE en cada cuenta tributaria
-            y HABER en el banco. Total: <strong>ARS {fmtMoney(vep.totalArs)}</strong>.
+            Genera un único asiento contable con DEBE en cada cuenta tributaria y HABER en el banco.
+            Total: <strong>ARS {fmtMoney(vep.totalArs)}</strong>.
           </DialogDescription>
         </DialogHeader>
 
@@ -384,10 +362,7 @@ function PagarVepDialog({
             <p className="mb-1 font-semibold">Detalle del VEP:</p>
             <ul className="space-y-0.5">
               {vep.cuentas.map((c) => (
-                <li
-                  key={c.cuentaId}
-                  className="flex justify-between font-mono"
-                >
+                <li key={c.cuentaId} className="flex justify-between font-mono">
                   <span>
                     {c.cuentaCodigo} {c.cuentaNombre}
                   </span>
@@ -396,27 +371,20 @@ function PagarVepDialog({
               ))}
               <li className="mt-1 flex justify-between border-t pt-1 font-mono font-bold">
                 <span>TOTAL</span>
-                <span className="tabular-nums">
-                  ARS {fmtMoney(vep.totalArs)}
-                </span>
+                <span className="tabular-nums">ARS {fmtMoney(vep.totalArs)}</span>
               </li>
             </ul>
           </div>
 
           <div className="flex flex-col gap-2">
             <Label>Cuenta bancaria de débito</Label>
-            <Select
-              value={cuentaBancariaId}
-              onValueChange={(v) => setCuentaBancariaId(v ?? "")}
-            >
+            <Select value={cuentaBancariaId} onValueChange={(v) => setCuentaBancariaId(v ?? "")}>
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar...">
                   {(value) => {
                     if (!value) return "Seleccionar...";
                     const c = cuentasBancarias.find((c) => c.id === value);
-                    return c
-                      ? `${c.banco}${c.numero ? ` · ${c.numero}` : ""}`
-                      : "Seleccionar...";
+                    return c ? `${c.banco}${c.numero ? ` · ${c.numero}` : ""}` : "Seleccionar...";
                   }}
                 </SelectValue>
               </SelectTrigger>
@@ -433,7 +401,10 @@ function PagarVepDialog({
           {saldoCreditoNum > 0.005 && (
             <div className="flex flex-col gap-2 rounded-md border border-emerald-300 bg-emerald-50/50 p-3 dark:border-emerald-700 dark:bg-emerald-950/20">
               <div className="flex items-center justify-between">
-                <Label htmlFor="credito-aplicado" className="text-emerald-900 dark:text-emerald-200">
+                <Label
+                  htmlFor="credito-aplicado"
+                  className="text-emerald-900 dark:text-emerald-200"
+                >
                   Aplicar crédito a favor (1.1.4.13)
                 </Label>
                 <button
@@ -452,9 +423,8 @@ function PagarVepDialog({
                 placeholder="0.00"
               />
               <p className="text-[11px] text-emerald-900/80 dark:text-emerald-200/80">
-                Saldo disponible: <strong>ARS {fmtMoney(saldoCreditoAduana)}</strong>.
-                Se descuenta del crédito y reduce lo que tenés que transferir
-                al banco.
+                Saldo disponible: <strong>ARS {fmtMoney(saldoCreditoAduana)}</strong>. Se descuenta
+                del crédito y reduce lo que tenés que transferir al banco.
               </p>
               {creditoExcedido && (
                 <p className="text-[11px] font-semibold text-red-700 dark:text-red-400">
@@ -465,9 +435,7 @@ function PagarVepDialog({
           )}
 
           <div className="flex flex-col gap-2">
-            <Label htmlFor="monto-pagado">
-              Monto efectivamente pagado al banco
-            </Label>
+            <Label htmlFor="monto-pagado">Monto efectivamente pagado al banco</Label>
             <Input
               id="monto-pagado"
               value={montoPagado}
@@ -478,34 +446,30 @@ function PagarVepDialog({
             <div className="flex justify-between text-[11px] text-muted-foreground">
               <span>
                 Total efectivo del pago:{" "}
-                <strong className="font-mono">
-                  ARS {fmtMoney(totalPagoNum.toFixed(2))}
-                </strong>{" "}
+                <strong className="font-mono">ARS {fmtMoney(totalPagoNum.toFixed(2))}</strong>{" "}
                 (crédito + banco)
               </span>
               <span>
-                Total VEP:{" "}
-                <span className="font-mono">ARS {fmtMoney(vep.totalArs)}</span>
+                Total VEP: <span className="font-mono">ARS {fmtMoney(vep.totalArs)}</span>
               </span>
             </div>
             {tipoDiff === "credito" && (
               <p className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
-                Estás pagando <strong>ARS {fmtMoney(diff.toFixed(2))}</strong> de
-                más → genera <strong>nuevo crédito a favor de Aduana</strong>{" "}
-                (cuenta 1.1.4.13). Aplicable contra próximos despachos.
+                Estás pagando <strong>ARS {fmtMoney(diff.toFixed(2))}</strong> de más → genera{" "}
+                <strong>nuevo crédito a favor de Aduana</strong> (cuenta 1.1.4.13). Aplicable contra
+                próximos despachos.
               </p>
             )}
             {tipoDiff === "deuda" && (
               <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
-                Estás pagando <strong>ARS {fmtMoney(Math.abs(diff).toFixed(2))}</strong>{" "}
-                de menos → genera <strong>saldo pendiente con Aduana</strong>{" "}
-                (cuenta 2.1.5.99). Tendrás que pagar un VEP de refuerzo.
+                Estás pagando <strong>ARS {fmtMoney(Math.abs(diff).toFixed(2))}</strong> de menos →
+                genera <strong>saldo pendiente con Aduana</strong> (cuenta 2.1.5.99). Tendrás que
+                pagar un VEP de refuerzo.
               </p>
             )}
             {tipoDiff === "exacto" && totalPagoNum > 0 && (
               <p className="text-xs text-muted-foreground">
-                Pago exacto al total VEP — no genera crédito ni deuda
-                adicional.
+                Pago exacto al total VEP — no genera crédito ni deuda adicional.
               </p>
             )}
           </div>
@@ -526,9 +490,7 @@ function PagarVepDialog({
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="referenciaBanco">
-                Referencia banco (opcional)
-              </Label>
+              <Label htmlFor="referenciaBanco">Referencia banco (opcional)</Label>
               <Input
                 id="referenciaBanco"
                 value={referenciaBanco}
@@ -563,23 +525,21 @@ function PagarRefuerzoVepDialog({
   cuentasBancarias,
   saldoCreditoAduana,
   onClose,
+  defaultFecha,
 }: {
   refuerzo: RefuerzoVepPendiente | null;
   cuentasBancarias: CuentaBancariaArsOption[];
   saldoCreditoAduana: string;
   onClose: () => void;
+  defaultFecha?: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [cuentaBancariaId, setCuentaBancariaId] = useState<string>("");
-  const [fecha, setFecha] = useState<string>(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [fecha, setFecha] = useState<string>(defaultFecha ?? new Date().toISOString().slice(0, 10));
   const [comprobante, setComprobante] = useState<string>("");
   const [referenciaBanco, setReferenciaBanco] = useState<string>("");
-  const [montoBanco, setMontoBanco] = useState<string>(
-    refuerzo?.saldoPendiente ?? "",
-  );
+  const [montoBanco, setMontoBanco] = useState<string>(refuerzo?.saldoPendiente ?? "");
   const [creditoAplicado, setCreditoAplicado] = useState<string>("0");
 
   const saldoCreditoNum = Number(saldoCreditoAduana);
@@ -599,8 +559,7 @@ function PagarRefuerzoVepDialog({
   const bancoNum = Number(montoBanco || "0");
   const creditoNum = Number(creditoAplicado || "0");
   const totalPagoNum =
-    (Number.isFinite(bancoNum) ? bancoNum : 0) +
-    (Number.isFinite(creditoNum) ? creditoNum : 0);
+    (Number.isFinite(bancoNum) ? bancoNum : 0) + (Number.isFinite(creditoNum) ? creditoNum : 0);
   const restante = saldoNum - totalPagoNum;
   const creditoExcedido = creditoNum > saldoCreditoNum + 0.005;
   const totalExcedido = totalPagoNum > saldoNum + 0.005;
@@ -656,9 +615,7 @@ function PagarRefuerzoVepDialog({
         partes.push(`saldo restante ARS ${fmtMoney(result.saldoRestante)}`);
       }
       const msgExtra = partes.length > 0 ? ` · ${partes.join(" · ")}` : "";
-      toast.success(
-        `Refuerzo pagado — asiento #${result.asientoNumero}${msgExtra}`,
-      );
+      toast.success(`Refuerzo pagado — asiento #${result.asientoNumero}${msgExtra}`);
       onClose();
       router.refresh();
     });
@@ -668,12 +625,9 @@ function PagarRefuerzoVepDialog({
     <Dialog open={Boolean(refuerzo)} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>
-            Pagar refuerzo VEP — {refuerzo.embarqueCodigo}
-          </DialogTitle>
+          <DialogTitle>Pagar refuerzo VEP — {refuerzo.embarqueCodigo}</DialogTitle>
           <DialogDescription>
-            Cancela parte o el total del saldo pendiente con Aduana
-            (cuenta 2.1.5.99). Saldo:{" "}
+            Cancela parte o el total del saldo pendiente con Aduana (cuenta 2.1.5.99). Saldo:{" "}
             <strong>ARS {fmtMoney(refuerzo.saldoPendiente)}</strong>.
           </DialogDescription>
         </DialogHeader>
@@ -704,8 +658,7 @@ function PagarRefuerzoVepDialog({
                 placeholder="0.00"
               />
               <p className="text-[11px] text-emerald-900/80 dark:text-emerald-200/80">
-                Saldo disponible:{" "}
-                <strong>ARS {fmtMoney(saldoCreditoAduana)}</strong>.
+                Saldo disponible: <strong>ARS {fmtMoney(saldoCreditoAduana)}</strong>.
               </p>
               {creditoExcedido && (
                 <p className="text-[11px] font-semibold text-red-700 dark:text-red-400">
@@ -727,9 +680,7 @@ function PagarRefuerzoVepDialog({
             <div className="flex justify-between text-[11px] text-muted-foreground">
               <span>
                 Total pago:{" "}
-                <strong className="font-mono">
-                  ARS {fmtMoney(totalPagoNum.toFixed(2))}
-                </strong>
+                <strong className="font-mono">ARS {fmtMoney(totalPagoNum.toFixed(2))}</strong>
               </span>
               <span>
                 {restante > 0.005
@@ -748,18 +699,13 @@ function PagarRefuerzoVepDialog({
 
           <div className="flex flex-col gap-2">
             <Label>Cuenta bancaria de débito (opcional si 100% crédito)</Label>
-            <Select
-              value={cuentaBancariaId}
-              onValueChange={(v) => setCuentaBancariaId(v ?? "")}
-            >
+            <Select value={cuentaBancariaId} onValueChange={(v) => setCuentaBancariaId(v ?? "")}>
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar...">
                   {(value) => {
                     if (!value) return "Seleccionar...";
                     const c = cuentasBancarias.find((c) => c.id === value);
-                    return c
-                      ? `${c.banco}${c.numero ? ` · ${c.numero}` : ""}`
-                      : "Seleccionar...";
+                    return c ? `${c.banco}${c.numero ? ` · ${c.numero}` : ""}` : "Seleccionar...";
                   }}
                 </SelectValue>
               </SelectTrigger>
@@ -776,11 +722,7 @@ function PagarRefuerzoVepDialog({
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div className="flex flex-col gap-2">
               <Label htmlFor="refuerzo-fecha">Fecha</Label>
-              <DatePicker
-                id="refuerzo-fecha"
-                value={fecha}
-                onChange={setFecha}
-              />
+              <DatePicker id="refuerzo-fecha" value={fecha} onChange={setFecha} />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="refuerzo-comprobante">Nº VEP (opcional)</Label>

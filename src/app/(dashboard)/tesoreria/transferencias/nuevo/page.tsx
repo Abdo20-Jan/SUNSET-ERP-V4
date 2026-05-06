@@ -1,9 +1,13 @@
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
+import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { TransferenciaForm } from "./transferencia-form";
 
 export default async function NuevaTransferenciaPage() {
-  const cuentasBancarias = await listarCuentasBancariasParaMovimiento();
+  const [cuentasBancarias, defaultFecha] = await Promise.all([
+    listarCuentasBancariasParaMovimiento(),
+    getDefaultFecha(),
+  ]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -12,13 +16,12 @@ export default async function NuevaTransferenciaPage() {
           Nueva transferencia entre cuentas
         </h1>
         <p className="text-sm text-muted-foreground">
-          Mueva dinero entre dos cuentas bancarias. El sistema generará
-          automáticamente el asiento de partida doble. Si hay diferencia de
-          valorización en ARS entre origen y destino, se registra en la cuenta
-          de Diferencia de Cambio correspondiente.
+          Mueva dinero entre dos cuentas bancarias. El sistema generará automáticamente el asiento
+          de partida doble. Si hay diferencia de valorización en ARS entre origen y destino, se
+          registra en la cuenta de Diferencia de Cambio correspondiente.
         </p>
       </div>
-      <TransferenciaForm cuentasBancarias={cuentasBancarias} />
+      <TransferenciaForm cuentasBancarias={cuentasBancarias} defaultFecha={defaultFecha} />
     </div>
   );
 }

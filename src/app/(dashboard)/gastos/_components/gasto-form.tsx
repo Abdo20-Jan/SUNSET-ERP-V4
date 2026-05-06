@@ -2,13 +2,7 @@
 
 import { useEffect, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Controller,
-  useFieldArray,
-  useForm,
-  useWatch,
-  type Control,
-} from "react-hook-form";
+import { Controller, useFieldArray, useForm, useWatch, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -30,16 +24,14 @@ import {
 } from "@/lib/actions/gastos";
 import { fmtMoney } from "@/lib/format";
 import { useCmdShortcut } from "@/lib/hooks/use-cmd-shortcut";
-import {
-  ProveedorCombobox,
-  type ProveedorOption,
-} from "@/components/proveedor-combobox";
+import { ProveedorCombobox, type ProveedorOption } from "@/components/proveedor-combobox";
 import { CuentaCombobox } from "@/components/cuenta-combobox";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RetroactivoBadge } from "@/components/ui/retroactivo-badge";
 import {
   Select,
   SelectContent,
@@ -87,10 +79,7 @@ const formSchema = z
     lineas: z
       .array(
         z.object({
-          cuentaContableGastoId: z.coerce
-            .number()
-            .int()
-            .positive("Seleccione cuenta de gasto"),
+          cuentaContableGastoId: z.coerce.number().int().positive("Seleccione cuenta de gasto"),
           descripcion: z.string().min(1, "Descripción requerida").max(200),
           subtotal: z.string().regex(moneyRegex, "Subtotal inválido"),
         }),
@@ -126,6 +115,7 @@ type Props = {
   initialData?: GastoDetalle;
   proveedores: ProveedorParaGasto[];
   cuentas: CuentaGastoOption[];
+  defaultFecha?: string;
 };
 
 function todayISO(): string {
@@ -146,6 +136,7 @@ export function GastoForm({
   initialData,
   proveedores,
   cuentas,
+  defaultFecha,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -182,7 +173,7 @@ export function GastoForm({
     : {
         numero: numeroSugerido ?? "",
         proveedorId: "",
-        fecha: todayISO(),
+        fecha: defaultFecha ?? todayISO(),
         fechaVencimiento: "",
         condicionPago: "CUENTA_CORRIENTE",
         moneda: "ARS",
@@ -340,9 +331,7 @@ export function GastoForm({
       }
       const cont = await contabilizarGastoAction(saved.id);
       if (cont.ok) {
-        toast.success(
-          `Gasto ${saved.numero} contabilizado (asiento Nº ${cont.numeroAsiento}).`,
-        );
+        toast.success(`Gasto ${saved.numero} contabilizado (asiento Nº ${cont.numeroAsiento}).`);
         router.push(`/gastos/${saved.id}`);
         router.refresh();
       } else {
@@ -384,17 +373,21 @@ export function GastoForm({
             />
           </Field>
 
-          <Field label="Fecha" error={errors.fecha?.message}>
-            <Controller
-              control={control}
-              name="fecha"
-              render={({ field }) => (
-                <DatePicker
-                  value={field.value ?? ""}
-                  onChange={field.onChange}
-                />
-              )}
-            />
+          <Field
+            label="Fecha"
+            error={errors.fecha?.message}
+            hint="Fecha del documento físico — no la del registro"
+          >
+            <div className="flex items-center gap-2">
+              <Controller
+                control={control}
+                name="fecha"
+                render={({ field }) => (
+                  <DatePicker value={field.value ?? ""} onChange={field.onChange} />
+                )}
+              />
+              <RetroactivoBadge fecha={fecha} />
+            </div>
           </Field>
 
           <Field
@@ -406,10 +399,7 @@ export function GastoForm({
               control={control}
               name="fechaVencimiento"
               render={({ field }) => (
-                <DatePicker
-                  value={field.value ?? ""}
-                  onChange={field.onChange}
-                />
+                <DatePicker value={field.value ?? ""} onChange={field.onChange} />
               )}
             />
           </Field>
@@ -429,9 +419,7 @@ export function GastoForm({
               render={({ field }) => (
                 <Select
                   value={field.value}
-                  onValueChange={(v) =>
-                    field.onChange(v as (typeof CONDICION_VALUES)[number])
-                  }
+                  onValueChange={(v) => field.onChange(v as (typeof CONDICION_VALUES)[number])}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue />
@@ -474,11 +462,7 @@ export function GastoForm({
             error={errors.tipoCambio?.message}
             hint={moneda === "ARS" ? "ARS: TC = 1" : undefined}
           >
-            <Input
-              {...register("tipoCambio")}
-              disabled={moneda === "ARS"}
-              inputMode="decimal"
-            />
+            <Input {...register("tipoCambio")} disabled={moneda === "ARS"} inputMode="decimal" />
           </Field>
 
           <Field label="IVA" error={errors.iva?.message}>
@@ -501,8 +485,8 @@ export function GastoForm({
             <div>
               <h2 className="text-lg font-medium">Líneas de gasto</h2>
               <p className="text-xs text-muted-foreground">
-                Cada línea va a una cuenta contable de gasto distinta.
-                IVA/IIBB se cargan a nivel header.
+                Cada línea va a una cuenta contable de gasto distinta. IVA/IIBB se cargan a nivel
+                header.
               </p>
             </div>
             <Button type="button" variant="outline" onClick={addLinea}>
@@ -525,12 +509,8 @@ export function GastoForm({
                 onRemove={() => remove(index)}
                 canRemove={fields.length > 1}
                 register={register}
-                errorCuenta={
-                  errors.lineas?.[index]?.cuentaContableGastoId?.message
-                }
-                errorDescripcion={
-                  errors.lineas?.[index]?.descripcion?.message
-                }
+                errorCuenta={errors.lineas?.[index]?.cuentaContableGastoId?.message}
+                errorDescripcion={errors.lineas?.[index]?.descripcion?.message}
                 errorSubtotal={errors.lineas?.[index]?.subtotal?.message}
               />
             ))}
@@ -554,11 +534,7 @@ export function GastoForm({
 
       {ivaWarning && (
         <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-          <HugeiconsIcon
-            icon={Alert02Icon}
-            strokeWidth={2}
-            className="mt-0.5 size-4 shrink-0"
-          />
+          <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="mt-0.5 size-4 shrink-0" />
           <span>
             <strong>Verifique IVA:</strong> {ivaWarning}
           </span>
@@ -573,9 +549,7 @@ export function GastoForm({
             <Total label="IIBB" value={totals.iibb.toString()} />
             <Total label="Otros" value={totals.otros.toString()} />
             <div className="flex items-baseline gap-1">
-              <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                Total
-              </span>
+              <span className="text-xs uppercase tracking-wide text-muted-foreground">Total</span>
               <span className="font-mono text-lg font-semibold tabular-nums">
                 {fmtMoney(totals.total.toString())} {moneda}
               </span>
@@ -590,12 +564,7 @@ export function GastoForm({
             >
               Cancelar
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={submitGuardar}
-              disabled={isPending}
-            >
+            <Button type="button" variant="outline" onClick={submitGuardar} disabled={isPending}>
               {isPending ? "Guardando…" : "Guardar borrador"}
             </Button>
             <Button
@@ -635,20 +604,12 @@ function Field({
       {children}
       {error ? (
         <p className="flex items-center gap-1 text-xs text-destructive">
-          <HugeiconsIcon
-            icon={Alert02Icon}
-            strokeWidth={2}
-            className="size-3"
-          />
+          <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="size-3" />
           {error}
         </p>
       ) : hint ? (
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
-          <HugeiconsIcon
-            icon={InformationCircleIcon}
-            strokeWidth={2}
-            className="size-3"
-          />
+          <HugeiconsIcon icon={InformationCircleIcon} strokeWidth={2} className="size-3" />
           {hint}
         </p>
       ) : null}
@@ -659,9 +620,7 @@ function Field({
 function Total({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-1">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <span className="font-mono text-sm tabular-nums">{fmtMoney(value)}</span>
     </div>
   );
@@ -701,19 +660,13 @@ function LineaRow({
           name={`lineas.${index}.cuentaContableGastoId` as const}
           render={({ field }) => (
             <CuentaCombobox
-              value={
-                field.value && Number(field.value) > 0
-                  ? Number(field.value)
-                  : null
-              }
+              value={field.value && Number(field.value) > 0 ? Number(field.value) : null}
               onChange={(id) => field.onChange(id)}
               cuentas={cuentas}
             />
           )}
         />
-        {errorCuenta && (
-          <p className="mt-1 text-xs text-destructive">{errorCuenta}</p>
-        )}
+        {errorCuenta && <p className="mt-1 text-xs text-destructive">{errorCuenta}</p>}
       </div>
 
       <div className="md:col-span-5">
@@ -722,20 +675,13 @@ function LineaRow({
           {...register(`lineas.${index}.descripcion` as const)}
           placeholder="Ej: Servicio mantenimiento mensual"
         />
-        {errorDescripcion && (
-          <p className="mt-1 text-xs text-destructive">{errorDescripcion}</p>
-        )}
+        {errorDescripcion && <p className="mt-1 text-xs text-destructive">{errorDescripcion}</p>}
       </div>
 
       <div className="md:col-span-1">
         <Label className="text-xs uppercase tracking-wide">Subtotal</Label>
-        <Input
-          inputMode="decimal"
-          {...register(`lineas.${index}.subtotal` as const)}
-        />
-        {errorSubtotal && (
-          <p className="mt-1 text-xs text-destructive">{errorSubtotal}</p>
-        )}
+        <Input inputMode="decimal" {...register(`lineas.${index}.subtotal` as const)} />
+        {errorSubtotal && <p className="mt-1 text-xs text-destructive">{errorSubtotal}</p>}
         <p className="mt-1 truncate font-mono text-xs text-muted-foreground tabular-nums">
           {fmtMoney(safe(subtotal))}
         </p>

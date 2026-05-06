@@ -9,6 +9,7 @@ import {
 
 import { getSaldosPorProveedorConAging } from "@/lib/services/cuentas-a-pagar";
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
+import { getDefaultFecha } from "@/lib/server/fecha-default";
 import { fmtMoney } from "@/lib/format";
 import { toDecimal } from "@/lib/decimal";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,9 +25,10 @@ export default async function SaldosProveedoresPage({
   searchParams: SearchParams;
 }) {
   const { filtro } = await searchParams;
-  const [todos, cuentasBancarias] = await Promise.all([
+  const [todos, cuentasBancarias, defaultFecha] = await Promise.all([
     getSaldosPorProveedorConAging(),
     listarCuentasBancariasParaMovimiento(),
+    getDefaultFecha(),
   ]);
 
   const conVencidas = todos.filter((p) => toDecimal(p.vencido).gt(0));
@@ -49,13 +51,10 @@ export default async function SaldosProveedoresPage({
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-[15px] font-semibold tracking-tight">
-            Saldos por proveedor
-          </h1>
+          <h1 className="text-[15px] font-semibold tracking-tight">Saldos por proveedor</h1>
           <p className="text-sm text-muted-foreground">
-            {list.length} proveedor{list.length === 1 ? "" : "es"} con saldo
-            pendiente · Vencimientos basados en facturas individuales (Compras y
-            Embarques).
+            {list.length} proveedor{list.length === 1 ? "" : "es"} con saldo pendiente ·
+            Vencimientos basados en facturas individuales (Compras y Embarques).
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -106,7 +105,11 @@ export default async function SaldosProveedoresPage({
         />
       </div>
 
-      <SaldosBatchPago proveedores={list} cuentasBancarias={cuentasBancarias} />
+      <SaldosBatchPago
+        proveedores={list}
+        cuentasBancarias={cuentasBancarias}
+        defaultFecha={defaultFecha}
+      />
     </div>
   );
 }
@@ -135,16 +138,11 @@ function KpiCard({
     <Card className={tone === "muted" ? undefined : toneClass}>
       <CardContent className="flex flex-col gap-1">
         <div className="flex items-center gap-1 text-xs uppercase tracking-wide text-muted-foreground">
-          {icon && (
-            <HugeiconsIcon icon={icon} strokeWidth={2} className="size-3" />
-          )}
+          {icon && <HugeiconsIcon icon={icon} strokeWidth={2} className="size-3" />}
           <span>{label}</span>
         </div>
-        <span className="font-mono text-xl font-semibold tabular-nums">
-          {value}
-        </span>
+        <span className="font-mono text-xl font-semibold tabular-nums">{value}</span>
       </CardContent>
     </Card>
   );
 }
-
