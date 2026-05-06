@@ -17,7 +17,11 @@ const prisma = new PrismaClient({ adapter });
 // ============================================================
 
 async function seedAdmin() {
-  const passwordHash = await bcrypt.hash("admin123", 10);
+  // Password do admin do seed vem de env var, com fallback para dev local.
+  // Nunca hardcodar credenciais reais aqui — em produção, defina SEED_ADMIN_PASSWORD
+  // via Vercel env (sem ela, o seed usa a senha padrão e o usuário deve trocá-la).
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "admin123";
+  const passwordHash = await bcrypt.hash(adminPassword, 10);
 
   await prisma.user.upsert({
     where: { username: "admin" },
