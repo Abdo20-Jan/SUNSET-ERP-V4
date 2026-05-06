@@ -128,30 +128,22 @@ const TIPO_COSTO_LABELS: Record<TipoCosto, string> = {
  * Mapeo del enum TipoProveedor (maestros) → TipoCostoEmbarque (categoría
  * de gasto en el embarque). Sirve para auto-poblar la categoría al
  * seleccionar un proveedor en una factura.
+ *
+ * Tipos no mapeados explícitamente (MERCADERIA_*, ALQUILERES, IT_SOFTWARE,
+ * MARKETING, OTRO) caen en GASTOS_LOCALES vía fallback.
  */
+const TIPO_PROVEEDOR_TO_COSTO_EMBARQUE: Record<string, TipoCosto> = {
+  DESPACHANTE: "HONORARIOS_DESPACHANTE",
+  LOGISTICA: "FLETE_NACIONAL",
+  ALMACENAJE: "ALMACENAJE",
+  GASTOS_PORTUARIOS: "GASTOS_PORTUARIOS",
+  SERVICIOS_EXTERIOR: "FLETE_INTERNACIONAL",
+  SERVICIOS_PROFESIONALES: "GASTOS_EXTRAS",
+};
+
 function mapTipoProveedorACostoEmbarque(tipoProveedor: string | null): TipoCosto | null {
-  switch (tipoProveedor) {
-    case "DESPACHANTE":
-      return "HONORARIOS_DESPACHANTE";
-    case "LOGISTICA":
-      return "FLETE_NACIONAL";
-    case "ALMACENAJE":
-      return "ALMACENAJE";
-    case "GASTOS_PORTUARIOS":
-      return "GASTOS_PORTUARIOS";
-    case "SERVICIOS_EXTERIOR":
-      return "FLETE_INTERNACIONAL";
-    case "SERVICIOS_PROFESIONALES":
-      return "GASTOS_EXTRAS";
-    case "MERCADERIA_LOCAL":
-    case "MERCADERIA_EXTERIOR":
-    case "ALQUILERES":
-    case "IT_SOFTWARE":
-    case "MARKETING":
-    case "OTRO":
-    default:
-      return "GASTOS_LOCALES";
-  }
+  if (!tipoProveedor) return null;
+  return TIPO_PROVEEDOR_TO_COSTO_EMBARQUE[tipoProveedor] ?? "GASTOS_LOCALES";
 }
 
 const formSchema = z
