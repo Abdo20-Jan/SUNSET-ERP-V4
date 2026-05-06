@@ -17,19 +17,13 @@ type Props = {
   } | null;
 };
 
-function buildHref(
-  pathname: string,
-  searchParams: URLSearchParams,
-  moneda: Moneda,
-): string {
+function buildHref(pathname: string, searchParams: URLSearchParams, moneda: Moneda): string {
   const next = new URLSearchParams(searchParams.toString());
-  if (moneda === "ARS") {
-    next.delete("moneda");
-  } else {
-    next.set("moneda", "USD");
-  }
-  const qs = next.toString();
-  return qs ? `${pathname}?${qs}` : pathname;
+  // Setar siempre explícito: la ausencia del param se interpreta como
+  // "preferencia del usuario" (USD por default), entonces borrar al elegir ARS
+  // hace que la página vuelva a USD.
+  next.set("moneda", moneda);
+  return `${pathname}?${next.toString()}`;
 }
 
 export function MonedaToggle({ current, tcInfo }: Props) {
@@ -67,9 +61,7 @@ export function MonedaToggle({ current, tcInfo }: Props) {
           )}
           disabled={!tcInfo && current !== "USD"}
           title={
-            !tcInfo
-              ? "Cargá una cotización en /maestros/cotizaciones para ver en USD"
-              : undefined
+            !tcInfo ? "Cargá una cotización en /maestros/cotizaciones para ver en USD" : undefined
           }
         >
           USD
