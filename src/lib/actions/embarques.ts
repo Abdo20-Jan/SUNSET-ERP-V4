@@ -733,8 +733,11 @@ export async function guardarEmbarqueAction(
           await crearAsientoEmbarqueCosto(costoId, tx);
         } catch (err) {
           // Loggeado pero no abortamos el guardado del embarque.
+          // costoId fica como argumento separado (não interpolado) pra evitar
+          // log injection — Opengrep flags string concat com não-literal em log.
           console.warn(
-            `No se pudo auto-emitir EmbarqueCosto ${costoId}:`,
+            "No se pudo auto-emitir EmbarqueCosto:",
+            costoId,
             err instanceof Error ? err.message : err,
           );
         }
