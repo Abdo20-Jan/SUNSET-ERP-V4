@@ -8,8 +8,8 @@ Apenas a branch `main` recebe correções de segurança. Não há LTS para vers�
 
 **Não abra issue público para vulnerabilidades.** Use um dos canais privados:
 
-1. **GitHub Security Advisories** (preferencial): https://github.com/Abdo20-Jan/SUNSET-ERP-V4/security/advisories/new
-2. **E-mail**: abdolatifnasser@gmail.com com assunto `[SECURITY] sunset-erp-v4: <título curto>`
+1. **GitHub Security Advisories** (preferencial): <https://github.com/Abdo20-Jan/SUNSET-ERP-V4/security/advisories/new>
+2. **E-mail**: <abdolatifnasser@gmail.com> com assunto `[SECURITY] sunset-erp-v4: <título curto>`
 
 Inclua, se possível:
 
