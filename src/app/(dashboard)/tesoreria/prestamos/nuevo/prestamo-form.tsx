@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { parseDefaultFecha } from "@/lib/utils/parse-default-fecha";
 
 const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
 const FX_RE = /^\d+(\.\d{1,6})?$/;
@@ -108,12 +109,7 @@ export function PrestamoForm({
     defaultValues: {
       prestamista: "",
       cuentaBancariaId: "",
-      fecha:
-        defaultFecha === undefined
-          ? new Date()
-          : defaultFecha === ""
-            ? (undefined as unknown as Date)
-            : new Date(defaultFecha),
+      fecha: parseDefaultFecha(defaultFecha) as Date,
       principal: "0",
       moneda: "ARS",
       tipoCambio: "1",

@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { parseDefaultFecha } from "@/lib/utils/parse-default-fecha";
 
 const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
 const FX_RE = /^\d+(\.\d{1,6})?$/;
@@ -106,12 +107,7 @@ export function TransferenciaForm({
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
 
-  const initialFecha =
-    defaultFecha === undefined
-      ? new Date()
-      : defaultFecha === ""
-        ? (undefined as unknown as Date)
-        : new Date(defaultFecha);
+  const initialFecha = parseDefaultFecha(defaultFecha) as Date;
 
   const {
     control,

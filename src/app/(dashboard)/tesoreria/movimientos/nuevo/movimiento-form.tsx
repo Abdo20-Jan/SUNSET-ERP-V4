@@ -25,6 +25,7 @@ import {
 } from "@/lib/actions/movimientos-tesoreria";
 import type { ContextoAmortizacion } from "@/lib/actions/prestamos";
 import { cn } from "@/lib/utils";
+import { parseDefaultFecha } from "@/lib/utils/parse-default-fecha";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent } from "@/components/ui/card";
@@ -130,16 +131,7 @@ function getDefaultFormValues(args: {
   defaultFecha?: string;
 }): FormValues {
   const i = { ...FORM_INITIAL_DEFAULTS, ...args.initial };
-  // `defaultFecha === ""` desativa o pre-fill (campo fica vazio para o user).
-  // Cast undefined→Date é intencional: Zod valida depois e o picker abre vazio.
-  let fecha: Date;
-  if (args.defaultFecha === undefined) {
-    fecha = new Date();
-  } else if (args.defaultFecha === "") {
-    fecha = undefined as unknown as Date;
-  } else {
-    fecha = new Date(args.defaultFecha);
-  }
+  const fecha = parseDefaultFecha(args.defaultFecha) as Date;
   return {
     tipo: i.tipo,
     cuentaBancariaId: "",

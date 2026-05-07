@@ -20,6 +20,7 @@ import {
 
 import { crearAsientoManualAction } from "@/lib/actions/asientos";
 import { cn } from "@/lib/utils";
+import { parseDefaultFecha } from "@/lib/utils/parse-default-fecha";
 
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
 
@@ -138,12 +139,7 @@ export function AsientoForm({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
     defaultValues: {
-      fecha:
-        defaultFecha === undefined
-          ? new Date()
-          : defaultFecha === ""
-            ? (undefined as unknown as Date)
-            : new Date(defaultFecha),
+      fecha: parseDefaultFecha(defaultFecha) as Date,
       moneda: "ARS",
       tipoCambio: "1",
       descripcion: "",
