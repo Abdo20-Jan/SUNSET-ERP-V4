@@ -563,12 +563,15 @@ export async function crearAsientoMovimientoTesoreria(
 
 export type CrearTransferenciaInput = {
   fecha: Date;
+  fechaDestino?: Date | null;
   cuentaBancariaOrigenId: string;
   cuentaBancariaDestinoId: string;
   montoOrigen: string;
   montoDestino: string;
   tipoCambioOrigen: string;
   tipoCambioDestino: string;
+  referenciaBancoOrigen?: string | null;
+  referenciaBancoDestino?: string | null;
   descripcion?: string | null;
 };
 
@@ -648,18 +651,25 @@ export async function crearAsientoTransferencia(
     const destinoArs = money(montoDestinoDec.mul(tcDestinoDec));
     const diff = toDecimal(destinoArs).minus(toDecimal(origenArs));
 
+    const refOrigenSuffix = input.referenciaBancoOrigen?.trim()
+      ? ` — Ref ${input.referenciaBancoOrigen.trim()}`
+      : "";
+    const refDestinoSuffix = input.referenciaBancoDestino?.trim()
+      ? ` — Ref ${input.referenciaBancoDestino.trim()}`
+      : "";
+
     const lineas: LineaInput[] = [
       {
         cuentaId: destino.cuentaContableId,
         debe: destinoArs.toString(),
         haber: 0,
-        descripcion: `Transferencia recibida desde ${origen.banco}`,
+        descripcion: `Transferencia recibida desde ${origen.banco}${refDestinoSuffix}`,
       },
       {
         cuentaId: origen.cuentaContableId,
         debe: 0,
         haber: origenArs.toString(),
-        descripcion: `Transferencia enviada a ${destino.banco}`,
+        descripcion: `Transferencia enviada a ${destino.banco}${refOrigenSuffix}`,
       },
     ];
 
@@ -697,10 +707,13 @@ export async function crearAsientoTransferencia(
         cuentaBancariaId: origen.id,
         cuentaContableId: destino.cuentaContableId,
         fecha: input.fecha,
+        fechaDestino: input.fechaDestino ?? null,
         monto: money(montoOrigenDec),
         moneda: origen.moneda,
         tipoCambio: new Prisma.Decimal(tcOrigenDec.toFixed(6)),
         descripcion: input.descripcion ?? null,
+        referenciaBanco: input.referenciaBancoOrigen ?? null,
+        referenciaBancoDestino: input.referenciaBancoDestino ?? null,
         asientoId: asiento.id,
       },
       select: { id: true },

@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import {
+  Controller,
+  useForm,
+  useWatch,
+  type Control,
+  type FieldErrors,
+  type UseFormRegister,
+} from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format } from "date-fns";
@@ -36,7 +43,10 @@ const formSchema = z
   .object({
     cuentaBancariaOrigenId: z.string().uuid({ message: "Seleccione la cuenta origen" }),
     cuentaBancariaDestinoId: z.string().uuid({ message: "Seleccione la cuenta destino" }),
-    fecha: z.date({ message: "Seleccione la fecha" }),
+    fecha: z.date({ message: "Seleccione la fecha de pago" }),
+    fechaDestino: z.date({ message: "Seleccione la fecha de recepción" }),
+    referenciaBancoOrigen: z.string().trim().max(120).optional(),
+    referenciaBancoDestino: z.string().trim().max(120).optional(),
     montoOrigen: z.string().regex(DECIMAL_RE, "Monto origen inválido (máx. 2 decimales)"),
     montoDestino: z.string().regex(DECIMAL_RE, "Monto destino inválido (máx. 2 decimales)"),
     tipoCambioOrigen: z.string().regex(FX_RE, "Tipo de cambio origen inválido"),
@@ -96,6 +106,13 @@ export function TransferenciaForm({
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
 
+  const initialFecha =
+    defaultFecha === undefined
+      ? new Date()
+      : defaultFecha === ""
+        ? (undefined as unknown as Date)
+        : new Date(defaultFecha);
+
   const {
     control,
     register,
@@ -108,12 +125,10 @@ export function TransferenciaForm({
     defaultValues: {
       cuentaBancariaOrigenId: "",
       cuentaBancariaDestinoId: "",
-      fecha:
-        defaultFecha === undefined
-          ? new Date()
-          : defaultFecha === ""
-            ? (undefined as unknown as Date)
-            : new Date(defaultFecha),
+      fecha: initialFecha,
+      fechaDestino: initialFecha,
+      referenciaBancoOrigen: "",
+      referenciaBancoDestino: "",
       montoOrigen: "0",
       montoDestino: "0",
       tipoCambioOrigen: "1",
@@ -124,6 +139,7 @@ export function TransferenciaForm({
 
   const origenId = useWatch({ control, name: "cuentaBancariaOrigenId" });
   const destinoId = useWatch({ control, name: "cuentaBancariaDestinoId" });
+  const fechaPago = useWatch({ control, name: "fecha" });
   const montoOrigen = useWatch({ control, name: "montoOrigen" });
   const montoDestino = useWatch({ control, name: "montoDestino" });
   const tcOrigen = useWatch({ control, name: "tipoCambioOrigen" });
@@ -150,6 +166,22 @@ export function TransferenciaForm({
     }
   }, [destino?.moneda, setValue]);
 
+  const sameCurrency = !!origen && !!destino && origen.moneda === destino.moneda;
+
+  const userTouchedDestinoMonto = useRef(false);
+  useEffect(() => {
+    if (sameCurrency && !userTouchedDestinoMonto.current) {
+      setValue("montoDestino", montoOrigen, { shouldValidate: true });
+    }
+  }, [sameCurrency, montoOrigen, setValue]);
+
+  const userTouchedFechaDestino = useRef(false);
+  useEffect(() => {
+    if (!userTouchedFechaDestino.current && fechaPago instanceof Date) {
+      setValue("fechaDestino", fechaPago, { shouldValidate: true });
+    }
+  }, [fechaPago, setValue]);
+
   const destinoOptions = useMemo(
     () => cuentasBancarias.filter((c) => c.id !== origenId),
     [cuentasBancarias, origenId],
@@ -175,10 +207,13 @@ export function TransferenciaForm({
         cuentaBancariaOrigenId: values.cuentaBancariaOrigenId,
         cuentaBancariaDestinoId: values.cuentaBancariaDestinoId,
         fecha: values.fecha,
+        fechaDestino: values.fechaDestino,
         montoOrigen: values.montoOrigen,
         montoDestino: values.montoDestino,
         tipoCambioOrigen: values.tipoCambioOrigen,
         tipoCambioDestino: values.tipoCambioDestino,
+        referenciaBancoOrigen: values.referenciaBancoOrigen,
+        referenciaBancoDestino: values.referenciaBancoDestino,
         descripcion: values.descripcion,
       });
 
@@ -196,193 +231,46 @@ export function TransferenciaForm({
       <Card>
         <CardContent className="flex flex-col gap-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto_1fr]">
-            <div className="flex flex-col gap-2">
-              <Label>Cuenta origen</Label>
-              <Controller
-                control={control}
-                name="cuentaBancariaOrigenId"
-                render={({ field }) => (
-                  <Select value={field.value || undefined} onValueChange={field.onChange}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Seleccione cuenta">
-                        {(value) => {
-                          const c = cuentasBancarias.find((c) => c.id === value);
-                          return c ? `${c.banco} · ${c.numero} · ${c.moneda}` : "Seleccione cuenta";
-                        }}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {cuentasBancarias.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.banco} · {c.numero} · {c.moneda}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {errors.cuentaBancariaOrigenId && (
-                <FieldError message={errors.cuentaBancariaOrigenId.message} />
-              )}
-              {origen && (
-                <p className="text-xs text-muted-foreground">
-                  <span className="font-mono">{origen.cuentaContableCodigo}</span> —{" "}
-                  {origen.cuentaContableNombre}
-                </p>
-              )}
-            </div>
+            <CuentaSideCard
+              lado="origen"
+              cuenta={origen}
+              cuentaOptions={cuentasBancarias}
+              previewArs={preview?.origenArs}
+              control={control}
+              register={register}
+              errors={errors}
+              onMontoChange={() => {
+                /* origen change does not reset destino-touched flag */
+              }}
+              onFechaChange={() => {
+                /* origen fecha change does not reset destino-touched flag */
+              }}
+            />
 
-            <div className="flex items-center justify-center pt-6 text-muted-foreground">
+            <div className="flex items-center justify-center pt-12 text-muted-foreground">
               <HugeiconsIcon icon={ArrowRight02Icon} strokeWidth={2} />
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label>Cuenta destino</Label>
-              <Controller
-                control={control}
-                name="cuentaBancariaDestinoId"
-                render={({ field }) => (
-                  <Select value={field.value || undefined} onValueChange={field.onChange}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Seleccione cuenta">
-                        {(value) => {
-                          const c = destinoOptions.find((c) => c.id === value);
-                          return c ? `${c.banco} · ${c.numero} · ${c.moneda}` : "Seleccione cuenta";
-                        }}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {destinoOptions.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.banco} · {c.numero} · {c.moneda}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {errors.cuentaBancariaDestinoId && (
-                <FieldError message={errors.cuentaBancariaDestinoId.message} />
-              )}
-              {destino && (
-                <p className="text-xs text-muted-foreground">
-                  <span className="font-mono">{destino.cuentaContableCodigo}</span> —{" "}
-                  {destino.cuentaContableNombre}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <Label>Fecha</Label>
-            <Controller
+            <CuentaSideCard
+              lado="destino"
+              cuenta={destino}
+              cuentaOptions={destinoOptions}
+              previewArs={preview?.destinoArs}
               control={control}
-              name="fecha"
-              render={({ field }) => <DatePicker value={field.value} onChange={field.onChange} />}
+              register={register}
+              errors={errors}
+              onMontoChange={() => {
+                userTouchedDestinoMonto.current = true;
+              }}
+              onFechaChange={() => {
+                userTouchedFechaDestino.current = true;
+              }}
+              autoFillHint={
+                sameCurrency
+                  ? "Auto-completa con el monto de origen (misma moneda). Edite manualmente para registrar comisiones."
+                  : null
+              }
             />
-            {errors.fecha && <FieldError message={errors.fecha.message} />}
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="flex flex-col gap-3 rounded-lg border p-4">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Origen
-                </Label>
-                {origen && (
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
-                    {origen.moneda}
-                  </span>
-                )}
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="montoOrigen" className="text-xs">
-                  Monto {origen?.moneda ? `(${origen.moneda})` : ""}
-                </Label>
-                <Input
-                  id="montoOrigen"
-                  inputMode="decimal"
-                  className="text-right tabular-nums"
-                  aria-invalid={!!errors.montoOrigen}
-                  {...register("montoOrigen")}
-                />
-                {errors.montoOrigen && <FieldError message={errors.montoOrigen.message} />}
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="tipoCambioOrigen" className="text-xs">
-                  Tipo de cambio (→ ARS)
-                </Label>
-                <Input
-                  id="tipoCambioOrigen"
-                  inputMode="decimal"
-                  className="tabular-nums"
-                  disabled={origen?.moneda === "ARS"}
-                  aria-invalid={!!errors.tipoCambioOrigen}
-                  {...register("tipoCambioOrigen")}
-                />
-                {errors.tipoCambioOrigen && (
-                  <FieldError message={errors.tipoCambioOrigen.message} />
-                )}
-                {origen?.moneda === "ARS" && (
-                  <p className="text-xs text-muted-foreground">Fijo en 1 para ARS.</p>
-                )}
-              </div>
-              {preview && (
-                <p className="text-xs text-muted-foreground">
-                  Equivalente ARS: {fmt(preview.origenArs)}
-                </p>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-3 rounded-lg border p-4">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Destino
-                </Label>
-                {destino && (
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
-                    {destino.moneda}
-                  </span>
-                )}
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="montoDestino" className="text-xs">
-                  Monto {destino?.moneda ? `(${destino.moneda})` : ""}
-                </Label>
-                <Input
-                  id="montoDestino"
-                  inputMode="decimal"
-                  className="text-right tabular-nums"
-                  aria-invalid={!!errors.montoDestino}
-                  {...register("montoDestino")}
-                />
-                {errors.montoDestino && <FieldError message={errors.montoDestino.message} />}
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="tipoCambioDestino" className="text-xs">
-                  Tipo de cambio (→ ARS)
-                </Label>
-                <Input
-                  id="tipoCambioDestino"
-                  inputMode="decimal"
-                  className="tabular-nums"
-                  disabled={destino?.moneda === "ARS"}
-                  aria-invalid={!!errors.tipoCambioDestino}
-                  {...register("tipoCambioDestino")}
-                />
-                {errors.tipoCambioDestino && (
-                  <FieldError message={errors.tipoCambioDestino.message} />
-                )}
-                {destino?.moneda === "ARS" && (
-                  <p className="text-xs text-muted-foreground">Fijo en 1 para ARS.</p>
-                )}
-              </div>
-              {preview && (
-                <p className="text-xs text-muted-foreground">
-                  Equivalente ARS: {fmt(preview.destinoArs)}
-                </p>
-              )}
-            </div>
           </div>
 
           <div className="flex flex-col gap-2">
@@ -423,6 +311,192 @@ export function TransferenciaForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+type CuentaSideRole = "origen" | "destino";
+
+type CuentaSideCardProps = {
+  lado: CuentaSideRole;
+  cuenta: CuentaBancariaOption | null;
+  cuentaOptions: CuentaBancariaOption[];
+  previewArs?: number;
+  control: Control<FormValues>;
+  register: UseFormRegister<FormValues>;
+  errors: FieldErrors<FormValues>;
+  onMontoChange: () => void;
+  onFechaChange: () => void;
+  autoFillHint?: string | null;
+};
+
+const FIELD_NAMES_ORIGEN = {
+  cuenta: "cuentaBancariaOrigenId",
+  fecha: "fecha",
+  ref: "referenciaBancoOrigen",
+  monto: "montoOrigen",
+  tc: "tipoCambioOrigen",
+} as const;
+
+const FIELD_NAMES_DESTINO = {
+  cuenta: "cuentaBancariaDestinoId",
+  fecha: "fechaDestino",
+  ref: "referenciaBancoDestino",
+  monto: "montoDestino",
+  tc: "tipoCambioDestino",
+} as const;
+
+function CuentaSideCard(props: CuentaSideCardProps) {
+  const {
+    lado,
+    cuenta,
+    cuentaOptions,
+    previewArs,
+    control,
+    register,
+    errors,
+    onMontoChange,
+    onFechaChange,
+    autoFillHint,
+  } = props;
+
+  const fields = lado === "origen" ? FIELD_NAMES_ORIGEN : FIELD_NAMES_DESTINO;
+  const titulo = lado === "origen" ? "Origen" : "Destino";
+  const cuentaLabel = lado === "origen" ? "Cuenta origen" : "Cuenta destino";
+  const fechaLabel = lado === "origen" ? "Fecha de pago" : "Fecha de recepción";
+  const refLabel =
+    lado === "origen" ? "Referencia bancaria (origen)" : "Referencia bancaria (destino)";
+  const refPlaceholder =
+    lado === "origen"
+      ? "Ej. ORD-2026-04823 / nº comprobante de pago"
+      : "Ej. CRE-2026-77291 / nº comprobante de acreditación";
+  const placeholderCuenta =
+    lado === "origen" ? "Seleccione cuenta origen" : "Seleccione cuenta destino";
+
+  const cuentaError = errors[fields.cuenta]?.message;
+  const fechaError = errors[fields.fecha]?.message;
+  const referenciaError = errors[fields.ref]?.message;
+  const montoError = errors[fields.monto]?.message;
+  const tcError = errors[fields.tc]?.message;
+  const tcDisabled = cuenta?.moneda === "ARS";
+
+  const montoRegister = register(fields.monto);
+  const refRegister = register(fields.ref);
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border p-4">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs uppercase tracking-wide text-muted-foreground">{titulo}</Label>
+        {cuenta && (
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+            {cuenta.moneda}
+          </span>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label className="text-xs">{cuentaLabel}</Label>
+        <Controller
+          control={control}
+          name={fields.cuenta}
+          render={({ field }) => (
+            <Select value={(field.value as string) || undefined} onValueChange={field.onChange}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={placeholderCuenta}>
+                  {(value) => {
+                    const c = cuentaOptions.find((c) => c.id === value);
+                    return c ? `${c.banco} · ${c.numero} · ${c.moneda}` : placeholderCuenta;
+                  }}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {cuentaOptions.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.banco} · {c.numero} · {c.moneda}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        />
+        {cuentaError && <FieldError message={cuentaError} />}
+        {cuenta && (
+          <p className="text-xs text-muted-foreground">
+            <span className="font-mono">{cuenta.cuentaContableCodigo}</span> —{" "}
+            {cuenta.cuentaContableNombre}
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label className="text-xs">{fechaLabel}</Label>
+        <Controller
+          control={control}
+          name={fields.fecha}
+          render={({ field }) => (
+            <DatePicker
+              value={field.value as Date | undefined}
+              onChange={(d) => {
+                onFechaChange();
+                field.onChange(d);
+              }}
+            />
+          )}
+        />
+        {fechaError && <FieldError message={fechaError} />}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label className="text-xs" htmlFor={fields.ref}>
+          {refLabel}
+        </Label>
+        <Input
+          id={fields.ref}
+          placeholder={refPlaceholder}
+          aria-invalid={!!referenciaError}
+          {...refRegister}
+        />
+        {referenciaError && <FieldError message={referenciaError} />}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={fields.monto} className="text-xs">
+          Monto {cuenta?.moneda ? `(${cuenta.moneda})` : ""}
+        </Label>
+        <Input
+          id={fields.monto}
+          inputMode="decimal"
+          className="text-right tabular-nums"
+          aria-invalid={!!montoError}
+          {...montoRegister}
+          onChange={(e) => {
+            onMontoChange();
+            montoRegister.onChange(e);
+          }}
+        />
+        {montoError && <FieldError message={montoError} />}
+        {autoFillHint && <p className="text-xs text-muted-foreground">{autoFillHint}</p>}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={fields.tc} className="text-xs">
+          Tipo de cambio (→ ARS)
+        </Label>
+        <Input
+          id={fields.tc}
+          inputMode="decimal"
+          className="tabular-nums"
+          disabled={tcDisabled}
+          aria-invalid={!!tcError}
+          {...register(fields.tc)}
+        />
+        {tcError && <FieldError message={tcError} />}
+        {tcDisabled && <p className="text-xs text-muted-foreground">Fijo en 1 para ARS.</p>}
+      </div>
+
+      {previewArs !== undefined && (
+        <p className="text-xs text-muted-foreground">Equivalente ARS: {fmt(previewArs)}</p>
+      )}
+    </div>
   );
 }
 
