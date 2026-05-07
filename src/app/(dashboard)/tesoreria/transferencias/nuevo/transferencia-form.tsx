@@ -2,7 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import {
+  Controller,
+  useForm,
+  useWatch,
+  type Control,
+  type FieldErrors,
+  type UseFormRegister,
+} from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format } from "date-fns";
@@ -133,7 +140,6 @@ export function TransferenciaForm({
   const origenId = useWatch({ control, name: "cuentaBancariaOrigenId" });
   const destinoId = useWatch({ control, name: "cuentaBancariaDestinoId" });
   const fechaPago = useWatch({ control, name: "fecha" });
-  const fechaDestino = useWatch({ control, name: "fechaDestino" });
   const montoOrigen = useWatch({ control, name: "montoOrigen" });
   const montoDestino = useWatch({ control, name: "montoDestino" });
   const tcOrigen = useWatch({ control, name: "tipoCambioOrigen" });
@@ -229,21 +235,10 @@ export function TransferenciaForm({
               lado="origen"
               cuenta={origen}
               cuentaOptions={cuentasBancarias}
-              cuentaFieldName="cuentaBancariaOrigenId"
-              cuentaError={errors.cuentaBancariaOrigenId?.message}
-              fechaFieldName="fecha"
-              fechaValue={fechaPago}
-              fechaError={errors.fecha?.message}
-              referenciaFieldName="referenciaBancoOrigen"
-              referenciaError={errors.referenciaBancoOrigen?.message}
-              montoFieldName="montoOrigen"
-              montoError={errors.montoOrigen?.message}
-              tcFieldName="tipoCambioOrigen"
-              tcError={errors.tipoCambioOrigen?.message}
-              tcDisabled={origen?.moneda === "ARS"}
               previewArs={preview?.origenArs}
               control={control}
               register={register}
+              errors={errors}
               onMontoChange={() => {
                 /* origen change does not reset destino-touched flag */
               }}
@@ -260,21 +255,10 @@ export function TransferenciaForm({
               lado="destino"
               cuenta={destino}
               cuentaOptions={destinoOptions}
-              cuentaFieldName="cuentaBancariaDestinoId"
-              cuentaError={errors.cuentaBancariaDestinoId?.message}
-              fechaFieldName="fechaDestino"
-              fechaValue={fechaDestino}
-              fechaError={errors.fechaDestino?.message}
-              referenciaFieldName="referenciaBancoDestino"
-              referenciaError={errors.referenciaBancoDestino?.message}
-              montoFieldName="montoDestino"
-              montoError={errors.montoDestino?.message}
-              tcFieldName="tipoCambioDestino"
-              tcError={errors.tipoCambioDestino?.message}
-              tcDisabled={destino?.moneda === "ARS"}
               previewArs={preview?.destinoArs}
               control={control}
               register={register}
+              errors={errors}
               onMontoChange={() => {
                 userTouchedDestinoMonto.current = true;
               }}
@@ -332,53 +316,50 @@ export function TransferenciaForm({
 
 type CuentaSideRole = "origen" | "destino";
 
-function CuentaSideCard({
-  lado,
-  cuenta,
-  cuentaOptions,
-  cuentaFieldName,
-  cuentaError,
-  fechaFieldName,
-  fechaValue,
-  fechaError,
-  referenciaFieldName,
-  referenciaError,
-  montoFieldName,
-  montoError,
-  tcFieldName,
-  tcError,
-  tcDisabled,
-  previewArs,
-  control,
-  register,
-  onMontoChange,
-  onFechaChange,
-  autoFillHint,
-}: {
+type CuentaSideCardProps = {
   lado: CuentaSideRole;
   cuenta: CuentaBancariaOption | null;
   cuentaOptions: CuentaBancariaOption[];
-  cuentaFieldName: "cuentaBancariaOrigenId" | "cuentaBancariaDestinoId";
-  cuentaError?: string;
-  fechaFieldName: "fecha" | "fechaDestino";
-  fechaValue: Date | undefined;
-  fechaError?: string;
-  referenciaFieldName: "referenciaBancoOrigen" | "referenciaBancoDestino";
-  referenciaError?: string;
-  montoFieldName: "montoOrigen" | "montoDestino";
-  montoError?: string;
-  tcFieldName: "tipoCambioOrigen" | "tipoCambioDestino";
-  tcError?: string;
-  tcDisabled: boolean;
   previewArs?: number;
-  // biome-ignore lint/suspicious/noExplicitAny: react-hook-form generic types are heavy here
-  control: any;
-  // biome-ignore lint/suspicious/noExplicitAny: react-hook-form generic types are heavy here
-  register: any;
+  control: Control<FormValues>;
+  register: UseFormRegister<FormValues>;
+  errors: FieldErrors<FormValues>;
   onMontoChange: () => void;
   onFechaChange: () => void;
   autoFillHint?: string | null;
-}) {
+};
+
+const FIELD_NAMES_ORIGEN = {
+  cuenta: "cuentaBancariaOrigenId",
+  fecha: "fecha",
+  ref: "referenciaBancoOrigen",
+  monto: "montoOrigen",
+  tc: "tipoCambioOrigen",
+} as const;
+
+const FIELD_NAMES_DESTINO = {
+  cuenta: "cuentaBancariaDestinoId",
+  fecha: "fechaDestino",
+  ref: "referenciaBancoDestino",
+  monto: "montoDestino",
+  tc: "tipoCambioDestino",
+} as const;
+
+function CuentaSideCard(props: CuentaSideCardProps) {
+  const {
+    lado,
+    cuenta,
+    cuentaOptions,
+    previewArs,
+    control,
+    register,
+    errors,
+    onMontoChange,
+    onFechaChange,
+    autoFillHint,
+  } = props;
+
+  const fields = lado === "origen" ? FIELD_NAMES_ORIGEN : FIELD_NAMES_DESTINO;
   const titulo = lado === "origen" ? "Origen" : "Destino";
   const cuentaLabel = lado === "origen" ? "Cuenta origen" : "Cuenta destino";
   const fechaLabel = lado === "origen" ? "Fecha de pago" : "Fecha de recepción";
@@ -391,8 +372,15 @@ function CuentaSideCard({
   const placeholderCuenta =
     lado === "origen" ? "Seleccione cuenta origen" : "Seleccione cuenta destino";
 
-  const montoRegister = register(montoFieldName);
-  const refRegister = register(referenciaFieldName);
+  const cuentaError = errors[fields.cuenta]?.message;
+  const fechaError = errors[fields.fecha]?.message;
+  const referenciaError = errors[fields.ref]?.message;
+  const montoError = errors[fields.monto]?.message;
+  const tcError = errors[fields.tc]?.message;
+  const tcDisabled = cuenta?.moneda === "ARS";
+
+  const montoRegister = register(fields.monto);
+  const refRegister = register(fields.ref);
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-4">
@@ -409,9 +397,9 @@ function CuentaSideCard({
         <Label className="text-xs">{cuentaLabel}</Label>
         <Controller
           control={control}
-          name={cuentaFieldName}
+          name={fields.cuenta}
           render={({ field }) => (
-            <Select value={field.value || undefined} onValueChange={field.onChange}>
+            <Select value={(field.value as string) || undefined} onValueChange={field.onChange}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder={placeholderCuenta}>
                   {(value) => {
@@ -443,10 +431,10 @@ function CuentaSideCard({
         <Label className="text-xs">{fechaLabel}</Label>
         <Controller
           control={control}
-          name={fechaFieldName}
+          name={fields.fecha}
           render={({ field }) => (
             <DatePicker
-              value={field.value}
+              value={field.value as Date | undefined}
               onChange={(d) => {
                 onFechaChange();
                 field.onChange(d);
@@ -454,16 +442,15 @@ function CuentaSideCard({
             />
           )}
         />
-        {fechaValue ? null : null}
         {fechaError && <FieldError message={fechaError} />}
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label className="text-xs" htmlFor={referenciaFieldName}>
+        <Label className="text-xs" htmlFor={fields.ref}>
           {refLabel}
         </Label>
         <Input
-          id={referenciaFieldName}
+          id={fields.ref}
           placeholder={refPlaceholder}
           aria-invalid={!!referenciaError}
           {...refRegister}
@@ -472,11 +459,11 @@ function CuentaSideCard({
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor={montoFieldName} className="text-xs">
+        <Label htmlFor={fields.monto} className="text-xs">
           Monto {cuenta?.moneda ? `(${cuenta.moneda})` : ""}
         </Label>
         <Input
-          id={montoFieldName}
+          id={fields.monto}
           inputMode="decimal"
           className="text-right tabular-nums"
           aria-invalid={!!montoError}
@@ -491,16 +478,16 @@ function CuentaSideCard({
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor={tcFieldName} className="text-xs">
+        <Label htmlFor={fields.tc} className="text-xs">
           Tipo de cambio (→ ARS)
         </Label>
         <Input
-          id={tcFieldName}
+          id={fields.tc}
           inputMode="decimal"
           className="tabular-nums"
           disabled={tcDisabled}
           aria-invalid={!!tcError}
-          {...register(tcFieldName)}
+          {...register(fields.tc)}
         />
         {tcError && <FieldError message={tcError} />}
         {tcDisabled && <p className="text-xs text-muted-foreground">Fijo en 1 para ARS.</p>}
