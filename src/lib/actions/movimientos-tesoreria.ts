@@ -39,9 +39,7 @@ export type CuentaContableContrapartidaOption = {
   categoria: "ACTIVO" | "PASIVO" | "PATRIMONIO" | "INGRESO" | "EGRESO";
 };
 
-export async function listarCuentasBancariasParaMovimiento(): Promise<
-  CuentaBancariaOption[]
-> {
+export async function listarCuentasBancariasParaMovimiento(): Promise<CuentaBancariaOption[]> {
   const cuentas = await db.cuentaBancaria.findMany({
     orderBy: [{ banco: "asc" }, { moneda: "asc" }],
     select: {
@@ -110,15 +108,11 @@ const crearMovimientoSchema = z
     cuentaBancariaId: z.string().uuid(),
     fecha: z.coerce.date(),
     moneda: z.nativeEnum(Moneda),
-    tipoCambio: z
-      .string()
-      .regex(FX_RE, "Tipo de cambio inválido (máx. 6 decimales)"),
+    tipoCambio: z.string().regex(FX_RE, "Tipo de cambio inválido (máx. 6 decimales)"),
     // 1+ contrapartidas. El total del movimiento bancario es la suma
     // de sus montos. Para casos simples (1 sola contrapartida) se
     // mantiene el comportamiento clásico (incluyendo split IDCB 33/67%).
-    lineas: z
-      .array(lineaContrapartidaSchema)
-      .min(1, "Agregue al menos una línea de contrapartida"),
+    lineas: z.array(lineaContrapartidaSchema).min(1, "Agregue al menos una línea de contrapartida"),
     descripcion: z
       .string()
       .trim()
@@ -213,10 +207,7 @@ export async function crearMovimientoTesoreriaAction(
     referenciaBanco,
   } = parsed.data;
 
-  const total = lineas.reduce(
-    (s, l) => s.plus(new Decimal(l.monto)),
-    new Decimal(0),
-  );
+  const total = lineas.reduce((s, l) => s.plus(new Decimal(l.monto)), new Decimal(0));
   const totalStr = total.toDecimalPlaces(2).toFixed(2);
 
   const cuentaBancaria = await db.cuentaBancaria.findUnique({
@@ -280,10 +271,7 @@ export async function crearMovimientoTesoreriaAction(
       const intentoArs = new Decimal(linea.monto)
         .times(new Decimal(tipoCambio))
         .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-      const saldoCheck = await validarSaldoSuficientePrestamo(
-        linea.cuentaContableId,
-        intentoArs,
-      );
+      const saldoCheck = await validarSaldoSuficientePrestamo(linea.cuentaContableId, intentoArs);
       if (!saldoCheck.ok) {
         return {
           ok: false,
@@ -513,10 +501,7 @@ export async function pagarConIntermediarioAction(
 
   const data = parsed.data;
   const total = new Decimal(data.montoTransferido);
-  const subtotal = data.facturas.reduce(
-    (s, f) => s.plus(new Decimal(f.monto)),
-    new Decimal(0),
-  );
+  const subtotal = data.facturas.reduce((s, f) => s.plus(new Decimal(f.monto)), new Decimal(0));
   const diferencia = total.minus(subtotal);
 
   // Validaciones de cuentas
@@ -535,10 +520,7 @@ export async function pagarConIntermediarioAction(
   }
 
   const cuentaIds = Array.from(
-    new Set([
-      ...data.facturas.map((f) => f.cuentaContableId),
-      data.beneficiarioCuentaId,
-    ]),
+    new Set([...data.facturas.map((f) => f.cuentaContableId), data.beneficiarioCuentaId]),
   );
   const cuentas = await db.cuentaContable.findMany({
     where: { id: { in: cuentaIds } },
@@ -608,14 +590,14 @@ export async function pagarConIntermediarioAction(
           cuentaId: data.beneficiarioCuentaId,
           debe: diferencia.toFixed(2),
           haber: 0,
-          descripcion: `Anticipo / saldo a favor`,
+          descripcion: "Anticipo / saldo a favor",
         });
       } else if (diferencia.lt(0)) {
         lineas.push({
           cuentaId: data.beneficiarioCuentaId,
           debe: 0,
           haber: diferencia.abs().toFixed(2),
-          descripcion: `Saldo pendiente con intermediario`,
+          descripcion: "Saldo pendiente con intermediario",
         });
       }
 
@@ -659,12 +641,11 @@ export async function pagarConIntermediarioAction(
     revalidatePath("/tesoreria/saldos-proveedores");
     revalidatePath("/contabilidad/asientos");
 
-    const tipoDiferencia: "exacto" | "anticipo" | "saldo_pendiente" =
-      diferencia.eq(0)
-        ? "exacto"
-        : diferencia.gt(0)
-          ? "anticipo"
-          : "saldo_pendiente";
+    const tipoDiferencia: "exacto" | "anticipo" | "saldo_pendiente" = diferencia.eq(0)
+      ? "exacto"
+      : diferencia.gt(0)
+        ? "anticipo"
+        : "saldo_pendiente";
 
     return {
       ok: true,
@@ -689,18 +670,25 @@ const crearTransferenciaSchema = z
     cuentaBancariaOrigenId: z.string().uuid(),
     cuentaBancariaDestinoId: z.string().uuid(),
     fecha: z.coerce.date(),
-    montoOrigen: z
-      .string()
-      .regex(MONEY_RE, "Monto origen inválido (máx. 2 decimales)"),
-    montoDestino: z
-      .string()
-      .regex(MONEY_RE, "Monto destino inválido (máx. 2 decimales)"),
-    tipoCambioOrigen: z
-      .string()
-      .regex(FX_RE, "Tipo de cambio origen inválido (máx. 6 decimales)"),
+    fechaDestino: z.coerce.date().optional(),
+    montoOrigen: z.string().regex(MONEY_RE, "Monto origen inválido (máx. 2 decimales)"),
+    montoDestino: z.string().regex(MONEY_RE, "Monto destino inválido (máx. 2 decimales)"),
+    tipoCambioOrigen: z.string().regex(FX_RE, "Tipo de cambio origen inválido (máx. 6 decimales)"),
     tipoCambioDestino: z
       .string()
       .regex(FX_RE, "Tipo de cambio destino inválido (máx. 6 decimales)"),
+    referenciaBancoOrigen: z
+      .string()
+      .trim()
+      .max(120)
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null)),
+    referenciaBancoDestino: z
+      .string()
+      .trim()
+      .max(120)
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null)),
     descripcion: z
       .string()
       .trim()
@@ -775,10 +763,13 @@ export async function crearTransferenciaAction(
     cuentaBancariaOrigenId,
     cuentaBancariaDestinoId,
     fecha,
+    fechaDestino,
     montoOrigen,
     montoDestino,
     tipoCambioOrigen,
     tipoCambioDestino,
+    referenciaBancoOrigen,
+    referenciaBancoDestino,
     descripcion,
   } = parsed.data;
 
@@ -818,12 +809,15 @@ export async function crearTransferenciaAction(
       const { asiento, movimientoId } = await crearAsientoTransferencia(
         {
           fecha,
+          fechaDestino: fechaDestino ?? null,
           cuentaBancariaOrigenId,
           cuentaBancariaDestinoId,
           montoOrigen,
           montoDestino,
           tipoCambioOrigen,
           tipoCambioDestino,
+          referenciaBancoOrigen,
+          referenciaBancoDestino,
           descripcion,
         },
         tx,
