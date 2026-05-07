@@ -28,7 +28,7 @@ export default async function CuentasPage() {
   const stripEmptyChildren = (node: CuentaNode) => {
     if (!node.children) return;
     if (node.children.length === 0) {
-      delete node.children;
+      node.children = undefined;
       return;
     }
     node.children.forEach(stripEmptyChildren);
@@ -38,12 +38,8 @@ export default async function CuentasPage() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-[15px] font-semibold tracking-tight">
-          Plan de Cuentas
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {cuentas.length} cuentas contables
-        </p>
+        <h1 className="text-[15px] font-semibold tracking-tight">Plan de Cuentas</h1>
+        <p className="text-sm text-muted-foreground">{cuentas.length} cuentas contables</p>
       </div>
       <Card className="py-0">
         <CuentasTreeTable data={roots} />

@@ -6,11 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Decimal from "decimal.js";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  CancelCircleIcon,
-  CheckmarkCircle02Icon,
-  Invoice01Icon,
-} from "@hugeicons/core-free-icons";
+import { CancelCircleIcon, CheckmarkCircle02Icon, Invoice01Icon } from "@hugeicons/core-free-icons";
 
 import {
   crearCompraDesdePedidoAction,
@@ -46,9 +42,7 @@ type Props = {
   comprasVinculadas: Array<{ id: string; numero: string; estado: string }>;
 };
 
-function estadoVariant(
-  estado: PedidoEstado,
-): "default" | "outline" | "secondary" | "destructive" {
+function estadoVariant(estado: PedidoEstado): "default" | "outline" | "secondary" | "destructive" {
   switch (estado) {
     case "BORRADOR":
       return "outline";
@@ -80,10 +74,8 @@ export function PedidoCompraDetail({
     )
     .toDecimalPlaces(2);
 
-  const editable =
-    pedido.estado === "BORRADOR" || pedido.estado === "ENVIADO";
-  const facturable =
-    pedido.estado !== "CANCELADO" && pedido.estado !== "COMPLETADO";
+  const editable = pedido.estado === "BORRADOR" || pedido.estado === "ENVIADO";
+  const facturable = pedido.estado !== "CANCELADO" && pedido.estado !== "COMPLETADO";
 
   const handleTransicion = (estado: PedidoEstado) => {
     startTransition(async () => {
@@ -115,14 +107,12 @@ export function PedidoCompraDetail({
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <h1 className="text-[15px] font-semibold tracking-tight">
-              Pedido {pedido.numero}
-            </h1>
+            <h1 className="text-[15px] font-semibold tracking-tight">Pedido {pedido.numero}</h1>
             <Badge variant={estadoVariant(pedido.estado)}>{pedido.estado}</Badge>
           </div>
           <p className="text-sm text-muted-foreground">
-            {proveedorNombre} · {fmtDate(new Date(pedido.fecha))} ·{" "}
-            {pedido.items.length} ítem{pedido.items.length === 1 ? "" : "s"}
+            {proveedorNombre} · {fmtDate(new Date(pedido.fecha))} · {pedido.items.length} ítem
+            {pedido.items.length === 1 ? "" : "s"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -155,11 +145,7 @@ export function PedidoCompraDetail({
             </Button>
           )}
           {facturable && (
-            <Button
-              variant="default"
-              onClick={handleCrearFactura}
-              disabled={isPending}
-            >
+            <Button variant="default" onClick={handleCrearFactura} disabled={isPending}>
               <HugeiconsIcon icon={Invoice01Icon} strokeWidth={2} />
               Crear factura desde pedido
             </Button>
@@ -189,11 +175,7 @@ export function PedidoCompraDetail({
         <Stat label="Fecha" value={fmtDate(new Date(pedido.fecha))} />
         <Stat
           label="Fecha prevista"
-          value={
-            pedido.fechaPrevista
-              ? fmtDate(new Date(pedido.fechaPrevista))
-              : "—"
-          }
+          value={pedido.fechaPrevista ? fmtDate(new Date(pedido.fechaPrevista)) : "—"}
         />
         <Stat
           label="Total estimado"
@@ -216,26 +198,20 @@ export function PedidoCompraDetail({
           <TableBody>
             {pedido.items.map((it) => {
               const p = productosMap[it.productoId];
-              const sub = new Decimal(it.precioUnitario)
-                .times(it.cantidad)
-                .toDecimalPlaces(2);
+              const sub = new Decimal(it.precioUnitario).times(it.cantidad).toDecimalPlaces(2);
               return (
                 <TableRow key={it.id}>
                   <TableCell>
                     {p ? (
                       <span>
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {p.codigo}
-                        </span>{" "}
+                        <span className="font-mono text-xs text-muted-foreground">{p.codigo}</span>{" "}
                         {p.nombre}
                       </span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">
-                    {it.cantidad}
-                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{it.cantidad}</TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
                     {fmtMoney(it.precioUnitario)}
                   </TableCell>
@@ -292,17 +268,12 @@ export function PedidoCompraDetail({
           <DialogHeader>
             <DialogTitle>Cancelar pedido {pedido.numero}</DialogTitle>
             <DialogDescription>
-              El pedido pasará a CANCELADO y ya no podrá facturarse. Las
-              facturas ya creadas siguen vigentes (pueden anularse desde su
-              vista propia si corresponde).
+              El pedido pasará a CANCELADO y ya no podrá facturarse. Las facturas ya creadas siguen
+              vigentes (pueden anularse desde su vista propia si corresponde).
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmCancel(false)}
-              disabled={isPending}
-            >
+            <Button variant="outline" onClick={() => setConfirmCancel(false)} disabled={isPending}>
               Volver
             </Button>
             <Button
@@ -331,16 +302,8 @@ function Stat({
   return (
     <Card>
       <CardContent className="flex flex-col gap-1">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">
-          {label}
-        </span>
-        <span
-          className={
-            emphasis
-              ? "font-mono text-xl font-semibold tabular-nums"
-              : "text-base"
-          }
-        >
+        <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
+        <span className={emphasis ? "font-mono text-xl font-semibold tabular-nums" : "text-base"}>
           {value}
         </span>
       </CardContent>
@@ -349,9 +312,5 @@ function Stat({
 }
 
 function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-xs uppercase tracking-wide text-muted-foreground">
-      {children}
-    </span>
-  );
+  return <span className="text-xs uppercase tracking-wide text-muted-foreground">{children}</span>;
 }

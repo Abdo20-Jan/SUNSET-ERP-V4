@@ -11,12 +11,7 @@ import {
   contabilizarAsiento,
   crearAsientoCompra,
 } from "@/lib/services/asiento-automatico";
-import {
-  CompraEstado,
-  CondicionPago,
-  Moneda,
-  Prisma,
-} from "@/generated/prisma/client";
+import { CompraEstado, CondicionPago, Moneda, Prisma } from "@/generated/prisma/client";
 
 export type CompraRow = {
   id: string;
@@ -95,9 +90,7 @@ export async function listarCompras(opts?: {
   };
 }
 
-export async function listarProveedoresParaCompra(): Promise<
-  ProveedorParaCompra[]
-> {
+export async function listarProveedoresParaCompra(): Promise<ProveedorParaCompra[]> {
   const rows = await db.proveedor.findMany({
     orderBy: { nombre: "asc" },
     select: {
@@ -117,9 +110,7 @@ export async function listarProveedoresParaCompra(): Promise<
   }));
 }
 
-export async function listarProductosParaCompra(): Promise<
-  ProductoParaCompra[]
-> {
+export async function listarProductosParaCompra(): Promise<ProductoParaCompra[]> {
   const rows = await db.producto.findMany({
     where: { activo: true },
     orderBy: { codigo: "asc" },
@@ -162,9 +153,7 @@ export type CompraDetalle = {
   }>;
 };
 
-export async function obtenerCompraPorId(
-  id: string,
-): Promise<CompraDetalle | null> {
+export async function obtenerCompraPorId(id: string): Promise<CompraDetalle | null> {
   const c = await db.compra.findUnique({
     where: { id },
     include: { items: { orderBy: { id: "asc" } } },
@@ -210,7 +199,7 @@ export async function generarNumeroCompra(): Promise<string> {
   });
   let next = 1;
   if (ultimo) {
-    const parsed = parseInt(ultimo.numero.slice(prefix.length), 10);
+    const parsed = Number.parseInt(ultimo.numero.slice(prefix.length), 10);
     if (!Number.isNaN(parsed)) next = parsed + 1;
   }
   return `${prefix}${String(next).padStart(4, "0")}`;
@@ -288,9 +277,7 @@ function calcItem(item: {
   };
 }
 
-export async function guardarCompraAction(
-  raw: CompraInput,
-): Promise<CompraActionResult> {
+export async function guardarCompraAction(raw: CompraInput): Promise<CompraActionResult> {
   const parsed = compraInputSchema.safeParse(raw);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
@@ -313,9 +300,7 @@ export async function guardarCompraAction(
         numero: input.numero,
         proveedorId: input.proveedorId,
         fecha: new Date(input.fecha),
-        fechaVencimiento: input.fechaVencimiento
-          ? new Date(input.fechaVencimiento)
-          : null,
+        fechaVencimiento: input.fechaVencimiento ? new Date(input.fechaVencimiento) : null,
         condicionPago: input.condicionPago,
         moneda: input.moneda,
         tipoCambio: new Prisma.Decimal(input.tipoCambio),
@@ -369,10 +354,7 @@ export async function guardarCompraAction(
     revalidatePath(`/compras/${saved.id}`);
     return { ok: true, id: saved.id, numero: saved.numero };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: `El número "${input.numero}" ya existe.` };
     }
     if (err instanceof Error) return { ok: false, error: err.message };
@@ -391,10 +373,7 @@ export async function emitirCompraAction(
       });
       if (!c) throw new AsientoError("DOMINIO_INVALIDO", "Compra no existe.");
       if (c.asientoId) {
-        throw new AsientoError(
-          "DOMINIO_INVALIDO",
-          `Compra ${c.numero} ya tiene asiento.`,
-        );
+        throw new AsientoError("DOMINIO_INVALIDO", `Compra ${c.numero} ya tiene asiento.`);
       }
       const asiento = await crearAsientoCompra(compraId, tx);
       const cont = await contabilizarAsiento(asiento.id, tx);

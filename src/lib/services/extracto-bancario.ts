@@ -112,11 +112,7 @@ export async function getExtractoBancario(params: {
         },
       },
     },
-    orderBy: [
-      { asiento: { fecha: "asc" } },
-      { asiento: { numero: "asc" } },
-      { id: "asc" },
-    ],
+    orderBy: [{ asiento: { fecha: "asc" } }, { asiento: { numero: "asc" } }, { id: "asc" }],
     select: {
       id: true,
       debe: true,
@@ -163,9 +159,7 @@ export async function getExtractoBancario(params: {
     totalHaber = totalHaber.plus(haber);
 
     // Contrapartida(s): líneas del asiento que NO son banco/caja.
-    const contrapartidas = l.asiento.lineas.filter(
-      (x) => !esBancoCaja(x.cuenta.codigo),
-    );
+    const contrapartidas = l.asiento.lineas.filter((x) => !esBancoCaja(x.cuenta.codigo));
     let proveedor: string | null = null;
     let proveedorCodigo: string | null = null;
     if (contrapartidas.length > 0) {
@@ -190,8 +184,7 @@ export async function getExtractoBancario(params: {
     const refBanco = mov?.referenciaBanco ?? null;
 
     // Descripción: la de la línea > la del asiento.
-    const descripcion =
-      (l.descripcion?.trim() || l.asiento.descripcion).slice(0, 200);
+    const descripcion = (l.descripcion?.trim() || l.asiento.descripcion).slice(0, 200);
 
     out.push({
       asientoId: l.asiento.id,

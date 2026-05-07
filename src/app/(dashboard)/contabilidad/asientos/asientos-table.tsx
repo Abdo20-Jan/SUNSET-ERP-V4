@@ -1,12 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -17,15 +12,8 @@ import {
   ViewIcon,
 } from "@hugeicons/core-free-icons";
 
-import type {
-  AsientoEstado,
-  AsientoOrigen,
-  Moneda,
-} from "@/generated/prisma/client";
-import {
-  anularAsientoAction,
-  contabilizarAsientoAction,
-} from "@/lib/actions/asientos";
+import type { AsientoEstado, AsientoOrigen, Moneda } from "@/generated/prisma/client";
+import { anularAsientoAction, contabilizarAsientoAction } from "@/lib/actions/asientos";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,12 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { AsientoDetalleSheet } from "./asiento-detalle-sheet";
 
@@ -74,17 +57,13 @@ export type AsientoRow = {
   periodoCodigo: string;
 };
 
-type PendingAction =
-  | { action: "contabilizar" | "anular"; asiento: AsientoRow }
-  | null;
+type PendingAction = { action: "contabilizar" | "anular"; asiento: AsientoRow } | null;
 
 function formatDate(d: Date) {
   return format(d, "dd/MM/yyyy");
 }
 
-function estadoVariant(
-  estado: AsientoEstado,
-): "default" | "outline" | "secondary" {
+function estadoVariant(estado: AsientoEstado): "default" | "outline" | "secondary" {
   switch (estado) {
     case "BORRADOR":
       return "outline";
@@ -104,9 +83,7 @@ export function AsientosTable({ data }: { data: AsientoRow[] }) {
     {
       id: "numero",
       header: "N°",
-      cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.numero}</span>
-      ),
+      cell: ({ row }) => <span className="font-mono text-xs">{row.original.numero}</span>,
     },
     {
       id: "periodo",
@@ -121,9 +98,7 @@ export function AsientosTable({ data }: { data: AsientoRow[] }) {
       id: "fecha",
       header: "Fecha",
       cell: ({ row }) => (
-        <span className="text-sm tabular-nums">
-          {formatDate(row.original.fecha)}
-        </span>
+        <span className="text-sm tabular-nums">{formatDate(row.original.fecha)}</span>
       ),
     },
     {
@@ -159,9 +134,7 @@ export function AsientosTable({ data }: { data: AsientoRow[] }) {
     {
       id: "moneda",
       header: "Moneda",
-      cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.moneda}</span>
-      ),
+      cell: ({ row }) => <span className="font-mono text-xs">{row.original.moneda}</span>,
     },
     {
       id: "total",
@@ -176,9 +149,7 @@ export function AsientosTable({ data }: { data: AsientoRow[] }) {
       id: "estado",
       header: "Estado",
       cell: ({ row }) => (
-        <Badge variant={estadoVariant(row.original.estado)}>
-          {row.original.estado}
-        </Badge>
+        <Badge variant={estadoVariant(row.original.estado)}>{row.original.estado}</Badge>
       ),
     },
     {
@@ -203,8 +174,7 @@ export function AsientosTable({ data }: { data: AsientoRow[] }) {
   const onConfirm = () => {
     if (!pending) return;
     const { action, asiento } = pending;
-    const fn =
-      action === "contabilizar" ? contabilizarAsientoAction : anularAsientoAction;
+    const fn = action === "contabilizar" ? contabilizarAsientoAction : anularAsientoAction;
     const verbPast = action === "contabilizar" ? "contabilizado" : "anulado";
 
     startTransition(async () => {
@@ -226,10 +196,7 @@ export function AsientosTable({ data }: { data: AsientoRow[] }) {
             <TableRow key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
                 <TableHead key={header.id}>
-                  {flexRender(
-                    header.column.columnDef.header,
-                    header.getContext(),
-                  )}
+                  {flexRender(header.column.columnDef.header, header.getContext())}
                 </TableHead>
               ))}
             </TableRow>
@@ -282,17 +249,11 @@ export function AsientosTable({ data }: { data: AsientoRow[] }) {
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setPending(null)}
-                  disabled={isSubmitting}
-                >
+                <Button variant="outline" onClick={() => setPending(null)} disabled={isSubmitting}>
                   Cancelar
                 </Button>
                 <Button
-                  variant={
-                    pending.action === "anular" ? "destructive" : "default"
-                  }
+                  variant={pending.action === "anular" ? "destructive" : "default"}
                   onClick={onConfirm}
                   disabled={isSubmitting}
                 >
@@ -326,11 +287,7 @@ function RowActions({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon-sm" aria-label="Acciones" />
-        }
-      >
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Acciones" />}>
         <HugeiconsIcon icon={MoreHorizontalCircle01Icon} strokeWidth={2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -350,10 +307,7 @@ function RowActions({
         {asiento.estado === "CONTABILIZADO" && (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => onAction("anular")}
-            >
+            <DropdownMenuItem variant="destructive" onClick={() => onAction("anular")}>
               <HugeiconsIcon icon={CancelCircleIcon} strokeWidth={2} />
               Anular
             </DropdownMenuItem>

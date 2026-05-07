@@ -5,16 +5,8 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import {
-  crearCuentaParaEntidad,
-  rangoClienteByCanal,
-} from "@/lib/services/cuenta-auto";
-import {
-  CondicionIva,
-  CuentaTipo,
-  Prisma,
-  TipoCanal,
-} from "@/generated/prisma/client";
+import { crearCuentaParaEntidad, rangoClienteByCanal } from "@/lib/services/cuenta-auto";
+import { CondicionIva, CuentaTipo, Prisma, TipoCanal } from "@/generated/prisma/client";
 
 export type ClienteRow = {
   id: string;
@@ -85,9 +77,7 @@ export async function listarClientes(): Promise<ClienteRow[]> {
   }));
 }
 
-export async function listarCuentasContablesParaCliente(): Promise<
-  CuentaContableOption[]
-> {
+export async function listarCuentasContablesParaCliente(): Promise<CuentaContableOption[]> {
   const cuentas = await db.cuentaContable.findMany({
     where: {
       tipo: CuentaTipo.ANALITICA,
@@ -126,18 +116,12 @@ const clienteBaseSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
-    .refine(
-      (v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
-      "Email inválido.",
-    ),
+    .refine((v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Email inválido."),
   estado: z
     .string()
     .optional()
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : "activo"))
-    .refine(
-      (v) => v === "activo" || v === "inactivo",
-      "Estado debe ser 'activo' o 'inactivo'.",
-    ),
+    .refine((v) => v === "activo" || v === "inactivo", "Estado debe ser 'activo' o 'inactivo'."),
   cuentaContableId: z
     .number()
     .int()
@@ -150,9 +134,7 @@ const clienteBaseSchema = z.object({
 
 export type ClienteInput = z.input<typeof clienteBaseSchema>;
 
-export type ClienteActionResult =
-  | { ok: true; id: string }
-  | { ok: false; error: string };
+export type ClienteActionResult = { ok: true; id: string } | { ok: false; error: string };
 
 async function validarCuentaContable(
   id: number | null,
@@ -177,9 +159,7 @@ async function validarCuentaContable(
   return { ok: true };
 }
 
-export async function crearClienteAction(
-  raw: ClienteInput,
-): Promise<ClienteActionResult> {
+export async function crearClienteAction(raw: ClienteInput): Promise<ClienteActionResult> {
   const session = await auth();
   if (!session) return { ok: false, error: "No autorizado." };
 
@@ -215,10 +195,7 @@ export async function crearClienteAction(
     revalidatePath("/contabilidad/cuentas");
     return { ok: true, id: created.id };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: "Ya existe un cliente con ese CUIT." };
     }
     if (err instanceof Error && err.message.startsWith("No hay códigos")) {
@@ -297,10 +274,7 @@ export async function eliminarClienteAction(
     revalidatePath("/maestros");
     return { ok: true, softDeleted: false };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2025"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
       return { ok: false, error: "El cliente no existe." };
     }
     console.error("eliminarClienteAction failed", err);

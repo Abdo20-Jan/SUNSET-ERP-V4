@@ -32,9 +32,7 @@ export default async function PipelinePage() {
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Pipeline</h1>
-          <p className="text-sm text-muted-foreground">
-            {cards.length} oportunidad(es) abierta(s)
-          </p>
+          <p className="text-sm text-muted-foreground">{cards.length} oportunidad(es) abierta(s)</p>
         </div>
         <Link
           href="/crm/oportunidades/nueva"
@@ -44,10 +42,7 @@ export default async function PipelinePage() {
         </Link>
       </header>
 
-      <KanbanBoard
-        stages={stages.map((s) => ({ id: s.id, nombre: s.nombre }))}
-        cards={cards}
-      />
+      <KanbanBoard stages={stages.map((s) => ({ id: s.id, nombre: s.nombre }))} cards={cards} />
     </main>
   );
 }

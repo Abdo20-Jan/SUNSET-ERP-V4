@@ -30,9 +30,7 @@ export function calcularCif(
   flete: DineroInput,
   seguro: DineroInput,
 ): Decimal {
-  return round2(
-    toDecimal(fobTotal).plus(toDecimal(flete)).plus(toDecimal(seguro)),
-  );
+  return round2(toDecimal(fobTotal).plus(toDecimal(flete)).plus(toDecimal(seguro)));
 }
 
 export type TributosSugeridos = {
@@ -47,24 +45,16 @@ export type TributosSugeridos = {
   iibb: Decimal;
 };
 
-export function calcularTributosSugeridos(
-  cifTotal: DineroInput,
-): TributosSugeridos {
+export function calcularTributosSugeridos(cifTotal: DineroInput): TributosSugeridos {
   const cif = toDecimal(cifTotal);
 
   const die = round2(cif.times(ALICUOTAS_IMPORTACION.DIE));
-  const tasaEstadistica = round2(
-    cif.times(ALICUOTAS_IMPORTACION.TASA_ESTADISTICA),
-  );
+  const tasaEstadistica = round2(cif.times(ALICUOTAS_IMPORTACION.TASA_ESTADISTICA));
   const arancelSim = round2(cif.times(ALICUOTAS_IMPORTACION.ARANCEL_SIM));
   const baseTributaria = round2(cif.plus(die).plus(tasaEstadistica));
   const iva = round2(baseTributaria.times(ALICUOTAS_IMPORTACION.IVA));
-  const ivaAdicional = round2(
-    baseTributaria.times(ALICUOTAS_IMPORTACION.IVA_ADICIONAL),
-  );
-  const ganancias = round2(
-    baseTributaria.times(ALICUOTAS_IMPORTACION.GANANCIAS),
-  );
+  const ivaAdicional = round2(baseTributaria.times(ALICUOTAS_IMPORTACION.IVA_ADICIONAL));
+  const ganancias = round2(baseTributaria.times(ALICUOTAS_IMPORTACION.GANANCIAS));
   const baseIibb = round2(baseTributaria.plus(iva));
   const iibb = round2(baseIibb.times(ALICUOTAS_IMPORTACION.IIBB));
 
@@ -145,9 +135,7 @@ export function calcularRateioEmbarque<T extends ItemRateioInput>(
 
   const dieArs = round2(toDecimal(embarque.die).times(embarqueTC));
   const teArs = round2(toDecimal(embarque.tasaEstadistica).times(embarqueTC));
-  const arancelArs = round2(
-    toDecimal(embarque.arancelSim).times(embarqueTC),
-  );
+  const arancelArs = round2(toDecimal(embarque.arancelSim).times(embarqueTC));
 
   const costoRateable = round2(
     fobTotalArs
@@ -163,9 +151,7 @@ export function calcularRateioEmbarque<T extends ItemRateioInput>(
   let acumulado = new Decimal(0);
 
   return items.map((item, idx) => {
-    const fobItem = round2(
-      toDecimal(item.precioUnitarioFob).times(item.cantidad),
-    );
+    const fobItem = round2(toDecimal(item.precioUnitarioFob).times(item.cantidad));
 
     let costoTotal: Decimal;
     if (idx === lastIdx) {
@@ -177,9 +163,7 @@ export function calcularRateioEmbarque<T extends ItemRateioInput>(
     }
 
     const costoUnitario =
-      item.cantidad > 0
-        ? round2(costoTotal.dividedBy(item.cantidad))
-        : new Decimal(0);
+      item.cantidad > 0 ? round2(costoTotal.dividedBy(item.cantidad)) : new Decimal(0);
 
     return { ...item, fobItem, costoTotal, costoUnitario };
   });

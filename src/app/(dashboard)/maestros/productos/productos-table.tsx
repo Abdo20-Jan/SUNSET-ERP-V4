@@ -2,12 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -18,10 +13,7 @@ import {
   SearchIcon,
 } from "@hugeicons/core-free-icons";
 
-import {
-  eliminarProductoAction,
-  type ProductoRow,
-} from "@/lib/actions/productos";
+import { eliminarProductoAction, type ProductoRow } from "@/lib/actions/productos";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,10 +48,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import {
-  ProductoFormDialog,
-  type ProductoFormState,
-} from "./producto-form-dialog";
+import { ProductoFormDialog, type ProductoFormState } from "./producto-form-dialog";
 
 function formatPrecio(v: string): string {
   const n = Number(v);
@@ -80,9 +69,7 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
 
   const marcaOptions = useMemo(() => {
     const s = new Set(
-      productos
-        .map((p) => p.marca)
-        .filter((m): m is string => !!m && m.length > 0),
+      productos.map((p) => p.marca).filter((m): m is string => !!m && m.length > 0),
     );
     return Array.from(s).sort();
   }, [productos]);
@@ -92,10 +79,7 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
     return productos.filter((p) => {
       if (marcaFilter !== "todas" && p.marca !== marcaFilter) return false;
       if (!q) return true;
-      return (
-        p.codigo.toLowerCase().includes(q) ||
-        p.nombre.toLowerCase().includes(q)
-      );
+      return p.codigo.toLowerCase().includes(q) || p.nombre.toLowerCase().includes(q);
     });
   }, [productos, searchText, marcaFilter]);
 
@@ -103,40 +87,28 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
     {
       id: "codigo",
       header: "Código",
-      cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.codigo}</span>
-      ),
+      cell: ({ row }) => <span className="font-mono text-xs">{row.original.codigo}</span>,
     },
     {
       id: "nombre",
       header: "Nombre",
-      cell: ({ row }) => (
-        <span className="text-sm font-medium">{row.original.nombre}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm font-medium">{row.original.nombre}</span>,
     },
     {
       id: "marca",
       header: "Marca",
-      cell: ({ row }) => (
-        <span className="text-sm">{row.original.marca ?? "—"}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm">{row.original.marca ?? "—"}</span>,
     },
     {
       id: "medida",
       header: "Medida",
-      cell: ({ row }) => (
-        <span className="font-mono text-xs">
-          {row.original.medida ?? "—"}
-        </span>
-      ),
+      cell: ({ row }) => <span className="font-mono text-xs">{row.original.medida ?? "—"}</span>,
     },
     {
       id: "ncm",
       header: "NCM",
       cell: ({ row }) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {row.original.ncm ?? "—"}
-        </span>
+        <span className="font-mono text-xs text-muted-foreground">{row.original.ncm ?? "—"}</span>
       ),
     },
     {
@@ -222,10 +194,7 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
             className="pl-9"
           />
         </div>
-        <Select
-          value={marcaFilter}
-          onValueChange={(v) => setMarcaFilter(v ?? "todas")}
-        >
+        <Select value={marcaFilter} onValueChange={(v) => setMarcaFilter(v ?? "todas")}>
           <SelectTrigger className="w-full sm:w-48">
             <SelectValue />
           </SelectTrigger>
@@ -250,10 +219,7 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
             <TableRow key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
                 <TableHead key={header.id}>
-                  {flexRender(
-                    header.column.columnDef.header,
-                    header.getContext(),
-                  )}
+                  {flexRender(header.column.columnDef.header, header.getContext())}
                 </TableHead>
               ))}
             </TableRow>
@@ -285,10 +251,7 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
         </TableBody>
       </Table>
 
-      <ProductoFormDialog
-        state={formState}
-        onClose={() => setFormState(null)}
-      />
+      <ProductoFormDialog state={formState} onClose={() => setFormState(null)} />
 
       <Dialog
         open={pendingDelete !== null}
@@ -303,15 +266,11 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
                 <DialogTitle>Eliminar producto</DialogTitle>
                 <DialogDescription>
                   ¿Confirma eliminar el producto{" "}
-                  <span className="font-mono text-foreground">
-                    {pendingDelete.codigo}
-                  </span>
+                  <span className="font-mono text-foreground">{pendingDelete.codigo}</span>
                   {" — "}
-                  <span className="font-medium text-foreground">
-                    {pendingDelete.nombre}
-                  </span>
-                  ? Si tiene embarques, compras, ventas o movimientos de stock
-                  asociados se marcará como inactivo en su lugar.
+                  <span className="font-medium text-foreground">{pendingDelete.nombre}</span>? Si
+                  tiene embarques, compras, ventas o movimientos de stock asociados se marcará como
+                  inactivo en su lugar.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -322,11 +281,7 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
                 >
                   Cancelar
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={onConfirmDelete}
-                  disabled={isDeleting}
-                >
+                <Button variant="destructive" onClick={onConfirmDelete} disabled={isDeleting}>
                   {isDeleting ? "Eliminando…" : "Eliminar"}
                 </Button>
               </DialogFooter>
@@ -347,11 +302,7 @@ function RowActions({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon-sm" aria-label="Acciones" />
-        }
-      >
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Acciones" />}>
         <HugeiconsIcon icon={MoreHorizontalCircle01Icon} strokeWidth={2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

@@ -187,11 +187,7 @@ export function PagoPorFactura({ proveedores, cuentasBancarias, defaultFecha }: 
     });
   };
 
-  const selectableInFiltered = useMemo(
-    () => filtered.filter(isSelectable),
-    // biome-ignore lint/correctness/useExhaustiveDependencies: lockedTo is derived from selectedKeys
-    [filtered, lockedTo],
-  );
+  const selectableInFiltered = useMemo(() => filtered.filter(isSelectable), [filtered, lockedTo]);
   const allSelectableSelected =
     selectableInFiltered.length > 0 &&
     selectableInFiltered.every((f) => selectedKeys.has(facturaKey(f)));
@@ -349,7 +345,7 @@ export function PagoPorFactura({ proveedores, cuentasBancarias, defaultFecha }: 
                 <TableHead>Fecha</TableHead>
                 <TableHead>Vencimiento</TableHead>
                 <TableHead className="text-right">Monto</TableHead>
-                <TableHead className="w-24"></TableHead>
+                <TableHead className="w-24" />
               </TableRow>
             </TableHeader>
             <TableBody>

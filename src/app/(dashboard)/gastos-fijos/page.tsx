@@ -19,18 +19,14 @@ export default async function GastosFijosPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-[15px] font-semibold tracking-tight">Gastos fijos</h1>
         <p className="text-sm text-muted-foreground">
-          Templates de gastos recurrentes (alquiler, contador, internet, etc).
-          Configurá una vez y registrá cada mes — genera asiento contable y
-          deja la cuenta a pagar lista para ser pagada vía Tesorería.
+          Templates de gastos recurrentes (alquiler, contador, internet, etc). Configurá una vez y
+          registrá cada mes — genera asiento contable y deja la cuenta a pagar lista para ser pagada
+          vía Tesorería.
         </p>
       </div>
 
       <Card className="py-0">
-        <GastosFijosTable
-          gastos={gastos}
-          proveedores={proveedores}
-          cuentas={cuentas}
-        />
+        <GastosFijosTable gastos={gastos} proveedores={proveedores} cuentas={cuentas} />
       </Card>
     </div>
   );

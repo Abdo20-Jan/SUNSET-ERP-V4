@@ -254,7 +254,7 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, default
               <TableHead className="text-right">Total facturado</TableHead>
               <TableHead className="text-right">Saldo proveedor</TableHead>
               <TableHead className="text-right">A pagar</TableHead>
-              <TableHead className="w-24 text-right"></TableHead>
+              <TableHead className="w-24 text-right" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -488,14 +488,13 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, default
                     </div>
                   </div>
                   <div
-                    className={
-                      "rounded-md border-2 px-2 py-1 " +
-                      (Math.abs(diferencia) < 0.01
+                    className={`rounded-md border-2 px-2 py-1 ${
+                      Math.abs(diferencia) < 0.01
                         ? "border-muted-foreground/30 bg-card"
                         : diferencia > 0
                           ? "border-emerald-400 bg-emerald-50/60 dark:bg-emerald-950/30"
-                          : "border-rose-400 bg-rose-50/60 dark:bg-rose-950/30")
-                    }
+                          : "border-rose-400 bg-rose-50/60 dark:bg-rose-950/30"
+                    }`}
                   >
                     <div className="text-[10px] uppercase text-muted-foreground">Diferencia</div>
                     <div className="font-mono tabular-nums">
@@ -521,12 +520,11 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, default
                     </div>
                     {Math.abs(diferencia) >= 0.01 && (
                       <div
-                        className={
-                          "mt-0.5 text-[10px] " +
-                          (diferencia > 0
+                        className={`mt-0.5 text-[10px] ${
+                          diferencia > 0
                             ? "text-emerald-700 dark:text-emerald-400"
-                            : "text-rose-700 dark:text-rose-400")
-                        }
+                            : "text-rose-700 dark:text-rose-400"
+                        }`}
                       >
                         {diferencia > 0
                           ? "Anticipo / saldo a favor"

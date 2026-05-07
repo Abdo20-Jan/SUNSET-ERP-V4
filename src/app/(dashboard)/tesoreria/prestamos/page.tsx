@@ -7,10 +7,7 @@ import {
   type PrestamoEstadoFiltro,
   type PrestamoListFilters,
 } from "@/lib/actions/prestamos";
-import {
-  Moneda,
-  PrestamoClasificacion,
-} from "@/generated/prisma/client";
+import { Moneda, PrestamoClasificacion } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -71,16 +68,13 @@ export default async function PrestamosPage({
   const rows = await listarPrestamosConSaldo(filtros);
 
   const prestamoIdParam =
-    params.prestamoId && /^[0-9a-f-]{36}$/i.test(params.prestamoId)
-      ? params.prestamoId
-      : null;
+    params.prestamoId && /^[0-9a-f-]{36}$/i.test(params.prestamoId) ? params.prestamoId : null;
   const prestamoInicial = prestamoIdParam
     ? (rows.find((r) => r.id === prestamoIdParam) ?? null)
     : null;
 
   const filtroTags: string[] = [];
-  if (clasificacion)
-    filtroTags.push(`clasificación ${CLASIFICACION_SHORT[clasificacion]}`);
+  if (clasificacion) filtroTags.push(`clasificación ${CLASIFICACION_SHORT[clasificacion]}`);
   if (moneda) filtroTags.push(`moneda ${moneda}`);
   if (estado) filtroTags.push(`estado ${ESTADO_SHORT[estado]}`);
 
@@ -96,10 +90,7 @@ export default async function PrestamosPage({
               : " · saldo calculado desde los asientos contabilizados"}
           </p>
         </div>
-        <Link
-          href="/tesoreria/prestamos/nuevo"
-          className={buttonVariants({ variant: "default" })}
-        >
+        <Link href="/tesoreria/prestamos/nuevo" className={buttonVariants({ variant: "default" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
           Nuevo préstamo
         </Link>

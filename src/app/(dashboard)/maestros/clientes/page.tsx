@@ -1,7 +1,4 @@
-import {
-  listarClientes,
-  listarCuentasContablesParaCliente,
-} from "@/lib/actions/clientes";
+import { listarClientes, listarCuentasContablesParaCliente } from "@/lib/actions/clientes";
 import { Card } from "@/components/ui/card";
 
 import { ClientesTable } from "./clientes-table";

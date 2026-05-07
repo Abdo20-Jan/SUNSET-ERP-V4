@@ -2,12 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -58,10 +53,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import {
-  ClienteFormDialog,
-  type ClienteFormState,
-} from "./cliente-form-dialog";
+import { ClienteFormDialog, type ClienteFormState } from "./cliente-form-dialog";
 
 const CONDICION_IVA_SHORT: Record<CondicionIva, string> = {
   RI: "RI",
@@ -80,9 +72,7 @@ export function ClientesTable({
 }) {
   const router = useRouter();
   const [searchText, setSearchText] = useState("");
-  const [estadoFilter, setEstadoFilter] = useState<
-    "todos" | "activo" | "inactivo"
-  >("todos");
+  const [estadoFilter, setEstadoFilter] = useState<"todos" | "activo" | "inactivo">("todos");
   const [formState, setFormState] = useState<ClienteFormState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ClienteRow | null>(null);
   const [isDeleting, startDelete] = useTransition();
@@ -92,10 +82,7 @@ export function ClientesTable({
     return clientes.filter((c) => {
       if (estadoFilter !== "todos" && c.estado !== estadoFilter) return false;
       if (!q) return true;
-      return (
-        c.nombre.toLowerCase().includes(q) ||
-        (c.cuit?.toLowerCase().includes(q) ?? false)
-      );
+      return c.nombre.toLowerCase().includes(q) || (c.cuit?.toLowerCase().includes(q) ?? false);
     });
   }, [clientes, searchText, estadoFilter]);
 
@@ -103,42 +90,32 @@ export function ClientesTable({
     {
       id: "nombre",
       header: "Nombre",
-      cell: ({ row }) => (
-        <span className="text-sm font-medium">{row.original.nombre}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm font-medium">{row.original.nombre}</span>,
     },
     {
       id: "cuit",
       header: "CUIT",
       cell: ({ row }) => (
-        <span className="font-mono text-xs tabular-nums">
-          {row.original.cuit ?? "—"}
-        </span>
+        <span className="font-mono text-xs tabular-nums">{row.original.cuit ?? "—"}</span>
       ),
     },
     {
       id: "condicionIva",
       header: "Condición IVA",
       cell: ({ row }) => (
-        <Badge variant="outline">
-          {CONDICION_IVA_SHORT[row.original.condicionIva]}
-        </Badge>
+        <Badge variant="outline">{CONDICION_IVA_SHORT[row.original.condicionIva]}</Badge>
       ),
     },
     {
       id: "telefono",
       header: "Teléfono",
-      cell: ({ row }) => (
-        <span className="text-sm">{row.original.telefono ?? "—"}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm">{row.original.telefono ?? "—"}</span>,
     },
     {
       id: "estado",
       header: "Estado",
       cell: ({ row }) => (
-        <Badge
-          variant={row.original.estado === "activo" ? "default" : "secondary"}
-        >
+        <Badge variant={row.original.estado === "activo" ? "default" : "secondary"}>
           {row.original.estado}
         </Badge>
       ),
@@ -152,9 +129,7 @@ export function ClientesTable({
             <span className="font-mono text-xs text-muted-foreground">
               {row.original.cuentaContableCodigo}
             </span>
-            <span className="text-sm">
-              {row.original.cuentaContableNombre}
-            </span>
+            <span className="text-sm">{row.original.cuentaContableNombre}</span>
           </div>
         ) : (
           <span className="text-xs text-muted-foreground">Sin vincular</span>
@@ -242,10 +217,7 @@ export function ClientesTable({
             <TableRow key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
                 <TableHead key={header.id}>
-                  {flexRender(
-                    header.column.columnDef.header,
-                    header.getContext(),
-                  )}
+                  {flexRender(header.column.columnDef.header, header.getContext())}
                 </TableHead>
               ))}
             </TableRow>
@@ -277,11 +249,7 @@ export function ClientesTable({
         </TableBody>
       </Table>
 
-      <ClienteFormDialog
-        state={formState}
-        cuentas={cuentas}
-        onClose={() => setFormState(null)}
-      />
+      <ClienteFormDialog state={formState} cuentas={cuentas} onClose={() => setFormState(null)} />
 
       <Dialog
         open={pendingDelete !== null}
@@ -296,11 +264,8 @@ export function ClientesTable({
                 <DialogTitle>Eliminar cliente</DialogTitle>
                 <DialogDescription>
                   ¿Confirma eliminar al cliente{" "}
-                  <span className="font-medium text-foreground">
-                    {pendingDelete.nombre}
-                  </span>
-                  ? Si tiene ventas asociadas se marcará como inactivo en su
-                  lugar.
+                  <span className="font-medium text-foreground">{pendingDelete.nombre}</span>? Si
+                  tiene ventas asociadas se marcará como inactivo en su lugar.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -311,11 +276,7 @@ export function ClientesTable({
                 >
                   Cancelar
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={onConfirmDelete}
-                  disabled={isDeleting}
-                >
+                <Button variant="destructive" onClick={onConfirmDelete} disabled={isDeleting}>
                   {isDeleting ? "Eliminando…" : "Eliminar"}
                 </Button>
               </DialogFooter>
@@ -336,11 +297,7 @@ function RowActions({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon-sm" aria-label="Acciones" />
-        }
-      >
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Acciones" />}>
         <HugeiconsIcon icon={MoreHorizontalCircle01Icon} strokeWidth={2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

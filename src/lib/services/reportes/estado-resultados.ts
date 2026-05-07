@@ -3,11 +3,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { Decimal } from "@/lib/decimal";
 
-import {
-  buildCuentaTree,
-  type CuentaTreeNode,
-  type ReporteFilter,
-} from "./shared";
+import { buildCuentaTree, type CuentaTreeNode, type ReporteFilter } from "./shared";
 
 export type EstadoResultadosResult = {
   periodo: {
@@ -43,8 +39,7 @@ export async function getEstadoResultados(
 
   const ingresos = tree.porCategoria.get("INGRESO") ?? [];
   const egresos = tree.porCategoria.get("EGRESO") ?? [];
-  const totalIngresos =
-    tree.totalPorCategoria.get("INGRESO") ?? new Decimal(0);
+  const totalIngresos = tree.totalPorCategoria.get("INGRESO") ?? new Decimal(0);
   const totalEgresos = tree.totalPorCategoria.get("EGRESO") ?? new Decimal(0);
 
   return {
@@ -76,8 +71,7 @@ export async function getEstadoResultadosByFecha(filter: {
 
   const ingresos = tree.porCategoria.get("INGRESO") ?? [];
   const egresos = tree.porCategoria.get("EGRESO") ?? [];
-  const totalIngresos =
-    tree.totalPorCategoria.get("INGRESO") ?? new Decimal(0);
+  const totalIngresos = tree.totalPorCategoria.get("INGRESO") ?? new Decimal(0);
   const totalEgresos = tree.totalPorCategoria.get("EGRESO") ?? new Decimal(0);
 
   return {

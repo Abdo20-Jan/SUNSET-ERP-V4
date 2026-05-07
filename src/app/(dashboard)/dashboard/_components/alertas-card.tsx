@@ -4,12 +4,7 @@ import { Alert02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { Alerta, AlertaSeveridad } from "@/lib/services/dashboard";
 
@@ -35,10 +30,7 @@ export function AlertasCard({ alertas }: { alertas: Alerta[] }) {
       <CardContent className="px-0 py-0">
         <ul className="divide-y">
           {alertas.map((a) => (
-            <li
-              key={a.id}
-              className="flex items-center gap-3 px-6 py-3 text-sm"
-            >
+            <li key={a.id} className="flex items-center gap-3 px-6 py-3 text-sm">
               <span
                 className={cn("size-2 shrink-0 rounded-full", SEVERIDAD_DOT[a.severidad])}
                 aria-hidden

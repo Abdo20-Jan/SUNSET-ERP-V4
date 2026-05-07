@@ -1063,12 +1063,11 @@ function ItemRow({
               {fmtMoney(rentabilidad.gananciaBruta.toString())}
             </p>
             <p
-              className={
-                "font-mono text-xs font-semibold tabular-nums " +
-                (rentabilidad.gananciaNeta.gte(0)
+              className={`font-mono text-xs font-semibold tabular-nums ${
+                rentabilidad.gananciaNeta.gte(0)
                   ? "text-emerald-700 dark:text-emerald-400"
-                  : "text-destructive")
-              }
+                  : "text-destructive"
+              }`}
             >
               Neto {rentabilidad.margenNetoPct.toFixed(2)}% ·{" "}
               {rentabilidad.gananciaNeta.gte(0) ? "+" : ""}

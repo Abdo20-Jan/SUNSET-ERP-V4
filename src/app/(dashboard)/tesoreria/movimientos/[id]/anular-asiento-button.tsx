@@ -53,17 +53,12 @@ export function AnularAsientoButton({
         <DialogHeader>
           <DialogTitle>Anular asiento Nº {asientoNumero}</DialogTitle>
           <DialogDescription>
-            El asiento queda en estado <strong>ANULADO</strong> (queda en la
-            historia contable). El movimiento de tesorería se desvincula —
-            podés volver a registrarlo si fue un error.
+            El asiento queda en estado <strong>ANULADO</strong> (queda en la historia contable). El
+            movimiento de tesorería se desvincula — podés volver a registrarlo si fue un error.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => setOpen(false)}
-            disabled={pending}
-          >
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
             Cancelar
           </Button>
           <Button variant="destructive" onClick={handle} disabled={pending}>

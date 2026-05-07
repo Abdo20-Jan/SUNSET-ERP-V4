@@ -17,11 +17,7 @@ import {
   getSaldoCreditoAduana,
   getVepEmbarques,
 } from "@/lib/services/cuentas-a-pagar";
-import {
-  AsientoOrigen,
-  Moneda,
-  MovimientoTesoreriaTipo,
-} from "@/generated/prisma/client";
+import { AsientoOrigen, Moneda, MovimientoTesoreriaTipo } from "@/generated/prisma/client";
 
 const MONEY_RE = /^\d+(\.\d{1,2})?$/;
 
@@ -41,10 +37,7 @@ const inputSchema = z.object({
   /** Monto del crédito a favor de Aduana (1.1.4.13) que se aplica como
    *  parte del pago. El total efectivo del VEP = creditoAplicado +
    *  montoPagado (banco). Si vacío o "0", no se usa crédito. */
-  creditoAplicado: z
-    .string()
-    .regex(MONEY_RE, "Crédito aplicado inválido.")
-    .optional(),
+  creditoAplicado: z.string().regex(MONEY_RE, "Crédito aplicado inválido.").optional(),
 });
 
 export type PagarVepInput = z.input<typeof inputSchema>;
@@ -62,9 +55,7 @@ export type PagarVepResult =
     }
   | { ok: false; error: string };
 
-export async function pagarVepEmbarqueAction(
-  raw: PagarVepInput,
-): Promise<PagarVepResult> {
+export async function pagarVepEmbarqueAction(raw: PagarVepInput): Promise<PagarVepResult> {
   const session = await auth();
   if (!session) return { ok: false, error: "No autorizado." };
 
@@ -129,9 +120,7 @@ export async function pagarVepEmbarqueAction(
   // sobre el TOTAL efectivo vs el total VEP.
   const totalVepNum = Number(vep.totalArs);
   const creditoAplicadoNum =
-    creditoAplicadoInput && Number(creditoAplicadoInput) > 0
-      ? Number(creditoAplicadoInput)
-      : 0;
+    creditoAplicadoInput && Number(creditoAplicadoInput) > 0 ? Number(creditoAplicadoInput) : 0;
 
   // Validar que haya saldo suficiente en 1.1.4.13
   if (creditoAplicadoNum > 0) {
@@ -168,11 +157,7 @@ export async function pagarVepEmbarqueAction(
 
   const diferenciaNum = totalPagoNum - totalVepNum;
   const tipoDiferencia: "credito" | "deuda" | "exacto" =
-    Math.abs(diferenciaNum) < 0.005
-      ? "exacto"
-      : diferenciaNum > 0
-        ? "credito"
-        : "deuda";
+    Math.abs(diferenciaNum) < 0.005 ? "exacto" : diferenciaNum > 0 ? "credito" : "deuda";
 
   try {
     const result = await db.$transaction(async (tx) => {
@@ -191,17 +176,13 @@ export async function pagarVepEmbarqueAction(
       // Línea de aplicación del crédito a favor (1.1.4.13) +
       // ajuste por diferencia cambiaria. Ambos tocan la misma cuenta
       // cuando hay sobra; netamos para no duplicar líneas.
-      const sobranteCredito =
-        tipoDiferencia === "credito" ? Math.abs(diferenciaNum) : 0;
+      const sobranteCredito = tipoDiferencia === "credito" ? Math.abs(diferenciaNum) : 0;
       const netoCredito = creditoAplicadoNum - sobranteCredito;
       // > 0 → HABER 1.1.4.13 (consume crédito neto)
       // < 0 → DEBE 1.1.4.13 (genera más crédito que el consumido)
       // = 0 → no se emite línea
       if (Math.abs(netoCredito) >= 0.005) {
-        const creditoCuentaId = await getOrCreateCuenta(
-          tx,
-          VEP_ADUANA_CODIGOS.CREDITO_ADUANA,
-        );
+        const creditoCuentaId = await getOrCreateCuenta(tx, VEP_ADUANA_CODIGOS.CREDITO_ADUANA);
         if (netoCredito > 0) {
           lineas.push({
             cuentaId: creditoCuentaId,
@@ -323,10 +304,7 @@ const refuerzoSchema = z.object({
   montoBanco: z.string().regex(MONEY_RE, "Monto inválido.").optional(),
   /** Crédito a favor Aduana (1.1.4.13) aplicado al pago. Si vacío o "0",
    *  no se usa. */
-  creditoAplicado: z
-    .string()
-    .regex(MONEY_RE, "Crédito aplicado inválido.")
-    .optional(),
+  creditoAplicado: z.string().regex(MONEY_RE, "Crédito aplicado inválido.").optional(),
 });
 
 export type PagarRefuerzoVepInput = z.input<typeof refuerzoSchema>;
@@ -401,9 +379,7 @@ export async function pagarRefuerzoVepAction(
   const saldoPendienteNum = Number(r.saldoPendiente);
 
   const creditoAplicadoNum =
-    creditoAplicadoInput && Number(creditoAplicadoInput) > 0
-      ? Number(creditoAplicadoInput)
-      : 0;
+    creditoAplicadoInput && Number(creditoAplicadoInput) > 0 ? Number(creditoAplicadoInput) : 0;
   const montoBancoNum =
     montoBancoInput !== undefined && Number(montoBancoInput) >= 0
       ? Number(montoBancoInput)
@@ -462,10 +438,7 @@ export async function pagarRefuerzoVepAction(
       });
 
       if (creditoAplicadoNum > 0) {
-        const cuentaCreditoId = await getOrCreateCuenta(
-          tx,
-          VEP_ADUANA_CODIGOS.CREDITO_ADUANA,
-        );
+        const cuentaCreditoId = await getOrCreateCuenta(tx, VEP_ADUANA_CODIGOS.CREDITO_ADUANA);
         lineas.push({
           cuentaId: cuentaCreditoId,
           debe: "0",

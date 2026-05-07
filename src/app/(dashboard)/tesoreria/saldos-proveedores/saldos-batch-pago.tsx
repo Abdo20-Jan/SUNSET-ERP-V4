@@ -258,7 +258,7 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }:
               <TableHead className="text-right">Al día</TableHead>
               <TableHead className="text-right">Saldo contable</TableHead>
               <TableHead className="text-right">A pagar</TableHead>
-              <TableHead></TableHead>
+              <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -398,14 +398,13 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }:
                     </div>
                   </div>
                   <div
-                    className={
-                      "rounded-md border-2 px-2 py-1 " +
-                      (Math.abs(diferencia) < 0.01
+                    className={`rounded-md border-2 px-2 py-1 ${
+                      Math.abs(diferencia) < 0.01
                         ? "border-muted-foreground/30 bg-card"
                         : diferencia > 0
                           ? "border-emerald-400 bg-emerald-50/60 dark:bg-emerald-950/30"
-                          : "border-rose-400 bg-rose-50/60 dark:bg-rose-950/30")
-                    }
+                          : "border-rose-400 bg-rose-50/60 dark:bg-rose-950/30"
+                    }`}
                   >
                     <div className="text-[10px] uppercase text-muted-foreground">Diferencia</div>
                     <div className="font-mono tabular-nums">
@@ -431,12 +430,11 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }:
                     </div>
                     {Math.abs(diferencia) >= 0.01 && (
                       <div
-                        className={
-                          "mt-0.5 text-[10px] " +
-                          (diferencia > 0
+                        className={`mt-0.5 text-[10px] ${
+                          diferencia > 0
                             ? "text-emerald-700 dark:text-emerald-400"
-                            : "text-rose-700 dark:text-rose-400")
-                        }
+                            : "text-rose-700 dark:text-rose-400"
+                        }`}
                       >
                         {diferencia > 0
                           ? "Anticipo / saldo a favor"
@@ -665,7 +663,7 @@ function ProveedorRow({
                     monto: p.saldoTotal,
                     descripcion: `Pago a ${p.proveedorNombre}${p.facturas.length > 0 ? ` — ${p.facturas.length} factura(s)` : ""}`,
                   }).toString()}`
-                : `/tesoreria/movimientos/nuevo?tipo=PAGO`
+                : "/tesoreria/movimientos/nuevo?tipo=PAGO"
             }
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >

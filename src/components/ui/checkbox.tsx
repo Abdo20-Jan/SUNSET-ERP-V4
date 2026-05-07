@@ -34,11 +34,7 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
         className="flex items-center justify-center text-current"
         keepMounted={false}
       >
-        <HugeiconsIcon
-          icon={Tick02Icon}
-          className="h-3 w-3"
-          strokeWidth={3.5}
-        />
+        <HugeiconsIcon icon={Tick02Icon} className="h-3 w-3" strokeWidth={3.5} />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );

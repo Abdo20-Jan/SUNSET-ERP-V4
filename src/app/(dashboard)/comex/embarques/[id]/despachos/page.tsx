@@ -110,7 +110,7 @@ export default async function DespachosEmbarquePage({
             ? "Embarque cerrado en flujo monolítico — no admite despachos parciales."
             : !tieneZP
               ? "Confirme zona primaria primero."
-              : `Mercadería en tránsito disponible para despachar parcialmente.`
+              : "Mercadería en tránsito disponible para despachar parcialmente."
         }
         actions={
           <Link href={`/comex/embarques/${id}`}>
@@ -143,7 +143,7 @@ export default async function DespachosEmbarquePage({
                     <th className="px-2.5 py-1.5 text-right">Facturas</th>
                     <th className="px-2.5 py-1.5 text-left">Estado</th>
                     <th className="px-2.5 py-1.5 text-left">Asiento</th>
-                    <th className="px-2.5 py-1.5"></th>
+                    <th className="px-2.5 py-1.5" />
                   </tr>
                 </thead>
                 <tbody className="divide-y">

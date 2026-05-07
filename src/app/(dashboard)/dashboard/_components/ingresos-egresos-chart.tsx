@@ -11,12 +11,7 @@ import {
   YAxis,
 } from "recharts";
 
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import type { IngresoEgresoMensual } from "@/lib/services/dashboard";
 
@@ -50,17 +45,11 @@ export function IngresosEgresosChart({
         </div>
         <div className="flex items-center gap-3 text-[11px]">
           <span className="flex items-center gap-1.5">
-            <span
-              className="size-2 rounded-sm"
-              style={{ backgroundColor: COLOR_INGRESO }}
-            />
+            <span className="size-2 rounded-sm" style={{ backgroundColor: COLOR_INGRESO }} />
             Ingresos
           </span>
           <span className="flex items-center gap-1.5">
-            <span
-              className="size-2 rounded-sm"
-              style={{ backgroundColor: COLOR_EGRESO }}
-            />
+            <span className="size-2 rounded-sm" style={{ backgroundColor: COLOR_EGRESO }} />
             Egresos
           </span>
         </div>
@@ -73,11 +62,7 @@ export function IngresosEgresosChart({
               margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
               barCategoryGap={20}
             >
-              <CartesianGrid
-                strokeDasharray="2 4"
-                stroke="var(--border)"
-                vertical={false}
-              />
+              <CartesianGrid strokeDasharray="2 4" stroke="var(--border)" vertical={false} />
               <XAxis
                 dataKey="label"
                 tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
@@ -107,24 +92,11 @@ export function IngresosEgresosChart({
                   fontWeight: 600,
                   marginBottom: 2,
                 }}
-                formatter={(value, name) => [
-                  fmtPesos.format(Number(value ?? 0)),
-                  String(name),
-                ]}
+                formatter={(value, name) => [fmtPesos.format(Number(value ?? 0)), String(name)]}
               />
               <Legend content={() => null} />
-              <Bar
-                dataKey="ingresos"
-                fill={COLOR_INGRESO}
-                name="Ingresos"
-                radius={[3, 3, 0, 0]}
-              />
-              <Bar
-                dataKey="egresos"
-                fill={COLOR_EGRESO}
-                name="Egresos"
-                radius={[3, 3, 0, 0]}
-              />
+              <Bar dataKey="ingresos" fill={COLOR_INGRESO} name="Ingresos" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="egresos" fill={COLOR_EGRESO} name="Egresos" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

@@ -1,22 +1,22 @@
-import { useSyncExternalStore } from "react"
+import { useSyncExternalStore } from "react";
 
-const MOBILE_BREAKPOINT = 768
-const QUERY = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`
+const MOBILE_BREAKPOINT = 768;
+const QUERY = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`;
 
 function subscribe(notify: () => void) {
-  const mql = window.matchMedia(QUERY)
-  mql.addEventListener("change", notify)
-  return () => mql.removeEventListener("change", notify)
+  const mql = window.matchMedia(QUERY);
+  mql.addEventListener("change", notify);
+  return () => mql.removeEventListener("change", notify);
 }
 
 function getSnapshot() {
-  return window.matchMedia(QUERY).matches
+  return window.matchMedia(QUERY).matches;
 }
 
 function getServerSnapshot() {
-  return false
+  return false;
 }
 
 export function useIsMobile() {
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

@@ -3,10 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import {
-  cerrarGanadaAction,
-  cerrarPerdidaAction,
-} from "@/lib/actions/oportunidades";
+import { cerrarGanadaAction, cerrarPerdidaAction } from "@/lib/actions/oportunidades";
 
 export function CerrarButtons({ opId }: { opId: string }) {
   const router = useRouter();
@@ -14,8 +11,7 @@ export function CerrarButtons({ opId }: { opId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   function handle(resultado: "GANADA" | "PERDIDA") {
-    const action =
-      resultado === "GANADA" ? cerrarGanadaAction : cerrarPerdidaAction;
+    const action = resultado === "GANADA" ? cerrarGanadaAction : cerrarPerdidaAction;
     const label = resultado === "GANADA" ? "ganada" : "perdida";
     if (!confirm(`¿Cerrar oportunidad como ${label}?`)) return;
     setError(null);

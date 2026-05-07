@@ -7,10 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon } from "@hugeicons/core-free-icons";
 
 import type { AsientoEstado } from "@/generated/prisma/client";
-import {
-  obtenerPrestamoDetalle,
-  type PrestamoDetalle,
-} from "@/lib/actions/prestamos";
+import { obtenerPrestamoDetalle, type PrestamoDetalle } from "@/lib/actions/prestamos";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -37,9 +34,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
 };
 
-function estadoVariant(
-  estado: AsientoEstado,
-): "default" | "outline" | "secondary" {
+function estadoVariant(estado: AsientoEstado): "default" | "outline" | "secondary" {
   switch (estado) {
     case "BORRADOR":
       return "outline";
@@ -59,11 +54,7 @@ function formatMoney(value: string): string {
   });
 }
 
-export function PrestamoDetalleSheet({
-  prestamoId,
-  open,
-  onOpenChange,
-}: Props) {
+export function PrestamoDetalleSheet({ prestamoId, open, onOpenChange }: Props) {
   const [detalle, setDetalle] = useState<PrestamoDetalle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -94,9 +85,7 @@ export function PrestamoDetalleSheet({
       >
         <SheetHeader className="gap-2">
           <div className="flex items-center gap-3">
-            <SheetTitle>
-              {detalle ? `Préstamo · ${detalle.prestamista}` : "Préstamo"}
-            </SheetTitle>
+            <SheetTitle>{detalle ? `Préstamo · ${detalle.prestamista}` : "Préstamo"}</SheetTitle>
             {detalle?.asiento && (
               <>
                 <Badge variant="outline" className="font-mono text-xs">
@@ -109,8 +98,7 @@ export function PrestamoDetalleSheet({
             )}
           </div>
           <SheetDescription>
-            Detalle del préstamo, asiento de recepción y amortizaciones
-            registradas.
+            Detalle del préstamo, asiento de recepción y amortizaciones registradas.
           </SheetDescription>
         </SheetHeader>
 
@@ -131,11 +119,7 @@ export function PrestamoDetalleSheet({
                   <InfoRow label="Prestamista" value={detalle.prestamista} />
                   <InfoRow
                     label="Clasificación"
-                    value={
-                      detalle.clasificacion === "CORTO_PLAZO"
-                        ? "Corto plazo"
-                        : "Largo plazo"
-                    }
+                    value={detalle.clasificacion === "CORTO_PLAZO" ? "Corto plazo" : "Largo plazo"}
                   />
                   <InfoRow
                     label="Cuenta bancaria"
@@ -151,14 +135,9 @@ export function PrestamoDetalleSheet({
                   />
                   <InfoRow
                     label="Tipo de cambio"
-                    value={Number(detalle.tipoCambio).toFixed(
-                      detalle.moneda === "ARS" ? 2 : 6,
-                    )}
+                    value={Number(detalle.tipoCambio).toFixed(detalle.moneda === "ARS" ? 2 : 6)}
                   />
-                  <InfoRow
-                    label="Valor en ARS"
-                    value={formatMoney(detalle.valorArs)}
-                  />
+                  <InfoRow label="Valor en ARS" value={formatMoney(detalle.valorArs)} />
                   <InfoRow
                     label="Saldo pendiente"
                     value={formatMoney(detalle.saldoPendiente)}
@@ -192,12 +171,8 @@ export function PrestamoDetalleSheet({
                       <TableBody>
                         {detalle.asiento.lineas.map((l, i) => (
                           <TableRow key={i}>
-                            <TableCell className="font-mono text-xs">
-                              {l.cuentaCodigo}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {l.cuentaNombre}
-                            </TableCell>
+                            <TableCell className="font-mono text-xs">{l.cuentaCodigo}</TableCell>
+                            <TableCell className="text-sm">{l.cuentaNombre}</TableCell>
                             <TableCell className="text-xs text-muted-foreground">
                               {l.descripcion ?? "—"}
                             </TableCell>
@@ -233,12 +208,9 @@ export function PrestamoDetalleSheet({
                 {detalle.amortizaciones.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Sin amortizaciones registradas. Use el botón{" "}
-                    <span className="font-medium">Registrar amortización</span>{" "}
-                    para generar un pago con contrapartida en la cuenta{" "}
-                    <span className="font-mono">
-                      {detalle.cuentaContable.codigo}
-                    </span>
-                    .
+                    <span className="font-medium">Registrar amortización</span> para generar un pago
+                    con contrapartida en la cuenta{" "}
+                    <span className="font-mono">{detalle.cuentaContable.codigo}</span>.
                   </p>
                 ) : (
                   <div className="overflow-x-auto">
@@ -257,14 +229,10 @@ export function PrestamoDetalleSheet({
                             <TableCell className="text-sm tabular-nums">
                               {format(new Date(a.fecha), "dd/MM/yyyy")}
                             </TableCell>
-                            <TableCell className="text-sm">
-                              {a.cuentaBancaria}
-                            </TableCell>
+                            <TableCell className="text-sm">{a.cuentaBancaria}</TableCell>
                             <TableCell className="text-right font-mono text-sm tabular-nums">
                               {formatMoney(a.monto)}{" "}
-                              <span className="text-xs text-muted-foreground">
-                                {a.moneda}
-                              </span>
+                              <span className="text-xs text-muted-foreground">{a.moneda}</span>
                             </TableCell>
                             <TableCell className="font-mono text-xs text-muted-foreground">
                               {a.asientoNumero ? `Nº ${a.asientoNumero}` : "—"}
@@ -296,13 +264,7 @@ function InfoRow({
   return (
     <div className="flex flex-col">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd
-        className={
-          highlight
-            ? "font-mono text-sm font-semibold"
-            : "font-mono text-sm"
-        }
-      >
+      <dd className={highlight ? "font-mono text-sm font-semibold" : "font-mono text-sm"}>
         {value}
       </dd>
     </div>
@@ -322,17 +284,13 @@ function AmortizacionCTA({ detalle }: { detalle: PrestamoDetalle }) {
   if (detalle.asiento?.estado !== "CONTABILIZADO") {
     return (
       <span className="text-xs text-muted-foreground">
-        Asiento {detalle.asiento?.estado.toLowerCase() ?? "sin registrar"} — no
-        se puede amortizar
+        Asiento {detalle.asiento?.estado.toLowerCase() ?? "sin registrar"} — no se puede amortizar
       </span>
     );
   }
   const href = `/tesoreria/movimientos/nuevo?prestamoId=${detalle.id}&modo=amortizacion`;
   return (
-    <Link
-      href={href}
-      className={buttonVariants({ variant: "default", size: "sm" })}
-    >
+    <Link href={href} className={buttonVariants({ variant: "default", size: "sm" })}>
       <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
       Registrar amortización
     </Link>

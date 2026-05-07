@@ -48,10 +48,7 @@ export async function calcularSaldosCuentasBancarias(
   for (const row of grouped) {
     const debe = toDecimal(row._sum.debe ?? 0);
     const haber = toDecimal(row._sum.haber ?? 0);
-    result.set(
-      row.cuentaId,
-      debe.minus(haber).toDecimalPlaces(2, Decimal.ROUND_HALF_UP),
-    );
+    result.set(row.cuentaId, debe.minus(haber).toDecimalPlaces(2, Decimal.ROUND_HALF_UP));
   }
   return result;
 }

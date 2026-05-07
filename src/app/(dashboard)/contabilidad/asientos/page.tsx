@@ -21,20 +21,18 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseEstado(value: string | undefined): AsientoEstado | null {
   if (!value) return null;
-  return ESTADO_VALUES.has(value as AsientoEstado)
-    ? (value as AsientoEstado)
-    : null;
+  return ESTADO_VALUES.has(value as AsientoEstado) ? (value as AsientoEstado) : null;
 }
 
 function parseDate(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T00:00:00Z");
+  const d = new Date(`${value}T00:00:00Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 function endOfDay(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T23:59:59.999Z");
+  const d = new Date(`${value}T23:59:59.999Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
@@ -44,9 +42,7 @@ function todayIso(): string {
 
 function firstOfMonthIso(): string {
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1)
-    .toISOString()
-    .slice(0, 10);
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 }
 
 type SearchParams = Promise<{
@@ -142,10 +138,7 @@ export default async function AsientosPage({
 
       <div className="flex flex-col gap-3">
         <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
-        <AsientosFilters
-          selectedEstado={estadoFilter ?? "all"}
-          query={qFilter}
-        />
+        <AsientosFilters selectedEstado={estadoFilter ?? "all"} query={qFilter} />
       </div>
 
       <Card className="py-0">

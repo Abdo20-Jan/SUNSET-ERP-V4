@@ -27,9 +27,7 @@ export default async function GastosPage({
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-[15px] font-semibold tracking-tight">
-            Gastos locales
-          </h1>
+          <h1 className="text-[15px] font-semibold tracking-tight">Gastos locales</h1>
           <p className="text-sm text-muted-foreground">
             {rows.length} gasto{rows.length === 1 ? "" : "s"}
             {rows.length > 0 && (
@@ -43,14 +41,8 @@ export default async function GastosPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <DateRangeFilter
-            initialDesde={params.desde ?? ""}
-            initialHasta={params.hasta ?? ""}
-          />
-          <Link
-            href="/gastos/nuevo"
-            className={buttonVariants({ variant: "default" })}
-          >
+          <DateRangeFilter initialDesde={params.desde ?? ""} initialHasta={params.hasta ?? ""} />
+          <Link href="/gastos/nuevo" className={buttonVariants({ variant: "default" })}>
             <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
             Nuevo gasto
           </Link>

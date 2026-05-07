@@ -11,8 +11,8 @@ export default async function DepositosPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-[15px] font-semibold tracking-tight">Depósitos</h1>
         <p className="text-sm text-muted-foreground">
-          {depositos.length} depósito{depositos.length === 1 ? "" : "s"}{" "}
-          registrado{depositos.length === 1 ? "" : "s"}.
+          {depositos.length} depósito{depositos.length === 1 ? "" : "s"} registrado
+          {depositos.length === 1 ? "" : "s"}.
         </p>
       </div>
 

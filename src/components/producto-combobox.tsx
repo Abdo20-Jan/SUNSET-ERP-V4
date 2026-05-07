@@ -13,11 +13,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 export type ProductoOption = {
   id: string;
@@ -59,16 +55,13 @@ export function ProductoCombobox({
           />
         }
       >
-        <span
-          className={cn(
-            "truncate text-left",
-            !selected && "text-muted-foreground",
-          )}
-        >
+        <span className={cn("truncate text-left", !selected && "text-muted-foreground")}>
           {selected
-            ? `${selected.codigo} — ${[selected.marca, selected.medida]
-                .filter((v): v is string => Boolean(v))
-                .join(" ") || selected.nombre}`
+            ? `${selected.codigo} — ${
+                [selected.marca, selected.medida]
+                  .filter((v): v is string => Boolean(v))
+                  .join(" ") || selected.nombre
+              }`
             : placeholder}
         </span>
         <HugeiconsIcon
@@ -91,13 +84,9 @@ export function ProductoCombobox({
                   setOpen(false);
                 }}
               >
-                <span className="font-mono text-xs text-muted-foreground">
-                  {p.codigo}
-                </span>
+                <span className="font-mono text-xs text-muted-foreground">{p.codigo}</span>
                 <span className="truncate">
-                  {[p.marca, p.medida]
-                    .filter((v): v is string => Boolean(v))
-                    .join(" ") || p.nombre}
+                  {[p.marca, p.medida].filter((v): v is string => Boolean(v)).join(" ") || p.nombre}
                 </span>
               </CommandItem>
             ))}

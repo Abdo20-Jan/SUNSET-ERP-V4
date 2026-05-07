@@ -3,28 +3,16 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import {
-  crearLeadAction,
-  editarLeadAction,
-  type LeadInput,
-} from "@/lib/actions/leads";
+import { crearLeadAction, editarLeadAction, type LeadInput } from "@/lib/actions/leads";
 
 type Mode = "create" | "edit";
 
-async function callAction(
-  mode: Mode,
-  leadId: string | undefined,
-  input: LeadInput,
-) {
+async function callAction(mode: Mode, leadId: string | undefined, input: LeadInput) {
   if (mode === "create") return crearLeadAction(input);
   return editarLeadAction(leadId as string, input);
 }
 
-function buildTargetUrl(
-  mode: Mode,
-  leadId: string | undefined,
-  createdId: string,
-): string {
+function buildTargetUrl(mode: Mode, leadId: string | undefined, createdId: string): string {
   const id = mode === "create" ? createdId : leadId;
   return `/crm/leads/${id}`;
 }

@@ -3,10 +3,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { Decimal, eqMoney, sumMoney } from "@/lib/decimal";
 
-import {
-  getEstadoResultados,
-  getEstadoResultadosByFecha,
-} from "./estado-resultados";
+import { getEstadoResultados, getEstadoResultadosByFecha } from "./estado-resultados";
 import { buildCuentaTree, type CuentaTreeNode } from "./shared";
 
 export type BalanceGeneralContexto =
@@ -53,9 +50,7 @@ export type BalanceGeneralResult = {
 // Código da conta analítica "RESULTADO DEL EJERCICIO" no plano oficial.
 const CODIGO_RESULTADO_EJERCICIO = "3.2.1.02";
 
-export async function getBalanceGeneral(
-  periodoId: number,
-): Promise<BalanceGeneralResult | null> {
+export async function getBalanceGeneral(periodoId: number): Promise<BalanceGeneralResult | null> {
   const periodo = await db.periodoContable.findUnique({
     where: { id: periodoId },
     select: {
@@ -132,18 +127,11 @@ function ensamblar({
 
   const totalActivo = tree.totalPorCategoria.get("ACTIVO") ?? new Decimal(0);
   const totalPasivo = tree.totalPorCategoria.get("PASIVO") ?? new Decimal(0);
-  const totalPatrimonio =
-    tree.totalPorCategoria.get("PATRIMONIO") ?? new Decimal(0);
+  const totalPatrimonio = tree.totalPorCategoria.get("PATRIMONIO") ?? new Decimal(0);
 
-  const totalSaldoInicialActivo = sumMoney(
-    activo.map((n) => n.saldoInicial),
-  );
-  const totalSaldoInicialPasivo = sumMoney(
-    pasivo.map((n) => n.saldoInicial),
-  );
-  const totalSaldoInicialPatrimonio = sumMoney(
-    patrimonio.map((n) => n.saldoInicial),
-  );
+  const totalSaldoInicialActivo = sumMoney(activo.map((n) => n.saldoInicial));
+  const totalSaldoInicialPasivo = sumMoney(pasivo.map((n) => n.saldoInicial));
+  const totalSaldoInicialPatrimonio = sumMoney(patrimonio.map((n) => n.saldoInicial));
 
   const cuentaResultadoYaMovida = patrimonio.some((root) =>
     containsCuentaComSaldo(root, CODIGO_RESULTADO_EJERCICIO),
@@ -153,9 +141,7 @@ function ensamblar({
     : totalPatrimonio.plus(resultadoEjercicio);
 
   const somaPasivoPatrimonio = totalPasivo.plus(totalPatrimonioAjustado);
-  const diferencia = totalActivo
-    .minus(somaPasivoPatrimonio)
-    .toDecimalPlaces(2);
+  const diferencia = totalActivo.minus(somaPasivoPatrimonio).toDecimalPlaces(2);
 
   return {
     periodo,
@@ -184,10 +170,7 @@ function rangoLabel(desde: Date | undefined, hasta: Date | undefined): string {
   return "Histórico completo";
 }
 
-function containsCuentaComSaldo(
-  node: CuentaTreeNode,
-  codigo: string,
-): boolean {
+function containsCuentaComSaldo(node: CuentaTreeNode, codigo: string): boolean {
   if (node.codigo === codigo && !node.saldo.isZero()) return true;
   for (const ch of node.children) {
     if (containsCuentaComSaldo(ch, codigo)) return true;

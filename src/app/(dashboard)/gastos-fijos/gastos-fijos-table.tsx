@@ -121,10 +121,7 @@ export function GastosFijosTable({
           {gastos.length === 1 ? "" : "s"} configurado
           {gastos.length === 1 ? "" : "s"}.
         </p>
-        <Button
-          size="sm"
-          onClick={() => setDialog({ mode: "create" })}
-        >
+        <Button size="sm" onClick={() => setDialog({ mode: "create" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
           Nuevo gasto fijo
         </Button>
@@ -146,10 +143,7 @@ export function GastosFijosTable({
         <TableBody>
           {gastos.length === 0 ? (
             <TableRow>
-              <TableCell
-                colSpan={8}
-                className="py-12 text-center text-sm text-muted-foreground"
-              >
+              <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
                 Sin gastos fijos. Creá uno para empezar.
               </TableCell>
             </TableRow>
@@ -167,14 +161,10 @@ export function GastosFijosTable({
                   {g.moneda} {fmtMoney(g.montoNeto)}
                   <div className="text-xs text-muted-foreground">
                     +{g.ivaPorcentaje}% IVA
-                    {Number(g.iibbPorcentaje) > 0
-                      ? ` · +${g.iibbPorcentaje}% IIBB`
-                      : ""}
+                    {Number(g.iibbPorcentaje) > 0 ? ` · +${g.iibbPorcentaje}% IIBB` : ""}
                   </div>
                 </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {g.diaVencimiento ?? "—"}
-                </TableCell>
+                <TableCell className="text-right tabular-nums">{g.diaVencimiento ?? "—"}</TableCell>
                 <TableCell className="text-xs">
                   {g.ultimoRegistro
                     ? `${String(g.ultimoRegistro.month).padStart(2, "0")}/${g.ultimoRegistro.year} · ${fmtMoney(g.ultimoRegistro.total)}`
@@ -257,9 +247,7 @@ function GastoFijoFormDialog({
   const [moneda, setMoneda] = useState<"ARS" | "USD">(editing?.moneda ?? "ARS");
   const [montoNeto, setMontoNeto] = useState(editing?.montoNeto ?? "");
   const [ivaPorcentaje, setIvaPorcentaje] = useState(editing?.ivaPorcentaje ?? "21");
-  const [iibbPorcentaje, setIibbPorcentaje] = useState(
-    editing?.iibbPorcentaje ?? "0",
-  );
+  const [iibbPorcentaje, setIibbPorcentaje] = useState(editing?.iibbPorcentaje ?? "0");
   const [diaVencimiento, setDiaVencimiento] = useState(
     editing?.diaVencimiento != null ? String(editing.diaVencimiento) : "",
   );
@@ -334,19 +322,16 @@ function GastoFijoFormDialog({
   }
 
   return (
-    <Dialog
-      open={Boolean(state)}
-      onOpenChange={(o) => !o && onClose()}
-    >
+    <Dialog open={Boolean(state)} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-[640px]">
         <DialogHeader>
           <DialogTitle>
             {state.mode === "edit" ? "Editar gasto fijo" : "Nuevo gasto fijo"}
           </DialogTitle>
           <DialogDescription>
-            Configurá un template para gastos recurrentes (ej: &quot;Alquiler
-            escritorio&quot;, &quot;Honorarios contador&quot;). Después registrá cada mes
-            con el botón &quot;Registrar&quot;.
+            Configurá un template para gastos recurrentes (ej: &quot;Alquiler escritorio&quot;,
+            &quot;Honorarios contador&quot;). Después registrá cada mes con el botón
+            &quot;Registrar&quot;.
           </DialogDescription>
         </DialogHeader>
 
@@ -398,10 +383,7 @@ function GastoFijoFormDialog({
 
             <div className="flex flex-col gap-2">
               <Label>Moneda</Label>
-              <Select
-                value={moneda}
-                onValueChange={(v) => v && setMoneda(v as "ARS" | "USD")}
-              >
+              <Select value={moneda} onValueChange={(v) => v && setMoneda(v as "ARS" | "USD")}>
                 <SelectTrigger>
                   <SelectValue>{(v) => v ?? "ARS"}</SelectValue>
                 </SelectTrigger>
@@ -421,13 +403,12 @@ function GastoFijoFormDialog({
               cuentas={cuentas}
               placeholder={
                 proveedorSeleccionado?.cuentaGastoContableId
-                  ? `Default del proveedor — opcional override`
+                  ? "Default del proveedor — opcional override"
                   : "Default por tipo de proveedor — opcional override"
               }
             />
             <p className="text-xs text-muted-foreground">
-              Si vacío, usa la cuenta de gasto del proveedor (o el default por
-              tipo).
+              Si vacío, usa la cuenta de gasto del proveedor (o el default por tipo).
             </p>
           </div>
 
@@ -500,7 +481,13 @@ function GastoFijoFormDialog({
           </div>
 
           <DialogFooter>
-            <DialogClose render={<Button variant="ghost" type="button">Cancelar</Button>} />
+            <DialogClose
+              render={
+                <Button variant="ghost" type="button">
+                  Cancelar
+                </Button>
+              }
+            />
             <Button type="submit" disabled={isPending}>
               {isPending ? "Guardando…" : state.mode === "edit" ? "Guardar" : "Crear"}
             </Button>
@@ -540,7 +527,7 @@ function RegistrarDialog({
         gastoFijoId: g.id,
         year,
         month,
-        fecha: new Date(fechaIso + "T12:00:00Z"),
+        fecha: new Date(`${fechaIso}T12:00:00Z`),
         tipoCambio: g.moneda === "ARS" ? "1" : tipoCambio,
       });
       if (!result.ok) {
@@ -563,8 +550,7 @@ function RegistrarDialog({
           <DialogDescription>
             {g.descripcion} · {g.proveedorNombre}
             <br />
-            Genera un asiento contable contabilizado y deja la cuenta a pagar
-            lista en Tesorería.
+            Genera un asiento contable contabilizado y deja la cuenta a pagar lista en Tesorería.
           </DialogDescription>
         </DialogHeader>
 
@@ -572,14 +558,9 @@ function RegistrarDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-2">
               <Label>Mes</Label>
-              <Select
-                value={String(month)}
-                onValueChange={(v) => v && setMonth(Number(v))}
-              >
+              <Select value={String(month)} onValueChange={(v) => v && setMonth(Number(v))}>
                 <SelectTrigger>
-                  <SelectValue>
-                    {(v) => MESES[Number(v) - 1] ?? ""}
-                  </SelectValue>
+                  <SelectValue>{(v) => MESES[Number(v) - 1] ?? ""}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {MESES.map((nombre, idx) => (
@@ -592,10 +573,7 @@ function RegistrarDialog({
             </div>
             <div className="flex flex-col gap-2">
               <Label>Año</Label>
-              <Select
-                value={String(year)}
-                onValueChange={(v) => v && setYear(Number(v))}
-              >
+              <Select value={String(year)} onValueChange={(v) => v && setYear(Number(v))}>
                 <SelectTrigger>
                   <SelectValue>{(v) => String(v ?? "")}</SelectValue>
                 </SelectTrigger>
@@ -615,11 +593,8 @@ function RegistrarDialog({
               <strong>Fecha del asiento:</strong> {fechaIso}
             </p>
             <p>
-              <strong>Monto:</strong> {g.moneda} {fmtMoney(g.montoNeto)} +{" "}
-              {g.ivaPorcentaje}% IVA
-              {Number(g.iibbPorcentaje) > 0
-                ? ` + ${g.iibbPorcentaje}% IIBB`
-                : ""}
+              <strong>Monto:</strong> {g.moneda} {fmtMoney(g.montoNeto)} + {g.ivaPorcentaje}% IVA
+              {Number(g.iibbPorcentaje) > 0 ? ` + ${g.iibbPorcentaje}% IIBB` : ""}
             </p>
           </div>
 
@@ -636,7 +611,13 @@ function RegistrarDialog({
           ) : null}
 
           <DialogFooter>
-            <DialogClose render={<Button variant="ghost" type="button">Cancelar</Button>} />
+            <DialogClose
+              render={
+                <Button variant="ghost" type="button">
+                  Cancelar
+                </Button>
+              }
+            />
             <Button type="submit" disabled={isPending}>
               <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} />
               {isPending ? "Registrando…" : "Registrar y contabilizar"}

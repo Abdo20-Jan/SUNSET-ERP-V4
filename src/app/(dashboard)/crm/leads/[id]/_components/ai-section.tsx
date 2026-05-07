@@ -2,10 +2,7 @@
 
 import { useState, useTransition } from "react";
 
-import {
-  recalcularScoringLeadAction,
-  resumirLeadAction,
-} from "@/lib/actions/crm-ai";
+import { recalcularScoringLeadAction, resumirLeadAction } from "@/lib/actions/crm-ai";
 
 type Resumen = { resumen: string; proximaAccion: string };
 
@@ -79,9 +76,7 @@ export function AiSection({ leadId }: { leadId: string }) {
       {resumen && (
         <div className="space-y-2 rounded-md border bg-background p-3 text-sm">
           <div>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">
-              Resumen
-            </div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Resumen</div>
             <p className="mt-1">{resumen.resumen}</p>
           </div>
           <div>

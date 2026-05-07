@@ -9,8 +9,7 @@ const SECTIONS = [
     href: "/comex/embarques",
     icon: CargoShipIcon,
     title: "Embarques",
-    description:
-      "Importaciones: FOB, CIF, tributos aduaneros y costo nacionalizado",
+    description: "Importaciones: FOB, CIF, tributos aduaneros y costo nacionalizado",
   },
 ] as const;
 
@@ -34,9 +33,7 @@ export default function ComexPage() {
                 </div>
                 <div className="flex flex-col gap-0.5">
                   <span className="text-sm font-medium">{s.title}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {s.description}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{s.description}</span>
                 </div>
               </CardContent>
             </Card>

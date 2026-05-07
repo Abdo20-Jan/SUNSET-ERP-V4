@@ -17,13 +17,13 @@ import {
   LineaExtractoStatus,
 } from "@/generated/prisma/client";
 
-const SUGGESTED_CUENTA_DEFAULTS: Record<
-  string,
-  { nombre: string; categoria: CuentaCategoria }
-> = {
+const SUGGESTED_CUENTA_DEFAULTS: Record<string, { nombre: string; categoria: CuentaCategoria }> = {
   "5.8.1.01": { nombre: "COMISIONES BANCARIAS", categoria: CuentaCategoria.EGRESO },
   "5.8.1.04": { nombre: "IMPUESTO DE SELLOS", categoria: CuentaCategoria.EGRESO },
-  "5.8.1.06": { nombre: "IMPUESTO LEY 25413 (DEB/CRED BANCARIOS)", categoria: CuentaCategoria.EGRESO },
+  "5.8.1.06": {
+    nombre: "IMPUESTO LEY 25413 (DEB/CRED BANCARIOS)",
+    categoria: CuentaCategoria.EGRESO,
+  },
   "5.8.2.02": { nombre: "INTERESES PAGADOS", categoria: CuentaCategoria.EGRESO },
   "1.1.4.01": { nombre: "IVA CRÉDITO FISCAL", categoria: CuentaCategoria.ACTIVO },
   "1.1.4.02": { nombre: "PERCEPCIÓN IVA RG 2408 (BANCARIA)", categoria: CuentaCategoria.ACTIVO },
@@ -76,7 +76,7 @@ function detectarPeriodoFromLineas(
 ): { year: number; month: number } | null {
   if (lineas.length === 0) return null;
   // Usamos la fecha más reciente (saldo final del mes)
-  const fechas = lineas.map((l) => new Date(l.fecha + "T12:00:00Z"));
+  const fechas = lineas.map((l) => new Date(`${l.fecha}T12:00:00Z`));
   const last = fechas.reduce((a, b) => (a > b ? a : b));
   return {
     year: last.getUTCFullYear(),
@@ -160,8 +160,7 @@ export async function importarExtractoAction(
     const todas = todasRaw as CuentaInfo[];
 
     const matches = todas.filter((c) => {
-      const cbuMatch =
-        cbuPdf !== null && normalizarCBU(c.cbu) === cbuPdf;
+      const cbuMatch = cbuPdf !== null && normalizarCBU(c.cbu) === cbuPdf;
       const numNorm = normalizarNumero(c.numero);
       const numMatch =
         numPdf.length > 0 &&
@@ -236,13 +235,27 @@ export async function importarExtractoAction(
           where: { cuit: { in: cuitVariants } },
           select: { id: true, cuit: true, nombre: true, cuentaContableId: true },
         })
-      : Promise.resolve([] as Array<{ id: string; cuit: string | null; nombre: string; cuentaContableId: number | null }>),
+      : Promise.resolve(
+          [] as Array<{
+            id: string;
+            cuit: string | null;
+            nombre: string;
+            cuentaContableId: number | null;
+          }>,
+        ),
     cuitVariants.length > 0
       ? db.cliente.findMany({
           where: { cuit: { in: cuitVariants } },
           select: { id: true, cuit: true, nombre: true, cuentaContableId: true },
         })
-      : Promise.resolve([] as Array<{ id: string; cuit: string | null; nombre: string; cuentaContableId: number | null }>),
+      : Promise.resolve(
+          [] as Array<{
+            id: string;
+            cuit: string | null;
+            nombre: string;
+            cuentaContableId: number | null;
+          }>,
+        ),
   ]);
 
   const provByCuit = new Map<string, (typeof proveedores)[number]>();
@@ -307,7 +320,7 @@ export async function importarExtractoAction(
             data: {
               importacionId: importacion.id,
               ordenLinea: i + 1,
-              fecha: new Date(l.fecha + "T12:00:00Z"),
+              fecha: new Date(`${l.fecha}T12:00:00Z`),
               descripcion: l.descripcion.slice(0, 500),
               comprobante: l.comprobante,
               referenciaBanco: l.referenciaBanco?.slice(0, 100) ?? null,

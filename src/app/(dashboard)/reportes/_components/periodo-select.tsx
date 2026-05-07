@@ -25,11 +25,7 @@ type Props = {
   paramName?: string;
 };
 
-export function PeriodoSelect({
-  periodos,
-  selectedPeriodoId,
-  paramName = "periodoId",
-}: Props) {
+export function PeriodoSelect({ periodos, selectedPeriodoId, paramName = "periodoId" }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();

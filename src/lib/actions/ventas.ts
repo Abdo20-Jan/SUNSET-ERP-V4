@@ -469,8 +469,8 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
             emisor: c.emisor,
             cuitEmisor: c.cuitEmisor,
             importe: money(c.importe),
-            fechaEmision: new Date(c.fechaEmision + "T12:00:00Z"),
-            fechaPago: new Date(c.fechaPago + "T12:00:00Z"),
+            fechaEmision: new Date(`${c.fechaEmision}T12:00:00Z`),
+            fechaPago: new Date(`${c.fechaPago}T12:00:00Z`),
           })),
         });
       }

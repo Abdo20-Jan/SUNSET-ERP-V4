@@ -35,9 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export type ClienteFormState =
-  | { mode: "create" }
-  | { mode: "edit"; row: ClienteRow };
+export type ClienteFormState = { mode: "create" } | { mode: "edit"; row: ClienteRow };
 
 const CONDICION_IVA_LABEL: Record<CondicionIva, string> = {
   RI: "Responsable Inscripto",
@@ -77,10 +75,7 @@ const formSchema = z.object({
     .trim()
     .optional()
     .or(z.literal(""))
-    .refine(
-      (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
-      "Email inválido.",
-    ),
+    .refine((v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Email inválido."),
   estado: z.enum(["activo", "inactivo"]),
   cuentaContableId: z.number().int().positive().nullable(),
   crearCuentaAuto: z.boolean(),
@@ -170,21 +165,13 @@ export function ClienteFormDialog({
         agenteRetencionGanancias: values.agenteRetencionGanancias,
         agenteIibb: values.agenteIibb,
         tipo: values.tipo && values.tipo.length > 0 ? values.tipo : undefined,
-        direccion:
-          values.direccion && values.direccion.length > 0
-            ? values.direccion
-            : undefined,
-        telefono:
-          values.telefono && values.telefono.length > 0
-            ? values.telefono
-            : undefined,
+        direccion: values.direccion && values.direccion.length > 0 ? values.direccion : undefined,
+        telefono: values.telefono && values.telefono.length > 0 ? values.telefono : undefined,
         email: values.email && values.email.length > 0 ? values.email : undefined,
         estado: values.estado,
         cuentaContableId: values.cuentaContableId ?? null,
         crearCuentaAuto:
-          state.mode === "create" &&
-          values.crearCuentaAuto &&
-          values.cuentaContableId === null,
+          state.mode === "create" && values.crearCuentaAuto && values.cuentaContableId === null,
       };
 
       const result =
@@ -193,11 +180,7 @@ export function ClienteFormDialog({
           : await crearClienteAction(payload);
 
       if (result.ok) {
-        toast.success(
-          state.mode === "edit"
-            ? "Cliente actualizado."
-            : "Cliente creado.",
-        );
+        toast.success(state.mode === "edit" ? "Cliente actualizado." : "Cliente creado.");
         onClose();
         router.refresh();
       } else {
@@ -215,9 +198,7 @@ export function ClienteFormDialog({
     >
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>
-            {state?.mode === "edit" ? "Editar cliente" : "Nuevo cliente"}
-          </DialogTitle>
+          <DialogTitle>{state?.mode === "edit" ? "Editar cliente" : "Nuevo cliente"}</DialogTitle>
           <DialogDescription>
             {state?.mode === "edit"
               ? "Modifique los datos del cliente y guarde los cambios."
@@ -229,11 +210,7 @@ export function ClienteFormDialog({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2 flex flex-col gap-2">
               <Label htmlFor="nombre">Nombre *</Label>
-              <Input
-                id="nombre"
-                aria-invalid={!!errors.nombre}
-                {...register("nombre")}
-              />
+              <Input id="nombre" aria-invalid={!!errors.nombre} {...register("nombre")} />
               {errors.nombre && <FieldError message={errors.nombre.message} />}
             </div>
 
@@ -269,8 +246,7 @@ export function ClienteFormDialog({
                 )}
               />
               <p className="text-xs text-muted-foreground">
-                Determina la cuenta analítica auto-creada (1.1.3.10–99 según
-                canal).
+                Determina la cuenta analítica auto-creada (1.1.3.10–99 según canal).
               </p>
             </div>
 
@@ -300,29 +276,26 @@ export function ClienteFormDialog({
               <Label>Agente de retención (si aplica)</Label>
               <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3 text-sm">
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    {...register("agenteRetencionIva")}
-                  />
-                  <span>Agente de retención <strong>IVA</strong> (10,5% típico)</span>
+                  <input type="checkbox" {...register("agenteRetencionIva")} />
+                  <span>
+                    Agente de retención <strong>IVA</strong> (10,5% típico)
+                  </span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    {...register("agenteRetencionGanancias")}
-                  />
-                  <span>Agente de retención <strong>Ganancias</strong> (RG 830, 2-6%)</span>
+                  <input type="checkbox" {...register("agenteRetencionGanancias")} />
+                  <span>
+                    Agente de retención <strong>Ganancias</strong> (RG 830, 2-6%)
+                  </span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    {...register("agenteIibb")}
-                  />
-                  <span>Agente de recaudación <strong>IIBB</strong></span>
+                  <input type="checkbox" {...register("agenteIibb")} />
+                  <span>
+                    Agente de recaudación <strong>IIBB</strong>
+                  </span>
                 </label>
                 <p className="text-xs text-muted-foreground">
-                  Marcá sólo si el cliente practica retenciones al pagar
-                  (Grandes Cuentas, concesionarias).
+                  Marcá sólo si el cliente practica retenciones al pagar (Grandes Cuentas,
+                  concesionarias).
                 </p>
               </div>
             </div>
@@ -353,12 +326,7 @@ export function ClienteFormDialog({
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                aria-invalid={!!errors.email}
-                {...register("email")}
-              />
+              <Input id="email" type="email" aria-invalid={!!errors.email} {...register("email")} />
               {errors.email && <FieldError message={errors.email.message} />}
             </div>
 
@@ -371,16 +339,10 @@ export function ClienteFormDialog({
               <Label className="text-sm">Cuenta contable</Label>
               {state?.mode === "create" && (
                 <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    {...register("crearCuentaAuto")}
-                  />
+                  <input type="checkbox" className="mt-1" {...register("crearCuentaAuto")} />
                   <span>
-                    <span className="font-medium">
-                      Crear automáticamente
-                    </span>{" "}
-                    una cuenta analítica para este cliente
+                    <span className="font-medium">Crear automáticamente</span> una cuenta analítica
+                    para este cliente
                     <span className="ml-1 text-xs text-muted-foreground">
                       (sugerido — rango 1.1.3.10–99)
                     </span>
@@ -404,20 +366,14 @@ export function ClienteFormDialog({
               )}
               <p className="text-xs text-muted-foreground">
                 Solo cuentas analíticas bajo{" "}
-                <span className="font-mono">1.1.3 CRÉDITOS POR VENTAS</span>.
-                Si elige &quot;Crear automáticamente&quot;, el sistema asigna el
-                próximo código disponible al guardar.
+                <span className="font-mono">1.1.3 CRÉDITOS POR VENTAS</span>. Si elige &quot;Crear
+                automáticamente&quot;, el sistema asigna el próximo código disponible al guardar.
               </p>
             </div>
           </div>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              disabled={isSubmitting}
-            >
+            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               Cancelar
             </Button>
             <Button type="submit" disabled={isSubmitting}>

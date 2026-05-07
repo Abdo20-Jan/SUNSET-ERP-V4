@@ -15,18 +15,13 @@ export default async function PedidosVentaPage() {
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-[15px] font-semibold tracking-tight">
-            Pedidos de venta (OV)
-          </h1>
+          <h1 className="text-[15px] font-semibold tracking-tight">Pedidos de venta (OV)</h1>
           <p className="text-sm text-muted-foreground">
-            {rows.length} pedido{rows.length === 1 ? "" : "s"} · planificación
-            de ventas antes de la factura.
+            {rows.length} pedido{rows.length === 1 ? "" : "s"} · planificación de ventas antes de la
+            factura.
           </p>
         </div>
-        <Link
-          href="/ventas/pedidos/nuevo"
-          className={buttonVariants({ variant: "default" })}
-        >
+        <Link href="/ventas/pedidos/nuevo" className={buttonVariants({ variant: "default" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
           Nuevo pedido
         </Link>

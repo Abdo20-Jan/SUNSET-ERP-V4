@@ -100,7 +100,7 @@ OUTPUT: SOLO el objeto JSON dentro de un bloque \`\`\`json ... \`\`\`. Nada más
 function buildUserPrompt(banco: string | null, moneda: "ARS" | "USD"): string {
   const hint = banco
     ? `Banco esperado: ${banco}.`
-    : `Detectá el banco a partir del header del PDF.`;
+    : "Detectá el banco a partir del header del PDF.";
   return `${hint} Moneda a parsear: ${moneda}.
 
 Devolvé el JSON con todas las líneas del extracto en orden cronológico, con las claves: banco, cbu, numeroCuenta, saldoInicial, saldoFinal, lineas[]. Cada línea: fecha (YYYY-MM-DD), descripcion (string), comprobante (string|null — número de cheque/factura/recibo del usuario), referenciaBanco (string|null — código interno del banco / "Cód. Op." / "Nº Operación" / "Referencia"), monto (number signed), saldoExtracto (number|null), categoria (tag corto tipo "IMPUESTO_CHEQUE", "COMISION_BANCARIA", "TRANSFERENCIA_EMITIDA", etc), codigoCuentaSugerida (string|null), descripcionAsiento (string|null), confianza (ALTA|MEDIA|BAJA), razon (string|null), cuitDetectado (string sin guiones | null), tipoEntidad (CLIENTE|PROVEEDOR|NINGUNO|null).`;

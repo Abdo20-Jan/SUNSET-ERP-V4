@@ -3,11 +3,7 @@ import type { Moneda } from "@/generated/prisma/client";
 import { Card } from "@/components/ui/card";
 
 import { FlujoFilters } from "./flujo-filters";
-import {
-  FlujoMatriz,
-  type SerializedNode,
-  type SerializedTotales,
-} from "./flujo-matriz";
+import { FlujoMatriz, type SerializedNode, type SerializedTotales } from "./flujo-matriz";
 
 type SearchParams = Promise<{
   desde?: string;
@@ -88,11 +84,10 @@ export default async function FlujoCajaPage({
 
   const desdeParsed = parseMesKey(params.desde) ?? { y: curY, m: curM };
   const defaultHasta = new Date(Date.UTC(curY, curM - 1 + 5, 1));
-  const hastaParsed =
-    parseMesKey(params.hasta) ?? {
-      y: defaultHasta.getUTCFullYear(),
-      m: defaultHasta.getUTCMonth() + 1,
-    };
+  const hastaParsed = parseMesKey(params.hasta) ?? {
+    y: defaultHasta.getUTCFullYear(),
+    m: defaultHasta.getUTCMonth() + 1,
+  };
   const moneda = parseMoneda(params.moneda);
 
   const desde = firstDayUtc(desdeParsed.y, desdeParsed.m);
@@ -116,22 +111,15 @@ export default async function FlujoCajaPage({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-[15px] font-semibold tracking-tight">
-          Flujo de Caja
-        </h1>
+        <h1 className="text-[15px] font-semibold tracking-tight">Flujo de Caja</h1>
         <p className="text-sm text-muted-foreground">
-          Movimientos reales de bancos y cajas, agrupados por la cuenta
-          contrapartida (proveedores, clientes, préstamos, impuestos, gastos,
-          créditos fiscales, etc). El saldo acumulado iguala al saldo
-          contable de bancos.
+          Movimientos reales de bancos y cajas, agrupados por la cuenta contrapartida (proveedores,
+          clientes, préstamos, impuestos, gastos, créditos fiscales, etc). El saldo acumulado iguala
+          al saldo contable de bancos.
         </p>
       </div>
 
-      <FlujoFilters
-        desde={mesKeyOf(desdeFinal)}
-        hasta={mesKeyOf(hastaFinal)}
-        moneda={moneda}
-      />
+      <FlujoFilters desde={mesKeyOf(desdeFinal)} hasta={mesKeyOf(hastaFinal)} moneda={moneda} />
 
       <Card className="py-0">
         <FlujoMatriz

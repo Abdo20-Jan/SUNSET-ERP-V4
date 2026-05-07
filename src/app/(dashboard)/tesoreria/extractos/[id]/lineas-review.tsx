@@ -122,10 +122,7 @@ const STATUS_LABEL: Record<LineaExtractoStatus, string> = {
   IGNORADA: "Ignorada",
 };
 
-const CONFIANZA_VARIANT: Record<
-  "ALTA" | "MEDIA" | "BAJA",
-  "default" | "secondary" | "outline"
-> = {
+const CONFIANZA_VARIANT: Record<"ALTA" | "MEDIA" | "BAJA", "default" | "secondary" | "outline"> = {
   ALTA: "default",
   MEDIA: "secondary",
   BAJA: "outline",
@@ -150,12 +147,14 @@ export function LineasReview({
   const [bulkRunning, setBulkRunning] = useState(false);
 
   const editingLinea = useMemo(
-    () => (editingId ? lineas.find((l) => l.id === editingId) ?? null : null),
+    () => (editingId ? (lineas.find((l) => l.id === editingId) ?? null) : null),
     [editingId, lineas],
   );
 
   function handleAction(
-    fn: () => Promise<{ ok: true } | { ok: true; movimientoId: string } | { ok: false; error: string }>,
+    fn: () => Promise<
+      { ok: true } | { ok: true; movimientoId: string } | { ok: false; error: string }
+    >,
     successMsg: string,
   ) {
     startTransition(async () => {
@@ -171,7 +170,10 @@ export function LineasReview({
 
   async function bulkAprobarConfianzaAlta() {
     const candidatas = lineas.filter(
-      (l) => l.status === LineaExtractoStatus.PENDIENTE && l.confianza === "ALTA" && resolverContrapartida(l) !== null,
+      (l) =>
+        l.status === LineaExtractoStatus.PENDIENTE &&
+        l.confianza === "ALTA" &&
+        resolverContrapartida(l) !== null,
     );
     if (candidatas.length === 0) {
       toast.info("No hay líneas pendientes de confianza ALTA con contrapartida resuelta.");
@@ -191,7 +193,9 @@ export function LineasReview({
       }
     }
     setBulkRunning(false);
-    toast.success(`Aprobadas ${ok} líneas${fail > 0 ? ` (${fail} fallaron — revisá la consola)` : ""}.`);
+    toast.success(
+      `Aprobadas ${ok} líneas${fail > 0 ? ` (${fail} fallaron — revisá la consola)` : ""}.`,
+    );
     router.refresh();
   }
 
@@ -267,9 +271,7 @@ export function LineasReview({
                   <TableCell className="max-w-70">
                     <p className="text-[13px]">{l.descripcion}</p>
                     {l.comprobante && l.referenciaBanco ? (
-                      <p className="text-[11px] text-muted-foreground">
-                        Comp.: {l.comprobante}
-                      </p>
+                      <p className="text-[11px] text-muted-foreground">Comp.: {l.comprobante}</p>
                     ) : null}
                   </TableCell>
                   <TableCell className="max-w-65">
@@ -277,10 +279,7 @@ export function LineasReview({
                       <div className="flex flex-col gap-1">
                         <p className="text-xs">{sugerencia}</p>
                         {l.confianza ? (
-                          <Badge
-                            variant={CONFIANZA_VARIANT[l.confianza]}
-                            className="w-fit"
-                          >
+                          <Badge variant={CONFIANZA_VARIANT[l.confianza]} className="w-fit">
                             {l.confianza}
                           </Badge>
                         ) : null}
@@ -291,9 +290,7 @@ export function LineasReview({
                       </span>
                     )}
                     {l.razonSugerencia ? (
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        {l.razonSugerencia}
-                      </p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">{l.razonSugerencia}</p>
                     ) : null}
                   </TableCell>
                   <TableCell className="text-right">
@@ -306,9 +303,7 @@ export function LineasReview({
                     <MoneyAmount value={l.monto} mode="credit-column" />
                   </TableCell>
                   <TableCell>
-                    <Badge variant={STATUS_VARIANT[l.status]}>
-                      {STATUS_LABEL[l.status]}
-                    </Badge>
+                    <Badge variant={STATUS_VARIANT[l.status]}>{STATUS_LABEL[l.status]}</Badge>
                   </TableCell>
                   <TableCell className="text-right">
                     {isPendiente ? (
@@ -318,7 +313,9 @@ export function LineasReview({
                           variant="default"
                           disabled={isPending || !contrapartida}
                           title={
-                            contrapartida ? "Aprobar y crear movimiento" : "Falta contrapartida — editá primero"
+                            contrapartida
+                              ? "Aprobar y crear movimiento"
+                              : "Falta contrapartida — editá primero"
                           }
                           onClick={() =>
                             handleAction(
@@ -345,10 +342,7 @@ export function LineasReview({
                           disabled={isPending}
                           title="Ignorar — no genera asiento (ej: línea ya conciliada o no contable)"
                           onClick={() =>
-                            handleAction(
-                              () => ignorarLineaAction(l.id),
-                              "Línea ignorada.",
-                            )
+                            handleAction(() => ignorarLineaAction(l.id), "Línea ignorada.")
                           }
                         >
                           <HugeiconsIcon icon={MinusSignIcon} strokeWidth={2} />
@@ -360,10 +354,7 @@ export function LineasReview({
                           disabled={isPending}
                           title="Rechazar — descartar sugerencia"
                           onClick={() =>
-                            handleAction(
-                              () => rechazarLineaAction(l.id),
-                              "Línea rechazada.",
-                            )
+                            handleAction(() => rechazarLineaAction(l.id), "Línea rechazada.")
                           }
                         >
                           <HugeiconsIcon icon={MultiplicationSignIcon} strokeWidth={2} />
@@ -513,8 +504,8 @@ function EditarLineaDialog({
               placeholder="Buscar cuenta..."
             />
             <p className="text-[11px] text-muted-foreground">
-              Para impuestos, comisiones y FCI. Si es pago a proveedor o cobro de
-              cliente, dejá vacío y elegí entidad abajo.
+              Para impuestos, comisiones y FCI. Si es pago a proveedor o cobro de cliente, dejá
+              vacío y elegí entidad abajo.
             </p>
           </div>
 
@@ -537,9 +528,7 @@ function EditarLineaDialog({
                     {(value) => {
                       if (!value || value === "__none__") return "— Sin proveedor —";
                       const p = proveedores.find((p) => p.id === value);
-                      return p
-                        ? `${p.nombre}${p.cuit ? ` (${p.cuit})` : ""}`
-                        : "— Sin proveedor —";
+                      return p ? `${p.nombre}${p.cuit ? ` (${p.cuit})` : ""}` : "— Sin proveedor —";
                     }}
                   </SelectValue>
                 </SelectTrigger>
@@ -572,9 +561,7 @@ function EditarLineaDialog({
                     {(value) => {
                       if (!value || value === "__none__") return "— Sin cliente —";
                       const c = clientes.find((c) => c.id === value);
-                      return c
-                        ? `${c.nombre}${c.cuit ? ` (${c.cuit})` : ""}`
-                        : "— Sin cliente —";
+                      return c ? `${c.nombre}${c.cuit ? ` (${c.cuit})` : ""}` : "— Sin cliente —";
                     }}
                   </SelectValue>
                 </SelectTrigger>

@@ -11,12 +11,7 @@ type PageHeaderProps = {
  * Header padrão de página: título + descrição opcional + slot de ações.
  * Densidade: h1 text-[15px] (não 2xl), description text-xs.
  */
-export function PageHeader({
-  title,
-  description,
-  actions,
-  className,
-}: PageHeaderProps) {
+export function PageHeader({ title, description, actions, className }: PageHeaderProps) {
   return (
     <div
       className={cn(
@@ -28,13 +23,9 @@ export function PageHeader({
         <h1 className="font-heading text-[15px] font-semibold tracking-tight text-foreground">
           {title}
         </h1>
-        {description ? (
-          <p className="text-xs text-muted-foreground">{description}</p>
-        ) : null}
+        {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
       </div>
-      {actions ? (
-        <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
-      ) : null}
+      {actions ? <div className="flex shrink-0 items-center gap-1.5">{actions}</div> : null}
     </div>
   );
 }

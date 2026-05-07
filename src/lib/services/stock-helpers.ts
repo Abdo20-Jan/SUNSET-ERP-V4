@@ -10,11 +10,7 @@ type TxClient = Prisma.TransactionClient;
  * `null` si todavía no se materializó (caso de un producto que nunca
  * tuvo movimiento en ese depósito).
  */
-export async function getStockPorDeposito(
-  tx: TxClient,
-  productoId: string,
-  depositoId: string,
-) {
+export async function getStockPorDeposito(tx: TxClient, productoId: string, depositoId: string) {
   return tx.stockPorDeposito.findUnique({
     where: { productoId_depositoId: { productoId, depositoId } },
     select: {

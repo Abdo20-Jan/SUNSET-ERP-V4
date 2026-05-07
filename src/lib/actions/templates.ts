@@ -7,9 +7,7 @@ import { db } from "@/lib/db";
 import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
 import { Prisma } from "@/generated/prisma/client";
 
-type ActionResult<T = undefined> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
 const templateSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio."),
@@ -92,9 +90,7 @@ export async function editarTemplateAction(
   }
 }
 
-export async function eliminarTemplateAction(
-  id: string,
-): Promise<ActionResult<undefined>> {
+export async function eliminarTemplateAction(id: string): Promise<ActionResult<undefined>> {
   const guard = await requireCrmAuth();
   if (!guard.ok) return guard;
 

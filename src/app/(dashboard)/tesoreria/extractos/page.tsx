@@ -56,18 +56,13 @@ export default async function ExtractosPage() {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h1 className="text-[15px] font-semibold tracking-tight">
-            Extractos bancarios
-          </h1>
+          <h1 className="text-[15px] font-semibold tracking-tight">Extractos bancarios</h1>
           <p className="text-sm text-muted-foreground">
-            Importá un PDF de extracto, revisá las sugerencias del sistema y
-            aprobalas para generar movimientos contables.
+            Importá un PDF de extracto, revisá las sugerencias del sistema y aprobalas para generar
+            movimientos contables.
           </p>
         </div>
-        <Link
-          href="/tesoreria/extractos/nuevo"
-          className={buttonVariants({ variant: "default" })}
-        >
+        <Link href="/tesoreria/extractos/nuevo" className={buttonVariants({ variant: "default" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
           Importar PDF
         </Link>
@@ -113,18 +108,12 @@ export default async function ExtractosPage() {
                 return (
                   <TableRow key={imp.id} className="cursor-pointer">
                     <TableCell className="font-medium">
-                      <Link
-                        href={`/tesoreria/extractos/${imp.id}`}
-                        className="block w-full"
-                      >
+                      <Link href={`/tesoreria/extractos/${imp.id}`} className="block w-full">
                         {periodo}
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <Link
-                        href={`/tesoreria/extractos/${imp.id}`}
-                        className="block w-full"
-                      >
+                      <Link href={`/tesoreria/extractos/${imp.id}`} className="block w-full">
                         {imp.cuentaBancaria.banco}{" "}
                         <span className="text-xs text-muted-foreground">
                           ({imp.cuentaBancaria.moneda}
@@ -133,9 +122,7 @@ export default async function ExtractosPage() {
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={STATUS_VARIANT[imp.status]}>
-                        {STATUS_LABEL[imp.status]}
-                      </Badge>
+                      <Badge variant={STATUS_VARIANT[imp.status]}>{STATUS_LABEL[imp.status]}</Badge>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {fmtMoney(imp.saldoInicial.toString())}

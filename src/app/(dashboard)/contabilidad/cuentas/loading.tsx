@@ -14,11 +14,7 @@ export default function PlanCuentasLoading() {
       <Card className="py-0">
         <div className="flex flex-col gap-1.5 p-4">
           {Array.from({ length: 14 }).map((_, i) => (
-            <Skeleton
-              key={i}
-              className="h-8 w-full"
-              style={{ marginLeft: `${(i % 4) * 12}px` }}
-            />
+            <Skeleton key={i} className="h-8 w-full" style={{ marginLeft: `${(i % 4) * 12}px` }} />
           ))}
         </div>
       </Card>

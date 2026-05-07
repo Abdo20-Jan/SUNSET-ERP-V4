@@ -45,7 +45,9 @@ export function MoverStageSelect({
           className="rounded-md border px-3 py-1.5 disabled:opacity-50"
         >
           {stages.map((s) => (
-            <option key={s.id} value={s.id}>{s.nombre}</option>
+            <option key={s.id} value={s.id}>
+              {s.nombre}
+            </option>
           ))}
         </select>
       </label>

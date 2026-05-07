@@ -55,11 +55,7 @@ export async function fetchLineasContabilizadas(
             : undefined,
       },
     },
-    orderBy: [
-      { asiento: { fecha: "asc" } },
-      { asiento: { numero: "asc" } },
-      { id: "asc" },
-    ],
+    orderBy: [{ asiento: { fecha: "asc" } }, { asiento: { numero: "asc" } }, { id: "asc" }],
     select: {
       id: true,
       cuentaId: true,
@@ -137,12 +133,8 @@ export function convertirMoneda(
 // Gera lista ordenada de chaves YYYY-MM entre duas datas (inclusive).
 export function listarMeses(desde: Date, hasta: Date): string[] {
   const out: string[] = [];
-  const cursor = new Date(
-    Date.UTC(desde.getUTCFullYear(), desde.getUTCMonth(), 1),
-  );
-  const fim = new Date(
-    Date.UTC(hasta.getUTCFullYear(), hasta.getUTCMonth(), 1),
-  );
+  const cursor = new Date(Date.UTC(desde.getUTCFullYear(), desde.getUTCMonth(), 1));
+  const fim = new Date(Date.UTC(hasta.getUTCFullYear(), hasta.getUTCMonth(), 1));
   while (cursor.getTime() <= fim.getTime()) {
     out.push(mesKey(cursor));
     cursor.setUTCMonth(cursor.getUTCMonth() + 1);
@@ -177,9 +169,7 @@ export type BuildTreeResult = {
  * `hasta` sola (saldo acumulado al cierre del día). Para movimientos
  * dentro de un período se usa `desde`+`hasta`.
  */
-export type ReporteFilter =
-  | { periodoId: number }
-  | { fechaDesde?: Date; fechaHasta?: Date };
+export type ReporteFilter = { periodoId: number } | { fechaDesde?: Date; fechaHasta?: Date };
 
 /**
  * Carrega todas as contas do plano filtradas por `categorias` e agrega os totais
@@ -212,8 +202,7 @@ export async function buildCuentaTree(
   // Para Balance General con rango: si hay fechaDesde, calcular el saldo
   // acumulado anterior a esa fecha (saldo inicial). Asientos con fecha
   // estrictamente menor a fechaDesde.
-  const calcularInicial =
-    !("periodoId" in filter) && Boolean(filter.fechaDesde);
+  const calcularInicial = !("periodoId" in filter) && Boolean(filter.fechaDesde);
 
   const [cuentas, agregados, agregadosInicial] = await Promise.all([
     db.cuentaContable.findMany({
@@ -293,9 +282,7 @@ export async function buildCuentaTree(
         : new Decimal(0);
 
     const saldoMov =
-      c.tipo === "ANALITICA"
-        ? saldoPorCategoria(debe, haber, c.categoria)
-        : new Decimal(0);
+      c.tipo === "ANALITICA" ? saldoPorCategoria(debe, haber, c.categoria) : new Decimal(0);
 
     byCodigo.set(c.codigo, {
       id: c.id,
@@ -332,9 +319,7 @@ export async function buildCuentaTree(
   const rollUp = (node: CuentaTreeNode): void => {
     if (node.tipo === "SINTETICA" && node.children.length > 0) {
       for (const ch of node.children) rollUp(ch);
-      node.saldoInicial = sumMoney(
-        node.children.map((ch) => ch.saldoInicial),
-      );
+      node.saldoInicial = sumMoney(node.children.map((ch) => ch.saldoInicial));
       node.debe = sumMoney(node.children.map((ch) => ch.debe));
       node.haber = sumMoney(node.children.map((ch) => ch.haber));
       node.saldo = sumMoney(node.children.map((ch) => ch.saldo));
@@ -356,10 +341,7 @@ export async function buildCuentaTree(
   }
   for (const cat of categorias) {
     const nodes = porCategoria.get(cat) ?? [];
-    totalPorCategoria.set(
-      cat,
-      sumMoney(nodes.map((n) => n.saldo)),
-    );
+    totalPorCategoria.set(cat, sumMoney(nodes.map((n) => n.saldo)));
   }
 
   return { roots, porCategoria, totalPorCategoria };

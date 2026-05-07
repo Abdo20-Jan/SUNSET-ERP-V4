@@ -267,9 +267,7 @@ export function assertOwnershipUnico(): void {
           const donoPrevio = donoPorCodigo.get(codigo);
           if (donoPrevio) {
             throw new Error(
-              `flujo-caja-config: codigo "${codigo}" aparece em dois items: ` +
-                `"${donoPrevio}" e "${ownerLabel}". Cada codigo deve ter ` +
-                `ownership único para não duplicar na matriz.`,
+              `flujo-caja-config: codigo "${codigo}" aparece em dois items: "${donoPrevio}" e "${ownerLabel}". Cada codigo deve ter ownership único para não duplicar na matriz.`,
             );
           }
           donoPorCodigo.set(codigo, ownerLabel);

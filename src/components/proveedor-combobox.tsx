@@ -13,11 +13,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 export type ProveedorOption = {
   id: string;
@@ -74,12 +70,7 @@ export function ProveedorCombobox({
           />
         }
       >
-        <span
-          className={cn(
-            "truncate text-left",
-            !selected && "text-muted-foreground",
-          )}
-        >
+        <span className={cn("truncate text-left", !selected && "text-muted-foreground")}>
           {selected ? `${selected.nombre} (${selected.pais})` : placeholder}
         </span>
         <HugeiconsIcon

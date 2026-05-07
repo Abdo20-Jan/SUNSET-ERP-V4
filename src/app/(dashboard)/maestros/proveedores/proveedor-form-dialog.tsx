@@ -35,9 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export type ProveedorFormState =
-  | { mode: "create" }
-  | { mode: "edit"; row: ProveedorRow };
+export type ProveedorFormState = { mode: "create" } | { mode: "edit"; row: ProveedorRow };
 
 const PAISES: Array<{ code: string; label: string }> = [
   { code: "AR", label: "Argentina" },
@@ -69,14 +67,9 @@ const TIPO_PROVEEDOR_LABEL: Record<TipoProveedor, string> = {
   SERVICIOS_EXTERIOR: "Servicios del exterior (flete intl., seguros)",
 };
 
-const TIPO_PROVEEDOR_VALUES = Object.keys(
-  TIPO_PROVEEDOR_LABEL,
-) as TipoProveedor[];
+const TIPO_PROVEEDOR_VALUES = Object.keys(TIPO_PROVEEDOR_LABEL) as TipoProveedor[];
 
-const TIPO_PROVEEDOR_EXTRANJEROS: TipoProveedor[] = [
-  "MERCADERIA_EXTERIOR",
-  "SERVICIOS_EXTERIOR",
-];
+const TIPO_PROVEEDOR_EXTRANJEROS: TipoProveedor[] = ["MERCADERIA_EXTERIOR", "SERVICIOS_EXTERIOR"];
 
 function esTipoExtranjero(tipo: TipoProveedor): boolean {
   return TIPO_PROVEEDOR_EXTRANJEROS.includes(tipo);
@@ -90,15 +83,11 @@ const CONCEPTO_RG830_LABEL: Record<ConceptoRG830, string> = {
   LOCACIONES_SERVICIOS: "Locaciones de servicios",
 };
 
-const CONCEPTO_RG830_VALUES = Object.keys(
-  CONCEPTO_RG830_LABEL,
-) as ConceptoRG830[];
+const CONCEPTO_RG830_VALUES = Object.keys(CONCEPTO_RG830_LABEL) as ConceptoRG830[];
 
 const formSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio."),
-  tipoProveedor: z.enum(
-    TIPO_PROVEEDOR_VALUES as [TipoProveedor, ...TipoProveedor[]],
-  ),
+  tipoProveedor: z.enum(TIPO_PROVEEDOR_VALUES as [TipoProveedor, ...TipoProveedor[]]),
   conceptoRG830: z
     .enum(CONCEPTO_RG830_VALUES as [ConceptoRG830, ...ConceptoRG830[]])
     .nullable()
@@ -113,10 +102,7 @@ const formSchema = z.object({
     .trim()
     .optional()
     .or(z.literal(""))
-    .refine(
-      (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
-      "Email inválido.",
-    ),
+    .refine((v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Email inválido."),
   estado: z.enum(["activo", "inactivo"]),
   cuentaContableId: z.number().int().positive().nullable(),
   cuentaGastoContableId: z.number().int().positive().nullable(),
@@ -208,8 +194,7 @@ export function ProveedorFormDialog({
     name: "crearCuentaGastoAuto",
   });
   const tipoSinGastoAuto =
-    tipoProveedor === "MERCADERIA_LOCAL" ||
-    tipoProveedor === "MERCADERIA_EXTERIOR";
+    tipoProveedor === "MERCADERIA_LOCAL" || tipoProveedor === "MERCADERIA_EXTERIOR";
 
   // Cuando cambian la nacionalidad, ajustar país y CUIT placeholder.
   useEffect(() => {
@@ -228,31 +213,18 @@ export function ProveedorFormDialog({
         nombre: values.nombre,
         tipoProveedor: values.tipoProveedor,
         conceptoRG830: values.conceptoRG830 ?? null,
-        cuit:
-          values.cuit && values.cuit.trim().length > 0
-            ? values.cuit
-            : undefined,
+        cuit: values.cuit && values.cuit.trim().length > 0 ? values.cuit : undefined,
         pais: values.pais,
         tipo: values.tipo && values.tipo.length > 0 ? values.tipo : undefined,
-        direccion:
-          values.direccion && values.direccion.length > 0
-            ? values.direccion
-            : undefined,
-        telefono:
-          values.telefono && values.telefono.length > 0
-            ? values.telefono
-            : undefined,
+        direccion: values.direccion && values.direccion.length > 0 ? values.direccion : undefined,
+        telefono: values.telefono && values.telefono.length > 0 ? values.telefono : undefined,
         email: values.email && values.email.length > 0 ? values.email : undefined,
         estado: values.estado,
         cuentaContableId: values.cuentaContableId ?? null,
         cuentaGastoContableId: values.cuentaGastoContableId ?? null,
         crearCuentaAuto:
-          state.mode === "create" &&
-          values.crearCuentaAuto &&
-          values.cuentaContableId === null,
-        crearCuentaGastoAuto:
-          values.crearCuentaGastoAuto &&
-          values.cuentaGastoContableId === null,
+          state.mode === "create" && values.crearCuentaAuto && values.cuentaContableId === null,
+        crearCuentaGastoAuto: values.crearCuentaGastoAuto && values.cuentaGastoContableId === null,
       };
 
       const result =
@@ -261,11 +233,7 @@ export function ProveedorFormDialog({
           : await crearProveedorAction(payload);
 
       if (result.ok) {
-        toast.success(
-          state.mode === "edit"
-            ? "Proveedor actualizado."
-            : "Proveedor creado.",
-        );
+        toast.success(state.mode === "edit" ? "Proveedor actualizado." : "Proveedor creado.");
         onClose();
         router.refresh();
       } else {
@@ -309,9 +277,7 @@ export function ProveedorFormDialog({
                       <div className="px-2 py-1 text-xs uppercase text-muted-foreground">
                         Nacional
                       </div>
-                      {TIPO_PROVEEDOR_VALUES.filter(
-                        (v) => !esTipoExtranjero(v),
-                      ).map((v) => (
+                      {TIPO_PROVEEDOR_VALUES.filter((v) => !esTipoExtranjero(v)).map((v) => (
                         <SelectItem key={v} value={v}>
                           {TIPO_PROVEEDOR_LABEL[v]}
                         </SelectItem>
@@ -319,31 +285,25 @@ export function ProveedorFormDialog({
                       <div className="mt-1 px-2 py-1 text-xs uppercase text-muted-foreground">
                         Exterior
                       </div>
-                      {TIPO_PROVEEDOR_VALUES.filter(esTipoExtranjero).map(
-                        (v) => (
-                          <SelectItem key={v} value={v}>
-                            {TIPO_PROVEEDOR_LABEL[v]}
-                          </SelectItem>
-                        ),
-                      )}
+                      {TIPO_PROVEEDOR_VALUES.filter(esTipoExtranjero).map((v) => (
+                        <SelectItem key={v} value={v}>
+                          {TIPO_PROVEEDOR_LABEL[v]}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 )}
               />
               <p className="text-xs text-muted-foreground">
                 Determina cuenta analítica auto-creada (
-                {nacionalidad === "EXTRANJERO" ? "2.1.8.x" : "2.1.1.10–59"}) y
-                contrapartida natural en compras.
+                {nacionalidad === "EXTRANJERO" ? "2.1.8.x" : "2.1.1.10–59"}) y contrapartida natural
+                en compras.
               </p>
             </div>
 
             <div className="sm:col-span-2 flex flex-col gap-2">
               <Label htmlFor="nombre">Nombre *</Label>
-              <Input
-                id="nombre"
-                aria-invalid={!!errors.nombre}
-                {...register("nombre")}
-              />
+              <Input id="nombre" aria-invalid={!!errors.nombre} {...register("nombre")} />
               {errors.nombre && <FieldError message={errors.nombre.message} />}
             </div>
 
@@ -374,23 +334,19 @@ export function ProveedorFormDialog({
                 )}
               />
               <p className="text-xs text-muted-foreground">
-                Si Sunset es agente de retención: define la alícuota a aplicar
-                al pagar (RG 830 Anexo VIII). Opcional.
+                Si Sunset es agente de retención: define la alícuota a aplicar al pagar (RG 830
+                Anexo VIII). Opcional.
               </p>
             </div>
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="cuit">
-                {nacionalidad === "NACIONAL"
-                  ? "CUIT (opcional)"
-                  : "ID fiscal (opcional)"}
+                {nacionalidad === "NACIONAL" ? "CUIT (opcional)" : "ID fiscal (opcional)"}
               </Label>
               <Input
                 id="cuit"
                 placeholder={
-                  nacionalidad === "NACIONAL"
-                    ? "XX-XXXXXXXX-X"
-                    : "ID fiscal del país de origen"
+                  nacionalidad === "NACIONAL" ? "XX-XXXXXXXX-X" : "ID fiscal del país de origen"
                 }
                 aria-invalid={!!errors.cuit}
                 {...register("cuit")}
@@ -410,14 +366,10 @@ export function ProveedorFormDialog({
                     </SelectTrigger>
                     <SelectContent>
                       {PAISES.filter((p) =>
-                        nacionalidad === "NACIONAL"
-                          ? p.code === "AR"
-                          : p.code !== "AR",
+                        nacionalidad === "NACIONAL" ? p.code === "AR" : p.code !== "AR",
                       ).map((p) => (
                         <SelectItem key={p.code} value={p.code}>
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {p.code}
-                          </span>
+                          <span className="font-mono text-xs text-muted-foreground">{p.code}</span>
                           <span>{p.label}</span>
                         </SelectItem>
                       ))}
@@ -458,12 +410,7 @@ export function ProveedorFormDialog({
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                aria-invalid={!!errors.email}
-                {...register("email")}
-              />
+              <Input id="email" type="email" aria-invalid={!!errors.email} {...register("email")} />
               {errors.email && <FieldError message={errors.email.message} />}
             </div>
 
@@ -476,22 +423,13 @@ export function ProveedorFormDialog({
               <Label className="text-sm">Cuenta contable</Label>
               {state?.mode === "create" && (
                 <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    {...register("crearCuentaAuto")}
-                  />
+                  <input type="checkbox" className="mt-1" {...register("crearCuentaAuto")} />
                   <span>
-                    <span className="font-medium">
-                      Crear automáticamente
-                    </span>{" "}
-                    una cuenta analítica para este proveedor
+                    <span className="font-medium">Crear automáticamente</span> una cuenta analítica
+                    para este proveedor
                     <span className="ml-1 text-xs text-muted-foreground">
                       (sugerido —{" "}
-                      {nacionalidad === "NACIONAL"
-                        ? "rango 2.1.1.10–49"
-                        : "rango 2.1.1.50–99"}
-                      )
+                      {nacionalidad === "NACIONAL" ? "rango 2.1.1.10–49" : "rango 2.1.1.50–99"})
                     </span>
                   </span>
                 </label>
@@ -513,38 +451,26 @@ export function ProveedorFormDialog({
               )}
               <p className="text-xs text-muted-foreground">
                 Solo cuentas analíticas bajo{" "}
-                <span className="font-mono">2.1.1 DEUDAS COMERCIALES</span>.
-                Si elige &quot;Crear automáticamente&quot;, el sistema asigna el
-                próximo código disponible al guardar.
+                <span className="font-mono">2.1.1 DEUDAS COMERCIALES</span>. Si elige &quot;Crear
+                automáticamente&quot;, el sistema asigna el próximo código disponible al guardar.
               </p>
             </div>
 
             <div className="sm:col-span-2 flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
-              <Label className="text-sm">
-                Cuenta de gasto / activo (contrapartida)
-              </Label>
+              <Label className="text-sm">Cuenta de gasto / activo (contrapartida)</Label>
               {!tipoSinGastoAuto && (
                 <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    {...register("crearCuentaGastoAuto")}
-                  />
+                  <input type="checkbox" className="mt-1" {...register("crearCuentaGastoAuto")} />
                   <span>
-                    <span className="font-medium">
-                      Crear automáticamente
-                    </span>{" "}
-                    una cuenta analítica de gasto para este proveedor
+                    <span className="font-medium">Crear automáticamente</span> una cuenta analítica
+                    de gasto para este proveedor
                     <span className="ml-1 text-xs text-muted-foreground">
-                      (rango por tipo: despachante → 5.1.1.10–29; almacenaje
-                      → 5.5.1.20–39; etc).
+                      (rango por tipo: despachante → 5.1.1.10–29; almacenaje → 5.5.1.20–39; etc).
                     </span>
                   </span>
                 </label>
               )}
-              {(state?.mode === "edit" ||
-                !crearCuentaGastoAuto ||
-                tipoSinGastoAuto) && (
+              {(state?.mode === "edit" || !crearCuentaGastoAuto || tipoSinGastoAuto) && (
                 <Controller
                   control={control}
                   name="cuentaGastoContableId"
@@ -564,21 +490,15 @@ export function ProveedorFormDialog({
                 />
               )}
               <p className="text-xs text-muted-foreground">
-                Cuenta que se debita al facturarle (DEBE en compras /
-                embarques). Si la dejás vacía y no auto-creás, el sistema usa
-                el default genérico por tipo (despachante → 5.1.1.03;
-                almacenaje → 5.5.1.05; etc).
+                Cuenta que se debita al facturarle (DEBE en compras / embarques). Si la dejás vacía
+                y no auto-creás, el sistema usa el default genérico por tipo (despachante →
+                5.1.1.03; almacenaje → 5.5.1.05; etc).
               </p>
             </div>
           </div>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              disabled={isSubmitting}
-            >
+            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               Cancelar
             </Button>
             <Button type="submit" disabled={isSubmitting}>

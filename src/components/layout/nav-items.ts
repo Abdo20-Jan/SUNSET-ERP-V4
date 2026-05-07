@@ -27,9 +27,7 @@ export type NavGroup = {
 export const NAV_GROUPS: readonly NavGroup[] = [
   {
     label: "General",
-    items: [
-      { label: "Dashboard", href: "/dashboard", icon: DashboardSquare01Icon },
-    ],
+    items: [{ label: "Dashboard", href: "/dashboard", icon: DashboardSquare01Icon }],
   },
   {
     label: "Operación",
@@ -53,12 +51,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   },
   {
     label: "Maestros",
-    items: [
-      { label: "Maestros", href: "/maestros", icon: UserGroupIcon },
-    ],
+    items: [{ label: "Maestros", href: "/maestros", icon: UserGroupIcon }],
   },
 ] as const;
 
-export const NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap(
-  (g) => g.items,
-);
+export const NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap((g) => g.items);

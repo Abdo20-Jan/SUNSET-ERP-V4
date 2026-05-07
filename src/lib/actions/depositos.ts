@@ -40,13 +40,9 @@ const depositoSchema = z.object({
 
 export type DepositoInput = z.input<typeof depositoSchema>;
 
-export type DepositoActionResult =
-  | { ok: true; id: string }
-  | { ok: false; error: string };
+export type DepositoActionResult = { ok: true; id: string } | { ok: false; error: string };
 
-export async function crearDepositoAction(
-  raw: DepositoInput,
-): Promise<DepositoActionResult> {
+export async function crearDepositoAction(raw: DepositoInput): Promise<DepositoActionResult> {
   const session = await auth();
   if (!session) return { ok: false, error: "No autorizado." };
 
@@ -94,10 +90,7 @@ export async function actualizarDepositoAction(
     revalidatePath("/maestros");
     return { ok: true, id: updated.id };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2025"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
       return { ok: false, error: "El depósito no existe." };
     }
     console.error("actualizarDepositoAction failed", err);
@@ -135,10 +128,7 @@ export async function eliminarDepositoAction(
     revalidatePath("/maestros");
     return { ok: true, softDeleted: false };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2025"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
       return { ok: false, error: "El depósito no existe." };
     }
     console.error("eliminarDepositoAction failed", err);

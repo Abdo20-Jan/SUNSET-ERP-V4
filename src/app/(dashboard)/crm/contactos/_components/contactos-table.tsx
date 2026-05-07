@@ -21,10 +21,7 @@ function VinculoCell({ row }: { row: ContactoRow }) {
   }
   if (row.cliente) {
     return (
-      <Link
-        href={`/maestros/clientes/${row.cliente.id}`}
-        className="text-primary hover:underline"
-      >
+      <Link href={`/maestros/clientes/${row.cliente.id}`} className="text-primary hover:underline">
         Cliente: {row.cliente.nombre}
       </Link>
     );

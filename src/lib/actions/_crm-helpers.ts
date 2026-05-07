@@ -24,10 +24,7 @@ export function fdString(formData: FormData, name: string): string {
   return typeof v === "string" ? v : "";
 }
 
-export function fdStringOrUndefined(
-  formData: FormData,
-  name: string,
-): string | undefined {
+export function fdStringOrUndefined(formData: FormData, name: string): string | undefined {
   const v = fdString(formData, name);
   return v.length > 0 ? v : undefined;
 }

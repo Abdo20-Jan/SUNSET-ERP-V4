@@ -2,12 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -47,9 +42,7 @@ import {
 
 import { PrestamoDetalleSheet } from "./prestamo-detalle-sheet";
 
-function estadoVariant(
-  estado: AsientoEstado,
-): "default" | "outline" | "secondary" {
+function estadoVariant(estado: AsientoEstado): "default" | "outline" | "secondary" {
   switch (estado) {
     case "BORRADOR":
       return "outline";
@@ -82,18 +75,14 @@ export function PrestamosTable({
 }) {
   const router = useRouter();
   const [pending, setPending] = useState<PrestamoRow | null>(null);
-  const [detalle, setDetalle] = useState<PrestamoRow | null>(
-    prestamoInicial ?? null,
-  );
+  const [detalle, setDetalle] = useState<PrestamoRow | null>(prestamoInicial ?? null);
   const [isSubmitting, startTransition] = useTransition();
 
   const columns: ColumnDef<PrestamoRow>[] = [
     {
       id: "prestamista",
       header: "Prestamista",
-      cell: ({ row }) => (
-        <span className="text-sm font-medium">{row.original.prestamista}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm font-medium">{row.original.prestamista}</span>,
     },
     {
       id: "clasificacion",
@@ -139,9 +128,7 @@ export function PrestamosTable({
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm tabular-nums">
           {formatMoney(row.original.principal)}{" "}
-          <span className="text-xs text-muted-foreground">
-            {row.original.moneda}
-          </span>
+          <span className="text-xs text-muted-foreground">{row.original.moneda}</span>
         </span>
       ),
     },
@@ -150,9 +137,7 @@ export function PrestamosTable({
       header: () => <span className="block text-right">TC</span>,
       cell: ({ row }) => (
         <span className="block text-right font-mono text-xs tabular-nums text-muted-foreground">
-          {Number(row.original.tipoCambio).toFixed(
-            row.original.moneda === "ARS" ? 2 : 6,
-          )}
+          {Number(row.original.tipoCambio).toFixed(row.original.moneda === "ARS" ? 2 : 6)}
         </span>
       ),
     },
@@ -164,9 +149,7 @@ export function PrestamosTable({
         return (
           <span className="block text-right font-mono text-sm font-semibold tabular-nums">
             {formatMoney(row.original.saldoPendiente)}
-            {saldo < 0 && (
-              <span className="ml-1 text-xs text-destructive">(neg.)</span>
-            )}
+            {saldo < 0 && <span className="ml-1 text-xs text-destructive">(neg.)</span>}
           </span>
         );
       },
@@ -180,9 +163,7 @@ export function PrestamosTable({
         return (
           <div className="flex items-center gap-2">
             <Badge variant={estadoVariant(a.estado)}>{a.estado}</Badge>
-            <span className="font-mono text-xs text-muted-foreground">
-              Nº {a.numero}
-            </span>
+            <span className="font-mono text-xs text-muted-foreground">Nº {a.numero}</span>
           </div>
         );
       },
@@ -229,10 +210,7 @@ export function PrestamosTable({
             <TableRow key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
                 <TableHead key={header.id}>
-                  {flexRender(
-                    header.column.columnDef.header,
-                    header.getContext(),
-                  )}
+                  {flexRender(header.column.columnDef.header, header.getContext())}
                 </TableHead>
               ))}
             </TableRow>
@@ -274,25 +252,16 @@ export function PrestamosTable({
               <DialogHeader>
                 <DialogTitle>Anular préstamo de {pending.prestamista}</DialogTitle>
                 <DialogDescription>
-                  Principal: {formatMoney(pending.principal)} {pending.moneda}.
-                  Al anularlo, el asiento pasará a ANULADO y dejará de afectar
-                  los saldos. Las amortizaciones registradas se mantienen. El
-                  número del asiento se conserva para auditoría.
+                  Principal: {formatMoney(pending.principal)} {pending.moneda}. Al anularlo, el
+                  asiento pasará a ANULADO y dejará de afectar los saldos. Las amortizaciones
+                  registradas se mantienen. El número del asiento se conserva para auditoría.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setPending(null)}
-                  disabled={isSubmitting}
-                >
+                <Button variant="outline" onClick={() => setPending(null)} disabled={isSubmitting}>
                   Cancelar
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={onConfirm}
-                  disabled={isSubmitting}
-                >
+                <Button variant="destructive" onClick={onConfirm} disabled={isSubmitting}>
                   {isSubmitting ? "Procesando…" : "Anular"}
                 </Button>
               </DialogFooter>
@@ -326,11 +295,7 @@ function RowActions({
   const puedeAnular = prestamo.asiento?.estado === "CONTABILIZADO";
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon-sm" aria-label="Acciones" />
-        }
-      >
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Acciones" />}>
         <HugeiconsIcon icon={MoreHorizontalCircle01Icon} strokeWidth={2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

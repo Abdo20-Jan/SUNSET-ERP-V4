@@ -984,7 +984,7 @@ export function EmbarqueForm(props: Props) {
                     <th className="py-2 pr-3 text-right font-medium">Cantidad</th>
                     <th className="py-2 pr-3 text-right font-medium">Precio FOB</th>
                     <th className="py-2 pr-3 text-right font-medium">Subtotal</th>
-                    {!readonly && <th className="w-12 py-2 pr-3"></th>}
+                    {!readonly && <th className="w-12 py-2 pr-3" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -1009,7 +1009,7 @@ export function EmbarqueForm(props: Props) {
                     <td className="py-2 pr-3 text-right font-mono text-sm tabular-nums">
                       {formatMoney(fobTotal.toString())}
                     </td>
-                    {!readonly && <td></td>}
+                    {!readonly && <td />}
                   </tr>
                 </tfoot>
               </table>
@@ -1925,7 +1925,7 @@ const FacturaCard = memo(function FacturaCard({
                   <th className="py-2 px-2 text-left font-medium">Cuenta analítica</th>
                   <th className="py-2 px-2 text-left font-medium">Descripción</th>
                   <th className="w-32 py-2 px-2 text-right font-medium">Subtotal ({moneda})</th>
-                  {!disabled && <th className="w-10"></th>}
+                  {!disabled && <th className="w-10" />}
                 </tr>
               </thead>
               <tbody>

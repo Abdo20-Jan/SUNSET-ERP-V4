@@ -3,10 +3,7 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { isCrmEnabled } from "@/lib/features";
 import { auth } from "@/lib/auth";
-import {
-  LeadEstado,
-  OportunidadEstado,
-} from "@/generated/prisma/client";
+import { LeadEstado, OportunidadEstado } from "@/generated/prisma/client";
 
 import { KpiCard, NavTile } from "./_components/dashboard-tiles";
 
@@ -64,7 +61,8 @@ export default async function CrmDashboardPage() {
         <div>
           <h1 className="text-2xl font-semibold">CRM</h1>
           <p className="text-sm text-muted-foreground">
-            Pipeline comercial · {kpis.totalLeads} leads · {kpis.oportunidadesAbiertas} oportunidades abiertas
+            Pipeline comercial · {kpis.totalLeads} leads · {kpis.oportunidadesAbiertas}{" "}
+            oportunidades abiertas
           </p>
         </div>
         <Link

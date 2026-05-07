@@ -60,12 +60,7 @@ function estadoVariant(
   }
 }
 
-export function CompraDetailView({
-  compra,
-  proveedorNombre,
-  productosMap,
-  asientoNumero,
-}: Props) {
+export function CompraDetailView({ compra, proveedorNombre, productosMap, asientoNumero }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -90,12 +85,8 @@ export function CompraDetailView({
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <h1 className="text-[15px] font-semibold tracking-tight">
-              Compra {compra.numero}
-            </h1>
-            <Badge variant={estadoVariant(compra.estado)}>
-              {compra.estado}
-            </Badge>
+            <h1 className="text-[15px] font-semibold tracking-tight">Compra {compra.numero}</h1>
+            <Badge variant={estadoVariant(compra.estado)}>{compra.estado}</Badge>
           </div>
           <p className="text-sm text-muted-foreground">
             {proveedorNombre} · {fmtDate(new Date(compra.fecha))} ·{" "}
@@ -104,11 +95,7 @@ export function CompraDetailView({
         </div>
         <div className="flex items-center gap-2">
           {puedeAnular && (
-            <Button
-              variant="destructive"
-              onClick={() => setConfirmOpen(true)}
-              disabled={isPending}
-            >
+            <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={isPending}>
               <HugeiconsIcon icon={CancelCircleIcon} strokeWidth={2} />
               Anular
             </Button>
@@ -125,11 +112,7 @@ export function CompraDetailView({
             (Number(compra.iibb) + Number(compra.otros)).toFixed(2),
           )} ${compra.moneda}`}
         />
-        <Stat
-          label="Total"
-          value={`${fmtMoney(compra.total)} ${compra.moneda}`}
-          emphasis
-        />
+        <Stat label="Total" value={`${fmtMoney(compra.total)} ${compra.moneda}`} emphasis />
       </div>
 
       <Card>
@@ -139,9 +122,7 @@ export function CompraDetailView({
             <DateBadge fecha={compra.fechaVencimiento} relative />
           </Field>
           <Field label="Tipo de cambio">
-            {compra.moneda === "ARS"
-              ? "—"
-              : `1 USD = ${fmtTipoCambio(compra.tipoCambio)} ARS`}
+            {compra.moneda === "ARS" ? "—" : `1 USD = ${fmtTipoCambio(compra.tipoCambio)} ARS`}
           </Field>
           <Field label="Asiento contable">
             {asientoNumero != null ? (
@@ -160,9 +141,7 @@ export function CompraDetailView({
 
       <Card className="py-0">
         <Table>
-          <caption className="sr-only">
-            Ítems de la compra {compra.numero}
-          </caption>
+          <caption className="sr-only">Ítems de la compra {compra.numero}</caption>
           <TableHeader>
             <TableRow>
               <TableHead>Producto</TableHead>
@@ -181,18 +160,14 @@ export function CompraDetailView({
                   <TableCell>
                     {p ? (
                       <span>
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {p.codigo}
-                        </span>{" "}
+                        <span className="font-mono text-xs text-muted-foreground">{p.codigo}</span>{" "}
                         {p.nombre}
                       </span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">
-                    {it.cantidad}
-                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{it.cantidad}</TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
                     {fmtMoney(it.precioUnitario)}
                   </TableCell>
@@ -222,24 +197,15 @@ export function CompraDetailView({
           <DialogHeader>
             <DialogTitle>Anular compra {compra.numero}</DialogTitle>
             <DialogDescription>
-              Esta acción genera un asiento de reverso, marca la compra como
-              CANCELADA y desvincula el asiento original. El número de compra
-              se mantiene para auditoría.
+              Esta acción genera un asiento de reverso, marca la compra como CANCELADA y desvincula
+              el asiento original. El número de compra se mantiene para auditoría.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmOpen(false)}
-              disabled={isPending}
-            >
+            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={isPending}>
               Cancelar
             </Button>
-            <Button
-              variant="destructive"
-              onClick={handleAnular}
-              disabled={isPending}
-            >
+            <Button variant="destructive" onClick={handleAnular} disabled={isPending}>
               {isPending ? "Procesando…" : "Anular"}
             </Button>
           </DialogFooter>
@@ -261,9 +227,7 @@ function Stat({
   return (
     <Card>
       <CardContent className="flex flex-col gap-1">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">
-          {label}
-        </span>
+        <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
         <span
           className={
             emphasis
@@ -288,16 +252,8 @@ function Field({
   wide?: boolean;
 }) {
   return (
-    <div
-      className={
-        wide
-          ? "col-span-1 flex flex-col gap-1 md:col-span-3"
-          : "flex flex-col gap-1"
-      }
-    >
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
+    <div className={wide ? "col-span-1 flex flex-col gap-1 md:col-span-3" : "flex flex-col gap-1"}>
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <div className="text-sm">{children}</div>
     </div>
   );

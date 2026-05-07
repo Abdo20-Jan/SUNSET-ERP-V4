@@ -1,16 +1,8 @@
 "use client";
 
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 
-import type {
-  CuentaBancariaRow,
-  CuentaContableOption,
-} from "@/lib/actions/cuentas-bancarias";
+import type { CuentaBancariaRow, CuentaContableOption } from "@/lib/actions/cuentas-bancarias";
 import type { Moneda, TipoCuentaBancaria } from "@/generated/prisma/client";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -50,9 +42,7 @@ export function CuentasBancariasTable({
     {
       id: "banco",
       header: "Banco",
-      cell: ({ row }) => (
-        <span className="text-sm font-medium">{row.original.banco}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm font-medium">{row.original.banco}</span>,
     },
     {
       id: "tipo",
@@ -66,16 +56,12 @@ export function CuentasBancariasTable({
     {
       id: "moneda",
       header: "Moneda",
-      cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.moneda}</span>
-      ),
+      cell: ({ row }) => <span className="font-mono text-xs">{row.original.moneda}</span>,
     },
     {
       id: "numero",
       header: "Número",
-      cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.numero}</span>
-      ),
+      cell: ({ row }) => <span className="font-mono text-xs">{row.original.numero}</span>,
     },
     {
       id: "cbuAlias",
@@ -88,9 +74,7 @@ export function CuentasBancariasTable({
         return (
           <div className="flex flex-col text-xs">
             {cbu && <span className="font-mono">{cbu}</span>}
-            {alias && (
-              <span className="font-mono text-muted-foreground">{alias}</span>
-            )}
+            {alias && <span className="font-mono text-muted-foreground">{alias}</span>}
           </div>
         );
       },
@@ -101,9 +85,7 @@ export function CuentasBancariasTable({
       cell: ({ row }) => (
         <div className="flex flex-col text-xs">
           <span className="font-mono">{row.original.cuentaContableCodigo}</span>
-          <span className="text-muted-foreground">
-            {row.original.cuentaContableNombre}
-          </span>
+          <span className="text-muted-foreground">{row.original.cuentaContableNombre}</span>
         </div>
       ),
     },
@@ -136,10 +118,7 @@ export function CuentasBancariasTable({
             <TableRow key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
                 <TableHead key={header.id}>
-                  {flexRender(
-                    header.column.columnDef.header,
-                    header.getContext(),
-                  )}
+                  {flexRender(header.column.columnDef.header, header.getContext())}
                 </TableHead>
               ))}
             </TableRow>

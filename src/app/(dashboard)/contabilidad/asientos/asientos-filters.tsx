@@ -89,9 +89,7 @@ export function AsientosFilters({ selectedEstado, query }: Props) {
           onValueChange={(v) => updateParam("estado", v === "all" ? null : v)}
         >
           <SelectTrigger className="min-w-40">
-            <SelectValue>
-              {(value) => ESTADO_LABELS[value as string] ?? value}
-            </SelectValue>
+            <SelectValue>{(value) => ESTADO_LABELS[value as string] ?? value}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>

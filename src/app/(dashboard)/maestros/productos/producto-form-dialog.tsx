@@ -33,9 +33,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
-export type ProductoFormState =
-  | { mode: "create" }
-  | { mode: "edit"; row: ProductoRow };
+export type ProductoFormState = { mode: "create" } | { mode: "edit"; row: ProductoRow };
 
 const DECIMAL_2_RE = /^\d+(\.\d{1,2})?$/;
 const DECIMAL_4_RE = /^\d+(\.\d{1,4})?$/;
@@ -49,15 +47,9 @@ const formSchema = z.object({
   medida: z.string().trim().optional().or(z.literal("")),
   ncm: z.string().trim().optional().or(z.literal("")),
   unidad: z.string().trim().min(1, "La unidad es obligatoria."),
-  diePorcentaje: z
-    .string()
-    .regex(DECIMAL_4_RE, "% DIE inválido (máx. 4 decimales, ≥ 0)."),
-  precioVenta: z
-    .string()
-    .regex(DECIMAL_2_RE, "Precio inválido (máx. 2 decimales, ≥ 0)."),
-  stockMinimo: z
-    .string()
-    .regex(/^\d+$/, "Stock mínimo debe ser un entero ≥ 0."),
+  diePorcentaje: z.string().regex(DECIMAL_4_RE, "% DIE inválido (máx. 4 decimales, ≥ 0)."),
+  precioVenta: z.string().regex(DECIMAL_2_RE, "Precio inválido (máx. 2 decimales, ≥ 0)."),
+  stockMinimo: z.string().regex(/^\d+$/, "Stock mínimo debe ser un entero ≥ 0."),
   activo: z.enum(["si", "no"]),
 });
 
@@ -132,15 +124,10 @@ export function ProductoFormDialog({
         codigo: values.codigo,
         nombre: values.nombre,
         descripcion:
-          values.descripcion && values.descripcion.length > 0
-            ? values.descripcion
-            : undefined,
-        marca:
-          values.marca && values.marca.length > 0 ? values.marca : undefined,
-        modelo:
-          values.modelo && values.modelo.length > 0 ? values.modelo : undefined,
-        medida:
-          values.medida && values.medida.length > 0 ? values.medida : undefined,
+          values.descripcion && values.descripcion.length > 0 ? values.descripcion : undefined,
+        marca: values.marca && values.marca.length > 0 ? values.marca : undefined,
+        modelo: values.modelo && values.modelo.length > 0 ? values.modelo : undefined,
+        medida: values.medida && values.medida.length > 0 ? values.medida : undefined,
         ncm: values.ncm && values.ncm.length > 0 ? values.ncm : undefined,
         unidad: values.unidad,
         diePorcentaje: Number(values.diePorcentaje),
@@ -155,11 +142,7 @@ export function ProductoFormDialog({
           : await crearProductoAction(payload);
 
       if (result.ok) {
-        toast.success(
-          state.mode === "edit"
-            ? "Producto actualizado."
-            : "Producto creado.",
-        );
+        toast.success(state.mode === "edit" ? "Producto actualizado." : "Producto creado.");
         onClose();
         router.refresh();
       } else {
@@ -177,9 +160,7 @@ export function ProductoFormDialog({
     >
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>
-            {state?.mode === "edit" ? "Editar producto" : "Nuevo producto"}
-          </DialogTitle>
+          <DialogTitle>{state?.mode === "edit" ? "Editar producto" : "Nuevo producto"}</DialogTitle>
           <DialogDescription>
             {state?.mode === "edit"
               ? "Modifique los datos del producto y guarde los cambios."
@@ -189,9 +170,7 @@ export function ProductoFormDialog({
 
         <form onSubmit={onSubmit} className="flex flex-col gap-6">
           <section className="flex flex-col gap-4">
-            <h3 className="text-sm font-medium text-muted-foreground">
-              Datos básicos
-            </h3>
+            <h3 className="text-sm font-medium text-muted-foreground">Datos básicos</h3>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="codigo">Código *</Label>
@@ -207,21 +186,13 @@ export function ProductoFormDialog({
 
               <div className="flex flex-col gap-2">
                 <Label htmlFor="nombre">Nombre *</Label>
-                <Input
-                  id="nombre"
-                  aria-invalid={!!errors.nombre}
-                  {...register("nombre")}
-                />
+                <Input id="nombre" aria-invalid={!!errors.nombre} {...register("nombre")} />
                 {errors.nombre && <FieldError message={errors.nombre.message} />}
               </div>
 
               <div className="sm:col-span-2 flex flex-col gap-2">
                 <Label htmlFor="descripcion">Descripción</Label>
-                <Textarea
-                  id="descripcion"
-                  rows={2}
-                  {...register("descripcion")}
-                />
+                <Textarea id="descripcion" rows={2} {...register("descripcion")} />
               </div>
 
               <div className="flex flex-col gap-2">
@@ -236,38 +207,24 @@ export function ProductoFormDialog({
 
               <div className="flex flex-col gap-2">
                 <Label htmlFor="medida">Medida</Label>
-                <Input
-                  id="medida"
-                  placeholder="205/55R16"
-                  {...register("medida")}
-                />
+                <Input id="medida" placeholder="205/55R16" {...register("medida")} />
               </div>
 
               <div className="flex flex-col gap-2">
                 <Label htmlFor="ncm">NCM</Label>
-                <Input
-                  id="ncm"
-                  className="font-mono"
-                  {...register("ncm")}
-                />
+                <Input id="ncm" className="font-mono" {...register("ncm")} />
               </div>
 
               <div className="flex flex-col gap-2">
                 <Label htmlFor="unidad">Unidad *</Label>
-                <Input
-                  id="unidad"
-                  aria-invalid={!!errors.unidad}
-                  {...register("unidad")}
-                />
+                <Input id="unidad" aria-invalid={!!errors.unidad} {...register("unidad")} />
                 {errors.unidad && <FieldError message={errors.unidad.message} />}
               </div>
             </div>
           </section>
 
           <section className="flex flex-col gap-4">
-            <h3 className="text-sm font-medium text-muted-foreground">
-              Datos financieros y stock
-            </h3>
+            <h3 className="text-sm font-medium text-muted-foreground">Datos financieros y stock</h3>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="diePorcentaje">% DIE</Label>
@@ -278,9 +235,7 @@ export function ProductoFormDialog({
                   aria-invalid={!!errors.diePorcentaje}
                   {...register("diePorcentaje")}
                 />
-                {errors.diePorcentaje && (
-                  <FieldError message={errors.diePorcentaje.message} />
-                )}
+                {errors.diePorcentaje && <FieldError message={errors.diePorcentaje.message} />}
               </div>
 
               <div className="flex flex-col gap-2">
@@ -292,9 +247,7 @@ export function ProductoFormDialog({
                   aria-invalid={!!errors.precioVenta}
                   {...register("precioVenta")}
                 />
-                {errors.precioVenta && (
-                  <FieldError message={errors.precioVenta.message} />
-                )}
+                {errors.precioVenta && <FieldError message={errors.precioVenta.message} />}
               </div>
 
               <div className="flex flex-col gap-2">
@@ -306,9 +259,7 @@ export function ProductoFormDialog({
                   aria-invalid={!!errors.stockMinimo}
                   {...register("stockMinimo")}
                 />
-                {errors.stockMinimo && (
-                  <FieldError message={errors.stockMinimo.message} />
-                )}
+                {errors.stockMinimo && <FieldError message={errors.stockMinimo.message} />}
               </div>
 
               <div className="flex flex-col gap-2">
@@ -316,14 +267,10 @@ export function ProductoFormDialog({
                 <Input
                   disabled
                   className="text-right tabular-nums"
-                  value={
-                    state?.mode === "edit" ? state.row.stockActual : 0
-                  }
+                  value={state?.mode === "edit" ? state.row.stockActual : 0}
                   readOnly
                 />
-                <p className="text-xs text-muted-foreground">
-                  Calculado por COMEX/Ventas.
-                </p>
+                <p className="text-xs text-muted-foreground">Calculado por COMEX/Ventas.</p>
               </div>
 
               <div className="flex flex-col gap-2">
@@ -331,14 +278,10 @@ export function ProductoFormDialog({
                 <Input
                   disabled
                   className="text-right tabular-nums"
-                  value={
-                    state?.mode === "edit" ? state.row.costoPromedio : "0.00"
-                  }
+                  value={state?.mode === "edit" ? state.row.costoPromedio : "0.00"}
                   readOnly
                 />
-                <p className="text-xs text-muted-foreground">
-                  Calculado por COMEX/Ventas.
-                </p>
+                <p className="text-xs text-muted-foreground">Calculado por COMEX/Ventas.</p>
               </div>
 
               <div className="flex flex-col gap-2">
@@ -347,10 +290,7 @@ export function ProductoFormDialog({
                   control={control}
                   name="activo"
                   render={({ field }) => (
-                    <Select
-                      value={field.value}
-                      onValueChange={field.onChange}
-                    >
+                    <Select value={field.value} onValueChange={field.onChange}>
                       <SelectTrigger className="w-full">
                         <SelectValue />
                       </SelectTrigger>
@@ -366,12 +306,7 @@ export function ProductoFormDialog({
           </section>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              disabled={isSubmitting}
-            >
+            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               Cancelar
             </Button>
             <Button type="submit" disabled={isSubmitting}>

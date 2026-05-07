@@ -2,12 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -18,10 +13,7 @@ import {
   SearchIcon,
 } from "@hugeicons/core-free-icons";
 
-import {
-  eliminarDepositoAction,
-  type DepositoRow,
-} from "@/lib/actions/depositos";
+import { eliminarDepositoAction, type DepositoRow } from "@/lib/actions/depositos";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,10 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import {
-  DepositoFormDialog,
-  type DepositoFormState,
-} from "./deposito-form-dialog";
+import { DepositoFormDialog, type DepositoFormState } from "./deposito-form-dialog";
 
 export function DepositosTable({ depositos }: { depositos: DepositoRow[] }) {
   const router = useRouter();
@@ -66,8 +55,7 @@ export function DepositosTable({ depositos }: { depositos: DepositoRow[] }) {
     if (!q) return depositos;
     return depositos.filter(
       (d) =>
-        d.nombre.toLowerCase().includes(q) ||
-        (d.direccion?.toLowerCase().includes(q) ?? false),
+        d.nombre.toLowerCase().includes(q) || (d.direccion?.toLowerCase().includes(q) ?? false),
     );
   }, [depositos, searchText]);
 
@@ -75,16 +63,12 @@ export function DepositosTable({ depositos }: { depositos: DepositoRow[] }) {
     {
       id: "nombre",
       header: "Nombre",
-      cell: ({ row }) => (
-        <span className="text-sm font-medium">{row.original.nombre}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm font-medium">{row.original.nombre}</span>,
     },
     {
       id: "direccion",
       header: "Dirección",
-      cell: ({ row }) => (
-        <span className="text-sm">{row.original.direccion ?? "—"}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm">{row.original.direccion ?? "—"}</span>,
     },
     {
       id: "estado",
@@ -160,10 +144,7 @@ export function DepositosTable({ depositos }: { depositos: DepositoRow[] }) {
             <TableRow key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
                 <TableHead key={header.id}>
-                  {flexRender(
-                    header.column.columnDef.header,
-                    header.getContext(),
-                  )}
+                  {flexRender(header.column.columnDef.header, header.getContext())}
                 </TableHead>
               ))}
             </TableRow>
@@ -195,10 +176,7 @@ export function DepositosTable({ depositos }: { depositos: DepositoRow[] }) {
         </TableBody>
       </Table>
 
-      <DepositoFormDialog
-        state={formState}
-        onClose={() => setFormState(null)}
-      />
+      <DepositoFormDialog state={formState} onClose={() => setFormState(null)} />
 
       <Dialog
         open={pendingDelete !== null}
@@ -213,11 +191,9 @@ export function DepositosTable({ depositos }: { depositos: DepositoRow[] }) {
                 <DialogTitle>Eliminar depósito</DialogTitle>
                 <DialogDescription>
                   ¿Confirma eliminar el depósito{" "}
-                  <span className="font-medium text-foreground">
-                    {pendingDelete.nombre}
-                  </span>
-                  ? Si tiene movimientos de stock o embarques asociados se
-                  marcará como inactivo en su lugar.
+                  <span className="font-medium text-foreground">{pendingDelete.nombre}</span>? Si
+                  tiene movimientos de stock o embarques asociados se marcará como inactivo en su
+                  lugar.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -228,11 +204,7 @@ export function DepositosTable({ depositos }: { depositos: DepositoRow[] }) {
                 >
                   Cancelar
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={onConfirmDelete}
-                  disabled={isDeleting}
-                >
+                <Button variant="destructive" onClick={onConfirmDelete} disabled={isDeleting}>
                   {isDeleting ? "Eliminando…" : "Eliminar"}
                 </Button>
               </DialogFooter>
@@ -253,11 +225,7 @@ function RowActions({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon-sm" aria-label="Acciones" />
-        }
-      >
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Acciones" />}>
         <HugeiconsIcon icon={MoreHorizontalCircle01Icon} strokeWidth={2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

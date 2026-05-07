@@ -2,10 +2,7 @@
 
 import { useTransition } from "react";
 
-import {
-  anularEntregaAction,
-  confirmarEntregaAction,
-} from "@/lib/actions/entregas";
+import { anularEntregaAction, confirmarEntregaAction } from "@/lib/actions/entregas";
 import type { EntregaEstado } from "@/generated/prisma/client";
 
 export function EntregaActions({

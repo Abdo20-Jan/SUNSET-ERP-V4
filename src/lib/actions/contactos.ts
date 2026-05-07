@@ -7,9 +7,7 @@ import { db } from "@/lib/db";
 import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
 import { Prisma } from "@/generated/prisma/client";
 
-type ActionResult<T = undefined> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
 const nullableStr = z
   .string()
@@ -76,11 +74,7 @@ export async function crearContactoAction(
   try {
     const created = await db.$transaction(async (tx) => {
       if (validated.data.esPrincipal) {
-        await desmarcarOtrosPrincipales(
-          tx,
-          validated.data.leadId,
-          validated.data.clienteId,
-        );
+        await desmarcarOtrosPrincipales(tx, validated.data.leadId, validated.data.clienteId);
       }
       return tx.contacto.create({
         data: validated.data,
@@ -107,9 +101,7 @@ export async function editarContactoAction(
   if (!validated.ok) return validated;
 
   try {
-    const updated = await db.$transaction((tx) =>
-      ejecutarUpdateContacto(tx, id, validated.data),
-    );
+    const updated = await db.$transaction((tx) => ejecutarUpdateContacto(tx, id, validated.data));
     revalidatePathsContacto(updated.leadId, updated.clienteId);
     return { ok: true, data: { id: updated.id } };
   } catch (err) {
@@ -136,9 +128,7 @@ async function ejecutarUpdateContacto(
   });
 }
 
-export async function marcarPrincipalAction(
-  id: string,
-): Promise<ActionResult<undefined>> {
+export async function marcarPrincipalAction(id: string): Promise<ActionResult<undefined>> {
   const guard = await requireCrmAuth();
   if (!guard.ok) return guard;
 
@@ -163,9 +153,7 @@ export async function marcarPrincipalAction(
   }
 }
 
-export async function eliminarContactoAction(
-  id: string,
-): Promise<ActionResult<undefined>> {
+export async function eliminarContactoAction(id: string): Promise<ActionResult<undefined>> {
   const guard = await requireCrmAuth();
   if (!guard.ok) return guard;
   if (!id) return { ok: false, error: "Id requerido." };
@@ -199,10 +187,7 @@ async function desmarcarOtrosPrincipales(
   await tx.contacto.updateMany({ where, data: { esPrincipal: false } });
 }
 
-function revalidatePathsContacto(
-  leadId: string | null,
-  clienteId: string | null,
-) {
+function revalidatePathsContacto(leadId: string | null, clienteId: string | null) {
   if (leadId) {
     revalidatePath(`/crm/leads/${leadId}`);
     revalidatePath("/crm/leads");

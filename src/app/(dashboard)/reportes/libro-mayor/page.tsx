@@ -40,13 +40,13 @@ function parseId(value: string | undefined): number | null {
 
 function parseDate(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T00:00:00Z");
+  const d = new Date(`${value}T00:00:00Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 function endOfDay(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T23:59:59.999Z");
+  const d = new Date(`${value}T23:59:59.999Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
@@ -56,9 +56,7 @@ function todayIso(): string {
 
 function firstOfMonthIso(): string {
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1)
-    .toISOString()
-    .slice(0, 10);
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 }
 
 export default async function LibroMayorPage({
@@ -95,8 +93,7 @@ export default async function LibroMayorPage({
   const moneda: Moneda = params.moneda === "ARS" ? "ARS" : "USD";
   const fechaCorte = fechaHasta ?? new Date();
   const cotizacion = await getCotizacionParaFecha(fechaCorte);
-  const tcParaUsd =
-    moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
+  const tcParaUsd = moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
   const tcInfo = cotizacion
     ? {
         valor: cotizacion.valor.toString(),
@@ -126,10 +123,7 @@ export default async function LibroMayorPage({
 
       <div className="flex flex-col gap-3">
         <MayorFilters cuentas={cuentas} selectedCuentaId={cuentaId} />
-        <DateRangeFilter
-          initialDesde={desdeStr}
-          initialHasta={hastaStr}
-        />
+        <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
         <MonedaToggle current={moneda} tcInfo={tcInfo} />
       </div>
 
@@ -143,9 +137,7 @@ export default async function LibroMayorPage({
             <span className="font-mono text-sm">{mayor.cuenta.codigo}</span>
             <span className="font-medium">{mayor.cuenta.nombre}</span>
             <Badge variant="secondary">{mayor.cuenta.categoria}</Badge>
-            <span className="ml-auto text-xs text-muted-foreground">
-              {rangoLabel}
-            </span>
+            <span className="ml-auto text-xs text-muted-foreground">{rangoLabel}</span>
           </div>
           <Table>
             <TableHeader>
@@ -155,9 +147,7 @@ export default async function LibroMayorPage({
                 <TableHead>Descripción</TableHead>
                 <TableHead className="w-32 text-right">Debe</TableHead>
                 <TableHead className="w-32 text-right">Haber</TableHead>
-                <TableHead className="w-36 text-right">
-                  Saldo Acumulado
-                </TableHead>
+                <TableHead className="w-36 text-right">Saldo Acumulado</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -201,9 +191,7 @@ export default async function LibroMayorPage({
                     <TableCell className="py-2 text-xs">
                       <span className="block">{l.asientoDescripcion}</span>
                       {l.descripcion ? (
-                        <span className="block text-muted-foreground">
-                          {l.descripcion}
-                        </span>
+                        <span className="block text-muted-foreground">{l.descripcion}</span>
                       ) : null}
                     </TableCell>
                     <TableCell className="py-2 text-right font-mono text-xs tabular-nums">

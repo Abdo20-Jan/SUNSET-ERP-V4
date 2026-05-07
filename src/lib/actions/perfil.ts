@@ -70,9 +70,7 @@ const modoRetroactivoSchema = z.object({
 });
 
 function isPrismaUserNotFound(err: unknown): boolean {
-  return (
-    err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025"
-  );
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025";
 }
 
 function firstZodMessage(error: z.ZodError): string {

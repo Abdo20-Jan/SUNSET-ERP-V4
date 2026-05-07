@@ -30,25 +30,18 @@ function getCampo(lead: LeadFields, campo: string): string | null {
   return typeof value === "string" ? value : null;
 }
 
-const OPERADORES: Record<
-  string,
-  (valor: string | null, regla: string) => boolean
-> = {
+const OPERADORES: Record<string, (valor: string | null, regla: string) => boolean> = {
   exists: (v) => v !== null && v.trim().length > 0,
   "not-exists": (v) => v === null || v.trim().length === 0,
   equals: (v, r) => v === r,
   "not-equals": (v, r) => v !== r,
-  contains: (v, r) =>
-    v !== null && v.toLowerCase().includes(r.toLowerCase()),
-  "starts-with": (v, r) =>
-    v !== null && v.toLowerCase().startsWith(r.toLowerCase()),
+  // biome-ignore lint/complexity/useOptionalChain: optional chain returns undefined; explicit null-check preserva tipo boolean
+  contains: (v, r) => v !== null && v.toLowerCase().includes(r.toLowerCase()),
+  // biome-ignore lint/complexity/useOptionalChain: ver acima
+  "starts-with": (v, r) => v !== null && v.toLowerCase().startsWith(r.toLowerCase()),
 };
 
-function evaluarRegla(
-  valorCampo: string | null,
-  operador: string,
-  valorRegla: string,
-): boolean {
+function evaluarRegla(valorCampo: string | null, operador: string, valorRegla: string): boolean {
   // nosemgrep: javascript.lang.security.audit.unsafe-dynamic-method.unsafe-dynamic-method
   const fn = OPERADORES[operador];
   return fn ? fn(valorCampo, valorRegla) : false;

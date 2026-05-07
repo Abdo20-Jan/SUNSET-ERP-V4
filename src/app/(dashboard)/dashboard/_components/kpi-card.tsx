@@ -71,9 +71,7 @@ export function KpiCard({
       >
         {value}
       </div>
-      {hint ? (
-        <div className="px-3 text-[11px] text-muted-foreground">{hint}</div>
-      ) : null}
+      {hint ? <div className="px-3 text-[11px] text-muted-foreground">{hint}</div> : null}
     </Card>
   );
 }

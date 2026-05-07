@@ -1,10 +1,6 @@
 import { db } from "@/lib/db";
 import { Decimal, sumMoney, toDecimal } from "@/lib/decimal";
-import {
-  AsientoEstado,
-  type CuentaCategoria,
-  type CuentaTipo,
-} from "@/generated/prisma/client";
+import { AsientoEstado, type CuentaCategoria, type CuentaTipo } from "@/generated/prisma/client";
 
 export type BalanceLinea = {
   kind: "linea";
@@ -43,11 +39,7 @@ export type BalanceResult = {
 };
 
 // Sinal natural: valor positivo representa o saldo na natureza da conta.
-function naturalSaldo(
-  categoria: CuentaCategoria,
-  debe: Decimal,
-  haber: Decimal,
-): Decimal {
+function naturalSaldo(categoria: CuentaCategoria, debe: Decimal, haber: Decimal): Decimal {
   if (categoria === "ACTIVO" || categoria === "EGRESO") {
     return debe.minus(haber);
   }
@@ -95,11 +87,7 @@ export async function getBalanceSumasYSaldos(filter: {
           ...(fechaWhere ? { fecha: fechaWhere } : {}),
         },
       },
-      orderBy: [
-        { asiento: { fecha: "asc" } },
-        { asiento: { numero: "asc" } },
-        { id: "asc" },
-      ],
+      orderBy: [{ asiento: { fecha: "asc" } }, { asiento: { numero: "asc" } }, { id: "asc" }],
       select: {
         id: true,
         cuentaId: true,
@@ -157,9 +145,7 @@ export async function getBalanceSumasYSaldos(filter: {
           debePeriodo = debePeriodo.plus(dec);
           haberPeriodo = haberPeriodo.plus(hec);
           const signed =
-            c.categoria === "ACTIVO" || c.categoria === "EGRESO"
-              ? dec.minus(hec)
-              : hec.minus(dec);
+            c.categoria === "ACTIVO" || c.categoria === "EGRESO" ? dec.minus(hec) : hec.minus(dec);
           acumulado = acumulado.plus(signed);
           lineasOut.push({
             kind: "linea",
@@ -214,19 +200,15 @@ export async function getBalanceSumasYSaldos(filter: {
   // Post-order: rola saldoInicial / debe / haber / saldoFinal das filhas nas SINTÉTICAS.
   const rollUp = (node: BalanceNode) => {
     if (node.tipo !== "SINTETICA" || !node.children || node.children.length === 0) {
-      if (node.children && node.children.length === 0) delete node.children;
+      if (node.children && node.children.length === 0) node.children = undefined;
       return;
     }
     for (const child of node.children) rollUp(child);
 
-    node.saldoInicial = sumMoney(
-      node.children.map((ch) => ch.saldoInicial),
-    ).toFixed(2);
+    node.saldoInicial = sumMoney(node.children.map((ch) => ch.saldoInicial)).toFixed(2);
     node.debe = sumMoney(node.children.map((ch) => ch.debe)).toFixed(2);
     node.haber = sumMoney(node.children.map((ch) => ch.haber)).toFixed(2);
-    node.saldoFinal = sumMoney(
-      node.children.map((ch) => ch.saldoFinal),
-    ).toFixed(2);
+    node.saldoFinal = sumMoney(node.children.map((ch) => ch.saldoFinal)).toFixed(2);
   };
   for (const r of roots) rollUp(r);
 
