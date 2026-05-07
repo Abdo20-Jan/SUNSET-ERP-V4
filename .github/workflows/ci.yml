@@ -36,11 +36,8 @@ jobs:
           PRISMA_SKIP_POSTINSTALL_GENERATE: "1"
       - name: ESLint
         run: pnpm lint
-      # NOTE: Biome (`pnpm biome:ci`) deferido — main hoje tem ~247 errors +
-      # 83 warnings de Biome (format mismatch, `Number.parseFloat`, template
-      # literals etc.) que nunca foram capturados porque o script é só
-      # invocado on-demand. Será adicionado em PR dedicado da Fase 2.2 do
-      # plano (Codacy tooling realignment + Biome cleanup).
+      - name: Biome
+        run: pnpm biome:ci
 
   typecheck:
     name: typecheck
