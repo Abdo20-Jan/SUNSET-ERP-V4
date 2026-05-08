@@ -5,16 +5,8 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import {
-  crearCuentaParaEntidad,
-  rangoClienteByCanal,
-} from "@/lib/services/cuenta-auto";
-import {
-  CondicionIva,
-  CuentaTipo,
-  Prisma,
-  TipoCanal,
-} from "@/generated/prisma/client";
+import { crearCuentaParaEntidad, rangoClienteByCanal } from "@/lib/services/cuenta-auto";
+import { CondicionIva, CuentaTipo, Prisma, TipoCanal } from "@/generated/prisma/client";
 
 export type ClienteRow = {
   id: string;
@@ -33,6 +25,10 @@ export type ClienteRow = {
   cuentaContableId: number | null;
   cuentaContableCodigo: string | null;
   cuentaContableNombre: string | null;
+  provinciaId: number | null;
+  provinciaNombre: string | null;
+  alicuotaPercepcionIIBB: string | null;
+  exentoPercepcionIIBB: boolean;
 };
 
 export type CuentaContableOption = {
@@ -62,6 +58,10 @@ export async function listarClientes(): Promise<ClienteRow[]> {
       estado: true,
       cuentaContableId: true,
       cuentaContable: { select: { codigo: true, nombre: true } },
+      provinciaId: true,
+      provincia: { select: { nombre: true } },
+      alicuotaPercepcionIIBB: true,
+      exentoPercepcionIIBB: true,
     },
   });
 
@@ -82,12 +82,14 @@ export async function listarClientes(): Promise<ClienteRow[]> {
     cuentaContableId: c.cuentaContableId,
     cuentaContableCodigo: c.cuentaContable?.codigo ?? null,
     cuentaContableNombre: c.cuentaContable?.nombre ?? null,
+    provinciaId: c.provinciaId,
+    provinciaNombre: c.provincia?.nombre ?? null,
+    alicuotaPercepcionIIBB: c.alicuotaPercepcionIIBB?.toString() ?? null,
+    exentoPercepcionIIBB: c.exentoPercepcionIIBB,
   }));
 }
 
-export async function listarCuentasContablesParaCliente(): Promise<
-  CuentaContableOption[]
-> {
+export async function listarCuentasContablesParaCliente(): Promise<CuentaContableOption[]> {
   const cuentas = await db.cuentaContable.findMany({
     where: {
       tipo: CuentaTipo.ANALITICA,
@@ -126,18 +128,12 @@ const clienteBaseSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
-    .refine(
-      (v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
-      "Email inválido.",
-    ),
+    .refine((v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Email inválido."),
   estado: z
     .string()
     .optional()
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : "activo"))
-    .refine(
-      (v) => v === "activo" || v === "inactivo",
-      "Estado debe ser 'activo' o 'inactivo'.",
-    ),
+    .refine((v) => v === "activo" || v === "inactivo", "Estado debe ser 'activo' o 'inactivo'."),
   cuentaContableId: z
     .number()
     .int()
@@ -145,14 +141,50 @@ const clienteBaseSchema = z.object({
     .nullable()
     .optional()
     .transform((v) => v ?? null),
+  // Localización fiscal AR (drill-down): provincia drives Percepción IIBB,
+  // localidad e CP são enriquecimento. Optional para retrocompat.
+  provinciaId: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
+  localidadId: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
+  codigoPostalId: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
+  // Override de alícuota Percepción IIBB. Se null, usa default da
+  // jurisdicción. Aceita "" (vazio) que vira null.
+  alicuotaPercepcionIIBB: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
+    .refine(
+      (v) => v === null || /^\d+(\.\d{1,4})?$/.test(v),
+      "Alícuota inválida (formato 0.0000-99.9999).",
+    )
+    .refine(
+      (v) => v === null || (Number(v) >= 0 && Number(v) <= 100),
+      "Alícuota fuera de rango [0, 100].",
+    ),
+  exentoPercepcionIIBB: z.boolean().optional().default(false),
   crearCuentaAuto: z.boolean().optional().default(false),
 });
 
 export type ClienteInput = z.input<typeof clienteBaseSchema>;
 
-export type ClienteActionResult =
-  | { ok: true; id: string }
-  | { ok: false; error: string };
+export type ClienteActionResult = { ok: true; id: string } | { ok: false; error: string };
 
 async function validarCuentaContable(
   id: number | null,
@@ -177,9 +209,7 @@ async function validarCuentaContable(
   return { ok: true };
 }
 
-export async function crearClienteAction(
-  raw: ClienteInput,
-): Promise<ClienteActionResult> {
+export async function crearClienteAction(raw: ClienteInput): Promise<ClienteActionResult> {
   const session = await auth();
   if (!session) return { ok: false, error: "No autorizado." };
 
@@ -215,10 +245,7 @@ export async function crearClienteAction(
     revalidatePath("/contabilidad/cuentas");
     return { ok: true, id: created.id };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: "Ya existe un cliente con ese CUIT." };
     }
     if (err instanceof Error && err.message.startsWith("No hay códigos")) {
@@ -297,10 +324,7 @@ export async function eliminarClienteAction(
     revalidatePath("/maestros");
     return { ok: true, softDeleted: false };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2025"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
       return { ok: false, error: "El cliente no existe." };
     }
     console.error("eliminarClienteAction failed", err);

@@ -1,15 +1,14 @@
-import {
-  listarClientes,
-  listarCuentasContablesParaCliente,
-} from "@/lib/actions/clientes";
+import { listarClientes, listarCuentasContablesParaCliente } from "@/lib/actions/clientes";
+import { listarProvincias } from "@/lib/actions/provincias";
 import { Card } from "@/components/ui/card";
 
 import { ClientesTable } from "./clientes-table";
 
 export default async function ClientesPage() {
-  const [clientes, cuentas] = await Promise.all([
+  const [clientes, cuentas, provincias] = await Promise.all([
     listarClientes(),
     listarCuentasContablesParaCliente(),
+    listarProvincias(),
   ]);
 
   return (
@@ -23,7 +22,7 @@ export default async function ClientesPage() {
       </div>
 
       <Card className="py-0">
-        <ClientesTable clientes={clientes} cuentas={cuentas} />
+        <ClientesTable clientes={clientes} cuentas={cuentas} provincias={provincias} />
       </Card>
     </div>
   );
