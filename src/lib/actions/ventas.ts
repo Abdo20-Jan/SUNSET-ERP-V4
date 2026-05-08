@@ -14,7 +14,13 @@ import {
 } from "@/lib/services/asiento-automatico";
 import { aplicarReservaSPD, liberarReservaSPD } from "@/lib/services/stock";
 import { getDepositoPorDefecto, validarDisponible } from "@/lib/services/stock-helpers";
-import { CondicionPago, Moneda, Prisma, VentaEstado } from "@/generated/prisma/client";
+import {
+  ChequeRecibidoEstado,
+  CondicionPago,
+  Moneda,
+  Prisma,
+  VentaEstado,
+} from "@/generated/prisma/client";
 
 export type VentaRow = {
   id: string;
@@ -587,12 +593,34 @@ export async function anularVentaAction(
             where: { estado: "CONFIRMADA" },
             select: { numero: true },
           },
+          // ChequeRecibido vinculados pelo FK direto. Anular venda
+          // sem tratar cheques ativos deixa órfãos: estado != ANULADO
+          // mas vinculado a venda CANCELADA + asiento de cobro
+          // ainda CONTABILIZADO. Reverter na mesma transação.
+          chequesRecibidos: {
+            where: { estado: { not: ChequeRecibidoEstado.ANULADO } },
+            select: { id: true, asientoCobroId: true },
+          },
         },
       });
       if (!v) {
         throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
       }
       ensureSinEntregasConfirmadas(v.entregas);
+
+      // Anular cheques ativos antes de reverter o asiento da venda.
+      // Se o cheque já foi acreditado (ACREDITADO/DEPOSITADO), o
+      // asiento de cobro reverte o crédito bancário — efeito desejado
+      // ao anular a venda.
+      for (const cheque of v.chequesRecibidos) {
+        if (cheque.asientoCobroId) {
+          await anularAsiento(cheque.asientoCobroId, tx);
+        }
+        await tx.chequeRecibido.update({
+          where: { id: cheque.id },
+          data: { estado: ChequeRecibidoEstado.ANULADO, asientoCobroId: null },
+        });
+      }
 
       if (!v.asientoId) {
         await tx.venta.update({
