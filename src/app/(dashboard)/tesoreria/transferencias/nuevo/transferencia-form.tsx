@@ -152,13 +152,13 @@ export function TransferenciaForm({
 
   useEffect(() => {
     if (origen?.moneda === "ARS") {
-      setValue("tipoCambioOrigen", "1", { shouldValidate: true });
+      setValue("tipoCambioOrigen", "1");
     }
   }, [origen?.moneda, setValue]);
 
   useEffect(() => {
     if (destino?.moneda === "ARS") {
-      setValue("tipoCambioDestino", "1", { shouldValidate: true });
+      setValue("tipoCambioDestino", "1");
     }
   }, [destino?.moneda, setValue]);
 
@@ -167,16 +167,19 @@ export function TransferenciaForm({
   const userTouchedDestinoMonto = useRef(false);
   useEffect(() => {
     if (sameCurrency && !userTouchedDestinoMonto.current) {
-      setValue("montoDestino", montoOrigen, { shouldValidate: true });
+      setValue("montoDestino", montoOrigen);
     }
   }, [sameCurrency, montoOrigen, setValue]);
 
   const userTouchedFechaDestino = useRef(false);
+  // RHF clona Date a cada read (useWatch), gerando ref nova por render. Usar
+  // primitive `.getTime()` como dep evita loop infinito de re-render.
+  const fechaPagoTime = fechaPago instanceof Date ? fechaPago.getTime() : null;
   useEffect(() => {
-    if (!userTouchedFechaDestino.current && fechaPago instanceof Date) {
-      setValue("fechaDestino", fechaPago, { shouldValidate: true });
+    if (!userTouchedFechaDestino.current && fechaPagoTime !== null) {
+      setValue("fechaDestino", new Date(fechaPagoTime));
     }
-  }, [fechaPago, setValue]);
+  }, [fechaPagoTime, setValue]);
 
   const destinoOptions = useMemo(
     () => cuentasBancarias.filter((c) => c.id !== origenId),
