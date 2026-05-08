@@ -403,6 +403,83 @@ async function seedPipelineStages() {
 }
 
 // ============================================================
+// PROVINCIAS AR + JURISDICCIONES IIBB
+// ============================================================
+
+// Datos de Comisión Arbitral CM + tabla "iibb-tabla-completa-24-jurisdicciones"
+// de la skill `tributos-ventas-argentina`. Las alícuotas son las de
+// "comercialización general mayorista" — sirven como default para
+// Percepción IIBB cuando el cliente no tiene override en padrón.
+//
+// `esAgentePercepcion`: por decisión del negocio, hoy Sunset solo
+// percepciona en CABA. El resto queda con default false; el usuario
+// puede marcar como true vía maestros si la designación cambia.
+const PROVINCIAS_AR: Array<{
+  codigo: string;
+  nombre: string;
+  codigoAfip: string;
+  alicuotaPercepcion: string;
+  esAgentePercepcion: boolean;
+}> = [
+  { codigo: "CABA", nombre: "Ciudad Autónoma de Buenos Aires", codigoAfip: "901", alicuotaPercepcion: "3.0000", esAgentePercepcion: true },
+  { codigo: "BA", nombre: "Buenos Aires", codigoAfip: "902", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
+  { codigo: "CAT", nombre: "Catamarca", codigoAfip: "903", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
+  { codigo: "CBA", nombre: "Córdoba", codigoAfip: "904", alicuotaPercepcion: "4.7500", esAgentePercepcion: false },
+  { codigo: "COR", nombre: "Corrientes", codigoAfip: "905", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
+  { codigo: "CHA", nombre: "Chaco", codigoAfip: "906", alicuotaPercepcion: "4.7500", esAgentePercepcion: false },
+  { codigo: "CHU", nombre: "Chubut", codigoAfip: "907", alicuotaPercepcion: "4.5000", esAgentePercepcion: false },
+  { codigo: "ER", nombre: "Entre Ríos", codigoAfip: "908", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
+  { codigo: "FOR", nombre: "Formosa", codigoAfip: "909", alicuotaPercepcion: "4.5000", esAgentePercepcion: false },
+  { codigo: "JUJ", nombre: "Jujuy", codigoAfip: "910", alicuotaPercepcion: "3.5000", esAgentePercepcion: false },
+  { codigo: "LP", nombre: "La Pampa", codigoAfip: "911", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
+  { codigo: "LR", nombre: "La Rioja", codigoAfip: "912", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
+  { codigo: "MZA", nombre: "Mendoza", codigoAfip: "913", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
+  { codigo: "MIS", nombre: "Misiones", codigoAfip: "914", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
+  { codigo: "NEU", nombre: "Neuquén", codigoAfip: "915", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
+  { codigo: "RN", nombre: "Río Negro", codigoAfip: "916", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
+  { codigo: "SAL", nombre: "Salta", codigoAfip: "917", alicuotaPercepcion: "3.6000", esAgentePercepcion: false },
+  { codigo: "SJ", nombre: "San Juan", codigoAfip: "918", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
+  { codigo: "SL", nombre: "San Luis", codigoAfip: "919", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
+  { codigo: "SC", nombre: "Santa Cruz", codigoAfip: "920", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
+  { codigo: "SF", nombre: "Santa Fe", codigoAfip: "921", alicuotaPercepcion: "4.5000", esAgentePercepcion: false },
+  { codigo: "SDE", nombre: "Santiago del Estero", codigoAfip: "922", alicuotaPercepcion: "4.5000", esAgentePercepcion: false },
+  { codigo: "TDF", nombre: "Tierra del Fuego", codigoAfip: "923", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
+  { codigo: "TUC", nombre: "Tucumán", codigoAfip: "924", alicuotaPercepcion: "4.5000", esAgentePercepcion: false },
+];
+
+async function seedProvinciasYJurisdicciones() {
+  for (const prov of PROVINCIAS_AR) {
+    const provincia = await prisma.provincia.upsert({
+      where: { codigo: prov.codigo },
+      update: { nombre: prov.nombre, codigoAfip: prov.codigoAfip },
+      create: { codigo: prov.codigo, nombre: prov.nombre, codigoAfip: prov.codigoAfip },
+    });
+
+    await prisma.jurisdiccionIIBB.upsert({
+      where: { codigo: prov.codigo },
+      update: {
+        nombre: prov.nombre,
+        alicuotaPercepcion: prov.alicuotaPercepcion,
+        esAgentePercepcion: prov.esAgentePercepcion,
+        provinciaId: provincia.id,
+      },
+      create: {
+        codigo: prov.codigo,
+        nombre: prov.nombre,
+        alicuotaPercepcion: prov.alicuotaPercepcion,
+        esAgentePercepcion: prov.esAgentePercepcion,
+        provinciaId: provincia.id,
+      },
+    });
+  }
+
+  const agentes = PROVINCIAS_AR.filter((p) => p.esAgentePercepcion).map((p) => p.codigo);
+  console.log(
+    `✓ ${PROVINCIAS_AR.length} provincias + jurisdicciones IIBB creadas/actualizadas (agente Percepción: ${agentes.join(", ")})`,
+  );
+}
+
+// ============================================================
 // MAIN
 // ============================================================
 
@@ -414,6 +491,7 @@ async function main() {
   await seedAnaliticasBase();
   await seedDepositos();
   await seedPipelineStages();
+  await seedProvinciasYJurisdicciones();
   console.log("\n✅ Seed completado. Sistema listo para auto-construir el plan analítico.");
 }
 
