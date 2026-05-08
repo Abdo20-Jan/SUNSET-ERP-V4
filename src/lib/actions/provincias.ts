@@ -6,6 +6,55 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 
+// ============================================================
+// PERCEPCIÓN IIBB INFO (preview client-side)
+// ============================================================
+
+// Devuelve el factor de Percepción IIBB que aplica para un cliente,
+// para que el form de venda pueda mostrar el monto antes de guardar.
+// Factor = alícuota / 100 (decimal). Si el cliente es exento, no
+// tiene provincia, o la jurisdicción no es agente, retorna 0.
+export type PercepcionInfo = {
+  factor: string; // "0.03" si 3%; "0" si no aplica
+  alicuota: string | null; // "3.0000" para mostrar al usuario
+  jurisdiccionNombre: string | null;
+};
+
+export async function obtenerPercepcionInfoCliente(clienteId: string): Promise<PercepcionInfo> {
+  const cliente = await db.cliente.findUnique({
+    where: { id: clienteId },
+    select: {
+      exentoPercepcionIIBB: true,
+      alicuotaPercepcionIIBB: true,
+      provincia: {
+        select: {
+          jurisdiccionIIBB: {
+            select: {
+              esAgentePercepcion: true,
+              alicuotaPercepcion: true,
+              nombre: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!cliente || cliente.exentoPercepcionIIBB) {
+    return { factor: "0", alicuota: null, jurisdiccionNombre: null };
+  }
+  const jur = cliente.provincia?.jurisdiccionIIBB;
+  if (!jur || !jur.esAgentePercepcion) {
+    return { factor: "0", alicuota: null, jurisdiccionNombre: null };
+  }
+  const alicuota = (cliente.alicuotaPercepcionIIBB ?? jur.alicuotaPercepcion).toString();
+  const factor = (Number(alicuota) / 100).toFixed(6);
+  return {
+    factor,
+    alicuota,
+    jurisdiccionNombre: jur.nombre,
+  };
+}
+
 // Provincias são populadas via seed (24 entradas fixas AR). Não há
 // CRUD para criar/deletar — apenas listar e (no futuro) atualizar
 // nome/codigoAfip se necessário.

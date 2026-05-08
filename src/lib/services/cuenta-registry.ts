@@ -38,6 +38,15 @@ export const VENTA_CODIGOS = {
     nombre: "OTROS IMPUESTOS",
     categoria: CuentaCategoria.PASIVO,
   },
+  // Percepciones IIBB jurisdiccionales cobradas al cliente (vía
+  // Percepción IIBB sobre el subtotal cuando la jurisdicción del cliente
+  // tiene flag esAgentePercepcion=true). Distinto de IIBB_POR_PAGAR
+  // (2.1.3.02) que es el tributo propio de Sunset (Córdoba 4,75%).
+  PERCEPCIONES_IIBB_A_DEPOSITAR: {
+    codigo: "2.1.3.05",
+    nombre: "PERCEPCIONES IIBB A DEPOSITAR",
+    categoria: CuentaCategoria.PASIVO,
+  },
   // Costo de Mercadería Vendida (CMV/COGS) — cuando se emite una venta
   // se debita aquí el costo a precio promedio, equilibrando con HABER en
   // 1.1.5.01 MERCADERÍAS. Esto hace que la utilidad bruta (ingreso - CMV)
