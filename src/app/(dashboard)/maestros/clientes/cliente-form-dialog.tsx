@@ -374,7 +374,17 @@ export function ClienteFormDialog({
                       onValueChange={(v) => field.onChange(v === "" ? null : Number(v))}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="— Sin provincia —" />
+                        <SelectValue placeholder="— Sin provincia —">
+                          {(value) => {
+                            if (value === null || value === undefined || value === "") {
+                              return "— Sin provincia —";
+                            }
+                            const idNum =
+                              typeof value === "string" ? Number(value) : (value as number);
+                            const p = provincias.find((x) => x.id === idNum);
+                            return p ? `${p.nombre} (${p.codigo})` : "— Sin provincia —";
+                          }}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {provincias.map((p) => (
