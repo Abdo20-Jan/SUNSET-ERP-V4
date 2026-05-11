@@ -844,9 +844,7 @@ export function VentaForm({
             <Total label="Subtotal" value={totals.subtotal.toString()} />
             <Total label="IVA" value={totals.iva.toString()} />
             <Total label="IIBB" value={totals.iibb.toString()} />
-            {totals.percepcionIIBB.gt(0) ? (
-              <Total label="Perc. IIBB" value={totals.percepcionIIBB.toString()} />
-            ) : null}
+            <Total label="Perc. IIBB" value={totals.percepcionIIBB.toString()} />
             <Total label="Otros" value={totals.otros.toString()} />
             {totals.flete.gt(0) ? (
               <Total label="Flete" value={`-${totals.flete.toString()}`} tone="negative" />
