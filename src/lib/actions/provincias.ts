@@ -94,6 +94,13 @@ const localidadCreateSchema = z.object({
   nombre: z.string().trim().min(2).max(120),
 });
 
+function mapCrearLocalidadError(err: unknown): { ok: false; error: string } {
+  if (err instanceof Error && err.message.includes("Unique constraint")) {
+    return { ok: false, error: "Ya existe una localidad con ese nombre en la provincia" };
+  }
+  return { ok: false, error: "Error al crear localidad" };
+}
+
 export async function crearLocalidadAction(
   input: z.infer<typeof localidadCreateSchema>,
 ): Promise<{ ok: true; row: LocalidadRow } | { ok: false; error: string }> {
@@ -116,10 +123,7 @@ export async function crearLocalidadAction(
     revalidatePath("/maestros/clientes");
     return { ok: true, row };
   } catch (err) {
-    if (err instanceof Error && err.message.includes("Unique constraint")) {
-      return { ok: false, error: "Ya existe una localidad con ese nombre en la provincia" };
-    }
-    return { ok: false, error: "Error al crear localidad" };
+    return mapCrearLocalidadError(err);
   }
 }
 

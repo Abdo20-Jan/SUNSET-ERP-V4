@@ -209,14 +209,24 @@ async function validarCuentaContable(
   return { ok: true };
 }
 
+function mapCrearClienteError(err: unknown): ClienteActionResult {
+  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+    return { ok: false, error: "Ya existe un cliente con ese CUIT." };
+  }
+  if (err instanceof Error && err.message.startsWith("No hay códigos")) {
+    return { ok: false, error: err.message };
+  }
+  console.error("crearClienteAction failed", err);
+  return { ok: false, error: "Error inesperado al crear el cliente." };
+}
+
 export async function crearClienteAction(raw: ClienteInput): Promise<ClienteActionResult> {
   const session = await auth();
   if (!session) return { ok: false, error: "No autorizado." };
 
   const parsed = clienteBaseSchema.safeParse(raw);
   if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, error: first?.message ?? "Datos inválidos." };
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
   }
 
   const cuentaCheck = await validarCuentaContable(parsed.data.cuentaContableId);
@@ -224,15 +234,7 @@ export async function crearClienteAction(raw: ClienteInput): Promise<ClienteActi
 
   try {
     const created = await db.$transaction(async (tx) => {
-      let cuentaContableId = parsed.data.cuentaContableId;
-      if (cuentaContableId === null && parsed.data.crearCuentaAuto) {
-        const cuenta = await crearCuentaParaEntidad(
-          tx,
-          rangoClienteByCanal(parsed.data.tipoCanal),
-          parsed.data.nombre,
-        );
-        cuentaContableId = cuenta.id;
-      }
+      const cuentaContableId = await resolverCuentaContableCliente(tx, parsed.data);
       const { crearCuentaAuto: _ignore, ...rest } = parsed.data;
       void _ignore;
       return tx.cliente.create({
@@ -245,15 +247,18 @@ export async function crearClienteAction(raw: ClienteInput): Promise<ClienteActi
     revalidatePath("/contabilidad/cuentas");
     return { ok: true, id: created.id };
   } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      return { ok: false, error: "Ya existe un cliente con ese CUIT." };
-    }
-    if (err instanceof Error && err.message.startsWith("No hay códigos")) {
-      return { ok: false, error: err.message };
-    }
-    console.error("crearClienteAction failed", err);
-    return { ok: false, error: "Error inesperado al crear el cliente." };
+    return mapCrearClienteError(err);
   }
+}
+
+async function resolverCuentaContableCliente(
+  tx: Parameters<Parameters<typeof db.$transaction>[0]>[0],
+  data: z.infer<typeof clienteBaseSchema>,
+): Promise<number | null> {
+  if (data.cuentaContableId !== null) return data.cuentaContableId;
+  if (!data.crearCuentaAuto) return null;
+  const cuenta = await crearCuentaParaEntidad(tx, rangoClienteByCanal(data.tipoCanal), data.nombre);
+  return cuenta.id;
 }
 
 export async function actualizarClienteAction(
