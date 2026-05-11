@@ -2,12 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -48,19 +43,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { DataTable } from "@/components/ui/data-table";
 
-import {
-  ProveedorFormDialog,
-  type ProveedorFormState,
-} from "./proveedor-form-dialog";
+import { ProveedorFormDialog, type ProveedorFormState } from "./proveedor-form-dialog";
 
 export function ProveedoresTable({
   proveedores,
@@ -88,10 +73,7 @@ export function ProveedoresTable({
     return proveedores.filter((p) => {
       if (paisFilter !== "todos" && p.pais !== paisFilter) return false;
       if (!q) return true;
-      return (
-        p.nombre.toLowerCase().includes(q) ||
-        (p.cuit ?? "").toLowerCase().includes(q)
-      );
+      return p.nombre.toLowerCase().includes(q) || (p.cuit ?? "").toLowerCase().includes(q);
     });
   }, [proveedores, searchText, paisFilter]);
 
@@ -99,18 +81,14 @@ export function ProveedoresTable({
     {
       id: "nombre",
       header: "Nombre",
-      cell: ({ row }) => (
-        <span className="text-sm font-medium">{row.original.nombre}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm font-medium">{row.original.nombre}</span>,
     },
     {
       id: "cuit",
       header: "CUIT / ID fiscal",
       cell: ({ row }) => (
         <span className="font-mono text-xs tabular-nums">
-          {row.original.cuit ?? (
-            <span className="text-muted-foreground">—</span>
-          )}
+          {row.original.cuit ?? <span className="text-muted-foreground">—</span>}
         </span>
       ),
     },
@@ -127,9 +105,7 @@ export function ProveedoresTable({
       id: "estado",
       header: "Estado",
       cell: ({ row }) => (
-        <Badge
-          variant={row.original.estado === "activo" ? "default" : "secondary"}
-        >
+        <Badge variant={row.original.estado === "activo" ? "default" : "secondary"}>
           {row.original.estado}
         </Badge>
       ),
@@ -143,9 +119,7 @@ export function ProveedoresTable({
             <span className="font-mono text-xs text-muted-foreground">
               {row.original.cuentaContableCodigo}
             </span>
-            <span className="text-sm">
-              {row.original.cuentaContableNombre}
-            </span>
+            <span className="text-sm">{row.original.cuentaContableNombre}</span>
           </div>
         ) : (
           <span className="text-xs text-muted-foreground">Sin vincular</span>
@@ -204,10 +178,7 @@ export function ProveedoresTable({
             className="pl-9"
           />
         </div>
-        <Select
-          value={paisFilter}
-          onValueChange={(v) => setPaisFilter(v ?? "todos")}
-        >
+        <Select value={paisFilter} onValueChange={(v) => setPaisFilter(v ?? "todos")}>
           <SelectTrigger className="w-full sm:w-40">
             <SelectValue />
           </SelectTrigger>
@@ -226,46 +197,12 @@ export function ProveedoresTable({
         </Button>
       </div>
 
-      <Table>
-        <TableHeader>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <TableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <TableHead key={header.id}>
-                  {flexRender(
-                    header.column.columnDef.header,
-                    header.getContext(),
-                  )}
-                </TableHead>
-              ))}
-            </TableRow>
-          ))}
-        </TableHeader>
-        <TableBody>
-          {table.getRowModel().rows.length === 0 ? (
-            <TableRow>
-              <TableCell
-                colSpan={columns.length}
-                className="py-12 text-center text-sm text-muted-foreground"
-              >
-                {proveedores.length === 0
-                  ? "Aún no hay proveedores registrados."
-                  : "No hay proveedores para los filtros seleccionados."}
-              </TableCell>
-            </TableRow>
-          ) : (
-            table.getRowModel().rows.map((row) => (
-              <TableRow key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+      <DataTable
+        table={table}
+        emptyMessage="Aún no hay proveedores registrados."
+        emptyFilteredMessage="No hay proveedores para los filtros seleccionados."
+        isFiltered={proveedores.length > 0}
+      />
 
       <ProveedorFormDialog
         state={formState}
@@ -287,11 +224,8 @@ export function ProveedoresTable({
                 <DialogTitle>Eliminar proveedor</DialogTitle>
                 <DialogDescription>
                   ¿Confirma eliminar al proveedor{" "}
-                  <span className="font-medium text-foreground">
-                    {pendingDelete.nombre}
-                  </span>
-                  ? Si tiene embarques o compras asociados se marcará como
-                  inactivo en su lugar.
+                  <span className="font-medium text-foreground">{pendingDelete.nombre}</span>? Si
+                  tiene embarques o compras asociados se marcará como inactivo en su lugar.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -302,11 +236,7 @@ export function ProveedoresTable({
                 >
                   Cancelar
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={onConfirmDelete}
-                  disabled={isDeleting}
-                >
+                <Button variant="destructive" onClick={onConfirmDelete} disabled={isDeleting}>
                   {isDeleting ? "Eliminando…" : "Eliminar"}
                 </Button>
               </DialogFooter>
@@ -327,11 +257,7 @@ function RowActions({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon-sm" aria-label="Acciones" />
-        }
-      >
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Acciones" />}>
         <HugeiconsIcon icon={MoreHorizontalCircle01Icon} strokeWidth={2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
