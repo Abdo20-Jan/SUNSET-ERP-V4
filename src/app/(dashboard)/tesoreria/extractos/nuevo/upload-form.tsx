@@ -101,8 +101,8 @@ export function ExtractoUploadForm({
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         />
         <p className="text-xs text-muted-foreground">
-          Máx. 10 MB. El sistema detecta el banco, número de cuenta y período
-          automáticamente desde el PDF.
+          Máx. 10 MB. El sistema detecta el banco, número de cuenta y período automáticamente desde
+          el PDF.
         </p>
       </div>
 
@@ -112,13 +112,10 @@ export function ExtractoUploadForm({
         </summary>
         <div className="mt-3 flex flex-col gap-2">
           <p className="text-xs text-muted-foreground">
-            Solo necesario si el PDF no se autodetecta o si tenés varias
-            cuentas en el mismo banco que coinciden.
+            Solo necesario si el PDF no se autodetecta o si tenés varias cuentas en el mismo banco
+            que coinciden.
           </p>
-          <Select
-            value={cuentaId}
-            onValueChange={(v) => setCuentaId(v ?? "")}
-          >
+          <Select value={cuentaId} onValueChange={(v) => setCuentaId(v ?? "")}>
             <SelectTrigger id="cuenta">
               <SelectValue placeholder="Auto-detectar del PDF">
                 {(value) => {

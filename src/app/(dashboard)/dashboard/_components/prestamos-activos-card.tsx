@@ -29,9 +29,7 @@ export function PrestamosActivosCard({
     <Card>
       <CardHeader className="border-b">
         <CardTitle>Préstamos Vigentes</CardTitle>
-        <CardDescription>
-          Préstamos contabilizados con saldo deudor pendiente.
-        </CardDescription>
+        <CardDescription>Préstamos contabilizados con saldo deudor pendiente.</CardDescription>
         <CardAction>
           <Link
             href="/tesoreria/prestamos"
@@ -43,9 +41,7 @@ export function PrestamosActivosCard({
       </CardHeader>
       <CardContent className="px-0">
         {prestamos.length === 0 ? (
-          <p className="px-6 text-sm text-muted-foreground">
-            No hay préstamos vigentes.
-          </p>
+          <p className="px-6 text-sm text-muted-foreground">No hay préstamos vigentes.</p>
         ) : (
           <Table>
             <TableHeader>
@@ -60,9 +56,7 @@ export function PrestamosActivosCard({
             <TableBody>
               {prestamos.map((p) => (
                 <TableRow key={p.id}>
-                  <TableCell className="pl-6 font-medium">
-                    {p.prestamista}
-                  </TableCell>
+                  <TableCell className="pl-6 font-medium">{p.prestamista}</TableCell>
                   <TableCell>
                     <Badge variant="outline">{p.moneda}</Badge>
                   </TableCell>

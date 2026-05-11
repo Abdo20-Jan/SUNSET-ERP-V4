@@ -5,10 +5,7 @@ import Link from "next/link";
 import { format } from "date-fns";
 
 import type { AsientoEstado } from "@/generated/prisma/client";
-import {
-  getAsientoDetalle,
-  type AsientoDetalle,
-} from "@/lib/actions/asientos";
+import { getAsientoDetalle, type AsientoDetalle } from "@/lib/actions/asientos";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -36,9 +33,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
 };
 
-function estadoVariant(
-  estado: AsientoEstado,
-): "default" | "outline" | "secondary" {
+function estadoVariant(estado: AsientoEstado): "default" | "outline" | "secondary" {
   switch (estado) {
     case "BORRADOR":
       return "outline";
@@ -49,11 +44,7 @@ function estadoVariant(
   }
 }
 
-export function MovimientoDetalleSheet({
-  movimiento,
-  open,
-  onOpenChange,
-}: Props) {
+export function MovimientoDetalleSheet({ movimiento, open, onOpenChange }: Props) {
   const [asiento, setAsiento] = useState<AsientoDetalle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -86,9 +77,7 @@ export function MovimientoDetalleSheet({
       >
         <SheetHeader className="gap-2">
           <div className="flex items-center gap-3">
-            <SheetTitle>
-              {movimiento ? `Movimiento ${movimiento.tipo}` : "Movimiento"}
-            </SheetTitle>
+            <SheetTitle>{movimiento ? `Movimiento ${movimiento.tipo}` : "Movimiento"}</SheetTitle>
             {movimiento?.asiento && (
               <>
                 <Badge variant="outline" className="font-mono text-xs">
@@ -114,39 +103,22 @@ export function MovimientoDetalleSheet({
                 Datos del movimiento
               </h3>
               <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                <InfoRow
-                  label="Fecha"
-                  value={format(movimiento.fecha, "dd/MM/yyyy")}
-                />
+                <InfoRow label="Fecha" value={format(movimiento.fecha, "dd/MM/yyyy")} />
                 <InfoRow label="Tipo" value={movimiento.tipo} />
                 <InfoRow
                   label="Cuenta bancaria"
                   value={`${movimiento.cuentaBancaria.banco}${movimiento.cuentaBancaria.numero ? ` · ${movimiento.cuentaBancaria.numero}` : ""}`}
                 />
-                <InfoRow
-                  label="Monto"
-                  value={`${movimiento.monto} ${movimiento.moneda}`}
-                />
+                <InfoRow label="Monto" value={`${movimiento.monto} ${movimiento.moneda}`} />
                 <InfoRow
                   label="Tipo de cambio"
-                  value={Number(movimiento.tipoCambio).toFixed(
-                    movimiento.moneda === "ARS" ? 2 : 6,
-                  )}
+                  value={Number(movimiento.tipoCambio).toFixed(movimiento.moneda === "ARS" ? 2 : 6)}
                 />
                 <ContrapartidaRow movimiento={movimiento} />
-                <InfoRow
-                  label="Comprobante"
-                  value={movimiento.comprobante ?? "—"}
-                />
-                <InfoRow
-                  label="Ref. banco"
-                  value={movimiento.referenciaBanco ?? "—"}
-                />
+                <InfoRow label="Comprobante" value={movimiento.comprobante ?? "—"} />
+                <InfoRow label="Ref. banco" value={movimiento.referenciaBanco ?? "—"} />
                 {movimiento.asiento && (
-                  <InfoRow
-                    label="Período"
-                    value={movimiento.asiento.periodoCodigo}
-                  />
+                  <InfoRow label="Período" value={movimiento.asiento.periodoCodigo} />
                 )}
               </dl>
             </section>
@@ -184,12 +156,8 @@ export function MovimientoDetalleSheet({
                   <TableBody>
                     {asiento.lineas.map((l) => (
                       <TableRow key={l.id}>
-                        <TableCell className="font-mono text-xs">
-                          {l.cuentaCodigo}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {l.cuentaNombre}
-                        </TableCell>
+                        <TableCell className="font-mono text-xs">{l.cuentaCodigo}</TableCell>
+                        <TableCell className="text-sm">{l.cuentaNombre}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {l.descripcion ?? "—"}
                         </TableCell>
@@ -202,10 +170,7 @@ export function MovimientoDetalleSheet({
                       </TableRow>
                     ))}
                     <TableRow className="border-t-2">
-                      <TableCell
-                        colSpan={3}
-                        className="text-right text-sm font-medium"
-                      >
+                      <TableCell colSpan={3} className="text-right text-sm font-medium">
                         Totales
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">

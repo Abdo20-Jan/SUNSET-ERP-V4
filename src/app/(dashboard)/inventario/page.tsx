@@ -22,7 +22,8 @@ export default async function InventarioPage({
         <div>
           <h1 className="text-2xl font-semibold">Inventario</h1>
           <p className="text-sm text-muted-foreground">
-            Stock por depósito · {productos.length} productos · {depositos.length} depósitos{flagSuffix}
+            Stock por depósito · {productos.length} productos · {depositos.length} depósitos
+            {flagSuffix}
           </p>
         </div>
         <Link
@@ -41,10 +42,7 @@ export default async function InventarioPage({
           placeholder="Buscar por código o nombre…"
           className="flex-1 rounded-md border bg-background px-3 py-2"
         />
-        <button
-          type="submit"
-          className="rounded-md border px-4 py-2 hover:bg-muted"
-        >
+        <button type="submit" className="rounded-md border px-4 py-2 hover:bg-muted">
           Buscar
         </button>
       </form>

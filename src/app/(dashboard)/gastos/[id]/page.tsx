@@ -28,12 +28,7 @@ export default async function GastoDetailPage({
       listarCuentasGasto(),
     ]);
     return (
-      <GastoForm
-        mode="edit"
-        initialData={gasto}
-        proveedores={proveedores}
-        cuentas={cuentas}
-      />
+      <GastoForm mode="edit" initialData={gasto} proveedores={proveedores} cuentas={cuentas} />
     );
   }
 

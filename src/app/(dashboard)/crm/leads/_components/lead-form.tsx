@@ -5,10 +5,7 @@ import { useRouter } from "next/navigation";
 import { type LeadInput } from "@/lib/actions/leads";
 import { LEAD_ESTADOS, LEAD_FUENTES } from "@/lib/crm-enums";
 import { fdString, fdStringOrUndefined } from "@/lib/form-data";
-import type {
-  LeadEstado,
-  LeadFuente,
-} from "@/generated/prisma/client";
+import type { LeadEstado, LeadFuente } from "@/generated/prisma/client";
 
 import { EnumSelect } from "./enum-select";
 import { useLeadFormSubmit } from "./use-lead-form-submit";

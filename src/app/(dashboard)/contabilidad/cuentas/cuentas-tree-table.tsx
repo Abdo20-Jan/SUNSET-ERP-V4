@@ -64,9 +64,7 @@ const columns: ColumnDef<CuentaNode>[] = [
     id: "nombre",
     header: "Nombre",
     cell: ({ row }) => (
-      <span
-        className={cn(row.original.tipo === "SINTETICA" && "font-semibold")}
-      >
+      <span className={cn(row.original.tipo === "SINTETICA" && "font-semibold")}>
         {row.original.nombre}
       </span>
     ),
@@ -74,9 +72,7 @@ const columns: ColumnDef<CuentaNode>[] = [
   {
     id: "tipo",
     header: "Tipo",
-    cell: ({ row }) => (
-      <Badge variant="secondary">{row.original.categoria}</Badge>
-    ),
+    cell: ({ row }) => <Badge variant="secondary">{row.original.categoria}</Badge>,
   },
   {
     id: "categoria",
@@ -120,10 +116,7 @@ export function CuentasTreeTable({ data }: { data: CuentaNode[] }) {
           <TableRow key={headerGroup.id}>
             {headerGroup.headers.map((header) => (
               <TableHead key={header.id}>
-                {flexRender(
-                  header.column.columnDef.header,
-                  header.getContext(),
-                )}
+                {flexRender(header.column.columnDef.header, header.getContext())}
               </TableHead>
             ))}
           </TableRow>

@@ -89,55 +89,51 @@ export type Alerta = {
 };
 
 export async function getKpisPrincipales(): Promise<KpisPrincipales> {
-  const [bancosCaja, pasivo, ingresos, egresos, asientosCount] =
-    await Promise.all([
-      db.lineaAsiento.aggregate({
-        where: {
-          asiento: { estado: AsientoEstado.CONTABILIZADO },
-          cuenta: {
-            tipo: CuentaTipo.ANALITICA,
-            OR: [
-              { codigo: { startsWith: "1.1.1." } },
-              { codigo: { startsWith: "1.1.2." } },
-            ],
-          },
+  const [bancosCaja, pasivo, ingresos, egresos, asientosCount] = await Promise.all([
+    db.lineaAsiento.aggregate({
+      where: {
+        asiento: { estado: AsientoEstado.CONTABILIZADO },
+        cuenta: {
+          tipo: CuentaTipo.ANALITICA,
+          OR: [{ codigo: { startsWith: "1.1.1." } }, { codigo: { startsWith: "1.1.2." } }],
         },
-        _sum: { debe: true, haber: true },
-      }),
-      db.lineaAsiento.aggregate({
-        where: {
-          asiento: { estado: AsientoEstado.CONTABILIZADO },
-          cuenta: {
-            tipo: CuentaTipo.ANALITICA,
-            categoria: CuentaCategoria.PASIVO,
-          },
+      },
+      _sum: { debe: true, haber: true },
+    }),
+    db.lineaAsiento.aggregate({
+      where: {
+        asiento: { estado: AsientoEstado.CONTABILIZADO },
+        cuenta: {
+          tipo: CuentaTipo.ANALITICA,
+          categoria: CuentaCategoria.PASIVO,
         },
-        _sum: { debe: true, haber: true },
-      }),
-      db.lineaAsiento.aggregate({
-        where: {
-          asiento: { estado: AsientoEstado.CONTABILIZADO },
-          cuenta: {
-            tipo: CuentaTipo.ANALITICA,
-            categoria: CuentaCategoria.INGRESO,
-          },
+      },
+      _sum: { debe: true, haber: true },
+    }),
+    db.lineaAsiento.aggregate({
+      where: {
+        asiento: { estado: AsientoEstado.CONTABILIZADO },
+        cuenta: {
+          tipo: CuentaTipo.ANALITICA,
+          categoria: CuentaCategoria.INGRESO,
         },
-        _sum: { debe: true, haber: true },
-      }),
-      db.lineaAsiento.aggregate({
-        where: {
-          asiento: { estado: AsientoEstado.CONTABILIZADO },
-          cuenta: {
-            tipo: CuentaTipo.ANALITICA,
-            categoria: CuentaCategoria.EGRESO,
-          },
+      },
+      _sum: { debe: true, haber: true },
+    }),
+    db.lineaAsiento.aggregate({
+      where: {
+        asiento: { estado: AsientoEstado.CONTABILIZADO },
+        cuenta: {
+          tipo: CuentaTipo.ANALITICA,
+          categoria: CuentaCategoria.EGRESO,
         },
-        _sum: { debe: true, haber: true },
-      }),
-      db.asiento.count({
-        where: { estado: AsientoEstado.CONTABILIZADO },
-      }),
-    ]);
+      },
+      _sum: { debe: true, haber: true },
+    }),
+    db.asiento.count({
+      where: { estado: AsientoEstado.CONTABILIZADO },
+    }),
+  ]);
 
   const saldoBancosCaja = toDecimal(bancosCaja._sum.debe ?? 0)
     .minus(toDecimal(bancosCaja._sum.haber ?? 0))
@@ -150,9 +146,7 @@ export async function getKpisPrincipales(): Promise<KpisPrincipales> {
   const totalIngresos = toDecimal(ingresos._sum.haber ?? 0).minus(
     toDecimal(ingresos._sum.debe ?? 0),
   );
-  const totalEgresos = toDecimal(egresos._sum.debe ?? 0).minus(
-    toDecimal(egresos._sum.haber ?? 0),
-  );
+  const totalEgresos = toDecimal(egresos._sum.debe ?? 0).minus(toDecimal(egresos._sum.haber ?? 0));
   const resultadoEjercicio = totalIngresos
     .minus(totalEgresos)
     .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
@@ -194,10 +188,7 @@ export async function getSaldosBancarios(): Promise<SaldoBancario[]> {
     where: {
       tipo: CuentaTipo.ANALITICA,
       activa: true,
-      OR: [
-        { codigo: { startsWith: "1.1.1." } },
-        { codigo: { startsWith: "1.1.2." } },
-      ],
+      OR: [{ codigo: { startsWith: "1.1.1." } }, { codigo: { startsWith: "1.1.2." } }],
     },
     select: {
       id: true,
@@ -290,24 +281,14 @@ export async function getPrestamosActivos(): Promise<PrestamoActivo[]> {
 
   if (prestamos.length === 0) return [];
 
-  const saldos = await calcularSaldosPrestamos(
-    prestamos.map((p) => p.cuentaContableId),
-  );
+  const saldos = await calcularSaldosPrestamos(prestamos.map((p) => p.cuentaContableId));
 
   return prestamos
     .map((p) => {
-      const principal = toDecimal(p.principal).toDecimalPlaces(
-        2,
-        Decimal.ROUND_HALF_UP,
-      );
-      const tipoCambio = toDecimal(p.tipoCambio).toDecimalPlaces(
-        6,
-        Decimal.ROUND_HALF_UP,
-      );
+      const principal = toDecimal(p.principal).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+      const tipoCambio = toDecimal(p.tipoCambio).toDecimalPlaces(6, Decimal.ROUND_HALF_UP);
       const saldoPendiente = saldos.get(p.cuentaContableId) ?? new Decimal(0);
-      const equivalenteARS = principal
-        .times(tipoCambio)
-        .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+      const equivalenteARS = principal.times(tipoCambio).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
       return {
         id: p.id,
         prestamista: p.prestamista,
@@ -324,24 +305,20 @@ export async function getPrestamosActivos(): Promise<PrestamoActivo[]> {
 export async function getAlertasDashboard(): Promise<Alerta[]> {
   const ahora = new Date();
 
-  const [
-    periodosAbiertos,
-    periodosVencidos,
-    asientosBorrador,
-    descuadradosRows,
-  ] = await Promise.all([
-    db.periodoContable.count({ where: { estado: PeriodoEstado.ABIERTO } }),
-    db.periodoContable.count({
-      where: { estado: PeriodoEstado.ABIERTO, fechaFin: { lt: ahora } },
-    }),
-    db.asiento.count({ where: { estado: AsientoEstado.BORRADOR } }),
-    db.$queryRaw<{ count: bigint }[]>`
+  const [periodosAbiertos, periodosVencidos, asientosBorrador, descuadradosRows] =
+    await Promise.all([
+      db.periodoContable.count({ where: { estado: PeriodoEstado.ABIERTO } }),
+      db.periodoContable.count({
+        where: { estado: PeriodoEstado.ABIERTO, fechaFin: { lt: ahora } },
+      }),
+      db.asiento.count({ where: { estado: AsientoEstado.BORRADOR } }),
+      db.$queryRaw<{ count: bigint }[]>`
       SELECT COUNT(*)::bigint AS count
       FROM "Asiento"
       WHERE estado = 'CONTABILIZADO'
         AND "totalDebe" <> "totalHaber"
     `,
-  ]);
+    ]);
 
   const descuadrados = Number(descuadradosRows[0]?.count ?? 0);
   const alertas: Alerta[] = [];
@@ -397,9 +374,7 @@ export async function getAlertasDashboard(): Promise<Alerta[]> {
  */
 export async function getIngresosEgresosUltimos6m(): Promise<IngresoEgresoMensual[]> {
   const ahora = new Date();
-  const desde = new Date(
-    Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth() - 5, 1, 0, 0, 0),
-  );
+  const desde = new Date(Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth() - 5, 1, 0, 0, 0));
 
   const lineas = await db.lineaAsiento.findMany({
     where: {
@@ -420,14 +395,9 @@ export async function getIngresosEgresosUltimos6m(): Promise<IngresoEgresoMensua
   });
 
   // Inicializar 6 meses (incluindo o atual) com 0.
-  const buckets = new Map<
-    string,
-    { ingresos: Decimal; egresos: Decimal }
-  >();
+  const buckets = new Map<string, { ingresos: Decimal; egresos: Decimal }>();
   for (let i = 5; i >= 0; i--) {
-    const d = new Date(
-      Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth() - i, 1),
-    );
+    const d = new Date(Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth() - i, 1));
     const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
     buckets.set(key, { ingresos: new Decimal(0), egresos: new Decimal(0) });
   }

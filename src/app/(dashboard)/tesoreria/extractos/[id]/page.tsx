@@ -14,7 +14,13 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-import { LineasReview, type LineaRow, type CuentaOption, type ProveedorOption, type ClienteOption } from "./lineas-review";
+import {
+  LineasReview,
+  type LineaRow,
+  type CuentaOption,
+  type ProveedorOption,
+  type ClienteOption,
+} from "./lineas-review";
 
 const STATUS_LABEL: Record<ImportacionExtractoStatus, string> = {
   PENDIENTE: "Pendiente",
@@ -141,8 +147,7 @@ export default async function ExtractoDetallePage({
             <p className="text-sm text-muted-foreground">
               {imp.cuentaBancaria.moneda}
               {imp.cuentaBancaria.numero ? ` · cuenta ${imp.cuentaBancaria.numero}` : ""} ·{" "}
-              importado {fmtDate(imp.createdAt)} ·{" "}
-              {imp.archivoNombre ?? "(sin nombre)"}
+              importado {fmtDate(imp.createdAt)} · {imp.archivoNombre ?? "(sin nombre)"}
             </p>
           </div>
           <Badge variant="outline">{STATUS_LABEL[imp.status]}</Badge>

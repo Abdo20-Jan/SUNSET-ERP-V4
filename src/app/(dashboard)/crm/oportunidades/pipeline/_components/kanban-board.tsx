@@ -53,9 +53,7 @@ export function KanbanBoard({
     if (!cardId) return;
     const card = cards.find((c) => c.id === cardId);
     if (!card || card.stageId === stageId) return;
-    setCards((prev) =>
-      prev.map((c) => (c.id === cardId ? { ...c, stageId } : c)),
-    );
+    setCards((prev) => prev.map((c) => (c.id === cardId ? { ...c, stageId } : c)));
     setError(null);
     start(async () => {
       const r = await moverStageAction(cardId, stageId);
@@ -121,9 +119,7 @@ export function KanbanBoard({
                     </div>
                   </div>
                 ))}
-                {stageCards.length === 0 && (
-                  <p className="text-xs text-muted-foreground">—</p>
-                )}
+                {stageCards.length === 0 && <p className="text-xs text-muted-foreground">—</p>}
               </div>
             </div>
           );

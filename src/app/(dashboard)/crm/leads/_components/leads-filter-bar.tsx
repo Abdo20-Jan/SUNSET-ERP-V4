@@ -25,7 +25,9 @@ export function LeadsFilterBar({
         <select name="estado" defaultValue={estado ?? ""} className="rounded-md border px-3 py-1.5">
           <option value="">Todos</option>
           {LEAD_ESTADOS.map((e) => (
-            <option key={e} value={e}>{e}</option>
+            <option key={e} value={e}>
+              {e}
+            </option>
           ))}
         </select>
       </label>
@@ -34,14 +36,13 @@ export function LeadsFilterBar({
         <select name="fuente" defaultValue={fuente ?? ""} className="rounded-md border px-3 py-1.5">
           <option value="">Todas</option>
           {LEAD_FUENTES.map((f) => (
-            <option key={f} value={f}>{f}</option>
+            <option key={f} value={f}>
+              {f}
+            </option>
           ))}
         </select>
       </label>
-      <button
-        type="submit"
-        className="rounded-md border px-3 py-1.5 hover:bg-muted"
-      >
+      <button type="submit" className="rounded-md border px-3 py-1.5 hover:bg-muted">
         Filtrar
       </button>
     </form>

@@ -11,12 +11,7 @@ import {
   contabilizarAsiento,
   crearAsientoGasto,
 } from "@/lib/services/asiento-automatico";
-import {
-  CondicionPago,
-  GastoEstado,
-  Moneda,
-  Prisma,
-} from "@/generated/prisma/client";
+import { CondicionPago, GastoEstado, Moneda, Prisma } from "@/generated/prisma/client";
 
 export type GastoRow = {
   id: string;
@@ -78,9 +73,7 @@ export type ProveedorParaGasto = {
   cuentaGastoContableId: number | null;
 };
 
-export async function listarProveedoresParaGasto(): Promise<
-  ProveedorParaGasto[]
-> {
+export async function listarProveedoresParaGasto(): Promise<ProveedorParaGasto[]> {
   const rows = await db.proveedor.findMany({
     where: { estado: "activo" },
     orderBy: { nombre: "asc" },
@@ -140,9 +133,7 @@ export type GastoDetalle = {
   }>;
 };
 
-export async function obtenerGastoPorId(
-  id: string,
-): Promise<GastoDetalle | null> {
+export async function obtenerGastoPorId(id: string): Promise<GastoDetalle | null> {
   const g = await db.gasto.findUnique({
     where: { id },
     include: { lineas: { orderBy: { id: "asc" } } },
@@ -185,7 +176,7 @@ export async function generarNumeroGasto(): Promise<string> {
   });
   let next = 1;
   if (ultimo) {
-    const parsed = parseInt(ultimo.numero.slice(prefix.length), 10);
+    const parsed = Number.parseInt(ultimo.numero.slice(prefix.length), 10);
     if (!Number.isNaN(parsed)) next = parsed + 1;
   }
   return `${prefix}${String(next).padStart(4, "0")}`;
@@ -253,9 +244,7 @@ export type GastoActionResult =
   | { ok: true; id: string; numero: string }
   | { ok: false; error: string };
 
-export async function guardarGastoAction(
-  raw: GastoInput,
-): Promise<GastoActionResult> {
+export async function guardarGastoAction(raw: GastoInput): Promise<GastoActionResult> {
   const parsed = gastoInputSchema.safeParse(raw);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
@@ -273,9 +262,7 @@ export async function guardarGastoAction(
         numero: input.numero,
         proveedorId: input.proveedorId,
         fecha: new Date(input.fecha),
-        fechaVencimiento: input.fechaVencimiento
-          ? new Date(input.fechaVencimiento)
-          : null,
+        fechaVencimiento: input.fechaVencimiento ? new Date(input.fechaVencimiento) : null,
         condicionPago: input.condicionPago,
         moneda: input.moneda,
         tipoCambio: new Prisma.Decimal(input.tipoCambio),
@@ -327,10 +314,7 @@ export async function guardarGastoAction(
     revalidatePath(`/gastos/${saved.id}`);
     return { ok: true, id: saved.id, numero: saved.numero };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: `El número "${input.numero}" ya existe.` };
     }
     if (err instanceof Error) return { ok: false, error: err.message };
@@ -349,10 +333,7 @@ export async function contabilizarGastoAction(
       });
       if (!g) throw new AsientoError("DOMINIO_INVALIDO", "Gasto no existe.");
       if (g.asientoId) {
-        throw new AsientoError(
-          "DOMINIO_INVALIDO",
-          `Gasto ${g.numero} ya tiene asiento.`,
-        );
+        throw new AsientoError("DOMINIO_INVALIDO", `Gasto ${g.numero} ya tiene asiento.`);
       }
       if (g.estado !== "BORRADOR") {
         throw new AsientoError(

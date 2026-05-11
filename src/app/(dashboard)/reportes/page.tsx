@@ -8,26 +8,19 @@ import {
   CreditCardIcon,
 } from "@hugeicons/core-free-icons";
 
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const REPORTES = [
   {
     href: "/reportes/libro-diario",
     title: "Libro Diario",
-    description:
-      "Todos los asientos contabilizados del período, con sus líneas Debe/Haber.",
+    description: "Todos los asientos contabilizados del período, con sus líneas Debe/Haber.",
     icon: BookOpen01Icon,
   },
   {
     href: "/reportes/libro-mayor",
     title: "Libro Mayor",
-    description:
-      "Movimientos por cuenta analítica con saldo acumulado progresivo.",
+    description: "Movimientos por cuenta analítica con saldo acumulado progresivo.",
     icon: Invoice01Icon,
   },
   {
@@ -40,8 +33,7 @@ const REPORTES = [
   {
     href: "/reportes/estado-resultados",
     title: "Estado de Resultados",
-    description:
-      "Ingresos y Egresos del período, resultado neto destacado (ganancia/pérdida).",
+    description: "Ingresos y Egresos del período, resultado neto destacado (ganancia/pérdida).",
     icon: ChartLineData01Icon,
   },
   {

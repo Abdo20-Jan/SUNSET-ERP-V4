@@ -47,9 +47,7 @@ function buildMesOptions(): string[] {
   const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   // -18 ... +18 months inclusive
   for (let i = -18; i <= 18; i++) {
-    const d = new Date(
-      Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + i, 1),
-    );
+    const d = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + i, 1));
     const y = d.getUTCFullYear();
     const m = String(d.getUTCMonth() + 1).padStart(2, "0");
     out.push(`${y}-${m}`);
@@ -112,10 +110,7 @@ export function FlujoFilters({ desde, hasta, moneda }: Props) {
       </div>
       <div className="flex flex-col gap-1.5">
         <Label className="text-xs text-muted-foreground">Moneda</Label>
-        <Select
-          value={moneda}
-          onValueChange={(v) => v && setParam("moneda", v)}
-        >
+        <Select value={moneda} onValueChange={(v) => v && setParam("moneda", v)}>
           <SelectTrigger className="min-w-24">
             <SelectValue>{(v) => v as string}</SelectValue>
           </SelectTrigger>

@@ -7,12 +7,7 @@ import {
   BalanceScaleIcon,
 } from "@hugeicons/core-free-icons";
 
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const SECTIONS = [
   {
@@ -46,9 +41,7 @@ export default function ContabilidadPage() {
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
         <h1 className="text-[15px] font-semibold tracking-tight">Contabilidad</h1>
-        <p className="text-sm text-muted-foreground">
-          Seleccioná una sección.
-        </p>
+        <p className="text-sm text-muted-foreground">Seleccioná una sección.</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {SECTIONS.map((section) => (

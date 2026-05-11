@@ -11,8 +11,7 @@ export default async function ProductosPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-[15px] font-semibold tracking-tight">Productos</h1>
         <p className="text-sm text-muted-foreground">
-          {productos.length} producto{productos.length === 1 ? "" : "s"} en el
-          catálogo.
+          {productos.length} producto{productos.length === 1 ? "" : "s"} en el catálogo.
         </p>
       </div>
 

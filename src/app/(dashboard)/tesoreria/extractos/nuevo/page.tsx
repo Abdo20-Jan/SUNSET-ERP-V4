@@ -27,12 +27,10 @@ export default async function NuevoExtractoPage() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-[15px] font-semibold tracking-tight">
-          Importar extracto bancario
-        </h1>
+        <h1 className="text-[15px] font-semibold tracking-tight">Importar extracto bancario</h1>
         <p className="text-sm text-muted-foreground">
-          Subí el PDF del extracto. El sistema lo lee con IA y propone los
-          asientos línea por línea para tu aprobación.
+          Subí el PDF del extracto. El sistema lo lee con IA y propone los asientos línea por línea
+          para tu aprobación.
         </p>
       </div>
 

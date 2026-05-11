@@ -25,9 +25,7 @@ export function SaldosBancosCard({ saldos }: { saldos: SaldoBancario[] }) {
     <Card>
       <CardHeader className="border-b">
         <CardTitle>Saldos por Banco / Caja</CardTitle>
-        <CardDescription>
-          Saldo contable de cada cuenta analítica de Caja y Bancos.
-        </CardDescription>
+        <CardDescription>Saldo contable de cada cuenta analítica de Caja y Bancos.</CardDescription>
         <CardAction>
           <Link
             href="/tesoreria"
@@ -56,9 +54,7 @@ export function SaldosBancosCard({ saldos }: { saldos: SaldoBancario[] }) {
                 <TableRow key={s.cuentaId}>
                   <TableCell className="pl-6">
                     <div className="flex flex-col">
-                      <span className="font-medium">
-                        {s.banco ?? s.nombre}
-                      </span>
+                      <span className="font-medium">{s.banco ?? s.nombre}</span>
                       <span className="text-xs text-muted-foreground">
                         {s.codigo}
                         {s.banco ? ` · ${s.nombre}` : ""}

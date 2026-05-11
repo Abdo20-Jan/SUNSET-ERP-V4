@@ -45,14 +45,13 @@ export type SerializedAsientoDiario = {
   lineas: SerializedLineaDiario[];
 };
 
-const ORIGEN_VARIANT: Record<AsientoOrigen, "default" | "secondary" | "outline"> =
-  {
-    MANUAL: "outline",
-    TESORERIA: "secondary",
-    COMEX: "default",
-    AJUSTE: "outline",
-    GASTO: "secondary",
-  };
+const ORIGEN_VARIANT: Record<AsientoOrigen, "default" | "secondary" | "outline"> = {
+  MANUAL: "outline",
+  TESORERIA: "secondary",
+  COMEX: "default",
+  AJUSTE: "outline",
+  GASTO: "secondary",
+};
 
 function AsientoCard({
   asiento,
@@ -77,9 +76,7 @@ function AsientoCard({
           icon={open ? ArrowDown01Icon : ArrowRight01Icon}
           className="size-4 shrink-0 text-muted-foreground"
         />
-        <span className="w-16 shrink-0 font-mono text-xs tabular-nums">
-          #{asiento.numero}
-        </span>
+        <span className="w-16 shrink-0 font-mono text-xs tabular-nums">#{asiento.numero}</span>
         <span className="w-24 shrink-0 font-mono text-xs text-muted-foreground">
           {format(new Date(asiento.fecha), "yyyy-MM-dd")}
         </span>
@@ -120,9 +117,7 @@ function AsientoCard({
             <TableBody>
               {asiento.lineas.map((l) => (
                 <TableRow key={l.id}>
-                  <TableCell className="py-2 font-mono text-xs">
-                    {l.cuentaCodigo}
-                  </TableCell>
+                  <TableCell className="py-2 font-mono text-xs">{l.cuentaCodigo}</TableCell>
                   <TableCell className="py-2">{l.cuentaNombre}</TableCell>
                   <TableCell className="py-2 text-xs text-muted-foreground">
                     {l.descripcion ?? "—"}

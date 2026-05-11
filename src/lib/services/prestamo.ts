@@ -4,12 +4,7 @@ import Decimal from "decimal.js";
 
 import { db } from "@/lib/db";
 import { toDecimal, type MoneyInput } from "@/lib/decimal";
-import {
-  AsientoEstado,
-  Moneda,
-  MovimientoTesoreriaTipo,
-  Prisma,
-} from "@/generated/prisma/client";
+import { AsientoEstado, Moneda, MovimientoTesoreriaTipo, Prisma } from "@/generated/prisma/client";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -87,10 +82,7 @@ export async function calcularSaldosPrestamos(
   for (const row of grouped) {
     const debe = toDecimal(row._sum.debe ?? 0);
     const haber = toDecimal(row._sum.haber ?? 0);
-    result.set(
-      row.cuentaId,
-      haber.minus(debe).toDecimalPlaces(2, Decimal.ROUND_HALF_UP),
-    );
+    result.set(row.cuentaId, haber.minus(debe).toDecimalPlaces(2, Decimal.ROUND_HALF_UP));
   }
   return result;
 }
@@ -114,10 +106,7 @@ export async function listarAmortizacionesPrestamo(
     fecha: m.fecha,
     monto: toDecimal(m.monto).toDecimalPlaces(2, Decimal.ROUND_HALF_UP),
     moneda: m.moneda,
-    tipoCambio: toDecimal(m.tipoCambio).toDecimalPlaces(
-      6,
-      Decimal.ROUND_HALF_UP,
-    ),
+    tipoCambio: toDecimal(m.tipoCambio).toDecimalPlaces(6, Decimal.ROUND_HALF_UP),
     cuentaBancaria: {
       id: m.cuentaBancaria.id,
       banco: m.cuentaBancaria.banco,
@@ -157,10 +146,7 @@ export async function resumirAmortizaciones(
   });
   return {
     count: agg._count._all,
-    totalMonto: toDecimal(agg._sum.monto ?? 0).toDecimalPlaces(
-      2,
-      Decimal.ROUND_HALF_UP,
-    ),
+    totalMonto: toDecimal(agg._sum.monto ?? 0).toDecimalPlaces(2, Decimal.ROUND_HALF_UP),
     ultimaFecha: agg._max.fecha ?? null,
   };
 }
@@ -171,10 +157,7 @@ export async function validarSaldoSuficientePrestamo(
   tx?: TxClient,
 ): Promise<SaldoSuficienteResult> {
   const saldoActual = await calcularSaldoPrestamo(cuentaContableId, tx);
-  const intento = toDecimal(intentoArs).toDecimalPlaces(
-    2,
-    Decimal.ROUND_HALF_UP,
-  );
+  const intento = toDecimal(intentoArs).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 
   if (intento.lte(saldoActual)) {
     return { ok: true, saldoActual };
@@ -184,9 +167,7 @@ export async function validarSaldoSuficientePrestamo(
     ok: false,
     saldoActual,
     intento,
-    faltante: intento
-      .minus(saldoActual)
-      .toDecimalPlaces(2, Decimal.ROUND_HALF_UP),
+    faltante: intento.minus(saldoActual).toDecimalPlaces(2, Decimal.ROUND_HALF_UP),
   };
 }
 

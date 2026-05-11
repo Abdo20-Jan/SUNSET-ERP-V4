@@ -10,9 +10,7 @@ export type PeriodoActionResult =
   | { ok: true; codigo: string; estado: PeriodoEstado }
   | { ok: false; error: string };
 
-export async function cerrarPeriodo(
-  periodoId: number,
-): Promise<PeriodoActionResult> {
+export async function cerrarPeriodo(periodoId: number): Promise<PeriodoActionResult> {
   const session = await auth();
   if (!session) {
     return { ok: false, error: "No autorizado." };
@@ -56,9 +54,7 @@ export async function cerrarPeriodo(
   };
 }
 
-export async function reabrirPeriodo(
-  periodoId: number,
-): Promise<PeriodoActionResult> {
+export async function reabrirPeriodo(periodoId: number): Promise<PeriodoActionResult> {
   const session = await auth();
   if (!session) {
     return { ok: false, error: "No autorizado." };

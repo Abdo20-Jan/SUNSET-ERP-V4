@@ -62,7 +62,9 @@ export function TemplateForm({ mode, templateId, initial }: Props) {
   return (
     <form action={handleSubmit} className="space-y-4">
       <label className="flex flex-col gap-1 text-sm">
-        <span>Nombre <span className="text-red-700">*</span></span>
+        <span>
+          Nombre <span className="text-red-700">*</span>
+        </span>
         <input
           name="nombre"
           defaultValue={initial?.nombre ?? ""}
@@ -71,7 +73,9 @@ export function TemplateForm({ mode, templateId, initial }: Props) {
         />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span>Asunto <span className="text-red-700">*</span></span>
+        <span>
+          Asunto <span className="text-red-700">*</span>
+        </span>
         <input
           name="asunto"
           defaultValue={initial?.asunto ?? ""}
@@ -80,7 +84,9 @@ export function TemplateForm({ mode, templateId, initial }: Props) {
         />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span>Cuerpo <span className="text-red-700">*</span></span>
+        <span>
+          Cuerpo <span className="text-red-700">*</span>
+        </span>
         <textarea
           name="cuerpo"
           defaultValue={initial?.cuerpo ?? ""}
@@ -90,11 +96,7 @@ export function TemplateForm({ mode, templateId, initial }: Props) {
         />
       </label>
       <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          name="activo"
-          defaultChecked={initial?.activo ?? true}
-        />
+        <input type="checkbox" name="activo" defaultChecked={initial?.activo ?? true} />
         Activo
       </label>
 

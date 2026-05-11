@@ -2,13 +2,7 @@ import Link from "next/link";
 
 import { db } from "@/lib/db";
 import { getExtractoBancario } from "@/lib/services/extracto-bancario";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -92,14 +86,11 @@ export default async function ExtractoPage({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-[15px] font-semibold tracking-tight">
-          Extracto bancario
-        </h1>
+        <h1 className="text-[15px] font-semibold tracking-tight">Extracto bancario</h1>
         <p className="text-sm text-muted-foreground">
-          Movimientos de una cuenta bancaria con saldo corrido — equivalente
-          al extracto del banco. Saldo inicial calculado de los movimientos
-          previos al rango. Saldo final = saldo inicial + Σ (débitos −
-          créditos) del rango.
+          Movimientos de una cuenta bancaria con saldo corrido — equivalente al extracto del banco.
+          Saldo inicial calculado de los movimientos previos al rango. Saldo final = saldo inicial +
+          Σ (débitos − créditos) del rango.
         </p>
       </div>
 
@@ -117,11 +108,7 @@ export default async function ExtractoPage({
             />
           </div>
           <div className="md:flex-shrink-0">
-            <DateRangeFilter
-              initialDesde={desdeStr}
-              initialHasta={hastaStr}
-              hoyLabel="Hoy"
-            />
+            <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} hoyLabel="Hoy" />
           </div>
         </CardContent>
       </Card>
@@ -140,16 +127,8 @@ export default async function ExtractoPage({
               value={extracto.saldoInicial}
               hint={extracto.desde ? extracto.desde.toISOString().slice(0, 10) : "—"}
             />
-            <KpiCard
-              label="Total débitos (entradas)"
-              value={extracto.totalDebe}
-              tone="positive"
-            />
-            <KpiCard
-              label="Total créditos (salidas)"
-              value={extracto.totalHaber}
-              tone="negative"
-            />
+            <KpiCard label="Total débitos (entradas)" value={extracto.totalDebe} tone="positive" />
+            <KpiCard label="Total créditos (salidas)" value={extracto.totalHaber} tone="negative" />
             <KpiCard
               label="Saldo final"
               value={extracto.saldoFinal}
@@ -162,16 +141,13 @@ export default async function ExtractoPage({
             <CardHeader className="flex flex-row items-center justify-between gap-2 py-3">
               <div className="flex flex-col gap-0.5">
                 <CardTitle className="text-[14px]">
-                  {extracto.cuentaBancaria.banco} ·{" "}
-                  {extracto.cuentaBancaria.numero ?? "—"} ·{" "}
+                  {extracto.cuentaBancaria.banco} · {extracto.cuentaBancaria.numero ?? "—"} ·{" "}
                   {extracto.cuentaBancaria.moneda}
                 </CardTitle>
                 <CardDescription>
                   {extracto.cuentaBancaria.cuentaContableCodigo}{" "}
                   {extracto.cuentaBancaria.cuentaContableNombre}
-                  {extracto.cuentaBancaria.cbu
-                    ? ` · CBU ${extracto.cuentaBancaria.cbu}`
-                    : null}
+                  {extracto.cuentaBancaria.cbu ? ` · CBU ${extracto.cuentaBancaria.cbu}` : null}
                 </CardDescription>
               </div>
               <span className="text-[12px] text-muted-foreground">
@@ -189,15 +165,9 @@ export default async function ExtractoPage({
                       <TableHead className="w-32">Factura</TableHead>
                       <TableHead>Proveedor / Contrapartida</TableHead>
                       <TableHead>Descripción</TableHead>
-                      <TableHead className="w-32 text-right">
-                        Débito (entrada)
-                      </TableHead>
-                      <TableHead className="w-32 text-right">
-                        Crédito (salida)
-                      </TableHead>
-                      <TableHead className="w-32 text-right">
-                        Saldo final
-                      </TableHead>
+                      <TableHead className="w-32 text-right">Débito (entrada)</TableHead>
+                      <TableHead className="w-32 text-right">Crédito (salida)</TableHead>
+                      <TableHead className="w-32 text-right">Saldo final</TableHead>
                       <TableHead className="w-16"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -209,9 +179,7 @@ export default async function ExtractoPage({
                         className="text-[12px] uppercase tracking-wider text-muted-foreground"
                       >
                         Saldo inicial al{" "}
-                        {extracto.desde
-                          ? extracto.desde.toISOString().slice(0, 10)
-                          : "(inicio)"}
+                        {extracto.desde ? extracto.desde.toISOString().slice(0, 10) : "(inicio)"}
                       </TableCell>
                       <TableCell className="text-right font-mono text-[13px] font-semibold tabular-nums">
                         {fmtMoney(extracto.saldoInicial)}
@@ -262,9 +230,7 @@ export default async function ExtractoPage({
                             )}
                           </TableCell>
                           <TableCell className="text-[12px] text-muted-foreground">
-                            <span className="line-clamp-2">
-                              {l.descripcion}
-                            </span>
+                            <span className="line-clamp-2">{l.descripcion}</span>
                           </TableCell>
                           <TableCell className="text-right font-mono text-[13px] tabular-nums">
                             {debeNum > 0 ? (
@@ -286,11 +252,7 @@ export default async function ExtractoPage({
                           </TableCell>
                           <TableCell className="text-right font-mono text-[13px] font-semibold tabular-nums">
                             <span
-                              className={
-                                saldoNum < 0
-                                  ? "text-rose-700 dark:text-rose-400"
-                                  : ""
-                              }
+                              className={saldoNum < 0 ? "text-rose-700 dark:text-rose-400" : ""}
                             >
                               {saldoNum < 0
                                 ? `(${fmtMoney(Math.abs(saldoNum).toFixed(2))})`
@@ -318,9 +280,7 @@ export default async function ExtractoPage({
                           className="text-[12px] uppercase tracking-wider text-muted-foreground"
                         >
                           Saldo final al{" "}
-                          {extracto.hasta
-                            ? extracto.hasta.toISOString().slice(0, 10)
-                            : "(hoy)"}
+                          {extracto.hasta ? extracto.hasta.toISOString().slice(0, 10) : "(hoy)"}
                         </TableCell>
                         <TableCell className="text-right font-mono text-[13px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
                           {fmtMoney(extracto.totalDebe)}
@@ -373,25 +333,13 @@ function KpiCard({
           ? "text-rose-700 dark:text-rose-400"
           : "";
   return (
-    <Card
-      className={
-        destacar
-          ? "border-l-4 border-l-primary"
-          : ""
-      }
-    >
+    <Card className={destacar ? "border-l-4 border-l-primary" : ""}>
       <CardContent className="flex flex-col gap-0.5">
-        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-          {label}
-        </span>
+        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</span>
         <span className={`font-mono text-[15px] font-semibold tabular-nums ${cls}`}>
-          {num < 0
-            ? `(${fmtMoney(Math.abs(num).toFixed(2))})`
-            : fmtMoney(value)}
+          {num < 0 ? `(${fmtMoney(Math.abs(num).toFixed(2))})` : fmtMoney(value)}
         </span>
-        {hint && (
-          <span className="text-[10px] text-muted-foreground">{hint}</span>
-        )}
+        {hint && <span className="text-[10px] text-muted-foreground">{hint}</span>}
       </CardContent>
     </Card>
   );

@@ -85,9 +85,7 @@ function MontoCell({
       className={cn(
         "block text-right font-mono text-xs tabular-nums",
         destacar && "font-semibold",
-        isNegative
-          ? "text-rose-600 dark:text-rose-400"
-          : "text-emerald-700 dark:text-emerald-400",
+        isNegative ? "text-rose-600 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400",
       )}
     >
       {isNegative ? `(${abs})` : `+ ${abs}`}
@@ -102,9 +100,7 @@ function rowClasses(node: SerializedNode, depth: number): string {
   if (node.tipo === "SINTETICA") {
     return "bg-muted/30 hover:bg-muted/40 font-medium";
   }
-  return depth % 2 === 1
-    ? "hover:bg-muted/30"
-    : "bg-muted/10 hover:bg-muted/30";
+  return depth % 2 === 1 ? "hover:bg-muted/30" : "bg-muted/10 hover:bg-muted/30";
 }
 
 function NodeRow({
@@ -132,12 +128,7 @@ function NodeRow({
           className={cn("py-1.5 sticky left-0 z-10", rowClasses(node, depth))}
           style={{ paddingLeft: `${indent + 12}px` }}
         >
-          <div
-            className={cn(
-              "flex items-center gap-1",
-              isRoot && "uppercase tracking-wide",
-            )}
-          >
+          <div className={cn("flex items-center gap-1", isRoot && "uppercase tracking-wide")}>
             {hasChildren ? (
               <button
                 type="button"
@@ -164,11 +155,7 @@ function NodeRow({
             <span
               className={cn(
                 "ml-1 truncate",
-                isRoot
-                  ? "text-sm font-bold"
-                  : node.tipo === "ANALITICA"
-                    ? "text-xs"
-                    : "text-sm",
+                isRoot ? "text-sm font-bold" : node.tipo === "ANALITICA" ? "text-xs" : "text-sm",
               )}
             >
               {node.nombre}
@@ -184,10 +171,7 @@ function NodeRow({
           </TableCell>
         ))}
         <TableCell className="py-1.5 border-l">
-          <MontoCell
-            monto={node.totalPeriodo}
-            destacar={node.tipo === "SINTETICA"}
-          />
+          <MontoCell monto={node.totalPeriodo} destacar={node.tipo === "SINTETICA"} />
         </TableCell>
       </TableRow>
       {isOpen
@@ -206,12 +190,7 @@ function NodeRow({
   );
 }
 
-export function FlujoMatriz({
-  meses,
-  contrapartidas,
-  transferencias,
-  totales,
-}: Props) {
+export function FlujoMatriz({ meses, contrapartidas, transferencias, totales }: Props) {
   // Por padrão expande los roots de cada sección
   const [expanded, setExpanded] = useState<Set<number>>(() => {
     const init = new Set<number>();
@@ -229,10 +208,7 @@ export function FlujoMatriz({
   };
 
   // Agrupar contrapartidas por categoría (sección económica)
-  const contrapartidasPorSeccion = new Map<
-    SerializedNode["categoria"],
-    SerializedNode[]
-  >();
+  const contrapartidasPorSeccion = new Map<SerializedNode["categoria"], SerializedNode[]>();
   for (const n of contrapartidas) {
     const arr = contrapartidasPorSeccion.get(n.categoria) ?? [];
     arr.push(n);
@@ -333,21 +309,12 @@ export function FlujoMatriz({
               Total Ingresos
             </TableCell>
             {meses.map((m) => (
-              <TableCell
-                key={m}
-                className="bg-emerald-100 py-2 dark:bg-emerald-950/40"
-              >
-                <MontoCell
-                  monto={totales.totalIngresosPorMes[m] ?? "0"}
-                  destacar
-                />
+              <TableCell key={m} className="bg-emerald-100 py-2 dark:bg-emerald-950/40">
+                <MontoCell monto={totales.totalIngresosPorMes[m] ?? "0"} destacar />
               </TableCell>
             ))}
             <TableCell className="bg-emerald-100 py-2 border-l dark:bg-emerald-950/40">
-              <MontoCell
-                monto={sumByKey(totales.totalIngresosPorMes, meses)}
-                destacar
-              />
+              <MontoCell monto={sumByKey(totales.totalIngresosPorMes, meses)} destacar />
             </TableCell>
           </TableRow>
 
@@ -356,21 +323,12 @@ export function FlujoMatriz({
               Total Egresos
             </TableCell>
             {meses.map((m) => (
-              <TableCell
-                key={m}
-                className="bg-rose-100 py-2 dark:bg-rose-950/40"
-              >
-                <MontoCell
-                  monto={totales.totalEgresosPorMes[m] ?? "0"}
-                  destacar
-                />
+              <TableCell key={m} className="bg-rose-100 py-2 dark:bg-rose-950/40">
+                <MontoCell monto={totales.totalEgresosPorMes[m] ?? "0"} destacar />
               </TableCell>
             ))}
             <TableCell className="bg-rose-100 py-2 border-l dark:bg-rose-950/40">
-              <MontoCell
-                monto={sumByKey(totales.totalEgresosPorMes, meses)}
-                destacar
-              />
+              <MontoCell monto={sumByKey(totales.totalEgresosPorMes, meses)} destacar />
             </TableCell>
           </TableRow>
 
@@ -383,10 +341,7 @@ export function FlujoMatriz({
               const value = totales.saldoMensalPorMes[m] ?? "0";
               const signo = fmtSigno(value);
               return (
-                <TableCell
-                  key={m}
-                  className="bg-slate-900 py-3 dark:bg-slate-800"
-                >
+                <TableCell key={m} className="bg-slate-900 py-3 dark:bg-slate-800">
                   <SaldoCell value={value} signo={signo} />
                 </TableCell>
               );
@@ -409,10 +364,7 @@ export function FlujoMatriz({
               const value = totales.saldoAcumuladoPorMes[m] ?? "0";
               const signo = fmtSigno(value);
               return (
-                <TableCell
-                  key={m}
-                  className="bg-slate-800 py-3 dark:bg-slate-900"
-                >
+                <TableCell key={m} className="bg-slate-800 py-3 dark:bg-slate-900">
                   <SaldoCell value={value} signo={signo} />
                 </TableCell>
               );

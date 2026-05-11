@@ -9,11 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 type Props = {
   value: string;
@@ -161,11 +157,7 @@ export function DatePicker({
               disabled={disabled}
               aria-label="Abrir calendario"
             >
-              <HugeiconsIcon
-                icon={Calendar03Icon}
-                strokeWidth={2}
-                className="size-4"
-              />
+              <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} className="size-4" />
             </Button>
           }
         />

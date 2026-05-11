@@ -41,9 +41,7 @@ export type ProveedorPrestamistaOption = {
  * Proveedores del exterior (pais != AR) — son los candidatos a prestamistas
  * para préstamos externos.
  */
-export async function listarProveedoresParaPrestamo(): Promise<
-  ProveedorPrestamistaOption[]
-> {
+export async function listarProveedoresParaPrestamo(): Promise<ProveedorPrestamistaOption[]> {
   const rows = await db.proveedor.findMany({
     where: { pais: { not: "AR" }, estado: "activo" },
     orderBy: { nombre: "asc" },
@@ -82,10 +80,7 @@ export async function listarCuentasContablesParaPrestamo(
     db.cuentaBancaria.findMany({ select: { cuentaContableId: true } }),
     db.prestamoExterno.findMany({
       where: {
-        OR: [
-          { asiento: { estado: { not: AsientoEstado.ANULADO } } },
-          { asientoId: null },
-        ],
+        OR: [{ asiento: { estado: { not: AsientoEstado.ANULADO } } }, { asientoId: null }],
       },
       select: { cuentaContableId: true },
     }),
@@ -164,9 +159,7 @@ export async function listarPrestamosConSaldo(
     },
   });
 
-  const cuentaIds = Array.from(
-    new Set(prestamos.map((p) => p.cuentaContableId)),
-  );
+  const cuentaIds = Array.from(new Set(prestamos.map((p) => p.cuentaContableId)));
   const saldos = await calcularSaldosPrestamos(cuentaIds);
 
   return prestamos.map((p) => ({
@@ -237,9 +230,7 @@ export type PrestamoDetalle = {
   createdAt: string;
 };
 
-export async function obtenerPrestamoDetalle(
-  id: string,
-): Promise<PrestamoDetalle | null> {
+export async function obtenerPrestamoDetalle(id: string): Promise<PrestamoDetalle | null> {
   const prestamo = await db.prestamoExterno.findUnique({
     where: { id },
     include: {
@@ -260,9 +251,7 @@ export async function obtenerPrestamoDetalle(
 
   if (!prestamo) return null;
 
-  const amortizaciones = await listarAmortizacionesPrestamo(
-    prestamo.cuentaContableId,
-  );
+  const amortizaciones = await listarAmortizacionesPrestamo(prestamo.cuentaContableId);
 
   const saldos = await calcularSaldosPrestamos([prestamo.cuentaContableId]);
   const saldo = saldos.get(prestamo.cuentaContableId) ?? "0";
@@ -392,9 +381,7 @@ const crearPrestamoSchema = z
     fecha: z.coerce.date(),
     principal: z.string().regex(MONEY_RE, "Principal inválido (máx. 2 decimales)"),
     moneda: z.nativeEnum(Moneda),
-    tipoCambio: z
-      .string()
-      .regex(FX_RE, "Tipo de cambio inválido (máx. 6 decimales)"),
+    tipoCambio: z.string().regex(FX_RE, "Tipo de cambio inválido (máx. 6 decimales)"),
     clasificacion: z.nativeEnum(PrestamoClasificacion),
     /** Si null/omitido, el sistema crea automáticamente la cuenta de pasivo */
     cuentaContableId: z.number().int().positive().nullable().optional(),
@@ -434,9 +421,7 @@ export type CrearPrestamoResult =
     }
   | { ok: false; error: string };
 
-export async function crearPrestamoAction(
-  raw: CrearPrestamoInput,
-): Promise<CrearPrestamoResult> {
+export async function crearPrestamoAction(raw: CrearPrestamoInput): Promise<CrearPrestamoResult> {
   const session = await auth();
   if (!session) {
     return { ok: false, error: "No autorizado." };
@@ -520,10 +505,7 @@ export async function crearPrestamoAction(
     const enUso = await db.prestamoExterno.findFirst({
       where: {
         cuentaContableId: cuentaContableIdProvisto,
-        OR: [
-          { asiento: { estado: { not: AsientoEstado.ANULADO } } },
-          { asientoId: null },
-        ],
+        OR: [{ asiento: { estado: { not: AsientoEstado.ANULADO } } }, { asientoId: null }],
       },
       select: { id: true },
     });
@@ -541,9 +523,7 @@ export async function crearPrestamoAction(
       let cuentaContableId = cuentaContableIdProvisto ?? null;
       if (cuentaContableId === null) {
         const rango =
-          clasificacion === PrestamoClasificacion.CORTO_PLAZO
-            ? "PRESTAMO_CP"
-            : "PRESTAMO_LP";
+          clasificacion === PrestamoClasificacion.CORTO_PLAZO ? "PRESTAMO_CP" : "PRESTAMO_LP";
         const nombre = `PRÉSTAMO ${prestamista.toUpperCase()} ${moneda}`;
         const cuenta = await crearCuentaParaEntidad(tx, rango, nombre);
         cuentaContableId = cuenta.id;
@@ -593,13 +573,9 @@ export async function crearPrestamoAction(
 // Anulación
 // ============================================================
 
-export type AnularPrestamoResult =
-  | { ok: true }
-  | { ok: false; error: string };
+export type AnularPrestamoResult = { ok: true } | { ok: false; error: string };
 
-export async function anularPrestamoAction(
-  prestamoId: string,
-): Promise<AnularPrestamoResult> {
+export async function anularPrestamoAction(prestamoId: string): Promise<AnularPrestamoResult> {
   const session = await auth();
   if (!session) {
     return { ok: false, error: "No autorizado." };

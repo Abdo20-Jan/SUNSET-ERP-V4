@@ -12,19 +12,14 @@ import { db } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
 
 export default async function MaestrosPage() {
-  const [
-    clientesCount,
-    proveedoresCount,
-    productosCount,
-    depositosCount,
-    cotizacionesCount,
-  ] = await Promise.all([
-    db.cliente.count(),
-    db.proveedor.count(),
-    db.producto.count(),
-    db.deposito.count(),
-    db.cotizacion.count(),
-  ]);
+  const [clientesCount, proveedoresCount, productosCount, depositosCount, cotizacionesCount] =
+    await Promise.all([
+      db.cliente.count(),
+      db.proveedor.count(),
+      db.producto.count(),
+      db.deposito.count(),
+      db.cotizacion.count(),
+    ]);
 
   const sections = [
     {
@@ -83,9 +78,7 @@ export default async function MaestrosPage() {
                 </div>
                 <div className="flex flex-1 flex-col gap-0.5">
                   <span className="text-sm font-medium">{s.title}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {s.description}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{s.description}</span>
                   <span className="mt-1 font-mono text-xs text-muted-foreground">
                     {s.count} registro{s.count === 1 ? "" : "s"}
                   </span>

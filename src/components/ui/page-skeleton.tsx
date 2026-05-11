@@ -13,12 +13,7 @@ type Props = {
  * y una tarjeta con N filas. Usar dentro de loading.tsx para reducir
  * shift visual mientras la página resuelve queries.
  */
-export function PageSkeleton({
-  title = true,
-  rows = 6,
-  cards = 1,
-  withFilters = false,
-}: Props) {
+export function PageSkeleton({ title = true, rows = 6, cards = 1, withFilters = false }: Props) {
   return (
     <div className="flex flex-col gap-6">
       {title && (

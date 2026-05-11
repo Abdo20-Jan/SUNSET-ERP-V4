@@ -39,10 +39,7 @@ export function fmtCredito(value: string): string {
  * Convierte un monto en ARS (string serializado) a USD usando un TC dado.
  * Si tc es null/0/undefined, devuelve el valor original sin tocar.
  */
-export function convertirAUsd(
-  valueArs: string,
-  tc: string | null | undefined,
-): string {
+export function convertirAUsd(valueArs: string, tc: string | null | undefined): string {
   if (!tc) return valueArs;
   const tcN = Number.parseFloat(tc);
   if (!Number.isFinite(tcN) || tcN <= 0) return valueArs;
@@ -94,10 +91,7 @@ export function vencimientoStatus(
   reference: Date = new Date(),
 ): VencimientoStatus {
   if (!fechaVencimiento) return "none";
-  const d =
-    typeof fechaVencimiento === "string"
-      ? new Date(fechaVencimiento)
-      : fechaVencimiento;
+  const d = typeof fechaVencimiento === "string" ? new Date(fechaVencimiento) : fechaVencimiento;
   if (Number.isNaN(d.getTime())) return "none";
 
   // Normalizar a inicio del día para evitar ruido de horas/minutos.
@@ -118,10 +112,7 @@ export function vencimientoLabel(
   reference: Date = new Date(),
 ): string {
   if (!fechaVencimiento) return "—";
-  const d =
-    typeof fechaVencimiento === "string"
-      ? new Date(fechaVencimiento)
-      : fechaVencimiento;
+  const d = typeof fechaVencimiento === "string" ? new Date(fechaVencimiento) : fechaVencimiento;
   if (Number.isNaN(d.getTime())) return "—";
 
   const today = new Date(reference);

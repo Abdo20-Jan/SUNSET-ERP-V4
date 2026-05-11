@@ -16,11 +16,7 @@ export function TransferenciaActions({
   if (estado === "ANULADA") return null;
 
   const onAnular = () => {
-    if (
-      !confirm(
-        "Anular esta transferencia? Restaurará el stock al depósito origen.",
-      )
-    ) {
+    if (!confirm("Anular esta transferencia? Restaurará el stock al depósito origen.")) {
       return;
     }
     start(async () => {

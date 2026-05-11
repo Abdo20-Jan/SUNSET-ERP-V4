@@ -7,11 +7,7 @@ import { useEffect } from "react";
  * el evento NO viene de un textarea/input editor con Cmd+S nativo.
  * Llama preventDefault para no abrir el "Guardar página" del navegador.
  */
-export function useCmdShortcut(
-  key: string,
-  callback: () => void,
-  enabled: boolean = true,
-) {
+export function useCmdShortcut(key: string, callback: () => void, enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     const handler = (e: KeyboardEvent) => {

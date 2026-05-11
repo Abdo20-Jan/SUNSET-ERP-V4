@@ -30,9 +30,7 @@ export function EmbarquesRecientesCard({
     <Card>
       <CardHeader className="border-b">
         <CardTitle>Embarques Recientes</CardTitle>
-        <CardDescription>
-          Últimos 5 embarques cargados en COMEX.
-        </CardDescription>
+        <CardDescription>Últimos 5 embarques cargados en COMEX.</CardDescription>
         <CardAction>
           <Link
             href="/comex/embarques"
@@ -44,9 +42,7 @@ export function EmbarquesRecientesCard({
       </CardHeader>
       <CardContent className="px-0">
         {embarques.length === 0 ? (
-          <p className="px-6 text-sm text-muted-foreground">
-            No hay embarques registrados.
-          </p>
+          <p className="px-6 text-sm text-muted-foreground">No hay embarques registrados.</p>
         ) : (
           <Table>
             <TableHeader>

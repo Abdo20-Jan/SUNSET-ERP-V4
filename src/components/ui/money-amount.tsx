@@ -51,12 +51,7 @@ export function MoneyAmount({
       return <span className={cn("text-muted-foreground/40", className)}>—</span>;
     }
     return (
-      <span
-        className={cn(
-          "font-mono tabular-nums text-rose-700 dark:text-rose-400",
-          className,
-        )}
-      >
+      <span className={cn("font-mono tabular-nums text-rose-700 dark:text-rose-400", className)}>
         {prefix}
         {abs}
       </span>
@@ -69,10 +64,7 @@ export function MoneyAmount({
     }
     return (
       <span
-        className={cn(
-          "font-mono tabular-nums text-emerald-700 dark:text-emerald-400",
-          className,
-        )}
+        className={cn("font-mono tabular-nums text-emerald-700 dark:text-emerald-400", className)}
       >
         {prefix}
         {abs}
@@ -91,12 +83,7 @@ export function MoneyAmount({
   }
   if (n < 0) {
     return (
-      <span
-        className={cn(
-          "font-mono tabular-nums text-rose-700 dark:text-rose-400",
-          className,
-        )}
-      >
+      <span className={cn("font-mono tabular-nums text-rose-700 dark:text-rose-400", className)}>
         ({prefix}
         {abs})
       </span>
@@ -104,10 +91,7 @@ export function MoneyAmount({
   }
   return (
     <span
-      className={cn(
-        "font-mono tabular-nums text-emerald-700 dark:text-emerald-400",
-        className,
-      )}
+      className={cn("font-mono tabular-nums text-emerald-700 dark:text-emerald-400", className)}
     >
       + {prefix}
       {abs}

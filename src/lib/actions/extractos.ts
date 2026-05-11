@@ -131,9 +131,7 @@ export async function aprobarLineaAction(
       const montoAbs = Math.abs(montoNum);
       const montoAbsStr = montoAbs.toFixed(2);
 
-      const tipo = montoNum > 0
-        ? MovimientoTesoreriaTipo.COBRO
-        : MovimientoTesoreriaTipo.PAGO;
+      const tipo = montoNum > 0 ? MovimientoTesoreriaTipo.COBRO : MovimientoTesoreriaTipo.PAGO;
 
       const moneda = linea.importacion.cuentaBancaria.moneda;
       const tipoCambio = moneda === Moneda.ARS ? "1" : "1";
@@ -159,8 +157,7 @@ export async function aprobarLineaAction(
       // crédito fiscal pago a cuenta de Ganancias (1.1.4.12), 67% como
       // gasto (5.8.1.06). Reemplaza el asiento auto de 2 lineas por uno
       // de 3 lineas con la división.
-      const esImpuestoLey25413 =
-        contrapartidaCodigo === CODIGO_IMPUESTO_LEY_25413;
+      const esImpuestoLey25413 = contrapartidaCodigo === CODIGO_IMPUESTO_LEY_25413;
 
       if (esImpuestoLey25413 && tipo === MovimientoTesoreriaTipo.PAGO) {
         const creditoCuentaId = await getOrCreateCuenta(
@@ -180,8 +177,18 @@ export async function aprobarLineaAction(
             moneda,
             tipoCambio,
             lineas: [
-              { cuentaId: contrapartidaId, debe: gastoMonto.toFixed(2), haber: "0", descripcion: "Gasto no computable (67%)" },
-              { cuentaId: creditoCuentaId, debe: creditoMonto.toFixed(2), haber: "0", descripcion: "Pago a cuenta Ganancias (33%)" },
+              {
+                cuentaId: contrapartidaId,
+                debe: gastoMonto.toFixed(2),
+                haber: "0",
+                descripcion: "Gasto no computable (67%)",
+              },
+              {
+                cuentaId: creditoCuentaId,
+                debe: creditoMonto.toFixed(2),
+                haber: "0",
+                descripcion: "Pago a cuenta Ganancias (33%)",
+              },
               { cuentaId: bancoCuentaId, debe: "0", haber: montoAbsStr },
             ],
           },
@@ -211,8 +218,10 @@ export async function aprobarLineaAction(
         where: { importacionId: linea.importacionId },
         _count: { _all: true },
       });
-      const aprobadas = counts.find((c) => c.status === LineaExtractoStatus.APROBADA)?._count._all ?? 0;
-      const pendientes = counts.find((c) => c.status === LineaExtractoStatus.PENDIENTE)?._count._all ?? 0;
+      const aprobadas =
+        counts.find((c) => c.status === LineaExtractoStatus.APROBADA)?._count._all ?? 0;
+      const pendientes =
+        counts.find((c) => c.status === LineaExtractoStatus.PENDIENTE)?._count._all ?? 0;
 
       await tx.importacionExtracto.update({
         where: { id: linea.importacionId },
@@ -273,8 +282,10 @@ async function cambiarEstadoLinea(
       where: { importacionId: linea.importacionId },
       _count: { _all: true },
     });
-    const pendientes = counts.find((c) => c.status === LineaExtractoStatus.PENDIENTE)?._count._all ?? 0;
-    const aprobadas = counts.find((c) => c.status === LineaExtractoStatus.APROBADA)?._count._all ?? 0;
+    const pendientes =
+      counts.find((c) => c.status === LineaExtractoStatus.PENDIENTE)?._count._all ?? 0;
+    const aprobadas =
+      counts.find((c) => c.status === LineaExtractoStatus.APROBADA)?._count._all ?? 0;
 
     await tx.importacionExtracto.update({
       where: { id: linea.importacionId },
@@ -370,11 +381,9 @@ export async function desaprobarLineaAction(
         _count: { _all: true },
       });
       const aprobadas =
-        counts.find((c) => c.status === LineaExtractoStatus.APROBADA)?._count
-          ._all ?? 0;
+        counts.find((c) => c.status === LineaExtractoStatus.APROBADA)?._count._all ?? 0;
       const pendientes =
-        counts.find((c) => c.status === LineaExtractoStatus.PENDIENTE)?._count
-          ._all ?? 0;
+        counts.find((c) => c.status === LineaExtractoStatus.PENDIENTE)?._count._all ?? 0;
 
       await tx.importacionExtracto.update({
         where: { id: linea.importacionId },

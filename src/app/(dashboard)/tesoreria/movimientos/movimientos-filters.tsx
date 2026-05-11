@@ -34,11 +34,7 @@ type Props = {
   selectedTipo: string;
 };
 
-export function MovimientosFilters({
-  cuentas,
-  selectedCuentaId,
-  selectedTipo,
-}: Props) {
+export function MovimientosFilters({ cuentas, selectedCuentaId, selectedTipo }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -111,9 +107,7 @@ export function MovimientosFilters({
           onValueChange={(v) => updateParam("tipo", v === "all" ? null : v)}
         >
           <SelectTrigger className="min-w-44">
-            <SelectValue>
-              {(value) => TIPO_LABELS[value as string] ?? value}
-            </SelectValue>
+            <SelectValue>{(value) => TIPO_LABELS[value as string] ?? value}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>

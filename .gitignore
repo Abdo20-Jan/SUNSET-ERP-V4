@@ -10,6 +10,10 @@
 !.yarn/releases
 !.yarn/versions
 
+# package manager: pnpm only — block accidental npm/yarn lockfiles
+package-lock.json
+yarn.lock
+
 # testing
 /coverage
 

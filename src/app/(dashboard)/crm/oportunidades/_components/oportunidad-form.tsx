@@ -45,14 +45,7 @@ type Props = {
   clientes: ClienteOption[];
 };
 
-export function OportunidadForm({
-  mode,
-  opId,
-  initial,
-  stages,
-  leads,
-  clientes,
-}: Props) {
+export function OportunidadForm({ mode, opId, initial, stages, leads, clientes }: Props) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +74,9 @@ export function OportunidadForm({
   return (
     <form action={handleSubmit} className="space-y-4">
       <label className="flex flex-col gap-1 text-sm">
-        <span>Título <span className="text-red-700">*</span></span>
+        <span>
+          Título <span className="text-red-700">*</span>
+        </span>
         <input
           name="titulo"
           defaultValue={initial?.titulo ?? ""}
@@ -92,7 +87,9 @@ export function OportunidadForm({
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <label className="flex flex-col gap-1 text-sm">
-          <span>Monto <span className="text-red-700">*</span></span>
+          <span>
+            Monto <span className="text-red-700">*</span>
+          </span>
           <input
             name="monto"
             defaultValue={String(initial?.monto ?? "")}
@@ -109,7 +106,9 @@ export function OportunidadForm({
             className="rounded-md border px-3 py-2"
           >
             {MONEDAS.map((m) => (
-              <option key={m} value={m}>{m}</option>
+              <option key={m} value={m}>
+                {m}
+              </option>
             ))}
           </select>
         </label>
@@ -128,7 +127,9 @@ export function OportunidadForm({
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span>Stage <span className="text-red-700">*</span></span>
+          <span>
+            Stage <span className="text-red-700">*</span>
+          </span>
           <select
             name="stageId"
             defaultValue={initial?.stageId ?? stages[0]?.id ?? ""}
@@ -136,7 +137,9 @@ export function OportunidadForm({
             className="rounded-md border px-3 py-2"
           >
             {stages.map((s) => (
-              <option key={s.id} value={s.id}>{s.nombre}</option>
+              <option key={s.id} value={s.id}>
+                {s.nombre}
+              </option>
             ))}
           </select>
         </label>
@@ -176,7 +179,9 @@ export function OportunidadForm({
           >
             <option value="">—</option>
             {clientes.map((c) => (
-              <option key={c.id} value={c.id}>{c.nombre}</option>
+              <option key={c.id} value={c.id}>
+                {c.nombre}
+              </option>
             ))}
           </select>
         </label>

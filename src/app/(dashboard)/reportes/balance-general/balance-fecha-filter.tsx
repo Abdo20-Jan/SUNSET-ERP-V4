@@ -44,9 +44,7 @@ export function BalanceFechaFilter({
 
   function setEsteMes() {
     const now = new Date();
-    const first = new Date(now.getFullYear(), now.getMonth(), 1)
-      .toISOString()
-      .slice(0, 10);
+    const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
     const today = todayIso();
     setDesde(first);
     setHasta(today);
@@ -65,29 +63,15 @@ export function BalanceFechaFilter({
         <Label htmlFor="fecha-desde" className="text-xs">
           Desde (opcional)
         </Label>
-        <DatePicker
-          id="fecha-desde"
-          value={desde}
-          onChange={setDesde}
-          max={hasta || undefined}
-        />
+        <DatePicker id="fecha-desde" value={desde} onChange={setDesde} max={hasta || undefined} />
       </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="fecha-hasta" className="text-xs">
           Hasta
         </Label>
-        <DatePicker
-          id="fecha-hasta"
-          value={hasta}
-          onChange={setHasta}
-          min={desde || undefined}
-        />
+        <DatePicker id="fecha-hasta" value={hasta} onChange={setHasta} min={desde || undefined} />
       </div>
-      <Button
-        variant="default"
-        disabled={isPending}
-        onClick={() => applyFilter(desde, hasta)}
-      >
+      <Button variant="default" disabled={isPending} onClick={() => applyFilter(desde, hasta)}>
         Aplicar
       </Button>
       <div className="flex gap-1.5">

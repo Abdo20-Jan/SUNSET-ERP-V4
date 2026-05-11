@@ -1,12 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 
 import type { PedidoVentaRow } from "@/lib/actions/pedidos-venta";
 import { fmtDate, fmtMoney } from "@/lib/format";
@@ -55,17 +50,13 @@ export function PedidosVentaTable({ data }: { data: PedidoVentaRow[] }) {
       id: "fecha",
       header: "Fecha",
       cell: ({ row }) => (
-        <span className="text-sm tabular-nums">
-          {fmtDate(new Date(row.original.fecha))}
-        </span>
+        <span className="text-sm tabular-nums">{fmtDate(new Date(row.original.fecha))}</span>
       ),
     },
     {
       id: "cliente",
       header: "Cliente",
-      cell: ({ row }) => (
-        <span className="text-sm">{row.original.cliente.nombre}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm">{row.original.cliente.nombre}</span>,
     },
     {
       id: "fechaPrevista",
@@ -83,9 +74,7 @@ export function PedidosVentaTable({ data }: { data: PedidoVentaRow[] }) {
       id: "items",
       header: () => <span className="block text-right">Ítems</span>,
       cell: ({ row }) => (
-        <span className="block text-right text-sm tabular-nums">
-          {row.original.itemsCount}
-        </span>
+        <span className="block text-right text-sm tabular-nums">{row.original.itemsCount}</span>
       ),
     },
     {
@@ -101,9 +90,7 @@ export function PedidosVentaTable({ data }: { data: PedidoVentaRow[] }) {
       id: "estado",
       header: "Estado",
       cell: ({ row }) => (
-        <Badge variant={estadoVariant(row.original.estado)}>
-          {row.original.estado}
-        </Badge>
+        <Badge variant={estadoVariant(row.original.estado)}>{row.original.estado}</Badge>
       ),
     },
   ];

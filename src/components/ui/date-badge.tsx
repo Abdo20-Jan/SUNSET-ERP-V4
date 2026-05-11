@@ -1,9 +1,5 @@
 import { cn } from "@/lib/utils";
-import {
-  fmtDateOrDash,
-  vencimientoLabel,
-  vencimientoStatus,
-} from "@/lib/format";
+import { fmtDateOrDash, vencimientoLabel, vencimientoStatus } from "@/lib/format";
 
 type Props = {
   fecha: Date | string | null | undefined;

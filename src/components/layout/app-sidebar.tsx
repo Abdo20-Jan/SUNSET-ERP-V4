@@ -35,9 +35,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
             <HugeiconsIcon icon={TireIcon} className="size-4" />
           </div>
           <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
-            <span className="truncate text-[13px] font-semibold tracking-tight">
-              Sunset Tires
-            </span>
+            <span className="truncate text-[13px] font-semibold tracking-tight">Sunset Tires</span>
             <span className="truncate text-[10px] uppercase tracking-wider text-muted-foreground">
               ERP · v4
             </span>
@@ -54,9 +52,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {group.items.map((item) => {
-                  const isActive =
-                    pathname === item.href ||
-                    pathname.startsWith(`${item.href}/`);
+                  const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
                   return (
                     <SidebarMenuItem key={item.href}>
                       <SidebarMenuButton

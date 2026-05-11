@@ -11,10 +11,7 @@ import {
   MoreHorizontalCircle01Icon,
 } from "@hugeicons/core-free-icons";
 
-import {
-  deleteCotizacionAction,
-  upsertCotizacionAction,
-} from "@/lib/actions/cotizaciones";
+import { deleteCotizacionAction, upsertCotizacionAction } from "@/lib/actions/cotizaciones";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -50,9 +47,7 @@ type Row = {
   fuente: string | null;
 };
 
-type FormState =
-  | { mode: "create" }
-  | { mode: "edit"; row: Row };
+type FormState = { mode: "create" } | { mode: "edit"; row: Row };
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -115,10 +110,7 @@ export function CotizacionesTable({ rows }: { rows: Row[] }) {
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell
-                colSpan={4}
-                className="py-12 text-center text-sm text-muted-foreground"
-              >
+              <TableCell colSpan={4} className="py-12 text-center text-sm text-muted-foreground">
                 Aún no hay cotizaciones cargadas.
               </TableCell>
             </TableRow>
@@ -129,9 +121,7 @@ export function CotizacionesTable({ rows }: { rows: Row[] }) {
                 <TableCell className="text-right font-mono text-sm tabular-nums">
                   {fmtValor(r.valor)}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {r.fuente ?? "—"}
-                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">{r.fuente ?? "—"}</TableCell>
                 <TableCell className="text-right">
                   <RowActions
                     onEdit={() => setFormState({ mode: "edit", row: r })}
@@ -144,10 +134,7 @@ export function CotizacionesTable({ rows }: { rows: Row[] }) {
         </TableBody>
       </Table>
 
-      <CotizacionFormDialog
-        state={formState}
-        onClose={() => setFormState(null)}
-      />
+      <CotizacionFormDialog state={formState} onClose={() => setFormState(null)} />
 
       <Dialog
         open={pendingDelete !== null}
@@ -162,10 +149,7 @@ export function CotizacionesTable({ rows }: { rows: Row[] }) {
                 <DialogTitle>Eliminar cotización</DialogTitle>
                 <DialogDescription>
                   ¿Confirma eliminar la cotización del{" "}
-                  <span className="font-medium text-foreground">
-                    {pendingDelete.fecha}
-                  </span>
-                  ?
+                  <span className="font-medium text-foreground">{pendingDelete.fecha}</span>?
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -176,11 +160,7 @@ export function CotizacionesTable({ rows }: { rows: Row[] }) {
                 >
                   Cancelar
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={onConfirmDelete}
-                  disabled={isDeleting}
-                >
+                <Button variant="destructive" onClick={onConfirmDelete} disabled={isDeleting}>
                   {isDeleting ? "Eliminando…" : "Eliminar"}
                 </Button>
               </DialogFooter>
@@ -201,11 +181,7 @@ function RowActions({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon-sm" aria-label="Acciones" />
-        }
-      >
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Acciones" />}>
         <HugeiconsIcon icon={MoreHorizontalCircle01Icon} strokeWidth={2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -234,8 +210,7 @@ function CotizacionFormDialog({
   const [isSubmitting, startTransition] = useTransition();
   const open = state !== null;
 
-  const initialFecha =
-    state?.mode === "edit" ? state.row.fecha : todayIso();
+  const initialFecha = state?.mode === "edit" ? state.row.fecha : todayIso();
   const initialValor = state?.mode === "edit" ? state.row.valor : "";
   const initialFuente = state?.mode === "edit" ? (state.row.fuente ?? "") : "";
 
@@ -245,8 +220,7 @@ function CotizacionFormDialog({
 
   // Reset when state changes
   if (open && state) {
-    const expectedFecha =
-      state.mode === "edit" ? state.row.fecha : todayIso();
+    const expectedFecha = state.mode === "edit" ? state.row.fecha : todayIso();
     if (fecha === "" && expectedFecha !== "") {
       setFecha(expectedFecha);
     }
@@ -261,11 +235,7 @@ function CotizacionFormDialog({
         fuente: fuente.trim() || undefined,
       });
       if (result.ok) {
-        toast.success(
-          state?.mode === "edit"
-            ? "Cotización actualizada."
-            : "Cotización guardada.",
-        );
+        toast.success(state?.mode === "edit" ? "Cotización actualizada." : "Cotización guardada.");
         setFecha(todayIso());
         setValor("");
         setFuente("");
@@ -292,13 +262,11 @@ function CotizacionFormDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {state?.mode === "edit"
-              ? "Editar cotización"
-              : "Cargar TC del día"}
+            {state?.mode === "edit" ? "Editar cotización" : "Cargar TC del día"}
           </DialogTitle>
           <DialogDescription>
-            Ingrese cuántos pesos vale 1 USD en esa fecha. Si ya existe una
-            cotización para esa fecha, se actualizará.
+            Ingrese cuántos pesos vale 1 USD en esa fecha. Si ya existe una cotización para esa
+            fecha, se actualizará.
           </DialogDescription>
         </DialogHeader>
 
@@ -340,12 +308,7 @@ function CotizacionFormDialog({
           </div>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              disabled={isSubmitting}
-            >
+            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               Cancelar
             </Button>
             <Button type="submit" disabled={isSubmitting}>

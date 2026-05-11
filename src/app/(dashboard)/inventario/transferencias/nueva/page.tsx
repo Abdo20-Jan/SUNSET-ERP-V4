@@ -11,9 +11,7 @@ export default async function NuevaTransferenciaPage() {
     return (
       <main className="container mx-auto p-6">
         <h1 className="text-2xl font-semibold">Nueva transferencia</h1>
-        <p className="mt-4 text-muted-foreground">
-          Stock dual no habilitado.
-        </p>
+        <p className="mt-4 text-muted-foreground">Stock dual no habilitado.</p>
         <Link
           href="/inventario/transferencias"
           className="mt-4 inline-block text-primary underline"

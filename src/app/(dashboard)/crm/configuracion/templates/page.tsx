@@ -46,9 +46,7 @@ export default async function TemplatesPage() {
                   <div className="font-medium">
                     {t.nombre}
                     {!t.activo && (
-                      <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs">
-                        inactivo
-                      </span>
+                      <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs">inactivo</span>
                     )}
                   </div>
                   <div className="text-muted-foreground">{t.asunto}</div>

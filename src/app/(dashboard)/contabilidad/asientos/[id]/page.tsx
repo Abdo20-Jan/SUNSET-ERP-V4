@@ -4,10 +4,7 @@ import { format } from "date-fns";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 
-import {
-  getAsientoDetalle,
-  type AsientoDetalle,
-} from "@/lib/actions/asientos";
+import { getAsientoDetalle, type AsientoDetalle } from "@/lib/actions/asientos";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -22,9 +19,7 @@ import {
 
 type PageParams = Promise<{ id: string }>;
 
-function estadoVariant(
-  estado: AsientoDetalle["estado"],
-): "default" | "outline" | "secondary" {
+function estadoVariant(estado: AsientoDetalle["estado"]): "default" | "outline" | "secondary" {
   switch (estado) {
     case "BORRADOR":
       return "outline";
@@ -56,9 +51,7 @@ export default async function AsientoDetallePage({
           Volver a la lista
         </Link>
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-[15px] font-semibold tracking-tight">
-            Asiento Nº {detalle.numero}
-          </h1>
+          <h1 className="text-[15px] font-semibold tracking-tight">Asiento Nº {detalle.numero}</h1>
           <Badge variant="outline" className="font-mono text-xs">
             {detalle.periodoCodigo}
           </Badge>
@@ -77,9 +70,7 @@ export default async function AsientoDetallePage({
           <InfoRow label="Moneda" value={detalle.moneda} />
           <InfoRow
             label="Tipo de cambio"
-            value={Number(detalle.tipoCambio).toFixed(
-              detalle.moneda === "ARS" ? 2 : 6,
-            )}
+            value={Number(detalle.tipoCambio).toFixed(detalle.moneda === "ARS" ? 2 : 6)}
           />
         </dl>
 
@@ -99,9 +90,7 @@ export default async function AsientoDetallePage({
             <TableBody>
               {detalle.lineas.map((l) => (
                 <TableRow key={l.id}>
-                  <TableCell className="font-mono text-xs">
-                    {l.cuentaCodigo}
-                  </TableCell>
+                  <TableCell className="font-mono text-xs">{l.cuentaCodigo}</TableCell>
                   <TableCell className="text-sm">{l.cuentaNombre}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {l.descripcion ?? "—"}
@@ -115,10 +104,7 @@ export default async function AsientoDetallePage({
                 </TableRow>
               ))}
               <TableRow className="border-t-2">
-                <TableCell
-                  colSpan={3}
-                  className="text-right text-sm font-medium"
-                >
+                <TableCell colSpan={3} className="text-right text-sm font-medium">
                   Totales
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">

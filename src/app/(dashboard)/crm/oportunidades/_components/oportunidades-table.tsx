@@ -34,10 +34,7 @@ function estadoCls(estado: OportunidadEstado): string {
 function VinculoCell({ row }: { row: OportunidadRow }) {
   if (row.clienteNombre) {
     return (
-      <Link
-        href={`/maestros/clientes/${row.clienteId}`}
-        className="text-primary hover:underline"
-      >
+      <Link href={`/maestros/clientes/${row.clienteId}`} className="text-primary hover:underline">
         {row.clienteNombre}
       </Link>
     );

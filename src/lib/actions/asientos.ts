@@ -36,9 +36,7 @@ export type CrearAsientoActionResult =
   | { ok: true; asientoId: string; numero: number }
   | { ok: false; error: string };
 
-export type AsientoStateActionResult =
-  | { ok: true; numero: number }
-  | { ok: false; error: string };
+export type AsientoStateActionResult = { ok: true; numero: number } | { ok: false; error: string };
 
 export async function crearAsientoManualAction(
   raw: CrearAsientoManualInput,
@@ -106,9 +104,7 @@ export async function contabilizarAsientoAction(
   }
 }
 
-export async function anularAsientoAction(
-  asientoId: string,
-): Promise<AsientoStateActionResult> {
+export async function anularAsientoAction(asientoId: string): Promise<AsientoStateActionResult> {
   const session = await auth();
   if (!session) {
     return { ok: false, error: "No autorizado." };
@@ -156,9 +152,7 @@ export type GetAsientoDetalleResult =
   | { ok: true; detalle: AsientoDetalle }
   | { ok: false; error: string };
 
-export async function getAsientoDetalle(
-  asientoId: string,
-): Promise<GetAsientoDetalleResult> {
+export async function getAsientoDetalle(asientoId: string): Promise<GetAsientoDetalleResult> {
   const session = await auth();
   if (!session) {
     return { ok: false, error: "No autorizado." };

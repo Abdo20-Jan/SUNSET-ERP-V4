@@ -9,10 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DateRangeFilter } from "@/components/date-range-filter";
 
-import {
-  MovimientosFilters,
-  type CuentaBancariaOption,
-} from "./movimientos-filters";
+import { MovimientosFilters, type CuentaBancariaOption } from "./movimientos-filters";
 import { MovimientosTable, type MovimientoRow } from "./movimientos-table";
 
 const TIPO_VALUES = new Set<MovimientoTesoreriaTipo>([
@@ -53,9 +50,7 @@ function todayIso(): string {
 
 function firstOfMonthIso(): string {
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1)
-    .toISOString()
-    .slice(0, 10);
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 }
 
 type SearchParams = Promise<{
@@ -138,11 +133,8 @@ export default async function MovimientosPage({
     },
   });
 
-  const cuentaContableIds = Array.from(
-    new Set(movimientos.map((m) => m.cuentaContableId)),
-  );
-  const prestamosPorCuenta =
-    await listarPrestamosPorCuentaContable(cuentaContableIds);
+  const cuentaContableIds = Array.from(new Set(movimientos.map((m) => m.cuentaContableId)));
+  const prestamosPorCuenta = await listarPrestamosPorCuentaContable(cuentaContableIds);
 
   const rows: MovimientoRow[] = movimientos.map((m) => {
     const prestamo = prestamosPorCuenta.get(m.cuentaContableId);
@@ -174,9 +166,7 @@ export default async function MovimientosPage({
             periodoCodigo: m.asiento.periodo.codigo,
           }
         : null,
-      prestamo: prestamo
-        ? { id: prestamo.prestamoId, prestamista: prestamo.prestamista }
-        : null,
+      prestamo: prestamo ? { id: prestamo.prestamoId, prestamista: prestamo.prestamista } : null,
     };
   });
 

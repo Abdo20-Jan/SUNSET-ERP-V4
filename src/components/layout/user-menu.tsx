@@ -41,12 +41,7 @@ export function UserMenu({ user }: UserMenuProps) {
       <SidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={
-              <SidebarMenuButton
-                size="lg"
-                className="data-[state=open]:bg-sidebar-accent"
-              />
-            }
+            render={<SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent" />}
           >
             <Avatar className="size-8 rounded-md">
               <AvatarFallback className="rounded-md text-xs">
@@ -55,14 +50,9 @@ export function UserMenu({ user }: UserMenuProps) {
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
               <span className="truncate font-medium">{user.nombre}</span>
-              <span className="truncate text-xs text-muted-foreground">
-                @{user.username}
-              </span>
+              <span className="truncate text-xs text-muted-foreground">@{user.username}</span>
             </div>
-            <HugeiconsIcon
-              icon={MoreHorizontalIcon}
-              className="ml-auto size-4"
-            />
+            <HugeiconsIcon icon={MoreHorizontalIcon} className="ml-auto size-4" />
           </DropdownMenuTrigger>
 
           <DropdownMenuContent
@@ -80,19 +70,13 @@ export function UserMenu({ user }: UserMenuProps) {
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">{user.nombre}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {user.role}
-                  </span>
+                  <span className="truncate text-xs text-muted-foreground">{user.role}</span>
                 </div>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <form action={logout}>
-              <DropdownMenuItem
-                render={
-                  <button type="submit" className="w-full cursor-pointer" />
-                }
-              >
+              <DropdownMenuItem render={<button type="submit" className="w-full cursor-pointer" />}>
                 <HugeiconsIcon icon={Logout01Icon} />
                 Cerrar sesión
               </DropdownMenuItem>

@@ -38,11 +38,7 @@ type Props = {
   selectedEstado: string;
 };
 
-export function PrestamosFilters({
-  selectedClasificacion,
-  selectedMoneda,
-  selectedEstado,
-}: Props) {
+export function PrestamosFilters({ selectedClasificacion, selectedMoneda, selectedEstado }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -68,9 +64,7 @@ export function PrestamosFilters({
   };
 
   const hasFilters =
-    searchParams.has("clasificacion") ||
-    searchParams.has("moneda") ||
-    searchParams.has("estado");
+    searchParams.has("clasificacion") || searchParams.has("moneda") || searchParams.has("estado");
 
   return (
     <div className="flex flex-wrap items-end gap-3">
@@ -82,9 +76,7 @@ export function PrestamosFilters({
         >
           <SelectTrigger className="min-w-40">
             <SelectValue>
-              {(value) =>
-                CLASIFICACION_LABELS[value as string] ?? (value as string)
-              }
+              {(value) => CLASIFICACION_LABELS[value as string] ?? (value as string)}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -97,10 +89,7 @@ export function PrestamosFilters({
 
       <div className="flex flex-col gap-1.5">
         <Label className="text-xs text-muted-foreground">Moneda</Label>
-        <Select
-          value={selectedMoneda}
-          onValueChange={(v) => updateParam("moneda", v)}
-        >
+        <Select value={selectedMoneda} onValueChange={(v) => updateParam("moneda", v)}>
           <SelectTrigger className="min-w-32">
             <SelectValue>
               {(value) => MONEDA_LABELS[value as string] ?? (value as string)}
@@ -116,10 +105,7 @@ export function PrestamosFilters({
 
       <div className="flex flex-col gap-1.5">
         <Label className="text-xs text-muted-foreground">Estado</Label>
-        <Select
-          value={selectedEstado}
-          onValueChange={(v) => updateParam("estado", v)}
-        >
+        <Select value={selectedEstado} onValueChange={(v) => updateParam("estado", v)}>
           <SelectTrigger className="min-w-44">
             <SelectValue>
               {(value) => ESTADO_LABELS[value as string] ?? (value as string)}

@@ -10,9 +10,7 @@ export type CotizacionRow = {
 };
 
 function toDateOnly(d: Date): Date {
-  return new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
-  );
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
 export async function listarCotizaciones(limit = 60): Promise<CotizacionRow[]> {
@@ -33,9 +31,7 @@ export async function listarCotizaciones(limit = 60): Promise<CotizacionRow[]> {
  * Si no hay ninguna anterior, devuelve la más antigua disponible.
  * Si no hay cotizaciones, devuelve null.
  */
-export async function getCotizacionParaFecha(
-  fecha: Date,
-): Promise<CotizacionRow | null> {
+export async function getCotizacionParaFecha(fecha: Date): Promise<CotizacionRow | null> {
   const target = toDateOnly(fecha);
 
   const previa = await db.cotizacion.findFirst({
