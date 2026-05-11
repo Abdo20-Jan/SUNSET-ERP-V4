@@ -2,11 +2,11 @@
 
 import { useState, useTransition } from "react";
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { format } from "date-fns";
 import { toast } from "sonner";
 
 import type { PeriodoEstado } from "@/generated/prisma/client";
 import { cerrarPeriodo, reabrirPeriodo, type PeriodoActionResult } from "@/lib/actions/periodos";
+import { fmtDate } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,10 +32,6 @@ export type PeriodoRow = {
 
 type PendingAction = { action: "cerrar" | "reabrir"; periodo: PeriodoRow } | null;
 
-function formatDate(d: Date) {
-  return format(d, "dd/MM/yyyy");
-}
-
 export function PeriodosTable({ data }: { data: PeriodoRow[] }) {
   const [pending, setPending] = useState<PendingAction>(null);
   const [isSubmitting, startTransition] = useTransition();
@@ -55,14 +51,14 @@ export function PeriodosTable({ data }: { data: PeriodoRow[] }) {
       id: "fechaInicio",
       header: "Inicio",
       cell: ({ row }) => (
-        <span className="text-sm tabular-nums">{formatDate(row.original.fechaInicio)}</span>
+        <span className="text-sm tabular-nums">{fmtDate(row.original.fechaInicio)}</span>
       ),
     },
     {
       id: "fechaFin",
       header: "Fin",
       cell: ({ row }) => (
-        <span className="text-sm tabular-nums">{formatDate(row.original.fechaFin)}</span>
+        <span className="text-sm tabular-nums">{fmtDate(row.original.fechaFin)}</span>
       ),
     },
     {
@@ -124,8 +120,8 @@ export function PeriodosTable({ data }: { data: PeriodoRow[] }) {
                     : `Reabrir período ${pending.periodo.codigo}`}
                 </DialogTitle>
                 <DialogDescription>
-                  {pending.periodo.nombre} · {formatDate(pending.periodo.fechaInicio)} –{" "}
-                  {formatDate(pending.periodo.fechaFin)}
+                  {pending.periodo.nombre} · {fmtDate(pending.periodo.fechaInicio)} –{" "}
+                  {fmtDate(pending.periodo.fechaFin)}
                   {pending.action === "cerrar"
                     ? ". Una vez cerrado, no se podrán crear ni modificar asientos en este período."
                     : ". Al reabrirlo, se podrán crear y modificar asientos nuevamente."}
