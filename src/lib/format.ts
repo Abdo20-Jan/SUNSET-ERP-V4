@@ -12,10 +12,17 @@ const fmtIntAR = new Intl.NumberFormat("es-AR", {
   maximumFractionDigits: 0,
 });
 
+// Renderiza la fecha en UTC para que SSR (server en UTC) y hydration
+// (cliente en Argentina UTC-3) produzcan exactamente el mismo string y
+// evitar React #418 (hydration mismatch) en cualquier celda con fecha.
+// Las fechas-solo (PeriodoContable.fechaInicio/Fin, Compra.fechaVencimiento,
+// Venta.fecha) son persistidas como midnight UTC; el componente lógico
+// (DD/MM/YYYY) es invariante al timezone.
 const fmtDateAR = new Intl.DateTimeFormat("es-AR", {
   day: "2-digit",
   month: "2-digit",
   year: "numeric",
+  timeZone: "UTC",
 });
 
 export function fmtMoney(value: string): string {
@@ -94,11 +101,13 @@ export function vencimientoStatus(
   const d = typeof fechaVencimiento === "string" ? new Date(fechaVencimiento) : fechaVencimiento;
   if (Number.isNaN(d.getTime())) return "none";
 
-  // Normalizar a inicio del día para evitar ruido de horas/minutos.
+  // Normalizar a inicio del día en UTC para que SSR y hydration calculen
+  // el mismo diffDays. setHours() usa TZ local y diverge entre Vercel (UTC)
+  // y el cliente Argentino (UTC-3), causando React #418.
   const today = new Date(reference);
-  today.setHours(0, 0, 0, 0);
+  today.setUTCHours(0, 0, 0, 0);
   const due = new Date(d);
-  due.setHours(0, 0, 0, 0);
+  due.setUTCHours(0, 0, 0, 0);
 
   const diffDays = Math.round((due.getTime() - today.getTime()) / DAY_MS);
   if (diffDays < 0) return "overdue";
@@ -115,10 +124,11 @@ export function vencimientoLabel(
   const d = typeof fechaVencimiento === "string" ? new Date(fechaVencimiento) : fechaVencimiento;
   if (Number.isNaN(d.getTime())) return "—";
 
+  // setUTCHours para evitar hydration mismatch (server UTC vs client UTC-3).
   const today = new Date(reference);
-  today.setHours(0, 0, 0, 0);
+  today.setUTCHours(0, 0, 0, 0);
   const due = new Date(d);
-  due.setHours(0, 0, 0, 0);
+  due.setUTCHours(0, 0, 0, 0);
   const diffDays = Math.round((due.getTime() - today.getTime()) / DAY_MS);
 
   if (diffDays === 0) return "Vence hoy";
