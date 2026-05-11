@@ -263,9 +263,7 @@ export async function getFlujoCaja(
         }
       }
     }
-    const totalPeriodo = sumMoney(
-      Object.values(valoresPorMes).map((v) => v.monto),
-    );
+    const totalPeriodo = sumMoney(Object.values(valoresPorMes).map((v) => v.monto));
     byCodigo.set(c.codigo, {
       cuentaId: c.id,
       codigo: c.codigo,
@@ -306,9 +304,7 @@ export async function getFlujoCaja(
           origen: "REALIZADO",
         };
       }
-      node.totalPeriodo = sumMoney(
-        node.children.map((ch) => ch.totalPeriodo),
-      );
+      node.totalPeriodo = sumMoney(node.children.map((ch) => ch.totalPeriodo));
     } else {
       node.totalPeriodo = node.totalPeriodo.toDecimalPlaces(2);
     }
@@ -333,9 +329,7 @@ export async function getFlujoCaja(
         }
       }
     }
-    const totalPeriodo = sumMoney(
-      Object.values(valoresPorMes).map((v) => v.monto),
-    );
+    const totalPeriodo = sumMoney(Object.values(valoresPorMes).map((v) => v.monto));
     return {
       cuentaId: c.id,
       codigo: c.codigo,

@@ -35,9 +35,7 @@ function todayIso(): string {
 
 function firstOfMonthIso(): string {
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1)
-    .toISOString()
-    .slice(0, 10);
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 }
 
 export default async function LibroDiarioPage({
@@ -57,8 +55,7 @@ export default async function LibroDiarioPage({
   const moneda: Moneda = params.moneda === "ARS" ? "ARS" : "USD";
   const fechaCorte = fechaHasta ?? new Date();
   const cotizacion = await getCotizacionParaFecha(fechaCorte);
-  const tcParaUsd =
-    moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
+  const tcParaUsd = moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
   const tcInfo = cotizacion
     ? {
         valor: cotizacion.valor.toString(),
@@ -78,27 +75,25 @@ export default async function LibroDiarioPage({
           ? `Desde ${desdeStr}`
           : "Histórico completo";
 
-  const serializedAsientos: SerializedAsientoDiario[] = diario.asientos.map(
-    (a) => ({
-      id: a.id,
-      numero: a.numero,
-      fecha: a.fecha.toISOString(),
-      descripcion: a.descripcion,
-      origen: a.origen,
-      moneda: a.moneda,
-      totalDebe: a.totalDebe.toFixed(2),
-      totalHaber: a.totalHaber.toFixed(2),
-      lineas: a.lineas.map((l) => ({
-        id: l.id,
-        cuentaId: l.cuentaId,
-        cuentaCodigo: l.cuentaCodigo,
-        cuentaNombre: l.cuentaNombre,
-        descripcion: l.descripcion,
-        debe: l.debe.toFixed(2),
-        haber: l.haber.toFixed(2),
-      })),
-    }),
-  );
+  const serializedAsientos: SerializedAsientoDiario[] = diario.asientos.map((a) => ({
+    id: a.id,
+    numero: a.numero,
+    fecha: a.fecha.toISOString(),
+    descripcion: a.descripcion,
+    origen: a.origen,
+    moneda: a.moneda,
+    totalDebe: a.totalDebe.toFixed(2),
+    totalHaber: a.totalHaber.toFixed(2),
+    lineas: a.lineas.map((l) => ({
+      id: l.id,
+      cuentaId: l.cuentaId,
+      cuentaCodigo: l.cuentaCodigo,
+      cuentaNombre: l.cuentaNombre,
+      descripcion: l.descripcion,
+      debe: l.debe.toFixed(2),
+      haber: l.haber.toFixed(2),
+    })),
+  }));
 
   return (
     <div className="flex flex-col gap-3">
@@ -108,39 +103,24 @@ export default async function LibroDiarioPage({
       </div>
 
       <div className="flex flex-col gap-3">
-        <DateRangeFilter
-          initialDesde={desdeStr}
-          initialHasta={hastaStr}
-        />
+        <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
         <MonedaToggle current={moneda} tcInfo={tcInfo} />
       </div>
 
       <Card size="sm" className="flex-row items-center gap-6 px-6 py-4">
         <div className="flex flex-col gap-0.5">
           <span className="text-xs text-muted-foreground">Asientos</span>
-          <span className="font-mono text-lg tabular-nums">
-            {diario.totalAsientos}
-          </span>
+          <span className="font-mono text-lg tabular-nums">{diario.totalAsientos}</span>
         </div>
         <div className="flex flex-col gap-0.5">
           <span className="text-xs text-muted-foreground">Total Debe</span>
-          <span
-            className={cn(
-              "font-mono text-lg tabular-nums",
-              !cuadra && "text-destructive",
-            )}
-          >
+          <span className={cn("font-mono text-lg tabular-nums", !cuadra && "text-destructive")}>
             {fmtMoney(convertirAUsd(diario.totalDebe.toFixed(2), tcParaUsd))}
           </span>
         </div>
         <div className="flex flex-col gap-0.5">
           <span className="text-xs text-muted-foreground">Total Haber</span>
-          <span
-            className={cn(
-              "font-mono text-lg tabular-nums",
-              !cuadra && "text-destructive",
-            )}
-          >
+          <span className={cn("font-mono text-lg tabular-nums", !cuadra && "text-destructive")}>
             {fmtMoney(convertirAUsd(diario.totalHaber.toFixed(2), tcParaUsd))}
           </span>
         </div>
@@ -150,9 +130,7 @@ export default async function LibroDiarioPage({
               ✓ Partida doble cuadra
             </span>
           ) : (
-            <span className="font-medium text-destructive">
-              ✗ Diferencia entre totales
-            </span>
+            <span className="font-medium text-destructive">✗ Diferencia entre totales</span>
           )}
         </div>
       </Card>

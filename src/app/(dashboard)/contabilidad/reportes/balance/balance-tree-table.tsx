@@ -14,10 +14,7 @@ import { format } from "date-fns";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 
-import type {
-  BalanceLinea,
-  BalanceNode,
-} from "@/lib/services/balance-sumas-saldos";
+import type { BalanceLinea, BalanceNode } from "@/lib/services/balance-sumas-saldos";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -79,9 +76,7 @@ const columns: ColumnDef<Row>[] = [
           ) : (
             <span className="inline-block size-5 shrink-0" />
           )}
-          <span>
-            {isCuenta(r) ? r.codigo : format(r.fecha, "yyyy-MM-dd")}
-          </span>
+          <span>{isCuenta(r) ? r.codigo : format(r.fecha, "yyyy-MM-dd")}</span>
         </div>
       );
     },
@@ -92,16 +87,10 @@ const columns: ColumnDef<Row>[] = [
     cell: ({ row }) => {
       const r = row.original;
       if (isCuenta(r)) {
-        return (
-          <span className={cn(r.tipo === "SINTETICA" && "font-semibold")}>
-            {r.nombre}
-          </span>
-        );
+        return <span className={cn(r.tipo === "SINTETICA" && "font-semibold")}>{r.nombre}</span>;
       }
       return (
-        <span className="text-xs italic text-muted-foreground">
-          Transacción: {r.descripcion}
-        </span>
+        <span className="text-xs italic text-muted-foreground">Transacción: {r.descripcion}</span>
       );
     },
   },
@@ -160,9 +149,7 @@ const columns: ColumnDef<Row>[] = [
       const r = row.original;
       const value = isCuenta(r) ? r.debe : r.debe;
       return (
-        <span className="block text-right font-mono text-xs tabular-nums">
-          {fmtMoney(value)}
-        </span>
+        <span className="block text-right font-mono text-xs tabular-nums">{fmtMoney(value)}</span>
       );
     },
   },
@@ -225,10 +212,7 @@ export function BalanceTreeTable({ root }: { root: BalanceNode[] }) {
           <TableRow key={headerGroup.id}>
             {headerGroup.headers.map((header) => (
               <TableHead key={header.id}>
-                {flexRender(
-                  header.column.columnDef.header,
-                  header.getContext(),
-                )}
+                {flexRender(header.column.columnDef.header, header.getContext())}
               </TableHead>
             ))}
           </TableRow>
@@ -246,12 +230,7 @@ export function BalanceTreeTable({ root }: { root: BalanceNode[] }) {
           </TableRow>
         ) : (
           table.getRowModel().rows.map((row) => (
-            <TableRow
-              key={row.id}
-              className={cn(
-                !isCuenta(row.original) && "bg-muted/30",
-              )}
-            >
+            <TableRow key={row.id} className={cn(!isCuenta(row.original) && "bg-muted/30")}>
               {row.getVisibleCells().map((cell) => (
                 <TableCell key={cell.id}>
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}

@@ -89,9 +89,7 @@ export async function listarProveedores(): Promise<ProveedorRow[]> {
   }));
 }
 
-export async function listarCuentasContablesParaProveedor(): Promise<
-  CuentaContableOption[]
-> {
+export async function listarCuentasContablesParaProveedor(): Promise<CuentaContableOption[]> {
   const cuentas = await db.cuentaContable.findMany({
     where: {
       tipo: CuentaTipo.ANALITICA,
@@ -107,9 +105,7 @@ export async function listarCuentasContablesParaProveedor(): Promise<
 // Cuentas elegibles como contrapartida de gasto/activo cuando se factura
 // del proveedor: ANALITICAS activas categoría EGRESO (5.x) o ACTIVO (1.x —
 // para capitalizar en mercaderías en tránsito).
-export async function listarCuentasContablesParaGastoProveedor(): Promise<
-  CuentaContableOption[]
-> {
+export async function listarCuentasContablesParaGastoProveedor(): Promise<CuentaContableOption[]> {
   const cuentas = await db.cuentaContable.findMany({
     where: {
       tipo: CuentaTipo.ANALITICA,
@@ -127,67 +123,56 @@ const nullableStr = z
   .optional()
   .transform((v) => (v && v.trim().length > 0 ? v.trim() : null));
 
-const proveedorBaseSchema = z
-  .object({
-    nombre: z.string().trim().min(1, "El nombre es obligatorio."),
-    cuit: z
-      .string()
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-    tipo: z
-      .string()
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : "otro")),
-    tipoProveedor: z
-      .nativeEnum(TipoProveedor)
-      .default(TipoProveedor.MERCADERIA_LOCAL),
-    conceptoRG830: z.nativeEnum(ConceptoRG830).optional().nullable(),
-    pais: z
-      .string()
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim().toUpperCase() : "AR")),
-    direccion: nullableStr,
-    telefono: nullableStr,
-    email: z
-      .string()
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
-      .refine(
-        (v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
-        "Email inválido.",
-      ),
-    estado: z
-      .string()
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : "activo"))
-      .refine(
-        (v) => v === "activo" || v === "inactivo",
-        "Estado debe ser 'activo' o 'inactivo'.",
-      ),
-    cuentaContableId: z
-      .number()
-      .int()
-      .positive()
-      .nullable()
-      .optional()
-      .transform((v) => v ?? null),
-    cuentaGastoContableId: z
-      .number()
-      .int()
-      .positive()
-      .nullable()
-      .optional()
-      .transform((v) => v ?? null),
-    crearCuentaAuto: z.boolean().optional().default(false),
-    crearCuentaGastoAuto: z.boolean().optional().default(false),
-  });
-  // CUIT siempre opcional — tanto para nacionales como extranjeros.
+const proveedorBaseSchema = z.object({
+  nombre: z.string().trim().min(1, "El nombre es obligatorio."),
+  cuit: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
+  tipo: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : "otro")),
+  tipoProveedor: z.nativeEnum(TipoProveedor).default(TipoProveedor.MERCADERIA_LOCAL),
+  conceptoRG830: z.nativeEnum(ConceptoRG830).optional().nullable(),
+  pais: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim().toUpperCase() : "AR")),
+  direccion: nullableStr,
+  telefono: nullableStr,
+  email: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
+    .refine((v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Email inválido."),
+  estado: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : "activo"))
+    .refine((v) => v === "activo" || v === "inactivo", "Estado debe ser 'activo' o 'inactivo'."),
+  cuentaContableId: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
+  cuentaGastoContableId: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
+  crearCuentaAuto: z.boolean().optional().default(false),
+  crearCuentaGastoAuto: z.boolean().optional().default(false),
+});
+// CUIT siempre opcional — tanto para nacionales como extranjeros.
 
 export type ProveedorInput = z.input<typeof proveedorBaseSchema>;
 
-export type ProveedorActionResult =
-  | { ok: true; id: string }
-  | { ok: false; error: string };
+export type ProveedorActionResult = { ok: true; id: string } | { ok: false; error: string };
 
 async function validarCuentaContable(
   id: number | null,
@@ -212,9 +197,7 @@ async function validarCuentaContable(
   return { ok: true };
 }
 
-export async function crearProveedorAction(
-  raw: ProveedorInput,
-): Promise<ProveedorActionResult> {
+export async function crearProveedorAction(raw: ProveedorInput): Promise<ProveedorActionResult> {
   const session = await auth();
   if (!session) return { ok: false, error: "No autorizado." };
 
@@ -244,19 +227,11 @@ export async function crearProveedorAction(
       if (cuentaGastoContableId === null && parsed.data.crearCuentaGastoAuto) {
         const rangoGasto = rangoGastoByTipo(parsed.data.tipoProveedor);
         if (rangoGasto) {
-          const cuentaGasto = await crearCuentaParaEntidad(
-            tx,
-            rangoGasto,
-            parsed.data.nombre,
-          );
+          const cuentaGasto = await crearCuentaParaEntidad(tx, rangoGasto, parsed.data.nombre);
           cuentaGastoContableId = cuentaGasto.id;
         }
       }
-      const {
-        crearCuentaAuto: _ignore,
-        crearCuentaGastoAuto: _ignore2,
-        ...rest
-      } = parsed.data;
+      const { crearCuentaAuto: _ignore, crearCuentaGastoAuto: _ignore2, ...rest } = parsed.data;
       void _ignore;
       void _ignore2;
       return tx.proveedor.create({
@@ -269,10 +244,7 @@ export async function crearProveedorAction(
     revalidatePath("/contabilidad/cuentas");
     return { ok: true, id: created.id };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: "Ya existe un proveedor con ese CUIT." };
     }
     if (err instanceof Error && err.message.startsWith("No hay códigos")) {
@@ -308,19 +280,11 @@ export async function actualizarProveedorAction(
       if (cuentaGastoContableId === null && parsed.data.crearCuentaGastoAuto) {
         const rangoGasto = rangoGastoByTipo(parsed.data.tipoProveedor);
         if (rangoGasto) {
-          const cuentaGasto = await crearCuentaParaEntidad(
-            tx,
-            rangoGasto,
-            parsed.data.nombre,
-          );
+          const cuentaGasto = await crearCuentaParaEntidad(tx, rangoGasto, parsed.data.nombre);
           cuentaGastoContableId = cuentaGasto.id;
         }
       }
-      const {
-        crearCuentaAuto: _ignore,
-        crearCuentaGastoAuto: _ignore2,
-        ...rest
-      } = parsed.data;
+      const { crearCuentaAuto: _ignore, crearCuentaGastoAuto: _ignore2, ...rest } = parsed.data;
       void _ignore;
       void _ignore2;
       return tx.proveedor.update({
@@ -376,10 +340,7 @@ export async function eliminarProveedorAction(
     revalidatePath("/maestros");
     return { ok: true, softDeleted: false };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2025"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
       return { ok: false, error: "El proveedor no existe." };
     }
     console.error("eliminarProveedorAction failed", err);

@@ -149,9 +149,7 @@ export default async function LeadDetailPage({
                 </div>
                 <div className="text-xs text-muted-foreground">
                   {a.owner.nombre} · {a.fechaProgramada ? fmtDate(a.fechaProgramada) : "sin fecha"}
-                  {a.completada && a.fechaCompletada
-                    ? ` · ✓ ${fmtDate(a.fechaCompletada)}`
-                    : ""}
+                  {a.completada && a.fechaCompletada ? ` · ✓ ${fmtDate(a.fechaCompletada)}` : ""}
                 </div>
               </li>
             ))}

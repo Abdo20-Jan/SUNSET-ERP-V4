@@ -19,13 +19,11 @@ export default async function CotizacionesPage() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-[15px] font-semibold tracking-tight">
-          Cotizaciones USD
-        </h1>
+        <h1 className="text-[15px] font-semibold tracking-tight">Cotizaciones USD</h1>
         <p className="text-sm text-muted-foreground">
-          Tipo de cambio del día (1 USD = X ARS). Se usa para mostrar reportes
-          en USD — el sistema toma la cotización vigente más reciente cuya
-          fecha sea menor o igual a la fecha del reporte.
+          Tipo de cambio del día (1 USD = X ARS). Se usa para mostrar reportes en USD — el sistema
+          toma la cotización vigente más reciente cuya fecha sea menor o igual a la fecha del
+          reporte.
         </p>
       </div>
 

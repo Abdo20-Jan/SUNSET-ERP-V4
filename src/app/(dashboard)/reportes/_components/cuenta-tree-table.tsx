@@ -64,9 +64,7 @@ function rowClasses(row: Row<SerializedTreeNode>): string {
   if (r.tipo === "SINTETICA") {
     return "hover:bg-accent/30";
   }
-  return row.index % 2 === 0
-    ? "hover:bg-accent/30"
-    : "bg-muted/20 hover:bg-accent/30";
+  return row.index % 2 === 0 ? "hover:bg-accent/30" : "bg-muted/20 hover:bg-accent/30";
 }
 
 const colCodigo: ColumnDef<SerializedTreeNode> = {
@@ -134,9 +132,7 @@ const colNombre: ColumnDef<SerializedTreeNode> = {
   },
 };
 
-function makeColSaldoInicial(
-  tc: string | null | undefined,
-): ColumnDef<SerializedTreeNode> {
+function makeColSaldoInicial(tc: string | null | undefined): ColumnDef<SerializedTreeNode> {
   return {
     id: "saldoInicial",
     header: () => <span className="block text-right">Saldo Inicial</span>,
@@ -153,9 +149,7 @@ function makeColSaldoInicial(
   };
 }
 
-function makeColDebe(
-  tc: string | null | undefined,
-): ColumnDef<SerializedTreeNode> {
+function makeColDebe(tc: string | null | undefined): ColumnDef<SerializedTreeNode> {
   return {
     id: "debe",
     header: () => <span className="block text-right">Debe</span>,
@@ -167,9 +161,7 @@ function makeColDebe(
   };
 }
 
-function makeColHaber(
-  tc: string | null | undefined,
-): ColumnDef<SerializedTreeNode> {
+function makeColHaber(tc: string | null | undefined): ColumnDef<SerializedTreeNode> {
   return {
     id: "haber",
     header: () => <span className="block text-right">Haber</span>,
@@ -181,9 +173,7 @@ function makeColHaber(
   };
 }
 
-function makeColSaldo(
-  tc: string | null | undefined,
-): ColumnDef<SerializedTreeNode> {
+function makeColSaldo(tc: string | null | undefined): ColumnDef<SerializedTreeNode> {
   return {
     id: "saldo",
     header: () => <span className="block text-right">Saldo</span>,
@@ -241,14 +231,8 @@ export function CuentaTreeTable({
         {table.getHeaderGroups().map((headerGroup) => (
           <TableRow key={headerGroup.id} className="border-b-2">
             {headerGroup.headers.map((header) => (
-              <TableHead
-                key={header.id}
-                className="text-xs font-semibold uppercase tracking-wide"
-              >
-                {flexRender(
-                  header.column.columnDef.header,
-                  header.getContext(),
-                )}
+              <TableHead key={header.id} className="text-xs font-semibold uppercase tracking-wide">
+                {flexRender(header.column.columnDef.header, header.getContext())}
               </TableHead>
             ))}
           </TableRow>
@@ -277,14 +261,15 @@ export function CuentaTreeTable({
         )}
         {totalLabel && totalValue != null ? (
           <TableRow className="border-t-2 border-double border-border-strong bg-primary/5 hover:bg-primary/5">
-            <TableCell colSpan={2} className="py-2 text-[12px] font-bold uppercase tracking-wider text-foreground">
+            <TableCell
+              colSpan={2}
+              className="py-2 text-[12px] font-bold uppercase tracking-wider text-foreground"
+            >
               {totalLabel}
             </TableCell>
             {showSaldoInicial ? (
               <TableCell className="py-2 text-right font-mono text-[13px] font-bold tabular-nums">
-                {totalSaldoInicial != null
-                  ? renderSigned(totalSaldoInicial, tcParaUsd)
-                  : ""}
+                {totalSaldoInicial != null ? renderSigned(totalSaldoInicial, tcParaUsd) : ""}
               </TableCell>
             ) : null}
             <TableCell colSpan={2} />

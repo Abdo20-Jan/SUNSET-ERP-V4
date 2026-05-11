@@ -14,10 +14,7 @@ type Crumb = {
 export function Breadcrumb({ crumbs }: { crumbs: Crumb[] }) {
   if (crumbs.length === 0) return null;
   return (
-    <nav
-      aria-label="breadcrumb"
-      className="flex items-center gap-1 text-xs text-muted-foreground"
-    >
+    <nav aria-label="breadcrumb" className="flex items-center gap-1 text-xs text-muted-foreground">
       {crumbs.map((c, idx) => {
         const isLast = idx === crumbs.length - 1;
         return (

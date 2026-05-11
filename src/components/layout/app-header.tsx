@@ -84,10 +84,7 @@ export function AppHeader() {
     <header className="sticky top-0 z-10 flex h-11 shrink-0 items-center gap-2 border-b border-border bg-background/85 px-3 backdrop-blur-md">
       <SidebarTrigger className="-ml-1 size-7" />
       <Separator orientation="vertical" className="mx-1 h-4" />
-      <nav
-        aria-label="breadcrumb"
-        className="flex min-w-0 items-center gap-1 text-[12px]"
-      >
+      <nav aria-label="breadcrumb" className="flex min-w-0 items-center gap-1 text-[12px]">
         {crumbs.map((c, idx) => {
           const isLast = idx === crumbs.length - 1;
           return (
@@ -101,11 +98,7 @@ export function AppHeader() {
                 </Link>
               ) : (
                 <span
-                  className={
-                    isLast
-                      ? "font-semibold text-foreground"
-                      : "text-muted-foreground"
-                  }
+                  className={isLast ? "font-semibold text-foreground" : "text-muted-foreground"}
                   aria-current={isLast ? "page" : undefined}
                 >
                   {c.label}

@@ -11,10 +11,7 @@ import {
   contabilizarAsiento,
   crearAsientoDespacho,
 } from "@/lib/services/asiento-automatico";
-import {
-  aplicarIngresoDespacho,
-  revertirIngresoDespacho,
-} from "@/lib/services/stock";
+import { aplicarIngresoDespacho, revertirIngresoDespacho } from "@/lib/services/stock";
 import { Prisma } from "@/generated/prisma/client";
 
 // ============================================================
@@ -67,9 +64,7 @@ export type DespachoDetalle = DespachoListRow & {
 // Listar / detalle
 // ============================================================
 
-export async function listarDespachosDeEmbarque(
-  embarqueId: string,
-): Promise<DespachoListRow[]> {
+export async function listarDespachosDeEmbarque(embarqueId: string): Promise<DespachoListRow[]> {
   const despachos = await db.despacho.findMany({
     where: { embarqueId },
     orderBy: [{ createdAt: "asc" }],
@@ -90,9 +85,7 @@ export async function listarDespachosDeEmbarque(
   }));
 }
 
-export async function obtenerDespachoPorId(
-  despachoId: string,
-): Promise<DespachoDetalle | null> {
+export async function obtenerDespachoPorId(despachoId: string): Promise<DespachoDetalle | null> {
   const d = await db.despacho.findUnique({
     where: { id: despachoId },
     include: {
@@ -219,9 +212,7 @@ async function siguienteCodigoDespacho(
   return `${embarqueCodigo}-D${existentes + 1}`;
 }
 
-export async function crearDespachoAction(
-  input: CrearDespachoInput,
-): Promise<CrearDespachoResult> {
+export async function crearDespachoAction(input: CrearDespachoInput): Promise<CrearDespachoResult> {
   const parsed = crearDespachoSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -261,9 +252,7 @@ export async function crearDespachoAction(
       }
 
       // Validar items pertenecen al embarque + cantidades vs remanente
-      const itemsEmbById = new Map(
-        embarque.items.map((i) => [i.id, i.cantidad]),
-      );
+      const itemsEmbById = new Map(embarque.items.map((i) => [i.id, i.cantidad]));
       const otrosItems = await tx.itemDespacho.findMany({
         where: {
           despacho: { embarqueId: embarque.id, estado: { not: "ANULADO" } },
@@ -285,8 +274,7 @@ export async function crearDespachoAction(
             `Ítem ${it.itemEmbarqueId} no pertenece al embarque.`,
           );
         }
-        const remanente =
-          cantTotal - (yaDespachadoPorIE.get(it.itemEmbarqueId) ?? 0);
+        const remanente = cantTotal - (yaDespachadoPorIE.get(it.itemEmbarqueId) ?? 0);
         if (it.cantidad > remanente) {
           throw new AsientoError(
             "DOMINIO_INVALIDO",
@@ -305,16 +293,10 @@ export async function crearDespachoAction(
         for (const fid of data.facturasIds) {
           const f = facturas.find((x) => x.id === fid);
           if (!f) {
-            throw new AsientoError(
-              "DOMINIO_INVALIDO",
-              `Factura ${fid} no existe.`,
-            );
+            throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no existe.`);
           }
           if (f.embarqueId !== embarque.id) {
-            throw new AsientoError(
-              "DOMINIO_INVALIDO",
-              `Factura ${fid} no pertenece al embarque.`,
-            );
+            throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no pertenece al embarque.`);
           }
           if (f.momento !== "DESPACHO") {
             throw new AsientoError(
@@ -476,13 +458,9 @@ export async function contabilizarDespachoAction(
 // Anular despacho — anula asiento + revierte stock + libera facturas
 // ============================================================
 
-export type AnularDespachoResult =
-  | { ok: true }
-  | { ok: false; error: string };
+export type AnularDespachoResult = { ok: true } | { ok: false; error: string };
 
-export async function anularDespachoAction(
-  despachoId: string,
-): Promise<AnularDespachoResult> {
+export async function anularDespachoAction(despachoId: string): Promise<AnularDespachoResult> {
   if (!despachoId || typeof despachoId !== "string") {
     return { ok: false, error: "ID inválido." };
   }
@@ -534,13 +512,9 @@ export async function anularDespachoAction(
 // y libera facturas. NO permitido si está CONTABILIZADO.
 // ============================================================
 
-export type EliminarDespachoResult =
-  | { ok: true }
-  | { ok: false; error: string };
+export type EliminarDespachoResult = { ok: true } | { ok: false; error: string };
 
-export async function eliminarDespachoAction(
-  despachoId: string,
-): Promise<EliminarDespachoResult> {
+export async function eliminarDespachoAction(despachoId: string): Promise<EliminarDespachoResult> {
   if (!despachoId || typeof despachoId !== "string") {
     return { ok: false, error: "ID inválido." };
   }

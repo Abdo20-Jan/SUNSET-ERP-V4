@@ -36,12 +36,7 @@ export default async function NuevaOportunidadPage() {
   return (
     <main className="container mx-auto max-w-3xl space-y-6 p-6">
       <h1 className="text-2xl font-semibold">Nueva oportunidad</h1>
-      <OportunidadForm
-        mode="create"
-        stages={stages}
-        leads={leads}
-        clientes={clientes}
-      />
+      <OportunidadForm mode="create" stages={stages} leads={leads} clientes={clientes} />
     </main>
   );
 }

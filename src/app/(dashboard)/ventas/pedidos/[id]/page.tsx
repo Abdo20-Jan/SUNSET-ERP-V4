@@ -36,12 +36,7 @@ export default async function PedidoVentaDetailPage({
       listarProductosParaPedidoVenta(),
     ]);
     return (
-      <PedidoVentaForm
-        mode="edit"
-        initialData={pedido}
-        clientes={clientes}
-        productos={productos}
-      />
+      <PedidoVentaForm mode="edit" initialData={pedido} clientes={clientes} productos={productos} />
     );
   }
 

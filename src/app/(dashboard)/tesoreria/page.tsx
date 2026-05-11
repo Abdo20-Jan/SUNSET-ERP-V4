@@ -43,36 +43,31 @@ const SECTIONS = [
     href: "/tesoreria/extracto",
     icon: DocumentValidationIcon,
     title: "Extracto bancario",
-    description:
-      "Movimientos de una cuenta con saldo corrido — equivale al extracto del banco",
+    description: "Movimientos de una cuenta con saldo corrido — equivale al extracto del banco",
   },
   {
     href: "/tesoreria/prestamos",
     icon: BankIcon,
     title: "Préstamos",
-    description:
-      "Préstamos del exterior: alta, saldo pendiente y amortizaciones",
+    description: "Préstamos del exterior: alta, saldo pendiente y amortizaciones",
   },
   {
     href: "/tesoreria/cuentas-a-pagar",
     icon: ReceiptDollarIcon,
     title: "Cuentas a pagar",
-    description:
-      "Saldos pendientes a proveedores, despachante, Aduana e impuestos",
+    description: "Saldos pendientes a proveedores, despachante, Aduana e impuestos",
   },
   {
     href: "/tesoreria/saldos-proveedores",
     icon: Calendar03Icon,
     title: "Saldos por proveedor",
-    description:
-      "Saldo individual + facturas vencidas, próximas a vencer y al día",
+    description: "Saldo individual + facturas vencidas, próximas a vencer y al día",
   },
   {
     href: "/tesoreria/extractos",
     icon: FileImportIcon,
     title: "Importar extracto",
-    description:
-      "Subí el PDF del banco y aprobá las sugerencias de asiento generadas por IA",
+    description: "Subí el PDF del banco y aprobá las sugerencias de asiento generadas por IA",
   },
 ] as const;
 
@@ -96,9 +91,7 @@ export default function TesoreriaPage() {
                 </div>
                 <div className="flex flex-col gap-0.5">
                   <span className="text-sm font-medium">{s.title}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {s.description}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{s.description}</span>
                 </div>
               </CardContent>
             </Card>

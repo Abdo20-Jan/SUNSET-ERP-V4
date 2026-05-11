@@ -1,12 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 
 import type { GastoRow } from "@/lib/actions/gastos";
 import { fmtDate, fmtMoney } from "@/lib/format";
@@ -41,10 +36,7 @@ export function GastosTable({ data }: { data: GastoRow[] }) {
       id: "numero",
       header: "Número",
       cell: ({ row }) => (
-        <Link
-          href={`/gastos/${row.original.id}`}
-          className="font-mono text-sm hover:underline"
-        >
+        <Link href={`/gastos/${row.original.id}`} className="font-mono text-sm hover:underline">
           {row.original.numero}
         </Link>
       ),
@@ -53,17 +45,13 @@ export function GastosTable({ data }: { data: GastoRow[] }) {
       id: "fecha",
       header: "Fecha",
       cell: ({ row }) => (
-        <span className="text-sm tabular-nums">
-          {fmtDate(new Date(row.original.fecha))}
-        </span>
+        <span className="text-sm tabular-nums">{fmtDate(new Date(row.original.fecha))}</span>
       ),
     },
     {
       id: "proveedor",
       header: "Proveedor",
-      cell: ({ row }) => (
-        <span className="text-sm">{row.original.proveedor.nombre}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm">{row.original.proveedor.nombre}</span>,
     },
     {
       id: "factura",
@@ -101,9 +89,7 @@ export function GastosTable({ data }: { data: GastoRow[] }) {
       id: "estado",
       header: "Estado",
       cell: ({ row }) => (
-        <Badge variant={estadoVariant(row.original.estado)}>
-          {row.original.estado}
-        </Badge>
+        <Badge variant={estadoVariant(row.original.estado)}>{row.original.estado}</Badge>
       ),
     },
   ];
@@ -122,10 +108,7 @@ export function GastosTable({ data }: { data: GastoRow[] }) {
           <TableRow key={headerGroup.id}>
             {headerGroup.headers.map((header) => (
               <TableHead key={header.id}>
-                {flexRender(
-                  header.column.columnDef.header,
-                  header.getContext(),
-                )}
+                {flexRender(header.column.columnDef.header, header.getContext())}
               </TableHead>
             ))}
           </TableRow>

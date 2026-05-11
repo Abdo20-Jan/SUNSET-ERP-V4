@@ -1,12 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 
 import type { CompraRow } from "@/lib/actions/compras";
 import { fmtDate, fmtMoney } from "@/lib/format";
@@ -43,10 +38,7 @@ export function ComprasTable({ data }: { data: CompraRow[] }) {
       id: "numero",
       header: "Número",
       cell: ({ row }) => (
-        <Link
-          href={`/compras/${row.original.id}`}
-          className="font-mono text-sm hover:underline"
-        >
+        <Link href={`/compras/${row.original.id}`} className="font-mono text-sm hover:underline">
           {row.original.numero}
         </Link>
       ),
@@ -55,17 +47,13 @@ export function ComprasTable({ data }: { data: CompraRow[] }) {
       id: "fecha",
       header: "Fecha",
       cell: ({ row }) => (
-        <span className="text-sm tabular-nums">
-          {fmtDate(new Date(row.original.fecha))}
-        </span>
+        <span className="text-sm tabular-nums">{fmtDate(new Date(row.original.fecha))}</span>
       ),
     },
     {
       id: "proveedor",
       header: "Proveedor",
-      cell: ({ row }) => (
-        <span className="text-sm">{row.original.proveedor.nombre}</span>
-      ),
+      cell: ({ row }) => <span className="text-sm">{row.original.proveedor.nombre}</span>,
     },
     {
       id: "vencimiento",
@@ -83,8 +71,7 @@ export function ComprasTable({ data }: { data: CompraRow[] }) {
         <span
           className={cn(
             "block text-right font-mono text-sm tabular-nums",
-            row.original.estado === "CANCELADA" &&
-              "line-through opacity-60",
+            row.original.estado === "CANCELADA" && "line-through opacity-60",
           )}
         >
           {fmtMoney(row.original.total)} {row.original.moneda}
@@ -95,9 +82,7 @@ export function ComprasTable({ data }: { data: CompraRow[] }) {
       id: "estado",
       header: "Estado",
       cell: ({ row }) => (
-        <Badge variant={estadoVariant(row.original.estado)}>
-          {row.original.estado}
-        </Badge>
+        <Badge variant={estadoVariant(row.original.estado)}>{row.original.estado}</Badge>
       ),
     },
   ];
@@ -116,10 +101,7 @@ export function ComprasTable({ data }: { data: CompraRow[] }) {
           <TableRow key={headerGroup.id}>
             {headerGroup.headers.map((header) => (
               <TableHead key={header.id}>
-                {flexRender(
-                  header.column.columnDef.header,
-                  header.getContext(),
-                )}
+                {flexRender(header.column.columnDef.header, header.getContext())}
               </TableHead>
             ))}
           </TableRow>

@@ -28,9 +28,7 @@ export function UltimosAsientosCard({
     <Card>
       <CardHeader className="border-b">
         <CardTitle>Últimos Asientos</CardTitle>
-        <CardDescription>
-          10 últimos asientos contabilizados.
-        </CardDescription>
+        <CardDescription>10 últimos asientos contabilizados.</CardDescription>
         <CardAction>
           <Link
             href="/contabilidad/asientos"
@@ -42,9 +40,7 @@ export function UltimosAsientosCard({
       </CardHeader>
       <CardContent className="px-0">
         {asientos.length === 0 ? (
-          <p className="px-6 text-sm text-muted-foreground">
-            No hay asientos contabilizados.
-          </p>
+          <p className="px-6 text-sm text-muted-foreground">No hay asientos contabilizados.</p>
         ) : (
           <Table>
             <TableHeader>
@@ -58,9 +54,7 @@ export function UltimosAsientosCard({
             <TableBody>
               {asientos.map((a) => (
                 <TableRow key={a.id}>
-                  <TableCell className="pl-6 text-muted-foreground">
-                    {fmtDate(a.fecha)}
-                  </TableCell>
+                  <TableCell className="pl-6 text-muted-foreground">{fmtDate(a.fecha)}</TableCell>
                   <TableCell>
                     <Link
                       href={`/contabilidad/asientos/${a.id}`}

@@ -3,10 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { format } from "date-fns";
 
-import {
-  getAsientoDetalle,
-  type AsientoDetalle,
-} from "@/lib/actions/asientos";
+import { getAsientoDetalle, type AsientoDetalle } from "@/lib/actions/asientos";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -32,9 +29,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
 };
 
-function estadoVariant(
-  estado: AsientoDetalle["estado"],
-): "default" | "outline" | "secondary" {
+function estadoVariant(estado: AsientoDetalle["estado"]): "default" | "outline" | "secondary" {
   switch (estado) {
     case "BORRADOR":
       return "outline";
@@ -76,17 +71,13 @@ export function AsientoDetalleSheet({ asientoId, open, onOpenChange }: Props) {
       >
         <SheetHeader className="gap-2">
           <div className="flex items-center gap-3">
-            <SheetTitle>
-              {detalle ? `Asiento Nº ${detalle.numero}` : "Asiento"}
-            </SheetTitle>
+            <SheetTitle>{detalle ? `Asiento Nº ${detalle.numero}` : "Asiento"}</SheetTitle>
             {detalle && (
               <>
                 <Badge variant="outline" className="font-mono text-xs">
                   {detalle.periodoCodigo}
                 </Badge>
-                <Badge variant={estadoVariant(detalle.estado)}>
-                  {detalle.estado}
-                </Badge>
+                <Badge variant={estadoVariant(detalle.estado)}>{detalle.estado}</Badge>
               </>
             )}
           </div>
@@ -102,9 +93,7 @@ export function AsientoDetalleSheet({ asientoId, open, onOpenChange }: Props) {
         <Separator />
 
         <div className="flex flex-col gap-6 p-6">
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
 
           {!detalle && !error && <DetalleSkeleton />}
 
@@ -116,9 +105,7 @@ export function AsientoDetalleSheet({ asientoId, open, onOpenChange }: Props) {
                 <InfoRow label="Moneda" value={detalle.moneda} />
                 <InfoRow
                   label="Tipo de cambio"
-                  value={Number(detalle.tipoCambio).toFixed(
-                    detalle.moneda === "ARS" ? 2 : 6,
-                  )}
+                  value={Number(detalle.tipoCambio).toFixed(detalle.moneda === "ARS" ? 2 : 6)}
                 />
               </dl>
 
@@ -136,12 +123,8 @@ export function AsientoDetalleSheet({ asientoId, open, onOpenChange }: Props) {
                   <TableBody>
                     {detalle.lineas.map((l) => (
                       <TableRow key={l.id}>
-                        <TableCell className="font-mono text-xs">
-                          {l.cuentaCodigo}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {l.cuentaNombre}
-                        </TableCell>
+                        <TableCell className="font-mono text-xs">{l.cuentaCodigo}</TableCell>
+                        <TableCell className="text-sm">{l.cuentaNombre}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {l.descripcion ?? "—"}
                         </TableCell>

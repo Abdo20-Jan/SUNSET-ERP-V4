@@ -5,13 +5,7 @@ import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -97,27 +91,16 @@ export default async function MovimientoDetallePage({
   if (!mov) notFound();
 
   const fechaStr = formatFecha(mov.fecha);
-  const tipoLabel =
-    mov.tipo === "PAGO"
-      ? "Pago"
-      : mov.tipo === "COBRO"
-        ? "Cobro"
-        : "Transferencia";
+  const tipoLabel = mov.tipo === "PAGO" ? "Pago" : mov.tipo === "COBRO" ? "Cobro" : "Transferencia";
   const tipoBadgeVariant =
-    mov.tipo === "PAGO"
-      ? "secondary"
-      : mov.tipo === "COBRO"
-        ? "default"
-        : "outline";
+    mov.tipo === "PAGO" ? "secondary" : mov.tipo === "COBRO" ? "default" : "outline";
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3 border-b border-border/60 pb-2">
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center gap-2">
-            <h1 className="text-[15px] font-semibold tracking-tight">
-              {tipoLabel} de Tesorería
-            </h1>
+            <h1 className="text-[15px] font-semibold tracking-tight">{tipoLabel} de Tesorería</h1>
             <Badge variant={tipoBadgeVariant}>{mov.tipo}</Badge>
             {mov.asiento && (
               <Badge
@@ -157,10 +140,7 @@ export default async function MovimientoDetallePage({
             </Button>
           </Link>
           {mov.asiento && mov.asiento.estado === "CONTABILIZADO" && (
-            <AnularAsientoButton
-              asientoId={mov.asiento.id}
-              asientoNumero={mov.asiento.numero}
-            />
+            <AnularAsientoButton asientoId={mov.asiento.id} asientoNumero={mov.asiento.numero} />
           )}
         </div>
       </div>
@@ -178,11 +158,7 @@ export default async function MovimientoDetallePage({
             {mov.moneda !== "ARS" && (
               <span className="text-[11px] text-muted-foreground">
                 TC {Number(mov.tipoCambio).toFixed(2)} · ARS{" "}
-                {fmtMoney(
-                  toDecimal(mov.monto)
-                    .times(toDecimal(mov.tipoCambio))
-                    .toFixed(2),
-                )}
+                {fmtMoney(toDecimal(mov.monto).times(toDecimal(mov.tipoCambio)).toFixed(2))}
               </span>
             )}
           </CardContent>
@@ -192,15 +168,12 @@ export default async function MovimientoDetallePage({
             <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
               Cuenta bancaria
             </span>
-            <span className="text-sm font-medium">
-              {mov.cuentaBancaria.banco}
-            </span>
+            <span className="text-sm font-medium">{mov.cuentaBancaria.banco}</span>
             <span className="text-[11px] text-muted-foreground">
               {mov.cuentaBancaria.numero ?? "—"} · {mov.cuentaBancaria.moneda}
             </span>
             <span className="font-mono text-[10px] text-muted-foreground">
-              {mov.cuentaBancaria.cuentaContable.codigo}{" "}
-              {mov.cuentaBancaria.cuentaContable.nombre}
+              {mov.cuentaBancaria.cuentaContable.codigo} {mov.cuentaBancaria.cuentaContable.nombre}
             </span>
           </CardContent>
         </Card>
@@ -209,9 +182,7 @@ export default async function MovimientoDetallePage({
             <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
               Contrapartida principal
             </span>
-            <span className="text-sm font-medium">
-              {mov.cuentaContable.nombre}
-            </span>
+            <span className="text-sm font-medium">{mov.cuentaContable.nombre}</span>
             <span className="font-mono text-[10px] text-muted-foreground">
               {mov.cuentaContable.codigo}
             </span>
@@ -228,27 +199,12 @@ export default async function MovimientoDetallePage({
           <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-[13px] md:grid-cols-2">
             <DataRow label="Fecha" value={fechaStr} />
             <DataRow label="Tipo" value={tipoLabel} />
-            <DataRow
-              label="Comprobante"
-              value={mov.comprobante ?? "—"}
-              mono
-            />
-            <DataRow
-              label="Referencia banco"
-              value={mov.referenciaBanco ?? "—"}
-              mono
-            />
+            <DataRow label="Comprobante" value={mov.comprobante ?? "—"} mono />
+            <DataRow label="Referencia banco" value={mov.referenciaBanco ?? "—"} mono />
             {mov.cuentaBancaria.cbu && (
-              <DataRow
-                label="CBU cuenta"
-                value={mov.cuentaBancaria.cbu}
-                mono
-              />
+              <DataRow label="CBU cuenta" value={mov.cuentaBancaria.cbu} mono />
             )}
-            <DataRow
-              label="Registrado el"
-              value={formatFecha(mov.createdAt)}
-            />
+            <DataRow label="Registrado el" value={formatFecha(mov.createdAt)} />
             {mov.descripcion && (
               <div className="col-span-full flex flex-col gap-0.5">
                 <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -276,12 +232,10 @@ export default async function MovimientoDetallePage({
       {mov.asiento ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-[14px]">
-              Asiento contable Nº {mov.asiento.numero}
-            </CardTitle>
+            <CardTitle className="text-[14px]">Asiento contable Nº {mov.asiento.numero}</CardTitle>
             <CardDescription>
-              {mov.asiento.descripcion} · Origen: {mov.asiento.origen} ·
-              Período {mov.asiento.periodo.codigo}
+              {mov.asiento.descripcion} · Origen: {mov.asiento.origen} · Período{" "}
+              {mov.asiento.periodo.codigo}
             </CardDescription>
           </CardHeader>
           <CardContent className="px-0 pb-0">
@@ -303,12 +257,9 @@ export default async function MovimientoDetallePage({
                   return (
                     <TableRow key={l.id}>
                       <TableCell className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                        {debeNum > 0 ? "DEBE" : haberNum > 0 ? "HABER" : "—"}{" "}
-                        {i + 1}
+                        {debeNum > 0 ? "DEBE" : haberNum > 0 ? "HABER" : "—"} {i + 1}
                       </TableCell>
-                      <TableCell className="font-mono text-[12px]">
-                        {l.cuenta.codigo}
-                      </TableCell>
+                      <TableCell className="font-mono text-[12px]">{l.cuenta.codigo}</TableCell>
                       <TableCell className="text-[13px]">
                         {l.cuenta.nombre}
                         <span className="ml-2 text-[10px] uppercase text-muted-foreground">
@@ -345,8 +296,7 @@ export default async function MovimientoDetallePage({
       ) : (
         <Card>
           <CardContent className="text-sm text-muted-foreground">
-            Este movimiento no tiene asiento asociado (puede haber sido anulado
-            o no contabilizado).
+            Este movimiento no tiene asiento asociado (puede haber sido anulado o no contabilizado).
           </CardContent>
         </Card>
       )}
@@ -365,12 +315,8 @@ function DataRow({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
-        {label}
-      </dt>
-      <dd className={mono ? "font-mono text-[12px]" : "text-[13px]"}>
-        {value}
-      </dd>
+      <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</dt>
+      <dd className={mono ? "font-mono text-[12px]" : "text-[13px]"}>{value}</dd>
     </div>
   );
 }

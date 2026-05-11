@@ -29,11 +29,7 @@ export function MayorFilters({ cuentas, selectedCuentaId }: Props) {
     <div className="flex flex-wrap items-end gap-3">
       <div className="flex min-w-80 flex-1 flex-col gap-1.5">
         <Label className="text-xs text-muted-foreground">Cuenta analítica</Label>
-        <CuentaCombobox
-          value={selectedCuentaId}
-          onChange={onCuentaChange}
-          cuentas={cuentas}
-        />
+        <CuentaCombobox value={selectedCuentaId} onChange={onCuentaChange} cuentas={cuentas} />
       </div>
     </div>
   );

@@ -61,17 +61,13 @@ export function EmbarquesFilters({ selectedEstado, selectedMoneda }: Props) {
     });
   };
 
-  const hasFilters =
-    searchParams.has("estado") || searchParams.has("moneda");
+  const hasFilters = searchParams.has("estado") || searchParams.has("moneda");
 
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div className="flex flex-col gap-1.5">
         <Label className="text-xs text-muted-foreground">Estado</Label>
-        <Select
-          value={selectedEstado}
-          onValueChange={(v) => updateParam("estado", v)}
-        >
+        <Select value={selectedEstado} onValueChange={(v) => updateParam("estado", v)}>
           <SelectTrigger className="min-w-44">
             <SelectValue>
               {(value) => ESTADO_LABELS[value as string] ?? (value as string)}
@@ -92,10 +88,7 @@ export function EmbarquesFilters({ selectedEstado, selectedMoneda }: Props) {
 
       <div className="flex flex-col gap-1.5">
         <Label className="text-xs text-muted-foreground">Moneda</Label>
-        <Select
-          value={selectedMoneda}
-          onValueChange={(v) => updateParam("moneda", v)}
-        >
+        <Select value={selectedMoneda} onValueChange={(v) => updateParam("moneda", v)}>
           <SelectTrigger className="min-w-32">
             <SelectValue>
               {(value) => MONEDA_LABELS[value as string] ?? (value as string)}

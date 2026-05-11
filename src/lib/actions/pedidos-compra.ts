@@ -34,9 +34,7 @@ export async function listarPedidosCompra(): Promise<PedidoCompraRow[]> {
     },
   });
   return rows.map((p) => {
-    const total = sumMoney(
-      p.items.map((it) => toDecimal(it.precioUnitario).times(it.cantidad)),
-    );
+    const total = sumMoney(p.items.map((it) => toDecimal(it.precioUnitario).times(it.cantidad)));
     return {
       id: p.id,
       numero: p.numero,
@@ -69,9 +67,7 @@ export type PedidoCompraDetalle = {
   }>;
 };
 
-export async function obtenerPedidoCompraPorId(
-  id: number,
-): Promise<PedidoCompraDetalle | null> {
+export async function obtenerPedidoCompraPorId(id: number): Promise<PedidoCompraDetalle | null> {
   const p = await db.pedidoCompra.findUnique({
     where: { id },
     include: { items: { orderBy: { id: "asc" } } },
@@ -106,7 +102,7 @@ export async function generarNumeroPedidoCompra(): Promise<string> {
   });
   let next = 1;
   if (ultimo) {
-    const parsed = parseInt(ultimo.numero.slice(prefix.length), 10);
+    const parsed = Number.parseInt(ultimo.numero.slice(prefix.length), 10);
     if (!Number.isNaN(parsed)) next = parsed + 1;
   }
   return `${prefix}${String(next).padStart(4, "0")}`;
@@ -185,13 +181,8 @@ export async function guardarPedidoCompraAction(
           select: { estado: true },
         });
         if (!actual) throw new Error("Pedido no existe.");
-        if (
-          actual.estado !== PedidoEstado.BORRADOR &&
-          actual.estado !== PedidoEstado.ENVIADO
-        ) {
-          throw new Error(
-            "Sólo se pueden editar pedidos en estado BORRADOR o ENVIADO.",
-          );
+        if (actual.estado !== PedidoEstado.BORRADOR && actual.estado !== PedidoEstado.ENVIADO) {
+          throw new Error("Sólo se pueden editar pedidos en estado BORRADOR o ENVIADO.");
         }
         const p = await tx.pedidoCompra.update({
           where: { id: input.id },
@@ -223,10 +214,7 @@ export async function guardarPedidoCompraAction(
     revalidatePath(`/compras/pedidos/${saved.id}`);
     return { ok: true, id: saved.id, numero: saved.numero };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: `Número "${input.numero}" ya existe.` };
     }
     if (err instanceof Error) return { ok: false, error: err.message };
@@ -271,10 +259,7 @@ export async function crearCompraDesdePedidoAction(
     });
     if (!pedido) return { ok: false, error: "Pedido no existe." };
 
-    if (
-      pedido.estado === PedidoEstado.CANCELADO ||
-      pedido.estado === PedidoEstado.COMPLETADO
-    ) {
+    if (pedido.estado === PedidoEstado.CANCELADO || pedido.estado === PedidoEstado.COMPLETADO) {
       return {
         ok: false,
         error: `No se puede facturar un pedido en estado ${pedido.estado}.`,
@@ -283,9 +268,7 @@ export async function crearCompraDesdePedidoAction(
 
     // Calcular números basados en items, IVA 21% por defecto
     const subtotalCalc = sumMoney(
-      pedido.items.map((it) =>
-        toDecimal(it.precioUnitario).times(it.cantidad),
-      ),
+      pedido.items.map((it) => toDecimal(it.precioUnitario).times(it.cantidad)),
     );
     const ivaCalc = toDecimal(subtotalCalc).times(0.21).toDecimalPlaces(2);
     const totalCalc = toDecimal(subtotalCalc).plus(ivaCalc).toDecimalPlaces(2);
@@ -300,7 +283,7 @@ export async function crearCompraDesdePedidoAction(
     });
     let next = 1;
     if (ultimo) {
-      const parsed = parseInt(ultimo.numero.slice(prefix.length), 10);
+      const parsed = Number.parseInt(ultimo.numero.slice(prefix.length), 10);
       if (!Number.isNaN(parsed)) next = parsed + 1;
     }
     const numero = `${prefix}${String(next).padStart(4, "0")}`;
@@ -333,9 +316,7 @@ export async function crearCompraDesdePedidoAction(
 
       await tx.itemCompra.createMany({
         data: pedido.items.map((it) => {
-          const sub = toDecimal(it.precioUnitario)
-            .times(it.cantidad)
-            .toDecimalPlaces(2);
+          const sub = toDecimal(it.precioUnitario).times(it.cantidad).toDecimalPlaces(2);
           const iva = sub.times(0.21).toDecimalPlaces(2);
           return {
             compraId: c.id,

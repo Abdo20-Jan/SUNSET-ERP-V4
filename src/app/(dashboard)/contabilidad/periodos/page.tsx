@@ -35,12 +35,8 @@ export default async function PeriodosPage() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h1 className="text-[15px] font-semibold tracking-tight">
-          Períodos Contables
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {periodos.length} períodos
-        </p>
+        <h1 className="text-[15px] font-semibold tracking-tight">Períodos Contables</h1>
+        <p className="text-sm text-muted-foreground">{periodos.length} períodos</p>
       </div>
       <Card className="py-0">
         <PeriodosTable data={rows} />

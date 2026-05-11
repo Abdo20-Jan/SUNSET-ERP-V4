@@ -2,11 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { Decimal, toDecimal } from "@/lib/decimal";
-import {
-  AsientoEstado,
-  type AsientoOrigen,
-  type Moneda,
-} from "@/generated/prisma/client";
+import { AsientoEstado, type AsientoOrigen, type Moneda } from "@/generated/prisma/client";
 
 export type LibroDiarioLinea = {
   id: number;

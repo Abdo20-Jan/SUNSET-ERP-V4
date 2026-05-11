@@ -49,9 +49,7 @@ export function CuentaBancariaSelect({
         <SelectValue placeholder="Seleccione cuenta">
           {(value) => {
             const c = cuentas.find((x) => x.id === value);
-            return c
-              ? `${c.banco} · ${c.numero ?? "—"} · ${c.moneda}`
-              : "Seleccione cuenta";
+            return c ? `${c.banco} · ${c.numero ?? "—"} · ${c.moneda}` : "Seleccione cuenta";
           }}
         </SelectValue>
       </SelectTrigger>

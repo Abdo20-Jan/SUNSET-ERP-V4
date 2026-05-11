@@ -29,9 +29,9 @@ type Props = {
 export function DespachoActions({ despachoId, estado, codigo }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [confirmOpen, setConfirmOpen] = useState<
-    "anular" | "eliminar" | "contabilizar" | null
-  >(null);
+  const [confirmOpen, setConfirmOpen] = useState<"anular" | "eliminar" | "contabilizar" | null>(
+    null,
+  );
 
   if (estado === "ANULADO") {
     return <span className="text-[12px] text-muted-foreground">—</span>;
@@ -89,16 +89,12 @@ export function DespachoActions({ despachoId, estado, codigo }: Props) {
               <DialogHeader>
                 <DialogTitle>Contabilizar {codigo}</DialogTitle>
                 <DialogDescription>
-                  Genera el asiento + ingresa stock al depósito destino. Se
-                  puede anular después si fuera necesario.
+                  Genera el asiento + ingresa stock al depósito destino. Se puede anular después si
+                  fuera necesario.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setConfirmOpen(null)}
-                  disabled={pending}
-                >
+                <Button variant="outline" onClick={() => setConfirmOpen(null)} disabled={pending}>
                   Cancelar
                 </Button>
                 <Button onClick={onContabilizar} disabled={pending}>
@@ -123,23 +119,15 @@ export function DespachoActions({ despachoId, estado, codigo }: Props) {
               <DialogHeader>
                 <DialogTitle>Eliminar {codigo}</DialogTitle>
                 <DialogDescription>
-                  Borra el despacho BORRADOR y libera las facturas linkadas. No
-                  hay asiento contable involucrado.
+                  Borra el despacho BORRADOR y libera las facturas linkadas. No hay asiento contable
+                  involucrado.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setConfirmOpen(null)}
-                  disabled={pending}
-                >
+                <Button variant="outline" onClick={() => setConfirmOpen(null)} disabled={pending}>
                   Cancelar
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={onEliminar}
-                  disabled={pending}
-                >
+                <Button variant="destructive" onClick={onEliminar} disabled={pending}>
                   {pending ? "Eliminando…" : "Sí, eliminar"}
                 </Button>
               </DialogFooter>
@@ -164,23 +152,15 @@ export function DespachoActions({ despachoId, estado, codigo }: Props) {
             <DialogHeader>
               <DialogTitle>Anular {codigo}</DialogTitle>
               <DialogDescription>
-                Anula el asiento, revierte el ingreso de stock + recalcula
-                costo promedio del producto, y libera las facturas linkadas.
+                Anula el asiento, revierte el ingreso de stock + recalcula costo promedio del
+                producto, y libera las facturas linkadas.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setConfirmOpen(null)}
-                disabled={pending}
-              >
+              <Button variant="outline" onClick={() => setConfirmOpen(null)} disabled={pending}>
                 Cancelar
               </Button>
-              <Button
-                variant="destructive"
-                onClick={onAnular}
-                disabled={pending}
-              >
+              <Button variant="destructive" onClick={onAnular} disabled={pending}>
                 {pending ? "Anulando…" : "Sí, anular"}
               </Button>
             </DialogFooter>

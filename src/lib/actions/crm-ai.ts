@@ -4,17 +4,12 @@ import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
 import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
-import {
-  resumirLead,
-  type ResumenLead,
-} from "@/lib/services/crm/lead-summarizer";
+import { resumirLead, type ResumenLead } from "@/lib/services/crm/lead-summarizer";
 import { recalcularScoreLead } from "@/lib/services/crm/scoring-engine";
 import { analizarSentimiento } from "@/lib/services/crm/sentiment";
 import { Prisma } from "@/generated/prisma/client";
 
-type ActionResult<T = undefined> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
 function mapAiError(err: unknown, contexto: string): string {
   if (err instanceof Error) {
@@ -27,9 +22,7 @@ function mapAiError(err: unknown, contexto: string): string {
   return "El asistente no pudo completar la operación. Probá de nuevo.";
 }
 
-export async function resumirLeadAction(
-  leadId: string,
-): Promise<ActionResult<ResumenLead>> {
+export async function resumirLeadAction(leadId: string): Promise<ActionResult<ResumenLead>> {
   const guard = await requireCrmAuth();
   if (!guard.ok) return guard;
   if (!leadId) return { ok: false, error: "Id requerido." };

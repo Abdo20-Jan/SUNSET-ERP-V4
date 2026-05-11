@@ -65,10 +65,7 @@ export default async function OportunidadDetailPage({
           label="Lead"
           value={
             op.lead ? (
-              <Link
-                href={`/crm/leads/${op.lead.id}`}
-                className="text-primary hover:underline"
-              >
+              <Link href={`/crm/leads/${op.lead.id}`} className="text-primary hover:underline">
                 {op.lead.empresa ?? op.lead.nombre}
               </Link>
             ) : (

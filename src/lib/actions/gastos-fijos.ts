@@ -5,16 +5,9 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import {
-  AsientoError,
-  anularAsiento,
-} from "@/lib/services/asiento-automatico";
+import { AsientoError, anularAsiento } from "@/lib/services/asiento-automatico";
 import { registrarGastoFijoPeriodo } from "@/lib/services/gasto-fijo";
-import {
-  CuentaCategoria,
-  CuentaTipo,
-  Moneda,
-} from "@/generated/prisma/client";
+import { CuentaCategoria, CuentaTipo, Moneda } from "@/generated/prisma/client";
 
 export type GastoFijoRow = {
   id: number;
@@ -93,9 +86,7 @@ export type ProveedorOptionParaGastoFijo = {
   cuentaGastoContableId: number | null;
 };
 
-export async function listarProveedoresParaGastoFijo(): Promise<
-  ProveedorOptionParaGastoFijo[]
-> {
+export async function listarProveedoresParaGastoFijo(): Promise<ProveedorOptionParaGastoFijo[]> {
   const rows = await db.proveedor.findMany({
     where: { estado: "activo" },
     orderBy: { nombre: "asc" },
@@ -133,28 +124,39 @@ const MONEY_RE = /^\d+(\.\d{1,2})?$/;
 const inputSchema = z.object({
   descripcion: z.string().trim().min(1, "Descripción obligatoria.").max(255),
   proveedorId: z.string().uuid("Proveedor obligatorio."),
-  cuentaGastoContableId: z.number().int().positive().nullable().optional()
+  cuentaGastoContableId: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
     .transform((v) => v ?? null),
   moneda: z.nativeEnum(Moneda).default(Moneda.ARS),
   montoNeto: z.string().regex(MONEY_RE, "Monto inválido (máx. 2 decimales)."),
   ivaPorcentaje: z.string().regex(PORCENTAJE_RE, "% IVA inválido.").default("21"),
   iibbPorcentaje: z.string().regex(PORCENTAJE_RE, "% IIBB inválido.").default("0"),
-  diaVencimiento: z.number().int().min(1).max(28).nullable().optional()
+  diaVencimiento: z
+    .number()
+    .int()
+    .min(1)
+    .max(28)
+    .nullable()
+    .optional()
     .transform((v) => v ?? null),
   activo: z.boolean().default(true),
-  notas: z.string().trim().max(500).optional()
+  notas: z
+    .string()
+    .trim()
+    .max(500)
+    .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
 });
 
 export type GastoFijoInput = z.input<typeof inputSchema>;
 
-export type GastoFijoActionResult =
-  | { ok: true; id: number }
-  | { ok: false; error: string };
+export type GastoFijoActionResult = { ok: true; id: number } | { ok: false; error: string };
 
-export async function crearGastoFijoAction(
-  raw: GastoFijoInput,
-): Promise<GastoFijoActionResult> {
+export async function crearGastoFijoAction(raw: GastoFijoInput): Promise<GastoFijoActionResult> {
   const session = await auth();
   if (!session) return { ok: false, error: "No autorizado." };
 

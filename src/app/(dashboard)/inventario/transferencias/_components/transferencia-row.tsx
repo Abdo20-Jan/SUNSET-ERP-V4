@@ -16,10 +16,7 @@ type Row = {
 };
 
 export function TransferenciaRow({ t }: { t: Row }) {
-  const estadoCls =
-    t.estado === "CONFIRMADA"
-      ? "font-medium text-green-700"
-      : "text-red-700";
+  const estadoCls = t.estado === "CONFIRMADA" ? "font-medium text-green-700" : "text-red-700";
   return (
     <tr className="border-t">
       <td className="px-3 py-2 font-mono text-xs">{t.numero}</td>

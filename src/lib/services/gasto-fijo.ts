@@ -1,22 +1,11 @@
 import "server-only";
 
 import { Decimal as DecimalJs } from "@/lib/decimal";
-import {
-  AsientoOrigen,
-  Moneda,
-  type Asiento,
-} from "@/generated/prisma/client";
+import { AsientoOrigen, Moneda, type Asiento } from "@/generated/prisma/client";
 
-import {
-  AsientoError,
-  contabilizarAsiento,
-  crearAsientoManual,
-} from "./asiento-automatico";
+import { AsientoError, contabilizarAsiento, crearAsientoManual } from "./asiento-automatico";
 import { getOrCreateCuenta } from "./cuenta-auto";
-import {
-  COMPRA_CODIGOS,
-  GASTO_POR_TIPO_PROVEEDOR,
-} from "./cuenta-registry";
+import { COMPRA_CODIGOS, GASTO_POR_TIPO_PROVEEDOR } from "./cuenta-registry";
 import { db } from "@/lib/db";
 
 /**
@@ -48,16 +37,10 @@ export async function registrarGastoFijoPeriodo(opts: {
       },
     });
     if (!gasto) {
-      throw new AsientoError(
-        "DOMINIO_INVALIDO",
-        `GastoFijo ${gastoFijoId} no existe.`,
-      );
+      throw new AsientoError("DOMINIO_INVALIDO", `GastoFijo ${gastoFijoId} no existe.`);
     }
     if (!gasto.activo) {
-      throw new AsientoError(
-        "ESTADO_INVALIDO",
-        `GastoFijo "${gasto.descripcion}" está inactivo.`,
-      );
+      throw new AsientoError("ESTADO_INVALIDO", `GastoFijo "${gasto.descripcion}" está inactivo.`);
     }
 
     const yaRegistrado = await tx.gastoFijoRegistro.findUnique({
@@ -80,10 +63,7 @@ export async function registrarGastoFijoPeriodo(opts: {
     // Resolver cuentas
     let proveedorPasivoId = gasto.proveedor.cuentaContableId;
     if (!proveedorPasivoId) {
-      proveedorPasivoId = await getOrCreateCuenta(
-        tx,
-        COMPRA_CODIGOS.PROVEEDOR_FALLBACK,
-      );
+      proveedorPasivoId = await getOrCreateCuenta(tx, COMPRA_CODIGOS.PROVEEDOR_FALLBACK);
     }
 
     let gastoCuentaId = gasto.cuentaGastoContableId;
@@ -94,16 +74,19 @@ export async function registrarGastoFijoPeriodo(opts: {
     }
 
     const ivaCuentaId = await getOrCreateCuenta(tx, COMPRA_CODIGOS.IVA_CREDITO);
-    const iibbCuentaId = await getOrCreateCuenta(
-      tx,
-      COMPRA_CODIGOS.IIBB_CREDITO,
-    );
+    const iibbCuentaId = await getOrCreateCuenta(tx, COMPRA_CODIGOS.IIBB_CREDITO);
 
     // Computar montos (en moneda del gasto, luego × TC para asiento en ARS)
     const tc = new DecimalJs(tipoCambio);
     const neto = new DecimalJs(gasto.montoNeto.toString());
-    const iva = neto.times(new DecimalJs(gasto.ivaPorcentaje.toString())).dividedBy(100).toDecimalPlaces(2);
-    const iibb = neto.times(new DecimalJs(gasto.iibbPorcentaje.toString())).dividedBy(100).toDecimalPlaces(2);
+    const iva = neto
+      .times(new DecimalJs(gasto.ivaPorcentaje.toString()))
+      .dividedBy(100)
+      .toDecimalPlaces(2);
+    const iibb = neto
+      .times(new DecimalJs(gasto.iibbPorcentaje.toString()))
+      .dividedBy(100)
+      .toDecimalPlaces(2);
     const total = neto.plus(iva).plus(iibb).toDecimalPlaces(2);
 
     const netoArs = neto.times(tc).toDecimalPlaces(2);

@@ -13,11 +13,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 export type ClienteOption = {
   id: string;
@@ -57,12 +53,7 @@ export function ClienteCombobox({
           />
         }
       >
-        <span
-          className={cn(
-            "truncate text-left",
-            !selected && "text-muted-foreground",
-          )}
-        >
+        <span className={cn("truncate text-left", !selected && "text-muted-foreground")}>
           {selected ? selected.nombre : placeholder}
         </span>
         <HugeiconsIcon
@@ -88,9 +79,7 @@ export function ClienteCombobox({
                 <span className="truncate">{c.nombre}</span>
                 {c.diasPagoDefault != null && (
                   <span className="ml-auto text-xs text-muted-foreground">
-                    {c.diasPagoDefault === 0
-                      ? "Contado"
-                      : `${c.diasPagoDefault}d`}
+                    {c.diasPagoDefault === 0 ? "Contado" : `${c.diasPagoDefault}d`}
                   </span>
                 )}
               </CommandItem>

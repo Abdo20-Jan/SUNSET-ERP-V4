@@ -5,12 +5,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { money, sumMoney, toDecimal } from "@/lib/decimal";
-import {
-  Moneda,
-  PedidoEstado,
-  Prisma,
-  VentaEstado,
-} from "@/generated/prisma/client";
+import { Moneda, PedidoEstado, Prisma, VentaEstado } from "@/generated/prisma/client";
 
 export type PedidoVentaRow = {
   id: number;
@@ -33,9 +28,7 @@ export async function listarPedidosVenta(): Promise<PedidoVentaRow[]> {
     },
   });
   return rows.map((p) => {
-    const total = sumMoney(
-      p.items.map((it) => toDecimal(it.precioUnitario).times(it.cantidad)),
-    );
+    const total = sumMoney(p.items.map((it) => toDecimal(it.precioUnitario).times(it.cantidad)));
     return {
       id: p.id,
       numero: p.numero,
@@ -68,9 +61,7 @@ export type PedidoVentaDetalle = {
   }>;
 };
 
-export async function obtenerPedidoVentaPorId(
-  id: number,
-): Promise<PedidoVentaDetalle | null> {
+export async function obtenerPedidoVentaPorId(id: number): Promise<PedidoVentaDetalle | null> {
   const p = await db.pedidoVenta.findUnique({
     where: { id },
     include: { items: { orderBy: { id: "asc" } } },
@@ -105,7 +96,7 @@ export async function generarNumeroPedidoVenta(): Promise<string> {
   });
   let next = 1;
   if (ultimo) {
-    const parsed = parseInt(ultimo.numero.slice(prefix.length), 10);
+    const parsed = Number.parseInt(ultimo.numero.slice(prefix.length), 10);
     if (!Number.isNaN(parsed)) next = parsed + 1;
   }
   return `${prefix}${String(next).padStart(4, "0")}`;
@@ -155,9 +146,7 @@ export type PedidoVentaResult =
   | { ok: true; id: number; numero: string }
   | { ok: false; error: string };
 
-export async function guardarPedidoVentaAction(
-  raw: PedidoVentaInput,
-): Promise<PedidoVentaResult> {
+export async function guardarPedidoVentaAction(raw: PedidoVentaInput): Promise<PedidoVentaResult> {
   const parsed = inputSchema.safeParse(raw);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
@@ -184,13 +173,8 @@ export async function guardarPedidoVentaAction(
           select: { estado: true },
         });
         if (!actual) throw new Error("Pedido no existe.");
-        if (
-          actual.estado !== PedidoEstado.BORRADOR &&
-          actual.estado !== PedidoEstado.ENVIADO
-        ) {
-          throw new Error(
-            "Sólo se pueden editar pedidos en estado BORRADOR o ENVIADO.",
-          );
+        if (actual.estado !== PedidoEstado.BORRADOR && actual.estado !== PedidoEstado.ENVIADO) {
+          throw new Error("Sólo se pueden editar pedidos en estado BORRADOR o ENVIADO.");
         }
         const p = await tx.pedidoVenta.update({
           where: { id: input.id },
@@ -222,10 +206,7 @@ export async function guardarPedidoVentaAction(
     revalidatePath(`/ventas/pedidos/${saved.id}`);
     return { ok: true, id: saved.id, numero: saved.numero };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: `Número "${input.numero}" ya existe.` };
     }
     if (err instanceof Error) return { ok: false, error: err.message };
@@ -265,10 +246,7 @@ export async function crearVentaDesdePedidoAction(
     });
     if (!pedido) return { ok: false, error: "Pedido no existe." };
 
-    if (
-      pedido.estado === PedidoEstado.CANCELADO ||
-      pedido.estado === PedidoEstado.COMPLETADO
-    ) {
+    if (pedido.estado === PedidoEstado.CANCELADO || pedido.estado === PedidoEstado.COMPLETADO) {
       return {
         ok: false,
         error: `No se puede facturar un pedido en estado ${pedido.estado}.`,
@@ -276,9 +254,7 @@ export async function crearVentaDesdePedidoAction(
     }
 
     const subtotalCalc = sumMoney(
-      pedido.items.map((it) =>
-        toDecimal(it.precioUnitario).times(it.cantidad),
-      ),
+      pedido.items.map((it) => toDecimal(it.precioUnitario).times(it.cantidad)),
     );
     const ivaCalc = toDecimal(subtotalCalc).times(0.21).toDecimalPlaces(2);
     const totalCalc = toDecimal(subtotalCalc).plus(ivaCalc).toDecimalPlaces(2);
@@ -292,7 +268,7 @@ export async function crearVentaDesdePedidoAction(
     });
     let next = 1;
     if (ultimo) {
-      const parsed = parseInt(ultimo.numero.slice(prefix.length), 10);
+      const parsed = Number.parseInt(ultimo.numero.slice(prefix.length), 10);
       if (!Number.isNaN(parsed)) next = parsed + 1;
     }
     const numero = `${prefix}${String(next).padStart(4, "0")}`;
@@ -325,9 +301,7 @@ export async function crearVentaDesdePedidoAction(
 
       await tx.itemVenta.createMany({
         data: pedido.items.map((it) => {
-          const sub = toDecimal(it.precioUnitario)
-            .times(it.cantidad)
-            .toDecimalPlaces(2);
+          const sub = toDecimal(it.precioUnitario).times(it.cantidad).toDecimalPlaces(2);
           const iva = sub.times(0.21).toDecimalPlaces(2);
           return {
             ventaId: v.id,

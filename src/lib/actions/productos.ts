@@ -27,9 +27,7 @@ export type ProductoRow = {
 };
 
 function percent4(value: MoneyInput): Prisma.Decimal {
-  return new Prisma.Decimal(
-    toDecimal(value).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4),
-  );
+  return new Prisma.Decimal(toDecimal(value).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4));
 }
 
 export async function listarProductos(): Promise<ProductoRow[]> {
@@ -114,13 +112,9 @@ const productoCrearSchema = z.object({
 
 export type ProductoInput = z.input<typeof productoCrearSchema>;
 
-export type ProductoActionResult =
-  | { ok: true; id: string }
-  | { ok: false; error: string };
+export type ProductoActionResult = { ok: true; id: string } | { ok: false; error: string };
 
-export async function crearProductoAction(
-  raw: ProductoInput,
-): Promise<ProductoActionResult> {
+export async function crearProductoAction(raw: ProductoInput): Promise<ProductoActionResult> {
   const session = await auth();
   if (!session) return { ok: false, error: "No autorizado." };
 
@@ -167,10 +161,7 @@ export async function crearProductoAction(
     revalidatePath("/maestros");
     return { ok: true, id: created.id };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: "Ya existe un producto con ese código." };
     }
     console.error("crearProductoAction failed", err);
@@ -257,8 +248,7 @@ export async function eliminarProductoAction(
     db.movimientoStock.count({ where: { productoId: id } }),
   ]);
 
-  const tieneReferencias =
-    embarqueCount > 0 || compraCount > 0 || ventaCount > 0 || stockCount > 0;
+  const tieneReferencias = embarqueCount > 0 || compraCount > 0 || ventaCount > 0 || stockCount > 0;
 
   try {
     if (tieneReferencias) {
@@ -276,10 +266,7 @@ export async function eliminarProductoAction(
     revalidatePath("/maestros");
     return { ok: true, softDeleted: false };
   } catch (err) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2025"
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
       return { ok: false, error: "El producto no existe." };
     }
     console.error("eliminarProductoAction failed", err);

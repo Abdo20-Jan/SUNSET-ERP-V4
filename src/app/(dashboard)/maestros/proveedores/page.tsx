@@ -26,11 +26,7 @@ export default async function ProveedoresPage() {
       </div>
 
       <Card className="py-0">
-        <ProveedoresTable
-          proveedores={proveedores}
-          cuentas={cuentas}
-          cuentasGasto={cuentasGasto}
-        />
+        <ProveedoresTable proveedores={proveedores} cuentas={cuentas} cuentasGasto={cuentasGasto} />
       </Card>
     </div>
   );

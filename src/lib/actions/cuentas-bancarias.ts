@@ -34,9 +34,7 @@ export type CuentaContableOption = {
   nombre: string;
 };
 
-export async function listarCuentasBancariasConSaldo(): Promise<
-  CuentaBancariaRow[]
-> {
+export async function listarCuentasBancariasConSaldo(): Promise<CuentaBancariaRow[]> {
   const cuentas = await db.cuentaBancaria.findMany({
     orderBy: [{ banco: "asc" }, { moneda: "asc" }],
     select: {
@@ -51,9 +49,7 @@ export async function listarCuentasBancariasConSaldo(): Promise<
     },
   });
 
-  const saldos = await calcularSaldosCuentasBancarias(
-    cuentas.map((c) => c.cuentaContable.id),
-  );
+  const saldos = await calcularSaldosCuentasBancarias(cuentas.map((c) => c.cuentaContable.id));
 
   return cuentas.map((c) => ({
     id: c.id,
@@ -65,15 +61,11 @@ export async function listarCuentasBancariasConSaldo(): Promise<
     alias: c.alias,
     cuentaContableCodigo: c.cuentaContable.codigo,
     cuentaContableNombre: c.cuentaContable.nombre,
-    saldo: (saldos.get(c.cuentaContable.id) ?? new Prisma.Decimal(0)).toFixed(
-      2,
-    ),
+    saldo: (saldos.get(c.cuentaContable.id) ?? new Prisma.Decimal(0)).toFixed(2),
   }));
 }
 
-export async function listarCuentasContablesDisponibles(): Promise<
-  CuentaContableOption[]
-> {
+export async function listarCuentasContablesDisponibles(): Promise<CuentaContableOption[]> {
   const [cuentas, usadas] = await Promise.all([
     db.cuentaContable.findMany({
       where: {
@@ -121,9 +113,7 @@ const crearInputSchema = z.object({
 
 export type CrearCuentaBancariaInput = z.input<typeof crearInputSchema>;
 
-export type CrearCuentaBancariaResult =
-  | { ok: true; id: string }
-  | { ok: false; error: string };
+export type CrearCuentaBancariaResult = { ok: true; id: string } | { ok: false; error: string };
 
 export async function crearCuentaBancariaAction(
   raw: CrearCuentaBancariaInput,
@@ -193,11 +183,7 @@ export async function crearCuentaBancariaAction(
       if (cuentaContableId === null) {
         const esCaja = input.tipo === TipoCuentaBancaria.CAJA_CHICA;
         const nombreCuenta = `${input.banco} ${input.moneda}`.trim();
-        const cuenta = await crearCuentaParaEntidad(
-          tx,
-          esCaja ? "CAJA" : "BANCO",
-          nombreCuenta,
-        );
+        const cuenta = await crearCuentaParaEntidad(tx, esCaja ? "CAJA" : "BANCO", nombreCuenta);
         cuentaContableId = cuenta.id;
       }
       return tx.cuentaBancaria.create({

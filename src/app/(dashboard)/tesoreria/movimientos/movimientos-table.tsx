@@ -1,26 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  CancelCircleIcon,
-  MoreHorizontalCircle01Icon,
-  ViewIcon,
-} from "@hugeicons/core-free-icons";
+import { CancelCircleIcon, MoreHorizontalCircle01Icon, ViewIcon } from "@hugeicons/core-free-icons";
 
-import type {
-  AsientoEstado,
-  Moneda,
-  MovimientoTesoreriaTipo,
-} from "@/generated/prisma/client";
+import type { AsientoEstado, Moneda, MovimientoTesoreriaTipo } from "@/generated/prisma/client";
 import { anularAsientoAction } from "@/lib/actions/asientos";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -48,12 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { MovimientoDetalleSheet } from "./movimiento-detalle-sheet";
 
@@ -93,9 +75,7 @@ function formatDate(d: Date) {
   return format(d, "dd/MM/yyyy");
 }
 
-function estadoVariant(
-  estado: AsientoEstado,
-): "default" | "outline" | "secondary" {
+function estadoVariant(estado: AsientoEstado): "default" | "outline" | "secondary" {
   switch (estado) {
     case "BORRADOR":
       return "outline";
@@ -106,9 +86,7 @@ function estadoVariant(
   }
 }
 
-function tipoVariant(
-  tipo: MovimientoTesoreriaTipo,
-): "default" | "outline" | "secondary" {
+function tipoVariant(tipo: MovimientoTesoreriaTipo): "default" | "outline" | "secondary" {
   switch (tipo) {
     case "COBRO":
       return "default";
@@ -129,18 +107,14 @@ export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
       id: "fecha",
       header: "Fecha",
       cell: ({ row }) => (
-        <span className="text-sm tabular-nums">
-          {formatDate(row.original.fecha)}
-        </span>
+        <span className="text-sm tabular-nums">{formatDate(row.original.fecha)}</span>
       ),
     },
     {
       id: "tipo",
       header: "Tipo",
       cell: ({ row }) => (
-        <Badge variant={tipoVariant(row.original.tipo)}>
-          {row.original.tipo}
-        </Badge>
+        <Badge variant={tipoVariant(row.original.tipo)}>{row.original.tipo}</Badge>
       ),
     },
     {
@@ -197,9 +171,7 @@ export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
     {
       id: "moneda",
       header: "Moneda",
-      cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.moneda}</span>
-      ),
+      cell: ({ row }) => <span className="font-mono text-xs">{row.original.moneda}</span>,
     },
     {
       id: "estado",
@@ -210,9 +182,7 @@ export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
         return (
           <div className="flex items-center gap-2">
             <Badge variant={estadoVariant(a.estado)}>{a.estado}</Badge>
-            <span className="font-mono text-xs text-muted-foreground">
-              Nº {a.numero}
-            </span>
+            <span className="font-mono text-xs text-muted-foreground">Nº {a.numero}</span>
           </div>
         );
       },
@@ -258,10 +228,7 @@ export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
             <TableRow key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
                 <TableHead key={header.id}>
-                  {flexRender(
-                    header.column.columnDef.header,
-                    header.getContext(),
-                  )}
+                  {flexRender(header.column.columnDef.header, header.getContext())}
                 </TableHead>
               ))}
             </TableRow>
@@ -301,30 +268,18 @@ export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
           {pending && pending.asiento && (
             <>
               <DialogHeader>
-                <DialogTitle>
-                  Anular movimiento Nº {pending.asiento.numero}
-                </DialogTitle>
+                <DialogTitle>Anular movimiento Nº {pending.asiento.numero}</DialogTitle>
                 <DialogDescription>
-                  {pending.tipo} · {formatDate(pending.fecha)} ·{" "}
-                  {pending.cuentaBancaria.banco} · {pending.monto}{" "}
-                  {pending.moneda}. Al anularlo, el asiento pasará a ANULADO y
-                  dejará de afectar saldos. El número se mantiene para
-                  auditoría.
+                  {pending.tipo} · {formatDate(pending.fecha)} · {pending.cuentaBancaria.banco} ·{" "}
+                  {pending.monto} {pending.moneda}. Al anularlo, el asiento pasará a ANULADO y
+                  dejará de afectar saldos. El número se mantiene para auditoría.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setPending(null)}
-                  disabled={isSubmitting}
-                >
+                <Button variant="outline" onClick={() => setPending(null)} disabled={isSubmitting}>
                   Cancelar
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={onConfirm}
-                  disabled={isSubmitting}
-                >
+                <Button variant="destructive" onClick={onConfirm} disabled={isSubmitting}>
                   {isSubmitting ? "Procesando…" : "Anular"}
                 </Button>
               </DialogFooter>
@@ -356,11 +311,7 @@ function RowActions({
   const puedeAnular = movimiento.asiento?.estado === "CONTABILIZADO";
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon-sm" aria-label="Acciones" />
-        }
-      >
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Acciones" />}>
         <HugeiconsIcon icon={MoreHorizontalCircle01Icon} strokeWidth={2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -370,9 +321,7 @@ function RowActions({
         </DropdownMenuItem>
         <DropdownMenuItem
           render={
-            <a href={`/tesoreria/movimientos/${movimiento.id}`}>
-              Ver detalles (página completa)
-            </a>
+            <a href={`/tesoreria/movimientos/${movimiento.id}`}>Ver detalles (página completa)</a>
           }
         />
         {puedeAnular && (

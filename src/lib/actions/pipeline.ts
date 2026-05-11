@@ -8,9 +8,7 @@ import { requireCrmAuth } from "@/lib/actions/_crm-helpers";
 import { Prisma, Role } from "@/generated/prisma/client";
 import { auth } from "@/lib/auth";
 
-type ActionResult<T = undefined> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
 const NO_ADMIN = {
   ok: false as const,
@@ -29,8 +27,7 @@ export type StageInput = z.input<typeof stageSchema>;
 type ParsedStage = z.output<typeof stageSchema>;
 
 async function requireAdminCrm(): Promise<
-  | { ok: true; userId: string }
-  | { ok: false; error: string }
+  { ok: true; userId: string } | { ok: false; error: string }
 > {
   const guard = await requireCrmAuth();
   if (!guard.ok) return guard;
@@ -60,9 +57,7 @@ export async function listarStages() {
   });
 }
 
-export async function crearStageAction(
-  raw: StageInput,
-): Promise<ActionResult<{ id: string }>> {
+export async function crearStageAction(raw: StageInput): Promise<ActionResult<{ id: string }>> {
   const guard = await requireAdminCrm();
   if (!guard.ok) return guard;
 
@@ -116,9 +111,7 @@ export async function editarStageAction(
   }
 }
 
-export async function reordenarStagesAction(
-  ordenIds: string[],
-): Promise<ActionResult<undefined>> {
+export async function reordenarStagesAction(ordenIds: string[]): Promise<ActionResult<undefined>> {
   const guard = await requireAdminCrm();
   if (!guard.ok) return guard;
   if (!Array.isArray(ordenIds) || ordenIds.length === 0) {

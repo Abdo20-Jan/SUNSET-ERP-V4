@@ -2,13 +2,7 @@
 
 import { useEffect, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Controller,
-  useFieldArray,
-  useForm,
-  useWatch,
-  type Control,
-} from "react-hook-form";
+import { Controller, useFieldArray, useForm, useWatch, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -16,20 +10,11 @@ import Decimal from "decimal.js";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, Delete02Icon } from "@hugeicons/core-free-icons";
 
-import {
-  guardarPedidoCompraAction,
-  type PedidoCompraDetalle,
-} from "@/lib/actions/pedidos-compra";
+import { guardarPedidoCompraAction, type PedidoCompraDetalle } from "@/lib/actions/pedidos-compra";
 import { fmtMoney } from "@/lib/format";
 import { useCmdShortcut } from "@/lib/hooks/use-cmd-shortcut";
-import {
-  ProductoCombobox,
-  type ProductoOption,
-} from "@/components/producto-combobox";
-import {
-  ProveedorCombobox,
-  type ProveedorOption,
-} from "@/components/proveedor-combobox";
+import { ProductoCombobox, type ProductoOption } from "@/components/producto-combobox";
+import { ProveedorCombobox, type ProveedorOption } from "@/components/proveedor-combobox";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -129,9 +114,7 @@ export function PedidoCompraForm({
         numero: initialData!.numero,
         proveedorId: initialData!.proveedorId,
         fecha: initialData!.fecha.slice(0, 10),
-        fechaPrevista: initialData!.fechaPrevista
-          ? initialData!.fechaPrevista.slice(0, 10)
-          : "",
+        fechaPrevista: initialData!.fechaPrevista ? initialData!.fechaPrevista.slice(0, 10) : "",
         moneda: initialData!.moneda,
         tipoCambio: initialData!.tipoCambio,
         observaciones: initialData!.observaciones ?? "",
@@ -233,13 +216,11 @@ export function PedidoCompraForm({
     <form onSubmit={submit} className="flex flex-col gap-6 pb-32">
       <div className="flex flex-col gap-1">
         <h1 className="text-[15px] font-semibold tracking-tight">
-          {isEdit
-            ? `Editar pedido ${initialData!.numero}`
-            : "Nuevo pedido de compra (OC)"}
+          {isEdit ? `Editar pedido ${initialData!.numero}` : "Nuevo pedido de compra (OC)"}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Una orden de compra define lo que se va a pedir. La factura se crea
-          después desde el pedido.
+          Una orden de compra define lo que se va a pedir. La factura se crea después desde el
+          pedido.
         </p>
       </div>
 
@@ -248,9 +229,7 @@ export function PedidoCompraForm({
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs uppercase tracking-wide">Número</Label>
             <Input {...register("numero")} placeholder="OC-2026-0001" />
-            {errors.numero && (
-              <p className="text-xs text-destructive">{errors.numero.message}</p>
-            )}
+            {errors.numero && <p className="text-xs text-destructive">{errors.numero.message}</p>}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -267,9 +246,7 @@ export function PedidoCompraForm({
               )}
             />
             {errors.proveedorId && (
-              <p className="text-xs text-destructive">
-                {errors.proveedorId.message}
-              </p>
+              <p className="text-xs text-destructive">{errors.proveedorId.message}</p>
             )}
           </div>
 
@@ -279,26 +256,18 @@ export function PedidoCompraForm({
               control={control}
               name="fecha"
               render={({ field }) => (
-                <DatePicker
-                  value={field.value ?? ""}
-                  onChange={field.onChange}
-                />
+                <DatePicker value={field.value ?? ""} onChange={field.onChange} />
               )}
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs uppercase tracking-wide">
-              Fecha prevista
-            </Label>
+            <Label className="text-xs uppercase tracking-wide">Fecha prevista</Label>
             <Controller
               control={control}
               name="fechaPrevista"
               render={({ field }) => (
-                <DatePicker
-                  value={field.value ?? ""}
-                  onChange={field.onChange}
-                />
+                <DatePicker value={field.value ?? ""} onChange={field.onChange} />
               )}
             />
           </div>
@@ -326,18 +295,10 @@ export function PedidoCompraForm({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs uppercase tracking-wide">
-              Tipo de cambio
-            </Label>
-            <Input
-              {...register("tipoCambio")}
-              disabled={moneda === "ARS"}
-              inputMode="decimal"
-            />
+            <Label className="text-xs uppercase tracking-wide">Tipo de cambio</Label>
+            <Input {...register("tipoCambio")} disabled={moneda === "ARS"} inputMode="decimal" />
             {errors.tipoCambio && (
-              <p className="text-xs text-destructive">
-                {errors.tipoCambio.message}
-              </p>
+              <p className="text-xs text-destructive">{errors.tipoCambio.message}</p>
             )}
           </div>
         </CardContent>
@@ -349,18 +310,14 @@ export function PedidoCompraForm({
             <div>
               <h2 className="text-lg font-medium">Ítems del pedido</h2>
               <p className="text-xs text-muted-foreground">
-                Sin IVA acá. El IVA se calcula al crear la factura desde el
-                pedido.
+                Sin IVA acá. El IVA se calcula al crear la factura desde el pedido.
               </p>
             </div>
             <Button
               type="button"
               variant="outline"
               onClick={() =>
-                append(
-                  { productoId: "", cantidad: 1, precioUnitario: "0" },
-                  { shouldFocus: false },
-                )
+                append({ productoId: "", cantidad: 1, precioUnitario: "0" }, { shouldFocus: false })
               }
             >
               <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
@@ -476,9 +433,7 @@ function ItemRow({
           productos={productos}
         />
         {productoSel && (
-          <p className="mt-1 truncate text-xs text-muted-foreground">
-            {productoSel.nombre}
-          </p>
+          <p className="mt-1 truncate text-xs text-muted-foreground">{productoSel.nombre}</p>
         )}
       </div>
       <div className="md:col-span-1">
@@ -494,16 +449,11 @@ function ItemRow({
       </div>
       <div className="md:col-span-2">
         <Label className="text-xs uppercase tracking-wide">P. unit.</Label>
-        <Input
-          inputMode="decimal"
-          {...register(`items.${index}.precioUnitario` as const)}
-        />
+        <Input inputMode="decimal" {...register(`items.${index}.precioUnitario` as const)} />
       </div>
       <div className="md:col-span-2 text-right">
         <Label className="text-xs uppercase tracking-wide">Subtotal</Label>
-        <p className="font-mono text-sm tabular-nums">
-          {fmtMoney(subtotal.toString())}
-        </p>
+        <p className="font-mono text-sm tabular-nums">{fmtMoney(subtotal.toString())}</p>
       </div>
       <div className="flex justify-end md:col-span-1">
         <Button

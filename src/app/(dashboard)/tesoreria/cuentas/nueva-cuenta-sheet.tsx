@@ -67,11 +67,7 @@ export function NuevaCuentaButton({
         <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
         Nueva cuenta
       </Button>
-      <NuevaCuentaSheet
-        open={open}
-        onOpenChange={setOpen}
-        cuentasContables={cuentasContables}
-      />
+      <NuevaCuentaSheet open={open} onOpenChange={setOpen} cuentasContables={cuentasContables} />
     </>
   );
 }
@@ -122,9 +118,7 @@ function NuevaCuentaSheet({
         numero: values.numero,
         cbu: values.cbu,
         alias: values.alias,
-        cuentaContableId: values.crearCuentaAuto
-          ? null
-          : values.cuentaContableId,
+        cuentaContableId: values.crearCuentaAuto ? null : values.cuentaContableId,
       });
 
       if (result.ok) {
@@ -155,8 +149,7 @@ function NuevaCuentaSheet({
         <SheetHeader className="gap-2">
           <SheetTitle>Nueva cuenta bancaria</SheetTitle>
           <SheetDescription>
-            Registre una cuenta bancaria vinculada a una cuenta contable
-            analítica de activo.
+            Registre una cuenta bancaria vinculada a una cuenta contable analítica de activo.
           </SheetDescription>
         </SheetHeader>
 
@@ -165,15 +158,11 @@ function NuevaCuentaSheet({
         <form onSubmit={onSubmit} className="flex flex-1 flex-col">
           <div className="flex flex-col gap-4 p-6">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="banco">
-                {tipo === "CAJA_CHICA" ? "Caja" : "Banco"}
-              </Label>
+              <Label htmlFor="banco">{tipo === "CAJA_CHICA" ? "Caja" : "Banco"}</Label>
               <Input
                 id="banco"
                 placeholder={
-                  tipo === "CAJA_CHICA"
-                    ? "Ej: Caja Abdo, Caja Principal"
-                    : "Banco Santander"
+                  tipo === "CAJA_CHICA" ? "Ej: Caja Abdo, Caja Principal" : "Banco Santander"
                 }
                 aria-invalid={!!errors.banco}
                 {...register("banco")}
@@ -190,9 +179,7 @@ function NuevaCuentaSheet({
                   render={({ field }) => (
                     <Select
                       value={field.value}
-                      onValueChange={(v) =>
-                        field.onChange(v as TipoCuentaBancaria)
-                      }
+                      onValueChange={(v) => field.onChange(v as TipoCuentaBancaria)}
                     >
                       <SelectTrigger className="w-full">
                         <SelectValue />
@@ -215,10 +202,7 @@ function NuevaCuentaSheet({
                   control={control}
                   name="moneda"
                   render={({ field }) => (
-                    <Select
-                      value={field.value}
-                      onValueChange={(v) => field.onChange(v as Moneda)}
-                    >
+                    <Select value={field.value} onValueChange={(v) => field.onChange(v as Moneda)}>
                       <SelectTrigger className="w-full">
                         <SelectValue />
                       </SelectTrigger>
@@ -251,28 +235,18 @@ function NuevaCuentaSheet({
 
               <div className="flex flex-col gap-2">
                 <Label htmlFor="alias">Alias (opcional)</Label>
-                <Input
-                  id="alias"
-                  placeholder="MI.ALIAS"
-                  {...register("alias")}
-                />
+                <Input id="alias" placeholder="MI.ALIAS" {...register("alias")} />
               </div>
             </div>
 
             <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
               <Label className="text-sm">Cuenta contable</Label>
               <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  {...register("crearCuentaAuto")}
-                />
+                <input type="checkbox" className="mt-1" {...register("crearCuentaAuto")} />
                 <span>
-                  <span className="font-medium">Crear automáticamente</span>{" "}
-                  una cuenta analítica
+                  <span className="font-medium">Crear automáticamente</span> una cuenta analítica
                   <span className="ml-1 text-xs text-muted-foreground">
-                    (sugerido — código en{" "}
-                    {tipo === "CAJA_CHICA" ? "1.1.1.10–99" : "1.1.2.10–99"};
+                    (sugerido — código en {tipo === "CAJA_CHICA" ? "1.1.1.10–99" : "1.1.2.10–99"};
                     nombre: <span className="font-mono">«banco/caja» {moneda}</span>)
                   </span>
                 </span>
@@ -291,8 +265,8 @@ function NuevaCuentaSheet({
                 />
               )}
               <p className="text-xs text-muted-foreground">
-                Si elige &quot;Crear automáticamente&quot;, el sistema asigna el próximo
-                código disponible al guardar.
+                Si elige &quot;Crear automáticamente&quot;, el sistema asigna el próximo código
+                disponible al guardar.
               </p>
             </div>
           </div>
@@ -327,4 +301,3 @@ function FieldError({ message }: { message?: string }) {
     </p>
   );
 }
-

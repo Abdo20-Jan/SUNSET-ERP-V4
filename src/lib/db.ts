@@ -1,8 +1,7 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
-const connectionString =
-  process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL!;
+const connectionString = process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL!;
 
 function buildClient(): PrismaClient {
   return new PrismaClient({
@@ -20,8 +19,7 @@ const globalForPrisma = globalThis as unknown as {
   prismaBase?: PrismaClient;
 };
 
-let baseClient: PrismaClient =
-  globalForPrisma.prismaBase ?? buildClient();
+let baseClient: PrismaClient = globalForPrisma.prismaBase ?? buildClient();
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prismaBase = baseClient;
@@ -66,10 +64,7 @@ async function rebuild(): Promise<void> {
 type AnyFn = (...args: unknown[]) => unknown;
 type AnyRec = Record<string | symbol, unknown>;
 
-async function withRetryGeneric<T>(
-  label: string,
-  fn: () => Promise<T>,
-): Promise<T> {
+async function withRetryGeneric<T>(label: string, fn: () => Promise<T>): Promise<T> {
   let attempt = 0;
   // Allow up to 2 retries because: 1st failure triggers rebuild, but a new
   // pool may also surface a stale conn (Postgres limits, brief net blip).
@@ -84,18 +79,13 @@ async function withRetryGeneric<T>(
         throw err;
       }
       attempt++;
-      console.warn(
-        `[db] ${label} attempt ${attempt} failed with connection error, retrying`,
-      );
+      console.warn(`[db] ${label} attempt ${attempt} failed with connection error, retrying`);
       await rebuild();
     }
   }
 }
 
-function withRetry(
-  modelKey: string | symbol,
-  methodKey: string | symbol,
-): AnyFn {
+function withRetry(modelKey: string | symbol, methodKey: string | symbol): AnyFn {
   return async (...args: unknown[]) => {
     return withRetryGeneric(`${String(modelKey)}.${String(methodKey)}`, () => {
       const delegate = (baseClient as unknown as AnyRec)[modelKey] as AnyRec;

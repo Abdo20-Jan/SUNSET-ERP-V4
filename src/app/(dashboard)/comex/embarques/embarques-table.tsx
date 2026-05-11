@@ -1,12 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 
 import type { EmbarqueEstado } from "@/generated/prisma/client";
 import type { EmbarqueRow } from "@/lib/actions/embarques";
@@ -31,9 +26,7 @@ const ESTADO_LABELS: Record<EmbarqueEstado, string> = {
   CERRADO: "Cerrado",
 };
 
-function estadoVariant(
-  estado: EmbarqueEstado,
-): "default" | "outline" | "secondary" {
+function estadoVariant(estado: EmbarqueEstado): "default" | "outline" | "secondary" {
   switch (estado) {
     case "BORRADOR":
       return "outline";
@@ -70,9 +63,7 @@ export function EmbarquesTable({ data }: { data: EmbarqueRow[] }) {
       id: "codigo",
       header: "Código",
       cell: ({ row }) => (
-        <span className="font-mono text-sm font-medium">
-          {row.original.codigo}
-        </span>
+        <span className="font-mono text-sm font-medium">{row.original.codigo}</span>
       ),
     },
     {
@@ -80,12 +71,8 @@ export function EmbarquesTable({ data }: { data: EmbarqueRow[] }) {
       header: "Proveedor",
       cell: ({ row }) => (
         <div className="flex flex-col leading-tight">
-          <span className="text-sm font-medium">
-            {row.original.proveedor.nombre}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {row.original.proveedor.pais}
-          </span>
+          <span className="text-sm font-medium">{row.original.proveedor.nombre}</span>
+          <span className="text-xs text-muted-foreground">{row.original.proveedor.pais}</span>
         </div>
       ),
     },
@@ -102,9 +89,7 @@ export function EmbarquesTable({ data }: { data: EmbarqueRow[] }) {
       id: "moneda",
       header: "Moneda",
       cell: ({ row }) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {row.original.moneda}
-        </span>
+        <span className="font-mono text-xs text-muted-foreground">{row.original.moneda}</span>
       ),
     },
     {
@@ -117,9 +102,7 @@ export function EmbarquesTable({ data }: { data: EmbarqueRow[] }) {
           <span className="font-mono text-xs">
             {inc}
             {row.original.lugarIncoterm && (
-              <span className="ml-1 text-muted-foreground">
-                · {row.original.lugarIncoterm}
-              </span>
+              <span className="ml-1 text-muted-foreground">· {row.original.lugarIncoterm}</span>
             )}
           </span>
         );
@@ -149,11 +132,7 @@ export function EmbarquesTable({ data }: { data: EmbarqueRow[] }) {
       cell: ({ row }) => {
         const costo = formatCosto(row.original.costoTotal);
         if (!costo) {
-          return (
-            <span className="block text-right text-xs text-muted-foreground">
-              —
-            </span>
-          );
+          return <span className="block text-right text-xs text-muted-foreground">—</span>;
         }
         return (
           <span className="block text-right font-mono text-sm font-semibold tabular-nums">
@@ -186,10 +165,7 @@ export function EmbarquesTable({ data }: { data: EmbarqueRow[] }) {
           <TableRow key={headerGroup.id}>
             {headerGroup.headers.map((header) => (
               <TableHead key={header.id}>
-                {flexRender(
-                  header.column.columnDef.header,
-                  header.getContext(),
-                )}
+                {flexRender(header.column.columnDef.header, header.getContext())}
               </TableHead>
             ))}
           </TableRow>
@@ -210,9 +186,7 @@ export function EmbarquesTable({ data }: { data: EmbarqueRow[] }) {
             <TableRow
               key={row.id}
               className="cursor-pointer"
-              onClick={() =>
-                router.push(`/comex/embarques/${row.original.id}`)
-              }
+              onClick={() => router.push(`/comex/embarques/${row.original.id}`)}
             >
               {row.getVisibleCells().map((cell) => (
                 <TableCell key={cell.id}>

@@ -32,9 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export type DepositoFormState =
-  | { mode: "create" }
-  | { mode: "edit"; row: DepositoRow };
+export type DepositoFormState = { mode: "create" } | { mode: "edit"; row: DepositoRow };
 
 const formSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio."),
@@ -89,10 +87,7 @@ export function DepositoFormDialog({
     startTransition(async () => {
       const payload = {
         nombre: values.nombre,
-        direccion:
-          values.direccion && values.direccion.length > 0
-            ? values.direccion
-            : undefined,
+        direccion: values.direccion && values.direccion.length > 0 ? values.direccion : undefined,
         activo: values.activo === "si",
       };
 
@@ -102,11 +97,7 @@ export function DepositoFormDialog({
           : await crearDepositoAction(payload);
 
       if (result.ok) {
-        toast.success(
-          state.mode === "edit"
-            ? "Depósito actualizado."
-            : "Depósito creado.",
-        );
+        toast.success(state.mode === "edit" ? "Depósito actualizado." : "Depósito creado.");
         onClose();
         router.refresh();
       } else {
@@ -124,9 +115,7 @@ export function DepositoFormDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            {state?.mode === "edit" ? "Editar depósito" : "Nuevo depósito"}
-          </DialogTitle>
+          <DialogTitle>{state?.mode === "edit" ? "Editar depósito" : "Nuevo depósito"}</DialogTitle>
           <DialogDescription>
             {state?.mode === "edit"
               ? "Modifique los datos del depósito y guarde los cambios."
@@ -137,11 +126,7 @@ export function DepositoFormDialog({
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <Label htmlFor="nombre">Nombre *</Label>
-            <Input
-              id="nombre"
-              aria-invalid={!!errors.nombre}
-              {...register("nombre")}
-            />
+            <Input id="nombre" aria-invalid={!!errors.nombre} {...register("nombre")} />
             {errors.nombre && <FieldError message={errors.nombre.message} />}
           </div>
 
@@ -170,12 +155,7 @@ export function DepositoFormDialog({
           </div>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              disabled={isSubmitting}
-            >
+            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               Cancelar
             </Button>
             <Button type="submit" disabled={isSubmitting}>

@@ -2,11 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { Decimal, toDecimal } from "@/lib/decimal";
-import {
-  AsientoEstado,
-  type CuentaCategoria,
-  type CuentaTipo,
-} from "@/generated/prisma/client";
+import { AsientoEstado, type CuentaCategoria, type CuentaTipo } from "@/generated/prisma/client";
 
 import { saldoPorCategoria } from "./shared";
 
@@ -67,10 +63,7 @@ export async function getLibroMayor(
   });
 
   if (!cuenta) {
-    throw new LibroMayorError(
-      "CUENTA_NO_ENCONTRADA",
-      `Cuenta contable ${cuentaId} no existe`,
-    );
+    throw new LibroMayorError("CUENTA_NO_ENCONTRADA", `Cuenta contable ${cuentaId} no existe`);
   }
   if (cuenta.tipo !== "ANALITICA") {
     throw new LibroMayorError(
@@ -113,11 +106,7 @@ export async function getLibroMayor(
         ...(fechaWhere ? { fecha: fechaWhere } : {}),
       },
     },
-    orderBy: [
-      { asiento: { fecha: "asc" } },
-      { asiento: { numero: "asc" } },
-      { id: "asc" },
-    ],
+    orderBy: [{ asiento: { fecha: "asc" } }, { asiento: { numero: "asc" } }, { id: "asc" }],
     select: {
       id: true,
       debe: true,
