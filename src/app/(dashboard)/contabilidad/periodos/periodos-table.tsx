@@ -1,21 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { format } from "date-fns";
 import { toast } from "sonner";
 
 import type { PeriodoEstado } from "@/generated/prisma/client";
-import {
-  cerrarPeriodo,
-  reabrirPeriodo,
-  type PeriodoActionResult,
-} from "@/lib/actions/periodos";
+import { cerrarPeriodo, reabrirPeriodo, type PeriodoActionResult } from "@/lib/actions/periodos";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,20 +17,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { DataTable } from "@/components/ui/data-table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export type PeriodoRow = {
   id: number;
@@ -51,9 +30,7 @@ export type PeriodoRow = {
   borradorCount: number;
 };
 
-type PendingAction =
-  | { action: "cerrar" | "reabrir"; periodo: PeriodoRow }
-  | null;
+type PendingAction = { action: "cerrar" | "reabrir"; periodo: PeriodoRow } | null;
 
 function formatDate(d: Date) {
   return format(d, "dd/MM/yyyy");
@@ -67,9 +44,7 @@ export function PeriodosTable({ data }: { data: PeriodoRow[] }) {
     {
       id: "codigo",
       header: "Código",
-      cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.codigo}</span>
-      ),
+      cell: ({ row }) => <span className="font-mono text-xs">{row.original.codigo}</span>,
     },
     {
       id: "nombre",
@@ -80,27 +55,21 @@ export function PeriodosTable({ data }: { data: PeriodoRow[] }) {
       id: "fechaInicio",
       header: "Inicio",
       cell: ({ row }) => (
-        <span className="text-sm tabular-nums">
-          {formatDate(row.original.fechaInicio)}
-        </span>
+        <span className="text-sm tabular-nums">{formatDate(row.original.fechaInicio)}</span>
       ),
     },
     {
       id: "fechaFin",
       header: "Fin",
       cell: ({ row }) => (
-        <span className="text-sm tabular-nums">
-          {formatDate(row.original.fechaFin)}
-        </span>
+        <span className="text-sm tabular-nums">{formatDate(row.original.fechaFin)}</span>
       ),
     },
     {
       id: "estado",
       header: "Estado",
       cell: ({ row }) => (
-        <Badge
-          variant={row.original.estado === "ABIERTO" ? "default" : "secondary"}
-        >
+        <Badge variant={row.original.estado === "ABIERTO" ? "default" : "secondary"}>
           {row.original.estado}
         </Badge>
       ),
@@ -137,33 +106,7 @@ export function PeriodosTable({ data }: { data: PeriodoRow[] }) {
 
   return (
     <TooltipProvider>
-      <Table>
-        <TableHeader>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <TableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <TableHead key={header.id}>
-                  {flexRender(
-                    header.column.columnDef.header,
-                    header.getContext(),
-                  )}
-                </TableHead>
-              ))}
-            </TableRow>
-          ))}
-        </TableHeader>
-        <TableBody>
-          {table.getRowModel().rows.map((row) => (
-            <TableRow key={row.id}>
-              {row.getVisibleCells().map((cell) => (
-                <TableCell key={cell.id}>
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </TableCell>
-              ))}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      <DataTable table={table} emptyMessage="Sin períodos." />
 
       <Dialog
         open={pending !== null}
@@ -181,19 +124,15 @@ export function PeriodosTable({ data }: { data: PeriodoRow[] }) {
                     : `Reabrir período ${pending.periodo.codigo}`}
                 </DialogTitle>
                 <DialogDescription>
-                  {pending.periodo.nombre} · {formatDate(pending.periodo.fechaInicio)}{" "}
-                  – {formatDate(pending.periodo.fechaFin)}
+                  {pending.periodo.nombre} · {formatDate(pending.periodo.fechaInicio)} –{" "}
+                  {formatDate(pending.periodo.fechaFin)}
                   {pending.action === "cerrar"
                     ? ". Una vez cerrado, no se podrán crear ni modificar asientos en este período."
                     : ". Al reabrirlo, se podrán crear y modificar asientos nuevamente."}
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setPending(null)}
-                  disabled={isSubmitting}
-                >
+                <Button variant="outline" onClick={() => setPending(null)} disabled={isSubmitting}>
                   Cancelar
                 </Button>
                 <Button
@@ -221,11 +160,7 @@ function RowAction({
 }) {
   if (periodo.estado === "CERRADO") {
     return (
-      <Button
-        variant="default"
-        size="sm"
-        onClick={() => onOpen({ action: "reabrir", periodo })}
-      >
+      <Button variant="default" size="sm" onClick={() => onOpen({ action: "reabrir", periodo })}>
         Reabrir
       </Button>
     );
@@ -247,10 +182,9 @@ function RowAction({
 
   return (
     <Tooltip>
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: span wrapper necesario para mostrar tooltip sobre <Button disabled> (disabled no recibe foco ni eventos pointer) */}
       <TooltipTrigger render={<span tabIndex={0} />}>{button}</TooltipTrigger>
-      <TooltipContent>
-        {periodo.borradorCount} asiento(s) en BORRADOR
-      </TooltipContent>
+      <TooltipContent>{periodo.borradorCount} asiento(s) en BORRADOR</TooltipContent>
     </Tooltip>
   );
 }
