@@ -282,14 +282,14 @@ export function VentaForm({
     jurisdiccionNombre: null,
   });
   useEffect(() => {
-    if (!clienteId) {
-      setPercepcionInfo({ factor: "0", alicuota: null, jurisdiccionNombre: null });
-      return;
-    }
     let cancelled = false;
-    obtenerPercepcionInfoCliente(clienteId).then((info) => {
+    const id = clienteId;
+    (async () => {
+      const info: PercepcionInfo = id
+        ? await obtenerPercepcionInfoCliente(id)
+        : { factor: "0", alicuota: null, jurisdiccionNombre: null };
       if (!cancelled) setPercepcionInfo(info);
-    });
+    })();
     return () => {
       cancelled = true;
     };
