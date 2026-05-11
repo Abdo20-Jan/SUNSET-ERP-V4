@@ -19,6 +19,7 @@ import {
   type ClienteRow,
   type CuentaContableOption,
 } from "@/lib/actions/clientes";
+import type { ProvinciaRow } from "@/lib/actions/provincias";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -59,9 +60,11 @@ const CONDICION_IVA_SHORT: Record<CondicionIva, string> = {
 export function ClientesTable({
   clientes,
   cuentas,
+  provincias,
 }: {
   clientes: ClienteRow[];
   cuentas: CuentaContableOption[];
+  provincias: ProvinciaRow[];
 }) {
   const router = useRouter();
   const [searchText, setSearchText] = useState("");
@@ -211,7 +214,12 @@ export function ClientesTable({
         isFiltered={clientes.length > 0}
       />
 
-      <ClienteFormDialog state={formState} cuentas={cuentas} onClose={() => setFormState(null)} />
+      <ClienteFormDialog
+        state={formState}
+        cuentas={cuentas}
+        provincias={provincias}
+        onClose={() => setFormState(null)}
+      />
 
       <Dialog
         open={pendingDelete !== null}

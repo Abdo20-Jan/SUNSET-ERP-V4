@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Controller, useFieldArray, useForm, useWatch, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -23,6 +23,7 @@ import {
   type ProductoParaVenta,
   type VentaDetalle,
 } from "@/lib/actions/ventas";
+import { obtenerPercepcionInfoCliente, type PercepcionInfo } from "@/lib/actions/provincias";
 import { fmtMoney } from "@/lib/format";
 import { useCmdShortcut } from "@/lib/hooks/use-cmd-shortcut";
 import { ClienteCombobox, type ClienteOption } from "@/components/cliente-combobox";
@@ -273,6 +274,27 @@ export function VentaForm({
     }
   }, [moneda, setValue]);
 
+  // Percepción IIBB info: re-fetch cuando cambia el cliente. El factor
+  // se usa en el useMemo de totales para calcular percepción × subtotal.
+  const [percepcionInfo, setPercepcionInfo] = useState<PercepcionInfo>({
+    factor: "0",
+    alicuota: null,
+    jurisdiccionNombre: null,
+  });
+  useEffect(() => {
+    let cancelled = false;
+    const id = clienteId;
+    (async () => {
+      const info: PercepcionInfo = id
+        ? await obtenerPercepcionInfoCliente(id)
+        : { factor: "0", alicuota: null, jurisdiccionNombre: null };
+      if (!cancelled) setPercepcionInfo(info);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clienteId]);
+
   const onClienteChange = (id: string) => {
     setValue("clienteId", id, { shouldValidate: true });
     if (isEdit) return;
@@ -318,7 +340,13 @@ export function VentaForm({
     const i = new Decimal(safe(iibb));
     const o = new Decimal(safe(otros));
     const f = new Decimal(safe(flete));
-    const total = subtotal.plus(iva).plus(i).plus(o);
+    // Percepción IIBB jurisdiccional (preview client-side). El factor
+    // viene de obtenerPercepcionInfoCliente y refleja la alícuota
+    // efectiva del cliente (override ?? jurisdicción) — o 0 si exento /
+    // sin agente / sin provincia.
+    const percepcionFactor = new Decimal(percepcionInfo.factor || "0");
+    const percepcion = subtotal.times(percepcionFactor).toDecimalPlaces(2);
+    const total = subtotal.plus(iva).plus(i).plus(percepcion).plus(o);
 
     // Rentabilidad total de la operación (con flete deducido).
     // Bruta = subtotal - costoTotal - flete.
@@ -336,6 +364,7 @@ export function VentaForm({
       subtotal: subtotal.toDecimalPlaces(2),
       iva: iva.toDecimalPlaces(2),
       iibb: i.toDecimalPlaces(2),
+      percepcionIIBB: percepcion,
       otros: o.toDecimalPlaces(2),
       flete: f.toDecimalPlaces(2),
       total: total.toDecimalPlaces(2),
@@ -346,7 +375,7 @@ export function VentaForm({
       margenNetoPct,
       tieneCostos: costoTotal.gt(0),
     };
-  }, [items, iibb, otros, flete, productos]);
+  }, [items, iibb, otros, flete, productos, percepcionInfo.factor]);
 
   // Warning si IVA total no coincide con 21% del subtotal
   const ivaWarning = useMemo(() => {
@@ -584,6 +613,17 @@ export function VentaForm({
             <Input {...register("iibb")} inputMode="decimal" />
           </Field>
 
+          <Field
+            label="Percepción IIBB"
+            hint={
+              percepcionInfo.alicuota
+                ? `${percepcionInfo.jurisdiccionNombre} · ${percepcionInfo.alicuota}% (autocalc)`
+                : "Sin percepción (cliente sin provincia / no agente / exento)"
+            }
+          >
+            <Input value={totals.percepcionIIBB.toString()} disabled inputMode="decimal" />
+          </Field>
+
           <Field label="Otros" error={errors.otros?.message}>
             <Input {...register("otros")} inputMode="decimal" />
           </Field>
@@ -804,6 +844,9 @@ export function VentaForm({
             <Total label="Subtotal" value={totals.subtotal.toString()} />
             <Total label="IVA" value={totals.iva.toString()} />
             <Total label="IIBB" value={totals.iibb.toString()} />
+            {totals.percepcionIIBB.gt(0) ? (
+              <Total label="Perc. IIBB" value={totals.percepcionIIBB.toString()} />
+            ) : null}
             <Total label="Otros" value={totals.otros.toString()} />
             {totals.flete.gt(0) ? (
               <Total label="Flete" value={`-${totals.flete.toString()}`} tone="negative" />

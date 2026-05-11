@@ -14,6 +14,7 @@ import {
   type ClienteRow,
   type CuentaContableOption,
 } from "@/lib/actions/clientes";
+import type { ProvinciaRow } from "@/lib/actions/provincias";
 import { Button } from "@/components/ui/button";
 import { CuentaCombobox } from "@/components/cuenta-combobox";
 import {
@@ -35,9 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export type ClienteFormState =
-  | { mode: "create" }
-  | { mode: "edit"; row: ClienteRow };
+export type ClienteFormState = { mode: "create" } | { mode: "edit"; row: ClienteRow };
 
 const CONDICION_IVA_LABEL: Record<CondicionIva, string> = {
   RI: "Responsable Inscripto",
@@ -77,12 +76,18 @@ const formSchema = z.object({
     .trim()
     .optional()
     .or(z.literal(""))
-    .refine(
-      (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
-      "Email inválido.",
-    ),
+    .refine((v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Email inválido."),
   estado: z.enum(["activo", "inactivo"]),
   cuentaContableId: z.number().int().positive().nullable(),
+  provinciaId: z.number().int().positive().nullable(),
+  alicuotaPercepcionIIBB: z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal(""))
+    .refine((v) => !v || /^\d+(\.\d{1,4})?$/.test(v), "Alícuota inválida (formato 0.0000-99.9999).")
+    .refine((v) => !v || (Number(v) >= 0 && Number(v) <= 100), "Alícuota fuera de rango [0, 100]."),
+  exentoPercepcionIIBB: z.boolean(),
   crearCuentaAuto: z.boolean(),
 });
 
@@ -103,6 +108,9 @@ function emptyDefaults(): FormValues {
     email: "",
     estado: "activo",
     cuentaContableId: null,
+    provinciaId: null,
+    alicuotaPercepcionIIBB: "",
+    exentoPercepcionIIBB: false,
     crearCuentaAuto: true,
   };
 }
@@ -122,6 +130,9 @@ function defaultsFromRow(row: ClienteRow): FormValues {
     email: row.email ?? "",
     estado: row.estado === "inactivo" ? "inactivo" : "activo",
     cuentaContableId: row.cuentaContableId,
+    provinciaId: row.provinciaId,
+    alicuotaPercepcionIIBB: row.alicuotaPercepcionIIBB ?? "",
+    exentoPercepcionIIBB: row.exentoPercepcionIIBB,
     crearCuentaAuto: false,
   };
 }
@@ -129,10 +140,12 @@ function defaultsFromRow(row: ClienteRow): FormValues {
 export function ClienteFormDialog({
   state,
   cuentas,
+  provincias,
   onClose,
 }: {
   state: ClienteFormState | null;
   cuentas: CuentaContableOption[];
+  provincias: ProvinciaRow[];
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -170,21 +183,19 @@ export function ClienteFormDialog({
         agenteRetencionGanancias: values.agenteRetencionGanancias,
         agenteIibb: values.agenteIibb,
         tipo: values.tipo && values.tipo.length > 0 ? values.tipo : undefined,
-        direccion:
-          values.direccion && values.direccion.length > 0
-            ? values.direccion
-            : undefined,
-        telefono:
-          values.telefono && values.telefono.length > 0
-            ? values.telefono
-            : undefined,
+        direccion: values.direccion && values.direccion.length > 0 ? values.direccion : undefined,
+        telefono: values.telefono && values.telefono.length > 0 ? values.telefono : undefined,
         email: values.email && values.email.length > 0 ? values.email : undefined,
         estado: values.estado,
         cuentaContableId: values.cuentaContableId ?? null,
+        provinciaId: values.provinciaId ?? null,
+        alicuotaPercepcionIIBB:
+          values.alicuotaPercepcionIIBB && values.alicuotaPercepcionIIBB.length > 0
+            ? values.alicuotaPercepcionIIBB
+            : undefined,
+        exentoPercepcionIIBB: values.exentoPercepcionIIBB,
         crearCuentaAuto:
-          state.mode === "create" &&
-          values.crearCuentaAuto &&
-          values.cuentaContableId === null,
+          state.mode === "create" && values.crearCuentaAuto && values.cuentaContableId === null,
       };
 
       const result =
@@ -193,11 +204,7 @@ export function ClienteFormDialog({
           : await crearClienteAction(payload);
 
       if (result.ok) {
-        toast.success(
-          state.mode === "edit"
-            ? "Cliente actualizado."
-            : "Cliente creado.",
-        );
+        toast.success(state.mode === "edit" ? "Cliente actualizado." : "Cliente creado.");
         onClose();
         router.refresh();
       } else {
@@ -215,9 +222,7 @@ export function ClienteFormDialog({
     >
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>
-            {state?.mode === "edit" ? "Editar cliente" : "Nuevo cliente"}
-          </DialogTitle>
+          <DialogTitle>{state?.mode === "edit" ? "Editar cliente" : "Nuevo cliente"}</DialogTitle>
           <DialogDescription>
             {state?.mode === "edit"
               ? "Modifique los datos del cliente y guarde los cambios."
@@ -229,11 +234,7 @@ export function ClienteFormDialog({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2 flex flex-col gap-2">
               <Label htmlFor="nombre">Nombre *</Label>
-              <Input
-                id="nombre"
-                aria-invalid={!!errors.nombre}
-                {...register("nombre")}
-              />
+              <Input id="nombre" aria-invalid={!!errors.nombre} {...register("nombre")} />
               {errors.nombre && <FieldError message={errors.nombre.message} />}
             </div>
 
@@ -269,8 +270,7 @@ export function ClienteFormDialog({
                 )}
               />
               <p className="text-xs text-muted-foreground">
-                Determina la cuenta analítica auto-creada (1.1.3.10–99 según
-                canal).
+                Determina la cuenta analítica auto-creada (1.1.3.10–99 según canal).
               </p>
             </div>
 
@@ -300,29 +300,26 @@ export function ClienteFormDialog({
               <Label>Agente de retención (si aplica)</Label>
               <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3 text-sm">
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    {...register("agenteRetencionIva")}
-                  />
-                  <span>Agente de retención <strong>IVA</strong> (10,5% típico)</span>
+                  <input type="checkbox" {...register("agenteRetencionIva")} />
+                  <span>
+                    Agente de retención <strong>IVA</strong> (10,5% típico)
+                  </span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    {...register("agenteRetencionGanancias")}
-                  />
-                  <span>Agente de retención <strong>Ganancias</strong> (RG 830, 2-6%)</span>
+                  <input type="checkbox" {...register("agenteRetencionGanancias")} />
+                  <span>
+                    Agente de retención <strong>Ganancias</strong> (RG 830, 2-6%)
+                  </span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    {...register("agenteIibb")}
-                  />
-                  <span>Agente de recaudación <strong>IIBB</strong></span>
+                  <input type="checkbox" {...register("agenteIibb")} />
+                  <span>
+                    Agente de recaudación <strong>IIBB</strong>
+                  </span>
                 </label>
                 <p className="text-xs text-muted-foreground">
-                  Marcá sólo si el cliente practica retenciones al pagar
-                  (Grandes Cuentas, concesionarias).
+                  Marcá sólo si el cliente practica retenciones al pagar (Grandes Cuentas,
+                  concesionarias).
                 </p>
               </div>
             </div>
@@ -353,12 +350,7 @@ export function ClienteFormDialog({
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                aria-invalid={!!errors.email}
-                {...register("email")}
-              />
+              <Input id="email" type="email" aria-invalid={!!errors.email} {...register("email")} />
               {errors.email && <FieldError message={errors.email.message} />}
             </div>
 
@@ -368,19 +360,81 @@ export function ClienteFormDialog({
             </div>
 
             <div className="sm:col-span-2 flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+              <Label className="text-sm">Localización fiscal AR</Label>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="provincia" className="text-xs text-muted-foreground">
+                  Provincia (driver de Percepción IIBB)
+                </Label>
+                <Controller
+                  control={control}
+                  name="provinciaId"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value === null ? "" : String(field.value)}
+                      onValueChange={(v) => field.onChange(v === "" ? null : Number(v))}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="— Sin provincia —" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {provincias.map((p) => (
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.nombre} ({p.codigo})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Si la jurisdicción tiene flag &quot;agente de percepción&quot; (hoy: solo CABA),
+                  el sistema autocalcula la Percepción IIBB en cada venta a este cliente.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-2">
+                  <Label
+                    htmlFor="alicuota-percepcion-iibb"
+                    className="text-xs text-muted-foreground"
+                  >
+                    Alícuota Percepción IIBB (override del padrón)
+                  </Label>
+                  <Input
+                    id="alicuota-percepcion-iibb"
+                    inputMode="decimal"
+                    placeholder="(usa default jurisdicción)"
+                    aria-invalid={!!errors.alicuotaPercepcionIIBB}
+                    {...register("alicuotaPercepcionIIBB")}
+                  />
+                  {errors.alicuotaPercepcionIIBB && (
+                    <FieldError message={errors.alicuotaPercepcionIIBB.message} />
+                  )}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="exento-percepcion-iibb" className="text-xs text-muted-foreground">
+                    Exento de Percepción IIBB
+                  </Label>
+                  <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm">
+                    <input
+                      id="exento-percepcion-iibb"
+                      type="checkbox"
+                      {...register("exentoPercepcionIIBB")}
+                    />
+                    <span>Cliente exento (no percepcionar)</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="sm:col-span-2 flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
               <Label className="text-sm">Cuenta contable</Label>
               {state?.mode === "create" && (
                 <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    {...register("crearCuentaAuto")}
-                  />
+                  <input type="checkbox" className="mt-1" {...register("crearCuentaAuto")} />
                   <span>
-                    <span className="font-medium">
-                      Crear automáticamente
-                    </span>{" "}
-                    una cuenta analítica para este cliente
+                    <span className="font-medium">Crear automáticamente</span> una cuenta analítica
+                    para este cliente
                     <span className="ml-1 text-xs text-muted-foreground">
                       (sugerido — rango 1.1.3.10–99)
                     </span>
@@ -404,20 +458,14 @@ export function ClienteFormDialog({
               )}
               <p className="text-xs text-muted-foreground">
                 Solo cuentas analíticas bajo{" "}
-                <span className="font-mono">1.1.3 CRÉDITOS POR VENTAS</span>.
-                Si elige &quot;Crear automáticamente&quot;, el sistema asigna el
-                próximo código disponible al guardar.
+                <span className="font-mono">1.1.3 CRÉDITOS POR VENTAS</span>. Si elige &quot;Crear
+                automáticamente&quot;, el sistema asigna el próximo código disponible al guardar.
               </p>
             </div>
           </div>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              disabled={isSubmitting}
-            >
+            <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               Cancelar
             </Button>
             <Button type="submit" disabled={isSubmitting}>

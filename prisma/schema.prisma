@@ -379,22 +379,22 @@ model CuentaBancaria {
 }
 
 model MovimientoTesoreria {
-  id                       String                  @id @default(uuid())
-  tipo                     MovimientoTesoreriaTipo
-  cuentaBancariaId         String
-  monto                    Decimal                 @db.Decimal(18, 2)
-  moneda                   Moneda
-  tipoCambio               Decimal                 @db.Decimal(18, 6)
-  fecha                    DateTime
-  fechaDestino             DateTime?
-  cuentaContableId         Int
-  asientoId                String?                 @unique
-  descripcion              String?
-  comprobante              String?
-  referenciaBanco          String?
-  referenciaBancoDestino   String?
-  createdAt                DateTime                @default(now())
-  updatedAt                DateTime                @updatedAt
+  id                     String                  @id @default(uuid())
+  tipo                   MovimientoTesoreriaTipo
+  cuentaBancariaId       String
+  monto                  Decimal                 @db.Decimal(18, 2)
+  moneda                 Moneda
+  tipoCambio             Decimal                 @db.Decimal(18, 6)
+  fecha                  DateTime
+  fechaDestino           DateTime?
+  cuentaContableId       Int
+  asientoId              String?                 @unique
+  descripcion            String?
+  comprobante            String?
+  referenciaBanco        String?
+  referenciaBancoDestino String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
 
   cuentaBancaria CuentaBancaria           @relation(fields: [cuentaBancariaId], references: [id])
   cuentaContable CuentaContable           @relation(fields: [cuentaContableId], references: [id])
@@ -518,12 +518,12 @@ model EmbarqueCosto {
   //  - LEGACY_BUNDLED  registros previos al PR de standalone — fueron
   //                    contabilizados via asiento de cierre/despacho.
   //                    El cierre/despacho los incluye, el flujo nuevo los ignora.
-  estado           EmbarqueCostoEstado @default(BORRADOR)
+  estado    EmbarqueCostoEstado @default(BORRADOR)
   // Asiento individual de la factura emitida (sólo cuando estado === EMITIDA).
-  asientoId        String?       @unique
+  asientoId String?             @unique
 
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // FK opcional al despacho que consume esta factura. Sólo seteado para
   // facturas con momento === DESPACHO cuando el embarque tiene N
@@ -761,10 +761,28 @@ model Cliente {
   cuentaContableId         Int?
   diasPagoDefault          Int? // 0 = contado, 30/60/90 = días corridos
   condicionPagoDefault     CondicionPago @default(CONTADO)
+  // Localización fiscal AR (drill-down Provincia → Localidad → CP). Las
+  // tres FKs son optional para mantener retrocompatibilidad con
+  // clientes pre-localización; se exige Provincia para autocálculo de
+  // Percepción IIBB, los otros niveles son enriquecimiento.
+  provinciaId              Int?
+  localidadId              Int?
+  codigoPostalId           Int?
+  // Override de alícuota de Percepción IIBB para este cliente (ej:
+  // alícuota del padrón mensual provincial o exención parcial). Si es
+  // null, se usa la alícuota default de la jurisdicción.
+  alicuotaPercepcionIIBB   Decimal?      @db.Decimal(8, 4)
+  // Marca cliente exento de Percepción IIBB (ej: agente de percepción
+  // o exención total). Si true, no se aplica percepción aunque la
+  // jurisdicción tenga `esAgentePercepcion=true`.
+  exentoPercepcionIIBB     Boolean       @default(false)
   createdAt                DateTime      @default(now())
   updatedAt                DateTime      @updatedAt
 
   cuentaContable CuentaContable?           @relation(fields: [cuentaContableId], references: [id])
+  provincia      Provincia?                @relation(fields: [provinciaId], references: [id])
+  localidad      Localidad?                @relation(fields: [localidadId], references: [id])
+  codigoPostal   CodigoPostal?             @relation(fields: [codigoPostalId], references: [id])
   ventas         Venta[]
   pedidosVenta   PedidoVenta[]
   extractoLineas LineaExtractoSugerencia[]
@@ -772,6 +790,9 @@ model Cliente {
   contactos      Contacto[]
   oportunidades  Oportunidad[]
   actividades    Actividad[]
+
+  @@index([provinciaId])
+  @@index([localidadId])
 }
 
 model Proveedor {
@@ -888,38 +909,49 @@ model MovimientoStock {
 }
 
 model Venta {
-  id               String        @id @default(uuid())
-  numero           String        @unique
-  clienteId        String
-  fecha            DateTime
-  fechaVencimiento DateTime?
-  condicionPago    CondicionPago @default(CUENTA_CORRIENTE)
-  moneda           Moneda
-  tipoCambio       Decimal       @default(1) @db.Decimal(18, 6)
-  subtotal         Decimal       @db.Decimal(18, 2)
-  iva              Decimal       @db.Decimal(18, 2)
-  iibb             Decimal       @default(0) @db.Decimal(18, 2)
-  otros            Decimal       @default(0) @db.Decimal(18, 2)
+  id                           String        @id @default(uuid())
+  numero                       String        @unique
+  clienteId                    String
+  fecha                        DateTime
+  fechaVencimiento             DateTime?
+  condicionPago                CondicionPago @default(CUENTA_CORRIENTE)
+  moneda                       Moneda
+  tipoCambio                   Decimal       @default(1) @db.Decimal(18, 6)
+  subtotal                     Decimal       @db.Decimal(18, 2)
+  iva                          Decimal       @db.Decimal(18, 2)
+  iibb                         Decimal       @default(0) @db.Decimal(18, 2)
+  // Percepción IIBB jurisdiccional cobrada al cliente (separada del
+  // IIBB propio Córdoba en `iibb`). Calculada según provincia del
+  // cliente + flag `esAgentePercepcion` de la jurisdicción + alícuota
+  // de la jurisdicción + override opcional del cliente. Snapshot de
+  // alícuota y jurisdicción al emitir, para reproducibilidad histórica
+  // si las alícuotas cambian después.
+  percepcionIIBB               Decimal       @default(0) @db.Decimal(18, 2)
+  percepcionIIBBAlicuota       Decimal?      @db.Decimal(8, 4)
+  percepcionIIBBJurisdiccionId Int?
+  otros                        Decimal       @default(0) @db.Decimal(18, 2)
   // Flete pagado por nosotros (no se cobra al cliente). No afecta `total`.
   // Reduce el margen neto de la operación y se contabiliza como gasto.
-  flete            Decimal       @default(0) @db.Decimal(18, 2)
-  total            Decimal       @db.Decimal(18, 2)
-  estado           VentaEstado   @default(BORRADOR)
-  asientoId        String?       @unique
-  pedidoVentaId    Int?
-  notas            String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  flete                        Decimal       @default(0) @db.Decimal(18, 2)
+  total                        Decimal       @db.Decimal(18, 2)
+  estado                       VentaEstado   @default(BORRADOR)
+  asientoId                    String?       @unique
+  pedidoVentaId                Int?
+  notas                        String?
+  createdAt                    DateTime      @default(now())
+  updatedAt                    DateTime      @updatedAt
 
-  cliente          Cliente          @relation(fields: [clienteId], references: [id])
-  asiento          Asiento?         @relation(fields: [asientoId], references: [id])
-  items            ItemVenta[]
-  pedidoVenta      PedidoVenta?     @relation(fields: [pedidoVentaId], references: [id])
-  chequesRecibidos ChequeRecibido[]
-  entregas         EntregaVenta[]
+  cliente                    Cliente           @relation(fields: [clienteId], references: [id])
+  asiento                    Asiento?          @relation(fields: [asientoId], references: [id])
+  items                      ItemVenta[]
+  pedidoVenta                PedidoVenta?      @relation(fields: [pedidoVentaId], references: [id])
+  chequesRecibidos           ChequeRecibido[]
+  entregas                   EntregaVenta[]
+  percepcionIIBBJurisdiccion JurisdiccionIIBB? @relation("VentaPercepcionIIBB", fields: [percepcionIIBBJurisdiccionId], references: [id])
 
   @@index([fechaVencimiento])
   @@index([clienteId])
+  @@index([percepcionIIBBJurisdiccionId])
 }
 
 // Cheques de terceros recibidos como medio de cobro de ventas. Quedan
@@ -1165,11 +1197,75 @@ model ItemPedidoVenta {
 // AUXILIARES
 // ============================================================
 
+// Catálogo de jurisdicciones IIBB de Argentina (24 jurisdicciones).
+// Acoplado 1-1 con `Provincia` por `provinciaId`. Esta tabla guarda
+// los parámetros tributarios (alícuota de Percepción IIBB y flag de
+// agente de percepción), mientras `Provincia` guarda la información
+// administrativa/cadastral. Se mantienen separadas para permitir que
+// otras tablas (Localidad, CodigoPostal, Cliente) referencien la
+// Provincia sin acoplarse al modelo fiscal.
 model JurisdiccionIIBB {
-  id       Int     @id @default(autoincrement())
-  codigo   String  @unique
-  nombre   String
-  alicuota Decimal @db.Decimal(8, 4)
+  id                 Int     @id @default(autoincrement())
+  codigo             String  @unique
+  nombre             String
+  // Alícuota default de Percepción IIBB para clientes de esta
+  // jurisdicción (en %, ej: 3.0000 = 3%). Override por cliente vive
+  // en `Cliente.alicuotaPercepcionIIBB`.
+  alicuotaPercepcion Decimal @db.Decimal(8, 4)
+  // ¿Sunset es agente de Percepción IIBB en esta jurisdicción? Si
+  // false, no se aplica percepción aunque el cliente tenga
+  // alícuota override. Hoy: solo CABA = true.
+  esAgentePercepcion Boolean @default(false)
+  provinciaId        Int?    @unique
+
+  provincia        Provincia? @relation(fields: [provinciaId], references: [id])
+  ventasPercepcion Venta[]    @relation("VentaPercepcionIIBB")
+}
+
+// Provincia / jurisdicción argentina (24 entradas: 23 provincias + CABA).
+// Driver del cálculo de Percepción IIBB vía Provincia → JurisdiccionIIBB.
+// Catálogo seedable; los usuarios no crean provincias nuevas.
+model Provincia {
+  id         Int     @id @default(autoincrement())
+  codigo     String  @unique // "CBA", "CABA", "BA", "SF", ...
+  nombre     String
+  // Código AFIP/AAU para reporting (puede ser null si no aplica).
+  codigoAfip String?
+
+  jurisdiccionIIBB JurisdiccionIIBB?
+  localidades      Localidad[]
+  clientes         Cliente[]
+}
+
+// Localidad/ciudad dentro de una provincia. Se crea on-demand al
+// cadastrar clientes (no hay seed masivo). El nombre es único dentro
+// de la provincia.
+model Localidad {
+  id          Int    @id @default(autoincrement())
+  nombre      String
+  provinciaId Int
+
+  provincia Provincia      @relation(fields: [provinciaId], references: [id])
+  cps       CodigoPostal[]
+  clientes  Cliente[]
+
+  @@unique([provinciaId, nombre])
+  @@index([provinciaId])
+}
+
+// Código postal vinculado a una localidad. Se crea on-demand. Argentina
+// usa formato "C1425" / "X5000" (CPA, 8 caracteres) o "1425" (CP
+// numérico legacy). Aceptamos ambos formatos como string.
+model CodigoPostal {
+  id          Int    @id @default(autoincrement())
+  cp          String
+  localidadId Int
+
+  localidad Localidad @relation(fields: [localidadId], references: [id])
+  clientes  Cliente[]
+
+  @@unique([localidadId, cp])
+  @@index([localidadId])
 }
 
 model IndiceIPC {

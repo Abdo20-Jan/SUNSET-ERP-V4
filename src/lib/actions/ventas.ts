@@ -12,6 +12,7 @@ import {
   contabilizarAsiento,
   crearAsientoVenta,
 } from "@/lib/services/asiento-automatico";
+import { calcularPercepcionIIBB } from "@/lib/services/percepcion-iibb";
 import { aplicarReservaSPD, liberarReservaSPD } from "@/lib/services/stock";
 import { getDepositoPorDefecto, validarDisponible } from "@/lib/services/stock-helpers";
 import {
@@ -403,7 +404,38 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
   }));
   const subtotal = sumMoney(itemsCalc.map((i) => i.subtotal));
   const iva = sumMoney(itemsCalc.map((i) => i.iva));
-  const total = sumMoney([subtotal, iva, input.iibb, input.otros]);
+
+  // Lookup cliente con provincia + jurisdicción para autocálculo de
+  // Percepción IIBB. El monto se snapshot-ea en el momento de guardar
+  // junto con alícuota usada y jurisdicción — vendas históricas deben
+  // poder reproducirse aunque la alícuota cambie después.
+  const clienteFiscal = await db.cliente.findUnique({
+    where: { id: input.clienteId },
+    select: {
+      exentoPercepcionIIBB: true,
+      alicuotaPercepcionIIBB: true,
+      provincia: {
+        select: {
+          jurisdiccionIIBB: {
+            select: {
+              id: true,
+              esAgentePercepcion: true,
+              alicuotaPercepcion: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  const percepcion = clienteFiscal
+    ? calcularPercepcionIIBB({
+        subtotal: toDecimal(subtotal),
+        cliente: clienteFiscal,
+      })
+    : { monto: toDecimal(0), alicuotaUsada: null, jurisdiccionId: null };
+  const percepcionIIBBMoney = money(percepcion.monto);
+
+  const total = sumMoney([subtotal, iva, input.iibb, percepcionIIBBMoney, input.otros]);
 
   try {
     const saved = await db.$transaction(async (tx) => {
@@ -419,6 +451,11 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
         subtotal: money(subtotal),
         iva: money(iva),
         iibb: money(input.iibb),
+        percepcionIIBB: percepcionIIBBMoney,
+        percepcionIIBBAlicuota: percepcion.alicuotaUsada
+          ? new Prisma.Decimal(percepcion.alicuotaUsada.toString())
+          : null,
+        percepcionIIBBJurisdiccionId: percepcion.jurisdiccionId,
         otros: money(input.otros),
         flete: money(input.flete),
         total: money(total),

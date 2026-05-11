@@ -1641,6 +1641,7 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
         subtotal: true,
         iva: true,
         iibb: true,
+        percepcionIIBB: true,
         otros: true,
         flete: true,
         asientoId: true,
@@ -1672,9 +1673,10 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
     const subtotal = toDecimal(venta.subtotal).times(tc).toDecimalPlaces(2);
     const iva = toDecimal(venta.iva).times(tc).toDecimalPlaces(2);
     const iibb = toDecimal(venta.iibb).times(tc).toDecimalPlaces(2);
+    const percepcionIIBB = toDecimal(venta.percepcionIIBB).times(tc).toDecimalPlaces(2);
     const otros = toDecimal(venta.otros).times(tc).toDecimalPlaces(2);
     const flete = toDecimal(venta.flete).times(tc).toDecimalPlaces(2);
-    const total = subtotal.plus(iva).plus(iibb).plus(otros);
+    const total = subtotal.plus(iva).plus(iibb).plus(percepcionIIBB).plus(otros);
 
     // Costo de mercadería vendida (CMV) — usa costoPromedio del producto
     // al momento de emitir la venta. En ARS porque costoPromedio se
@@ -1743,6 +1745,14 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
         debe: 0,
         haber: money(iibb).toString(),
         descripcion: `Venta ${venta.numero} — IIBB`,
+      });
+    }
+    if (percepcionIIBB.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.PERCEPCIONES_IIBB_A_DEPOSITAR.codigo)!,
+        debe: 0,
+        haber: money(percepcionIIBB).toString(),
+        descripcion: `Venta ${venta.numero} — Percepción IIBB jurisdiccional`,
       });
     }
     if (otros.gt(0)) {
