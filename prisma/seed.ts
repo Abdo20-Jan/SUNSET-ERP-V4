@@ -411,9 +411,9 @@ async function seedPipelineStages() {
 // "comercialización general mayorista" — sirven como default para
 // Percepción IIBB cuando el cliente no tiene override en padrón.
 //
-// `esAgentePercepcion`: por decisión del negocio, hoy Sunset solo
-// percepciona en CABA. El resto queda con default false; el usuario
-// puede marcar como true vía maestros si la designación cambia.
+// `esAgentePercepcion`: por decisión del negocio, Sunset percepciona
+// en TODAS las provincias (Convenio Multilateral). La alícuota usada
+// es la default del padrón provincial; cliente puede tener override.
 const PROVINCIAS_AR: Array<{
   codigo: string;
   nombre: string;
@@ -422,29 +422,29 @@ const PROVINCIAS_AR: Array<{
   esAgentePercepcion: boolean;
 }> = [
   { codigo: "CABA", nombre: "Ciudad Autónoma de Buenos Aires", codigoAfip: "901", alicuotaPercepcion: "3.0000", esAgentePercepcion: true },
-  { codigo: "BA", nombre: "Buenos Aires", codigoAfip: "902", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
-  { codigo: "CAT", nombre: "Catamarca", codigoAfip: "903", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
-  { codigo: "CBA", nombre: "Córdoba", codigoAfip: "904", alicuotaPercepcion: "4.7500", esAgentePercepcion: false },
-  { codigo: "COR", nombre: "Corrientes", codigoAfip: "905", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
-  { codigo: "CHA", nombre: "Chaco", codigoAfip: "906", alicuotaPercepcion: "4.7500", esAgentePercepcion: false },
-  { codigo: "CHU", nombre: "Chubut", codigoAfip: "907", alicuotaPercepcion: "4.5000", esAgentePercepcion: false },
-  { codigo: "ER", nombre: "Entre Ríos", codigoAfip: "908", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
-  { codigo: "FOR", nombre: "Formosa", codigoAfip: "909", alicuotaPercepcion: "4.5000", esAgentePercepcion: false },
-  { codigo: "JUJ", nombre: "Jujuy", codigoAfip: "910", alicuotaPercepcion: "3.5000", esAgentePercepcion: false },
-  { codigo: "LP", nombre: "La Pampa", codigoAfip: "911", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
-  { codigo: "LR", nombre: "La Rioja", codigoAfip: "912", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
-  { codigo: "MZA", nombre: "Mendoza", codigoAfip: "913", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
-  { codigo: "MIS", nombre: "Misiones", codigoAfip: "914", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
-  { codigo: "NEU", nombre: "Neuquén", codigoAfip: "915", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
-  { codigo: "RN", nombre: "Río Negro", codigoAfip: "916", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
-  { codigo: "SAL", nombre: "Salta", codigoAfip: "917", alicuotaPercepcion: "3.6000", esAgentePercepcion: false },
-  { codigo: "SJ", nombre: "San Juan", codigoAfip: "918", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
-  { codigo: "SL", nombre: "San Luis", codigoAfip: "919", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
-  { codigo: "SC", nombre: "Santa Cruz", codigoAfip: "920", alicuotaPercepcion: "5.0000", esAgentePercepcion: false },
-  { codigo: "SF", nombre: "Santa Fe", codigoAfip: "921", alicuotaPercepcion: "4.5000", esAgentePercepcion: false },
-  { codigo: "SDE", nombre: "Santiago del Estero", codigoAfip: "922", alicuotaPercepcion: "4.5000", esAgentePercepcion: false },
-  { codigo: "TDF", nombre: "Tierra del Fuego", codigoAfip: "923", alicuotaPercepcion: "4.0000", esAgentePercepcion: false },
-  { codigo: "TUC", nombre: "Tucumán", codigoAfip: "924", alicuotaPercepcion: "4.5000", esAgentePercepcion: false },
+  { codigo: "BA", nombre: "Buenos Aires", codigoAfip: "902", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
+  { codigo: "CAT", nombre: "Catamarca", codigoAfip: "903", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
+  { codigo: "CBA", nombre: "Córdoba", codigoAfip: "904", alicuotaPercepcion: "4.7500", esAgentePercepcion: true },
+  { codigo: "COR", nombre: "Corrientes", codigoAfip: "905", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
+  { codigo: "CHA", nombre: "Chaco", codigoAfip: "906", alicuotaPercepcion: "4.7500", esAgentePercepcion: true },
+  { codigo: "CHU", nombre: "Chubut", codigoAfip: "907", alicuotaPercepcion: "4.5000", esAgentePercepcion: true },
+  { codigo: "ER", nombre: "Entre Ríos", codigoAfip: "908", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
+  { codigo: "FOR", nombre: "Formosa", codigoAfip: "909", alicuotaPercepcion: "4.5000", esAgentePercepcion: true },
+  { codigo: "JUJ", nombre: "Jujuy", codigoAfip: "910", alicuotaPercepcion: "3.5000", esAgentePercepcion: true },
+  { codigo: "LP", nombre: "La Pampa", codigoAfip: "911", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
+  { codigo: "LR", nombre: "La Rioja", codigoAfip: "912", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
+  { codigo: "MZA", nombre: "Mendoza", codigoAfip: "913", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
+  { codigo: "MIS", nombre: "Misiones", codigoAfip: "914", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
+  { codigo: "NEU", nombre: "Neuquén", codigoAfip: "915", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
+  { codigo: "RN", nombre: "Río Negro", codigoAfip: "916", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
+  { codigo: "SAL", nombre: "Salta", codigoAfip: "917", alicuotaPercepcion: "3.6000", esAgentePercepcion: true },
+  { codigo: "SJ", nombre: "San Juan", codigoAfip: "918", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
+  { codigo: "SL", nombre: "San Luis", codigoAfip: "919", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
+  { codigo: "SC", nombre: "Santa Cruz", codigoAfip: "920", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
+  { codigo: "SF", nombre: "Santa Fe", codigoAfip: "921", alicuotaPercepcion: "4.5000", esAgentePercepcion: true },
+  { codigo: "SDE", nombre: "Santiago del Estero", codigoAfip: "922", alicuotaPercepcion: "4.5000", esAgentePercepcion: true },
+  { codigo: "TDF", nombre: "Tierra del Fuego", codigoAfip: "923", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
+  { codigo: "TUC", nombre: "Tucumán", codigoAfip: "924", alicuotaPercepcion: "4.5000", esAgentePercepcion: true },
 ];
 
 async function seedProvinciasYJurisdicciones() {
