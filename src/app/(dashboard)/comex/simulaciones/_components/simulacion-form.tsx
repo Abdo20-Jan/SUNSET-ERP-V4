@@ -290,41 +290,22 @@ export function SimulacionForm(props: Props) {
   const iibb = useWatch({ control, name: "iibb" }) ?? "0";
 
   const resumen = useMemo(() => {
-    const input: SimulacionInput = {
+    const input = buildSimulacionInput({
       moneda,
-      tipoCambio: safeMoney(tipoCambio),
-      valorFleteOrigen: safeOptionalMoney(valorFleteOrigen),
-      valorSeguroOrigen: safeOptionalMoney(valorSeguroOrigen),
-      die: safeMoney(die),
-      tasaEstadistica: safeMoney(tasaEstadistica),
-      arancelSim: safeMoney(arancelSim),
-      iva: safeMoney(iva),
-      ivaAdicional: safeMoney(ivaAdicional),
-      ganancias: safeMoney(ganancias),
-      iibb: safeMoney(iibb),
-      items: items.map((it) => {
-        const producto = it?.productoId
-          ? props.productos.find((p) => p.id === it.productoId)
-          : null;
-        return {
-          productoId: it?.productoId ?? null,
-          descripcionLibre: it?.descripcionLibre ?? null,
-          label: producto
-            ? `${producto.codigo} · ${producto.nombre}`
-            : (it?.descripcionLibre ?? null),
-          cantidad: Number.isFinite(it?.cantidad) ? it.cantidad : 0,
-          precioUnitarioFob: safeMoney(it?.precioUnitarioFob),
-          precioVentaUnitario: safeOptionalMoney(it?.precioVentaUnitario),
-        };
-      }),
-      costos: costos.map((c) => ({
-        tipo: c?.tipo,
-        descripcion: c?.descripcion ?? null,
-        subtotal: safeMoney(c?.subtotal),
-        moneda: c?.moneda ?? "USD",
-        tipoCambio: safeMoney(c?.tipoCambio),
-      })),
-    };
+      tipoCambio,
+      valorFleteOrigen,
+      valorSeguroOrigen,
+      die,
+      tasaEstadistica,
+      arancelSim,
+      iva,
+      ivaAdicional,
+      ganancias,
+      iibb,
+      items,
+      costos,
+      productos: props.productos,
+    });
     return calcularResumenSimulacion(input);
   }, [
     moneda,
@@ -1221,4 +1202,61 @@ function safeMoney(v: unknown): string {
 function safeOptionalMoney(v: unknown): string | null {
   if (typeof v === "string" && v.trim().length > 0 && moneyRegex.test(v)) return v;
   return null;
+}
+
+type BuildInputArgs = {
+  moneda: "ARS" | "USD";
+  tipoCambio: string;
+  valorFleteOrigen?: string;
+  valorSeguroOrigen?: string;
+  die: string;
+  tasaEstadistica: string;
+  arancelSim: string;
+  iva: string;
+  ivaAdicional: string;
+  ganancias: string;
+  iibb: string;
+  items: ReadonlyArray<FormValues["items"][number] | undefined>;
+  costos: ReadonlyArray<FormValues["costos"][number] | undefined>;
+  productos: ProductoOption[];
+};
+
+function buildItemInput(it: FormValues["items"][number] | undefined, productos: ProductoOption[]) {
+  const producto = it?.productoId ? productos.find((p) => p.id === it.productoId) : null;
+  return {
+    productoId: it?.productoId ?? null,
+    descripcionLibre: it?.descripcionLibre ?? null,
+    label: producto ? `${producto.codigo} · ${producto.nombre}` : (it?.descripcionLibre ?? null),
+    cantidad: Number.isFinite(it?.cantidad) ? (it?.cantidad ?? 0) : 0,
+    precioUnitarioFob: safeMoney(it?.precioUnitarioFob),
+    precioVentaUnitario: safeOptionalMoney(it?.precioVentaUnitario),
+  };
+}
+
+function buildCostoInput(c: FormValues["costos"][number] | undefined) {
+  return {
+    tipo: c?.tipo,
+    descripcion: c?.descripcion ?? null,
+    subtotal: safeMoney(c?.subtotal),
+    moneda: c?.moneda ?? ("USD" as const),
+    tipoCambio: safeMoney(c?.tipoCambio),
+  };
+}
+
+function buildSimulacionInput(args: BuildInputArgs): SimulacionInput {
+  return {
+    moneda: args.moneda,
+    tipoCambio: safeMoney(args.tipoCambio),
+    valorFleteOrigen: safeOptionalMoney(args.valorFleteOrigen),
+    valorSeguroOrigen: safeOptionalMoney(args.valorSeguroOrigen),
+    die: safeMoney(args.die),
+    tasaEstadistica: safeMoney(args.tasaEstadistica),
+    arancelSim: safeMoney(args.arancelSim),
+    iva: safeMoney(args.iva),
+    ivaAdicional: safeMoney(args.ivaAdicional),
+    ganancias: safeMoney(args.ganancias),
+    iibb: safeMoney(args.iibb),
+    items: args.items.map((it) => buildItemInput(it, args.productos)),
+    costos: args.costos.map(buildCostoInput),
+  };
 }
