@@ -9,8 +9,8 @@ import type { ProveedorOption } from "@/components/proveedor-combobox";
 import type { ProductoOption } from "@/components/producto-combobox";
 import { Incoterm, Moneda, TipoCostoEmbarque } from "@/generated/prisma/client";
 
-const moneyRegex = /^\d+(\.\d{1,2})?$/;
-const rateRegex = /^\d+(\.\d{1,6})?$/;
+const moneyRegex = /^\d+(?:\.\d{1,2})?$/;
+const rateRegex = /^\d+(?:\.\d{1,6})?$/;
 
 export type SimulacionRow = {
   id: string;

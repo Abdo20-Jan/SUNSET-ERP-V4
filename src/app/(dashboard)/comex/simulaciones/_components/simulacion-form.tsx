@@ -42,8 +42,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const moneyRegex = /^\d+(\.\d{1,2})?$/;
-const rateRegex = /^\d+(\.\d{1,6})?$/;
+const moneyRegex = /^\d+(?:\.\d{1,2})?$/;
+const rateRegex = /^\d+(?:\.\d{1,6})?$/;
 
 const INCOTERMS = [
   "EXW",
