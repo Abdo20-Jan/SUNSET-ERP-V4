@@ -823,6 +823,7 @@ model Proveedor {
   extractoLineas      LineaExtractoSugerencia[]
   gastosFijos         GastoFijo[]
   gastos              Gasto[]
+  simulaciones        SimulacionImportacion[]
 }
 
 model Producto {
@@ -852,6 +853,7 @@ model Producto {
   itemsPedidoVenta  ItemPedidoVenta[]
   stockPorDeposito  StockPorDeposito[]
   transferencias    Transferencia[]
+  itemsSimulacion   ItemSimulacionImportacion[]
 }
 
 model Deposito {
@@ -1621,4 +1623,86 @@ model LlmCache {
 
   @@index([scope, expiresAt])
   @@index([expiresAt])
+}
+
+// ============================================================
+// SIMULACIÓN DE IMPORTACIÓN
+// ============================================================
+//
+// Simulador de costos de importación que reproduce la lógica de
+// Embarque (FOB + costos logísticos + tributos aduaneros + prorrateo)
+// pero SIN generar asientos, movimientos de stock ni afectar costo
+// promedio. Sirve para evaluar la viabilidad de una operación antes
+// de comprometerse: cuál es el costo unitario nacionalizado, cuánto
+// margen deja a un precio de venta dado, qué tributos pagaría.
+//
+// La aritmética se reusa de `calcularRateioEmbarque` y
+// `calcularTributosSugeridos` de `lib/services/comex.ts`. Por eso los
+// campos espejan los del Embarque (mismas monedas, mismo TC, mismos
+// tributos), pero esta tabla es completamente independiente.
+
+model SimulacionImportacion {
+  id                String    @id @default(uuid())
+  codigo            String    @unique
+  nombre            String?
+  proveedorId       String?
+  moneda            Moneda
+  tipoCambio        Decimal   @db.Decimal(18, 6)
+  incoterm          Incoterm?
+  lugarIncoterm     String?
+  valorFleteOrigen  Decimal?  @db.Decimal(18, 2)
+  valorSeguroOrigen Decimal?  @db.Decimal(18, 2)
+  die               Decimal   @default(0) @db.Decimal(18, 2)
+  tasaEstadistica   Decimal   @default(0) @db.Decimal(18, 2)
+  arancelSim        Decimal   @default(0) @db.Decimal(18, 2)
+  iva               Decimal   @default(0) @db.Decimal(18, 2)
+  ivaAdicional      Decimal   @default(0) @db.Decimal(18, 2)
+  ganancias         Decimal   @default(0) @db.Decimal(18, 2)
+  iibb              Decimal   @default(0) @db.Decimal(18, 2)
+  notas             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  proveedor Proveedor?                   @relation(fields: [proveedorId], references: [id])
+  items     ItemSimulacionImportacion[]
+  costos    CostoSimulacionImportacion[]
+
+  @@index([proveedorId])
+  @@index([createdAt])
+}
+
+model ItemSimulacionImportacion {
+  id                  Int      @id @default(autoincrement())
+  simulacionId        String
+  productoId          String?
+  descripcionLibre    String?
+  cantidad            Int
+  precioUnitarioFob   Decimal  @db.Decimal(18, 2)
+  // Precio de venta unitario propuesto en ARS (sin IVA). Opcional: si
+  // está cargado, se calcula la rentabilidad por línea en la UI.
+  precioVentaUnitario Decimal? @db.Decimal(18, 2)
+
+  simulacion SimulacionImportacion @relation(fields: [simulacionId], references: [id], onDelete: Cascade)
+  producto   Producto?             @relation(fields: [productoId], references: [id])
+
+  @@index([simulacionId])
+}
+
+// Costos logísticos a nivel simulación. A diferencia de
+// EmbarqueCosto / EmbarqueCostoLinea (header de factura + N líneas),
+// acá usamos una estructura flat: cada fila es un gasto con su
+// moneda y TC propios. Sin proveedor / cuenta contable porque no
+// generamos asiento.
+model CostoSimulacionImportacion {
+  id           Int               @id @default(autoincrement())
+  simulacionId String
+  tipo         TipoCostoEmbarque
+  descripcion  String?
+  subtotal     Decimal           @db.Decimal(18, 2)
+  moneda       Moneda
+  tipoCambio   Decimal           @db.Decimal(18, 6)
+
+  simulacion SimulacionImportacion @relation(fields: [simulacionId], references: [id], onDelete: Cascade)
+
+  @@index([simulacionId])
 }
