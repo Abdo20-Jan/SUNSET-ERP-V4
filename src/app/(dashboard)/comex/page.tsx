@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { CargoShipIcon } from "@hugeicons/core-free-icons";
+import { CargoShipIcon, Calculator01Icon } from "@hugeicons/core-free-icons";
 
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -10,6 +10,13 @@ const SECTIONS = [
     icon: CargoShipIcon,
     title: "Embarques",
     description: "Importaciones: FOB, CIF, tributos aduaneros y costo nacionalizado",
+  },
+  {
+    href: "/comex/simulaciones",
+    icon: Calculator01Icon,
+    title: "Simulaciones",
+    description:
+      "Simulador de costos de importación: nacionalizado y rentabilidad sin generar asientos",
   },
 ] as const;
 
