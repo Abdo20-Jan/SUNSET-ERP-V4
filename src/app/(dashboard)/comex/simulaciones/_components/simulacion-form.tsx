@@ -329,7 +329,7 @@ export function SimulacionForm(props: Props) {
       toast.error("Complete FOB y costos para calcular tributos.");
       return;
     }
-    const tc = new Decimal(safeMoney(tipoCambio));
+    const tc = new Decimal(safeRate(tipoCambio));
     const cifMoneda = tc.gt(0) ? resumen.cifTotalArs.dividedBy(tc) : new Decimal(0);
     const t = calcularTributosSugeridos(cifMoneda);
     setValue("die", t.die.toFixed(2), { shouldValidate: true });
@@ -356,13 +356,17 @@ export function SimulacionForm(props: Props) {
   };
 
   const addCosto = () => {
+    // safeRate returns "0" para valor inválido; "0" es truthy en JS por ser
+    // string no vacío, entonces el || fallback no se dispara. Comparamos
+    // explícitamente con "0" para usar "1" como TC default seguro.
+    const tcInicial = safeRate(tipoCambio);
     appendCosto(
       {
         tipo: "FLETE_INTERNACIONAL",
         descripcion: "",
         subtotal: "0",
         moneda: moneda,
-        tipoCambio: safeMoney(tipoCambio) || "1",
+        tipoCambio: tcInicial === "0" ? "1" : tcInicial,
       },
       { shouldFocus: false },
     );
@@ -1069,7 +1073,7 @@ export function SimulacionForm(props: Props) {
                     </td>
                     <td className="px-3 py-2 text-right">
                       <MoneyAmount
-                        value={resumen.costoTotalNacionalizadoArs.toFixed(2)}
+                        value={resumen.costoSubtotalConPrecioArs.toFixed(2)}
                         mode="plain"
                         symbol="$ "
                       />
@@ -1199,6 +1203,15 @@ function safeMoney(v: unknown): string {
   return "0";
 }
 
+// Tipo de cambio acepta hasta 6 decimales (rateRegex). NO usar safeMoney
+// para TCs: limita a 2 decimales y devuelve "0" para ratios válidos como
+// "1200.123", lo que ceraría todos los cálculos ARS en vivo.
+function safeRate(v: unknown): string {
+  if (typeof v === "string" && rateRegex.test(v)) return v;
+  if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v.toString();
+  return "0";
+}
+
 function safeOptionalMoney(v: unknown): string | null {
   if (typeof v === "string" && v.trim().length > 0 && moneyRegex.test(v)) return v;
   return null;
@@ -1239,14 +1252,14 @@ function buildCostoInput(c: FormValues["costos"][number] | undefined) {
     descripcion: c?.descripcion ?? null,
     subtotal: safeMoney(c?.subtotal),
     moneda: c?.moneda ?? ("USD" as const),
-    tipoCambio: safeMoney(c?.tipoCambio),
+    tipoCambio: safeRate(c?.tipoCambio),
   };
 }
 
 function buildSimulacionInput(args: BuildInputArgs): SimulacionInput {
   return {
     moneda: args.moneda,
-    tipoCambio: safeMoney(args.tipoCambio),
+    tipoCambio: safeRate(args.tipoCambio),
     valorFleteOrigen: safeOptionalMoney(args.valorFleteOrigen),
     valorSeguroOrigen: safeOptionalMoney(args.valorSeguroOrigen),
     die: safeMoney(args.die),

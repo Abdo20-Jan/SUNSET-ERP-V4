@@ -77,6 +77,7 @@ export type ResumenSimulacion = {
   items: ItemRentabilidad[];
   // Métricas agregadas de rentabilidad (sólo considera líneas con precioVenta cargado)
   itemsConPrecio: number;
+  costoSubtotalConPrecioArs: Decimal;
   ingresoTotalArs: Decimal;
   utilidadTotalArs: Decimal;
   margenPromedioPorcentaje: Decimal | null;
@@ -270,6 +271,7 @@ export function calcularResumenSimulacion(input: SimulacionInput): ResumenSimula
     desembolsoTotalEstimadoArs,
     items,
     itemsConPrecio,
+    costoSubtotalConPrecioArs: costoSubtotalConPrecio,
     ingresoTotalArs,
     utilidadTotalArs,
     margenPromedioPorcentaje,
