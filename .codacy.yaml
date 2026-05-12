@@ -20,8 +20,16 @@ engines:
       - "Semgrep_json.npm.security.package-dependencies-check.package-dependencies-check"
   lizard:
     enabled: true
+  # ESLint (legacy ESLint 8) deshabilitado: el repo ya tiene activo
+  # "ESLint9" via Codacy UI (usesConfigurationFile: true, lee
+  # `eslint.config.mjs`). El tool legacy "ESLint" carga plugins que el
+  # proyecto no usa (es-x compat, @lwc, @salesforce/aura, flowtype,
+  # promise/no-native, react-in-jsx-scope obsoleto desde React 17),
+  # generando cientos de falsos positivos a cada PR. El job `lint` del
+  # CI (`pnpm lint`, ESLint 9 con `eslint.config.mjs`) es el required
+  # check — single source of truth para JS/TS lint.
   eslint:
-    enabled: true
+    enabled: false
   biome:
     enabled: true
 
