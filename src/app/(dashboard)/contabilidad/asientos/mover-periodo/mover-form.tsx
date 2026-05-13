@@ -50,6 +50,7 @@ export type AsientoRow = {
   moneda: Moneda;
   totalDebe: string;
   periodoCodigo: string;
+  contexto: { etiqueta: string; lineas: string[] };
 };
 
 export type PeriodoOption = {
@@ -197,8 +198,8 @@ export function MoverPeriodoForm({ asientos, periodos, periodoOrigenId }: Props)
         </div>
       </Card>
 
-      <Card className="py-0">
-        <Table>
+      <Card className="overflow-x-auto py-0">
+        <Table className="w-full">
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">
@@ -212,9 +213,11 @@ export function MoverPeriodoForm({ asientos, periodos, periodoOrigenId }: Props)
               <TableHead>N°</TableHead>
               <TableHead>Período</TableHead>
               <TableHead>Fecha</TableHead>
-              <TableHead>Descripción</TableHead>
               <TableHead>Origen</TableHead>
               <TableHead>Estado</TableHead>
+              <TableHead>Tipo</TableHead>
+              <TableHead>Contexto</TableHead>
+              <TableHead>Descripción</TableHead>
               <TableHead className="text-right">Total</TableHead>
             </TableRow>
           </TableHeader>
@@ -222,7 +225,7 @@ export function MoverPeriodoForm({ asientos, periodos, periodoOrigenId }: Props)
             {asientos.map((a) => {
               const checked = selectedIds.has(a.id);
               return (
-                <TableRow key={a.id} className={checked ? "bg-primary/5" : undefined}>
+                <TableRow key={a.id} className={checked ? "bg-primary/5 align-top" : "align-top"}>
                   <TableCell>
                     <Checkbox
                       checked={checked}
@@ -230,29 +233,48 @@ export function MoverPeriodoForm({ asientos, periodos, periodoOrigenId }: Props)
                       aria-label={`Seleccionar asiento ${a.numero}`}
                     />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <span className="font-mono text-xs">{a.numero}</span>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <Badge variant="outline" className="font-mono text-xs">
                       {a.periodoCodigo}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <span className="text-sm tabular-nums">{formatDate(a.fecha)}</span>
                   </TableCell>
-                  <TableCell>
-                    <span className="block max-w-[40ch] truncate text-sm">{a.descripcion}</span>
-                  </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <Badge variant="ghost" className="text-xs">
                       {a.origen}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <Badge variant={estadoVariant(a.estado)}>{a.estado}</Badge>
                   </TableCell>
-                  <TableCell className="text-right font-mono text-sm tabular-nums">
+                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                    {a.contexto.etiqueta || "—"}
+                  </TableCell>
+                  <TableCell>
+                    {a.contexto.lineas.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    ) : (
+                      <div className="flex flex-col gap-0.5 text-xs leading-tight">
+                        {a.contexto.lineas.map((l, i) => (
+                          <span
+                            key={`${a.id}-ctx-${i}`}
+                            className={i === 0 ? "font-medium" : "text-muted-foreground"}
+                          >
+                            {l}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    <span className="block whitespace-normal wrap-break-word">{a.descripcion}</span>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono text-sm tabular-nums">
                     {a.totalDebe}
                   </TableCell>
                 </TableRow>
