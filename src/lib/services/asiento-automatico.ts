@@ -43,7 +43,12 @@ export type AsientoErrorCode =
   | "ASIENTO_INEXISTENTE"
   | "ESTADO_INVALIDO"
   | "NUMERACION_FALHOU"
-  | "DOMINIO_INVALIDO";
+  | "DOMINIO_INVALIDO"
+  | "ASIENTO_ANULADO"
+  | "PERIODO_ORIGEN_CERRADO"
+  | "PERIODO_DESTINO_CERRADO"
+  | "PERIODO_DESTINO_INEXISTENTE"
+  | "MISMO_PERIODO";
 
 export class AsientoError extends Error {
   readonly code: AsientoErrorCode;
@@ -80,7 +85,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withNumeracionRetry<T>(run: () => Promise<T>): Promise<T> {
+export async function withNumeracionRetry<T>(run: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < MAX_NUMERACION_RETRIES; attempt++) {
     try {
@@ -107,6 +112,63 @@ async function obtenerProximoNumero(tx: TxClient, periodoId: number): Promise<nu
     _max: { numero: true },
   });
   return (agg._max.numero ?? 0) + 1;
+}
+
+export async function moverAsientoDePeriodoEnTx(
+  tx: TxClient,
+  asientoId: string,
+  periodoDestinoId: number,
+): Promise<{ numeroAnterior: number; numeroNuevo: number; periodoOrigenId: number }> {
+  const asiento = await tx.asiento.findUnique({
+    where: { id: asientoId },
+    select: {
+      id: true,
+      estado: true,
+      numero: true,
+      periodoId: true,
+      periodo: { select: { estado: true } },
+    },
+  });
+  if (!asiento) {
+    throw new AsientoError("ASIENTO_INEXISTENTE", "El asiento no existe.");
+  }
+  if (asiento.estado === AsientoEstado.ANULADO) {
+    throw new AsientoError("ASIENTO_ANULADO", "Un asiento anulado no se puede mover.");
+  }
+  if (asiento.periodo.estado === PeriodoEstado.CERRADO) {
+    throw new AsientoError(
+      "PERIODO_ORIGEN_CERRADO",
+      "El período de origen está cerrado. Reabrilo antes de mover.",
+    );
+  }
+  if (asiento.periodoId === periodoDestinoId) {
+    throw new AsientoError("MISMO_PERIODO", "El asiento ya está en ese período.");
+  }
+  const destino = await tx.periodoContable.findUnique({
+    where: { id: periodoDestinoId },
+    select: { id: true, estado: true },
+  });
+  if (!destino) {
+    throw new AsientoError("PERIODO_DESTINO_INEXISTENTE", "El período destino no existe.");
+  }
+  if (destino.estado === PeriodoEstado.CERRADO) {
+    throw new AsientoError(
+      "PERIODO_DESTINO_CERRADO",
+      "El período destino está cerrado. Reabrilo antes de mover.",
+    );
+  }
+
+  const numeroNuevo = await obtenerProximoNumero(tx, periodoDestinoId);
+  await tx.asiento.update({
+    where: { id: asientoId },
+    data: { periodoId: periodoDestinoId, numero: numeroNuevo },
+  });
+
+  return {
+    numeroAnterior: asiento.numero,
+    numeroNuevo,
+    periodoOrigenId: asiento.periodoId,
+  };
 }
 
 async function resolverPeriodo(

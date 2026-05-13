@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon, ArrowLeftRightIcon } from "@hugeicons/core-free-icons";
 
 import { db } from "@/lib/db";
 import { AsientoEstado, Prisma } from "@/generated/prisma/client";
@@ -127,13 +127,22 @@ export default async function AsientosPage({
             {rows.length} asiento{rows.length === 1 ? "" : "s"} · {rangoLabel}
           </p>
         </div>
-        <Link
-          href="/contabilidad/asientos/nuevo"
-          className={buttonVariants({ variant: "default" })}
-        >
-          <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-          Nuevo asiento
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/contabilidad/asientos/mover-periodo"
+            className={buttonVariants({ variant: "outline" })}
+          >
+            <HugeiconsIcon icon={ArrowLeftRightIcon} strokeWidth={2} />
+            Mover de período
+          </Link>
+          <Link
+            href="/contabilidad/asientos/nuevo"
+            className={buttonVariants({ variant: "default" })}
+          >
+            <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+            Nuevo asiento
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-col gap-3">
