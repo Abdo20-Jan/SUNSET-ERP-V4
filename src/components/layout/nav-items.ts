@@ -5,6 +5,7 @@ import {
   CargoShipIcon,
   UserGroupIcon,
   ChartLineData01Icon,
+  Analytics01Icon,
   ShoppingBag03Icon,
   ShoppingBasket03Icon,
   Calendar03Icon,
@@ -27,7 +28,10 @@ export type NavGroup = {
 export const NAV_GROUPS: readonly NavGroup[] = [
   {
     label: "General",
-    items: [{ label: "Dashboard", href: "/dashboard", icon: DashboardSquare01Icon }],
+    items: [
+      { label: "Dashboard", href: "/dashboard", icon: DashboardSquare01Icon },
+      { label: "BI", href: "/bi", icon: Analytics01Icon },
+    ],
   },
   {
     label: "Operación",
