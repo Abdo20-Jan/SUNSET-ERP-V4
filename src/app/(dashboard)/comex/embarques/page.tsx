@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon } from "@hugeicons/core-free-icons";
 
 import { listarEmbarques, type EmbarqueListFilters } from "@/lib/actions/embarques";
+import { db } from "@/lib/db";
 import { EmbarqueEstado, Moneda } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -11,18 +12,34 @@ import { parsePaginationParams } from "@/components/ui/pagination-params";
 
 import { EmbarquesFilters } from "./embarques-filters";
 import { EmbarquesTable } from "./embarques-table";
+import { EmbarquesTabs, type EmbarqueTabKey } from "./embarques-tabs";
 
 type SearchParams = Promise<{
-  estado?: string;
+  tab?: string;
   moneda?: string;
   page?: string;
   perPage?: string;
 }>;
 
-function parseEstado(v: string | undefined): EmbarqueEstado | null {
-  if (!v) return null;
-  const values = Object.values(EmbarqueEstado) as string[];
-  return values.includes(v) ? (v as EmbarqueEstado) : null;
+const TAB_ESTADOS: Record<EmbarqueTabKey, EmbarqueEstado[]> = {
+  transito: [EmbarqueEstado.EN_TRANSITO],
+  porto: [EmbarqueEstado.EN_PUERTO, EmbarqueEstado.EN_ZONA_PRIMARIA, EmbarqueEstado.EN_ADUANA],
+  finalizados: [EmbarqueEstado.DESPACHADO, EmbarqueEstado.EN_DEPOSITO, EmbarqueEstado.CERRADO],
+  borrador: [EmbarqueEstado.BORRADOR],
+};
+
+const TAB_LABELS: Record<EmbarqueTabKey, string> = {
+  transito: "en tránsito",
+  porto: "en puerto",
+  finalizados: "finalizados",
+  borrador: "borradores",
+};
+
+function parseTab(v: string | undefined): EmbarqueTabKey {
+  if (v === "transito" || v === "porto" || v === "finalizados" || v === "borrador") {
+    return v;
+  }
+  return "transito";
 }
 
 function parseMoneda(v: string | undefined): Moneda | null {
@@ -31,17 +48,6 @@ function parseMoneda(v: string | undefined): Moneda | null {
   return null;
 }
 
-const ESTADO_SHORT: Record<EmbarqueEstado, string> = {
-  BORRADOR: "borrador",
-  EN_TRANSITO: "en tránsito",
-  EN_PUERTO: "en puerto",
-  EN_ZONA_PRIMARIA: "en zona primaria",
-  EN_ADUANA: "en aduana",
-  DESPACHADO: "despachado",
-  EN_DEPOSITO: "en depósito",
-  CERRADO: "cerrado",
-};
-
 export default async function EmbarquesPage({
   searchParams,
 }: {
@@ -49,21 +55,36 @@ export default async function EmbarquesPage({
 }) {
   const params = await searchParams;
 
-  const estado = parseEstado(params.estado);
+  const tab = parseTab(params.tab);
   const moneda = parseMoneda(params.moneda);
   const { page, perPage } = parsePaginationParams(params);
 
   const filtros: EmbarqueListFilters & { page: number; perPage: number } = {
+    estado: TAB_ESTADOS[tab],
     page,
     perPage,
   };
-  if (estado) filtros.estado = estado;
   if (moneda) filtros.moneda = moneda;
 
-  const { rows, total } = await listarEmbarques(filtros);
+  const [{ rows, total }, grouped] = await Promise.all([
+    listarEmbarques(filtros),
+    db.embarque.groupBy({
+      by: ["estado"],
+      _count: { _all: true },
+    }),
+  ]);
 
-  const filtroTags: string[] = [];
-  if (estado) filtroTags.push(`estado ${ESTADO_SHORT[estado]}`);
+  const countByEstado = new Map<EmbarqueEstado, number>(
+    grouped.map((g) => [g.estado, g._count._all]),
+  );
+  const counts = {
+    transito: TAB_ESTADOS.transito.reduce((a, e) => a + (countByEstado.get(e) ?? 0), 0),
+    porto: TAB_ESTADOS.porto.reduce((a, e) => a + (countByEstado.get(e) ?? 0), 0),
+    finalizados: TAB_ESTADOS.finalizados.reduce((a, e) => a + (countByEstado.get(e) ?? 0), 0),
+    borrador: TAB_ESTADOS.borrador.reduce((a, e) => a + (countByEstado.get(e) ?? 0), 0),
+  };
+
+  const filtroTags: string[] = [TAB_LABELS[tab]];
   if (moneda) filtroTags.push(`moneda ${moneda}`);
 
   return (
@@ -72,10 +93,7 @@ export default async function EmbarquesPage({
         <div className="flex flex-col gap-1">
           <h1 className="text-[15px] font-semibold tracking-tight">Embarques</h1>
           <p className="text-sm text-muted-foreground">
-            {total} embarque{total === 1 ? "" : "s"}
-            {filtroTags.length > 0
-              ? ` · ${filtroTags.join(" · ")}`
-              : " · importaciones registradas"}
+            {total} embarque{total === 1 ? "" : "s"} · {filtroTags.join(" · ")}
           </p>
         </div>
         <Link href="/comex/embarques/nuevo" className={buttonVariants({ variant: "default" })}>
@@ -84,7 +102,9 @@ export default async function EmbarquesPage({
         </Link>
       </div>
 
-      <EmbarquesFilters selectedEstado={estado ?? "all"} selectedMoneda={moneda ?? "all"} />
+      <EmbarquesTabs current={tab} counts={counts} />
+
+      <EmbarquesFilters selectedMoneda={moneda ?? "all"} />
 
       <Card className="py-0">
         <EmbarquesTable data={rows} />

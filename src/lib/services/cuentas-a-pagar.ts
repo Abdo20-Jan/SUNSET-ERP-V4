@@ -8,7 +8,24 @@ import {
   CompraEstado,
   EmbarqueEstado,
   GastoEstado,
+  Moneda,
+  MovimientoTesoreriaTipo,
+  TipoProveedor,
 } from "@/generated/prisma/client";
+
+export const TIPOS_PROVEEDOR_EXTERIOR: TipoProveedor[] = [
+  TipoProveedor.MERCADERIA_EXTERIOR,
+  TipoProveedor.SERVICIOS_EXTERIOR,
+];
+
+export function isProveedorExterior(p: {
+  tipoProveedor: TipoProveedor;
+  pais?: string | null;
+}): boolean {
+  if (TIPOS_PROVEEDOR_EXTERIOR.includes(p.tipoProveedor)) return true;
+  if (p.pais && p.pais.toUpperCase() !== "AR") return true;
+  return false;
+}
 
 export type ProveedorAsociado = {
   id: string;
@@ -1170,4 +1187,355 @@ export async function getSaldoCreditoAduana(): Promise<{
     cuentaCodigo: cuenta.codigo,
     saldo: saldo.lte(0) ? "0.00" : saldo.toFixed(2),
   };
+}
+
+// ============================================================
+// SALDOS DE PROVEEDORES DEL EXTERIOR (USD)
+// ============================================================
+//
+// Para proveedores marcados como MERCADERIA_EXTERIOR / SERVICIOS_EXTERIOR
+// (o con pais != AR), calcula saldos en USD a partir de:
+//   bruto USD = sum(Compra.total + EmbarqueCosto totales) con moneda=USD
+//   pagado USD = sum(MovimientoTesoreria.monto) con moneda=USD que
+//                referencien la factura/embarque vía tokens en descripción
+//
+// El cómputo es independiente de la verdad contable ARS (que mantiene su
+// saldo en `getSaldosPorProveedorConAging`). El propósito es operativo:
+// el usuario debe X USD; cuando los paga, fecha el TC del día.
+
+export type FacturaSaldoUsd = {
+  origen: "compra" | "embarque";
+  id: string;
+  numero: string;
+  fecha: string;
+  fechaVencimiento: string | null;
+  tipoCambioOriginal: string; // TC al momento de la factura
+  totalUsd: string;
+  pagadoUsd: string;
+  saldoUsd: string;
+};
+
+export type EmbarqueSaldoUsd = {
+  embarqueId: string;
+  embarqueCodigo: string;
+  saldoUsd: string;
+  facturas: FacturaSaldoUsd[];
+};
+
+export type ProveedorExteriorSaldo = {
+  proveedorId: string;
+  proveedorNombre: string;
+  pais: string;
+  cuit: string | null;
+  saldoUsd: string;
+  embarques: EmbarqueSaldoUsd[];
+  // Compras USD sin link a un embarque (proveedor exterior pero compra
+  // directa sin contenedor — caso menos común, agrupado aparte).
+  facturasSueltas: FacturaSaldoUsd[];
+};
+
+function tokenizar(s: string | null | undefined): Set<string> {
+  if (!s) return new Set();
+  return new Set(s.split(/[\s—,;]+/).filter((t) => t.length > 0));
+}
+
+export async function getSaldosExteriorPorProveedor(): Promise<ProveedorExteriorSaldo[]> {
+  const proveedores = await db.proveedor.findMany({
+    where: {
+      OR: [{ tipoProveedor: { in: TIPOS_PROVEEDOR_EXTERIOR } }, { NOT: { pais: "AR" } }],
+    },
+    select: {
+      id: true,
+      nombre: true,
+      cuit: true,
+      pais: true,
+      cuentaContableId: true,
+      tipoProveedor: true,
+    },
+    orderBy: { nombre: "asc" },
+  });
+
+  const proveedorIds = proveedores.map((p) => p.id);
+  if (proveedorIds.length === 0) return [];
+
+  // Pagos USD por proveedor (vía cuenta contable proveedor + descripción tokens)
+  const cuentaIds = proveedores
+    .map((p) => p.cuentaContableId)
+    .filter((id): id is number => id !== null);
+
+  // MovimientosTesoreria USD tipo PAGO que toquen las cuentas de proveedores
+  // exterior. Tomamos la línea DEBE (la que reduce el pasivo del proveedor).
+  const lineasPago =
+    cuentaIds.length > 0
+      ? await db.lineaAsiento.findMany({
+          where: {
+            cuentaId: { in: cuentaIds },
+            asiento: {
+              estado: AsientoEstado.CONTABILIZADO,
+              moneda: Moneda.USD,
+              movimiento: {
+                tipo: MovimientoTesoreriaTipo.PAGO,
+                moneda: Moneda.USD,
+              },
+            },
+          },
+          select: {
+            cuentaId: true,
+            debe: true,
+            haber: true,
+            descripcion: true,
+          },
+        })
+      : [];
+
+  // Por cuenta del proveedor: lista de pagos USD con sus tokens
+  const pagosUsdPorCuenta = new Map<
+    number,
+    Array<{ neto: ReturnType<typeof toDecimal>; tokens: Set<string> }>
+  >();
+  for (const l of lineasPago) {
+    const debe = toDecimal(l.debe);
+    const haber = toDecimal(l.haber);
+    const neto = debe.minus(haber);
+    if (neto.lte(0.005)) continue;
+    const arr = pagosUsdPorCuenta.get(l.cuentaId) ?? [];
+    arr.push({ neto, tokens: tokenizar(l.descripcion) });
+    pagosUsdPorCuenta.set(l.cuentaId, arr);
+  }
+
+  function pagadoUsdParaFactura(
+    cuentaId: number | null,
+    numero: string,
+    embarqueCodigo: string | null,
+  ): ReturnType<typeof toDecimal> {
+    if (cuentaId === null) return toDecimal(0);
+    const pagos = pagosUsdPorCuenta.get(cuentaId);
+    if (!pagos) return toDecimal(0);
+    const numTokens = tokenizar(numero);
+    let pagado = toDecimal(0);
+    for (const p of pagos) {
+      const matchNumero = numTokens.size > 0 && [...numTokens].every((t) => p.tokens.has(t));
+      const matchEmbarque = embarqueCodigo !== null && p.tokens.has(embarqueCodigo);
+      if (matchNumero || matchEmbarque) {
+        pagado = pagado.plus(p.neto);
+      }
+    }
+    return pagado;
+  }
+
+  // Compras USD del proveedor
+  const compras = await db.compra.findMany({
+    where: {
+      proveedorId: { in: proveedorIds },
+      moneda: Moneda.USD,
+      estado: { in: [CompraEstado.EMITIDA, CompraEstado.RECIBIDA] },
+    },
+    select: {
+      id: true,
+      numero: true,
+      fecha: true,
+      fechaVencimiento: true,
+      total: true,
+      tipoCambio: true,
+      proveedorId: true,
+    },
+  });
+
+  // EmbarqueCostos USD vinculados al proveedor (sólo CERRADO o embarque
+  // contabilizado — facturas que ya generan saldo).
+  const costos = await db.embarqueCosto.findMany({
+    where: {
+      proveedorId: { in: proveedorIds },
+      moneda: Moneda.USD,
+      embarque: {
+        estado: {
+          in: [
+            EmbarqueEstado.EN_ZONA_PRIMARIA,
+            EmbarqueEstado.EN_ADUANA,
+            EmbarqueEstado.DESPACHADO,
+            EmbarqueEstado.EN_DEPOSITO,
+            EmbarqueEstado.CERRADO,
+          ],
+        },
+      },
+    },
+    select: {
+      id: true,
+      facturaNumero: true,
+      fechaFactura: true,
+      fechaVencimiento: true,
+      tipoCambio: true,
+      iva: true,
+      iibb: true,
+      otros: true,
+      proveedorId: true,
+      lineas: { select: { subtotal: true } },
+      embarque: { select: { id: true, codigo: true } },
+    },
+  });
+
+  // Embarques propios del proveedor exterior (mercadería FOB).
+  // El "saldo" de la mercadería se modela a través de Compras vinculadas al
+  // pedido — no hay un EmbarqueCosto del proveedor exterior. Listamos los
+  // embarques para mostrar agrupados, pero las facturas usadas son Compras.
+  const embarques = await db.embarque.findMany({
+    where: {
+      proveedorId: { in: proveedorIds },
+      estado: {
+        in: [
+          EmbarqueEstado.EN_TRANSITO,
+          EmbarqueEstado.EN_PUERTO,
+          EmbarqueEstado.EN_ZONA_PRIMARIA,
+          EmbarqueEstado.EN_ADUANA,
+          EmbarqueEstado.DESPACHADO,
+          EmbarqueEstado.EN_DEPOSITO,
+          EmbarqueEstado.CERRADO,
+        ],
+      },
+    },
+    select: {
+      id: true,
+      codigo: true,
+      proveedorId: true,
+      pedidoCompraId: true,
+    },
+  });
+
+  // Map pedidoCompraId → embarque para asociar compras a embarques
+  const embarquePorPedido = new Map<number, { id: string; codigo: string }>();
+  for (const e of embarques) {
+    if (e.pedidoCompraId) {
+      embarquePorPedido.set(e.pedidoCompraId, { id: e.id, codigo: e.codigo });
+    }
+  }
+  // Map proveedorId → embarques del proveedor
+  const embarquesPorProveedor = new Map<string, Array<{ id: string; codigo: string }>>();
+  for (const e of embarques) {
+    const arr = embarquesPorProveedor.get(e.proveedorId) ?? [];
+    arr.push({ id: e.id, codigo: e.codigo });
+    embarquesPorProveedor.set(e.proveedorId, arr);
+  }
+
+  // Cargar compras con su pedidoCompra para detectar el embarque asociado
+  const comprasConPedido = await db.compra.findMany({
+    where: { id: { in: compras.map((c) => c.id) } },
+    select: { id: true, pedidoCompraId: true },
+  });
+  const pedidoPorCompra = new Map<string, number | null>(
+    comprasConPedido.map((c) => [c.id, c.pedidoCompraId]),
+  );
+
+  const cuentaPorProveedor = new Map<string, number | null>(
+    proveedores.map((p) => [p.id, p.cuentaContableId]),
+  );
+
+  const result: ProveedorExteriorSaldo[] = [];
+
+  for (const p of proveedores) {
+    const cuentaId = cuentaPorProveedor.get(p.id) ?? null;
+    const embarquesProv = embarquesPorProveedor.get(p.id) ?? [];
+
+    // Bucket por embarque + sueltas
+    const facturasPorEmbarque = new Map<string, FacturaSaldoUsd[]>();
+    const sueltas: FacturaSaldoUsd[] = [];
+
+    // Compras del proveedor exterior
+    const comprasProv = compras.filter((c) => c.proveedorId === p.id);
+    for (const c of comprasProv) {
+      const pedidoId = pedidoPorCompra.get(c.id) ?? null;
+      const embarqueRef = pedidoId !== null ? embarquePorPedido.get(pedidoId) : undefined;
+      const embCodigo = embarqueRef?.codigo ?? null;
+      const totalUsd = toDecimal(c.total);
+      const pagadoUsd = pagadoUsdParaFactura(cuentaId, c.numero, embCodigo);
+      const saldoUsd = totalUsd.minus(pagadoUsd);
+      if (saldoUsd.lte(0.005)) continue;
+      const f: FacturaSaldoUsd = {
+        origen: "compra",
+        id: c.id,
+        numero: c.numero,
+        fecha: c.fecha.toISOString(),
+        fechaVencimiento: c.fechaVencimiento?.toISOString() ?? null,
+        tipoCambioOriginal: toDecimal(c.tipoCambio).toFixed(6),
+        totalUsd: totalUsd.toFixed(2),
+        pagadoUsd: pagadoUsd.toFixed(2),
+        saldoUsd: saldoUsd.toFixed(2),
+      };
+      if (embarqueRef) {
+        const arr = facturasPorEmbarque.get(embarqueRef.id) ?? [];
+        arr.push(f);
+        facturasPorEmbarque.set(embarqueRef.id, arr);
+      } else {
+        sueltas.push(f);
+      }
+    }
+
+    // EmbarqueCostos del proveedor (gastos locales pagados al exterior — raro)
+    const costosProv = costos.filter((c) => c.proveedorId === p.id);
+    for (const c of costosProv) {
+      const subtotalLineas = c.lineas.reduce(
+        (acc, l) => acc.plus(toDecimal(l.subtotal)),
+        toDecimal(0),
+      );
+      const totalUsd = subtotalLineas
+        .plus(toDecimal(c.iva))
+        .plus(toDecimal(c.iibb))
+        .plus(toDecimal(c.otros));
+      const facturaNumero = c.facturaNumero ?? `Factura #${c.id}`;
+      const embCodigo = c.embarque.codigo;
+      const pagadoUsd = pagadoUsdParaFactura(cuentaId, facturaNumero, embCodigo);
+      const saldoUsd = totalUsd.minus(pagadoUsd);
+      if (saldoUsd.lte(0.005)) continue;
+      const f: FacturaSaldoUsd = {
+        origen: "embarque",
+        id: String(c.id),
+        numero: facturaNumero,
+        fecha: (c.fechaFactura ?? new Date()).toISOString(),
+        fechaVencimiento: c.fechaVencimiento?.toISOString() ?? null,
+        tipoCambioOriginal: toDecimal(c.tipoCambio).toFixed(6),
+        totalUsd: totalUsd.toFixed(2),
+        pagadoUsd: pagadoUsd.toFixed(2),
+        saldoUsd: saldoUsd.toFixed(2),
+      };
+      const arr = facturasPorEmbarque.get(c.embarque.id) ?? [];
+      arr.push(f);
+      facturasPorEmbarque.set(c.embarque.id, arr);
+    }
+
+    const embarquesOut: EmbarqueSaldoUsd[] = [];
+    for (const emb of embarquesProv) {
+      const facturas = facturasPorEmbarque.get(emb.id) ?? [];
+      if (facturas.length === 0) continue;
+      const saldoEmbarque = facturas.reduce(
+        (acc, f) => acc.plus(toDecimal(f.saldoUsd)),
+        toDecimal(0),
+      );
+      embarquesOut.push({
+        embarqueId: emb.id,
+        embarqueCodigo: emb.codigo,
+        saldoUsd: saldoEmbarque.toFixed(2),
+        facturas,
+      });
+    }
+
+    const saldoSueltas = sueltas.reduce((acc, f) => acc.plus(toDecimal(f.saldoUsd)), toDecimal(0));
+    const saldoEmbarques = embarquesOut.reduce(
+      (acc, e) => acc.plus(toDecimal(e.saldoUsd)),
+      toDecimal(0),
+    );
+    const saldoTotal = saldoEmbarques.plus(saldoSueltas);
+
+    if (saldoTotal.lte(0.005)) continue;
+
+    result.push({
+      proveedorId: p.id,
+      proveedorNombre: p.nombre,
+      pais: p.pais,
+      cuit: p.cuit,
+      saldoUsd: saldoTotal.toFixed(2),
+      embarques: embarquesOut.sort((a, b) => b.embarqueCodigo.localeCompare(a.embarqueCodigo)),
+      facturasSueltas: sueltas,
+    });
+  }
+
+  return result.sort((a, b) => toDecimal(b.saldoUsd).minus(toDecimal(a.saldoUsd)).toNumber());
 }

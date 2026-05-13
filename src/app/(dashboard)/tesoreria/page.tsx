@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowDataTransferHorizontalIcon,
   BankIcon,
+  ChartLineData01Icon,
   CreditCardIcon,
   DocumentValidationIcon,
   ExchangeIcon,
@@ -62,6 +63,13 @@ const SECTIONS = [
     icon: Calendar03Icon,
     title: "Saldos por proveedor",
     description: "Saldo individual + facturas vencidas, próximas a vencer y al día",
+  },
+  {
+    href: "/tesoreria/pagos-historial",
+    icon: ChartLineData01Icon,
+    title: "Histórico de pagos",
+    description:
+      "Listado de pagos con factura referenciada, banco origen, método y diferencia cambiaria",
   },
   {
     href: "/tesoreria/extractos",
