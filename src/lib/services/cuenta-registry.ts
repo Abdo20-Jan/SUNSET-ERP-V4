@@ -38,14 +38,25 @@ export const VENTA_CODIGOS = {
     nombre: "OTROS IMPUESTOS",
     categoria: CuentaCategoria.PASIVO,
   },
-  // Percepciones IIBB jurisdiccionales cobradas al cliente (vía
-  // Percepción IIBB sobre el subtotal cuando la jurisdicción del cliente
-  // tiene flag esAgentePercepcion=true). Distinto de IIBB_POR_PAGAR
-  // (2.1.3.02) que es el tributo propio de Sunset (Córdoba 4,75%).
+  // IIBB jurisdiccional embutido en el precio (no discriminado al
+  // cliente). Sunset absorbe el IIBB de la jurisdicción del cliente
+  // (BA 5%, CBA 4,75%, Corrientes 5%, etc.) — el cliente paga el
+  // mismo total mostrado en la factura, y Sunset reconoce el IIBB
+  // como gasto contra este pasivo a depositar a la jurisdicción.
+  // Distinto de IIBB_POR_PAGAR (2.1.3.02) que es el IIBB propio
+  // manual de Sunset (Córdoba). Mantiene el código histórico 2.1.3.05.
   PERCEPCIONES_IIBB_A_DEPOSITAR: {
     codigo: "2.1.3.05",
-    nombre: "PERCEPCIONES IIBB A DEPOSITAR",
+    nombre: "IIBB JURISDICCIONAL A DEPOSITAR",
     categoria: CuentaCategoria.PASIVO,
+  },
+  // Gasto IIBB jurisdiccional embutido — contrapartida de
+  // PERCEPCIONES_IIBB_A_DEPOSITAR. Reduce la utilidad bruta de la
+  // venta y por ende la base de Provisión Ganancias 35%.
+  IIBB_GASTO: {
+    codigo: "5.5.02",
+    nombre: "INGRESOS BRUTOS",
+    categoria: CuentaCategoria.EGRESO,
   },
   // Costo de Mercadería Vendida (CMV/COGS) — cuando se emite una venta
   // se debita aquí el costo a precio promedio, equilibrando con HABER en
