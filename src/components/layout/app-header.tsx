@@ -19,6 +19,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   transferencias: "Transferencias",
   prestamos: "Préstamos",
   "cuentas-a-pagar": "Cuentas a pagar",
+  "cuentas-a-cobrar": "Cuentas a cobrar",
   "saldos-proveedores": "Saldos por proveedor",
   extractos: "Extractos",
   pedidos: "Pedidos",
