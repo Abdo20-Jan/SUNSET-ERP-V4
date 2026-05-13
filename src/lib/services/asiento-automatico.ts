@@ -171,6 +171,77 @@ export async function moverAsientoDePeriodoEnTx(
   };
 }
 
+export async function cambiarFechaAsientoEnTx(
+  tx: TxClient,
+  asientoId: string,
+  nuevaFecha: Date,
+): Promise<{
+  fechaAnterior: Date;
+  fechaNueva: Date;
+  periodoAnteriorId: number;
+  periodoNuevoId: number;
+  numeroAnterior: number;
+  numeroNuevo: number;
+}> {
+  const asiento = await tx.asiento.findUnique({
+    where: { id: asientoId },
+    select: {
+      id: true,
+      estado: true,
+      numero: true,
+      fecha: true,
+      periodoId: true,
+      periodo: { select: { estado: true } },
+    },
+  });
+  if (!asiento) {
+    throw new AsientoError("ASIENTO_INEXISTENTE", "El asiento no existe.");
+  }
+  if (asiento.estado === AsientoEstado.ANULADO) {
+    throw new AsientoError("ASIENTO_ANULADO", "Un asiento anulado no se puede mover.");
+  }
+  if (asiento.periodo.estado === PeriodoEstado.CERRADO) {
+    throw new AsientoError(
+      "PERIODO_ORIGEN_CERRADO",
+      "El período de origen está cerrado. Reabrilo antes de cambiar la fecha.",
+    );
+  }
+
+  // resolverPeriodo ya valida que el período exista y esté ABIERTO.
+  const destino = await resolverPeriodo(tx, nuevaFecha);
+
+  if (destino.id === asiento.periodoId) {
+    // Mismo período: solo actualizamos fecha, mantenemos numero.
+    await tx.asiento.update({
+      where: { id: asientoId },
+      data: { fecha: nuevaFecha },
+    });
+    return {
+      fechaAnterior: asiento.fecha,
+      fechaNueva: nuevaFecha,
+      periodoAnteriorId: asiento.periodoId,
+      periodoNuevoId: destino.id,
+      numeroAnterior: asiento.numero,
+      numeroNuevo: asiento.numero,
+    };
+  }
+
+  const numeroNuevo = await obtenerProximoNumero(tx, destino.id);
+  await tx.asiento.update({
+    where: { id: asientoId },
+    data: { fecha: nuevaFecha, periodoId: destino.id, numero: numeroNuevo },
+  });
+
+  return {
+    fechaAnterior: asiento.fecha,
+    fechaNueva: nuevaFecha,
+    periodoAnteriorId: asiento.periodoId,
+    periodoNuevoId: destino.id,
+    numeroAnterior: asiento.numero,
+    numeroNuevo,
+  };
+}
+
 async function resolverPeriodo(
   tx: TxClient,
   fecha: Date,
