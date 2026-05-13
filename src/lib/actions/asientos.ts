@@ -11,6 +11,7 @@ import {
   contabilizarAsiento,
   crearAsientoManual,
   moverAsientoDePeriodoEnTx,
+  withNumeracionRetry,
 } from "@/lib/services/asiento-automatico";
 import { AsientoOrigen, Moneda } from "@/generated/prisma/client";
 
@@ -290,8 +291,8 @@ export async function moverAsientosDePeriodoAction(
   const resultados: MoverAsientoResultItem[] = [];
   for (const asientoId of asientoIds) {
     try {
-      const r = await db.$transaction((tx) =>
-        moverAsientoDePeriodoEnTx(tx, asientoId, periodoDestinoId),
+      const r = await withNumeracionRetry(() =>
+        db.$transaction((tx) => moverAsientoDePeriodoEnTx(tx, asientoId, periodoDestinoId)),
       );
       resultados.push({
         asientoId,

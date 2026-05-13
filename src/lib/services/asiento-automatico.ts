@@ -85,7 +85,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withNumeracionRetry<T>(run: () => Promise<T>): Promise<T> {
+export async function withNumeracionRetry<T>(run: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < MAX_NUMERACION_RETRIES; attempt++) {
     try {

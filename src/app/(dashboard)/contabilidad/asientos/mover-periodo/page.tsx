@@ -138,6 +138,7 @@ export default async function MoverPeriodoPage({
         </Card>
       ) : (
         <MoverPeriodoForm
+          key={`${periodoOrigenId}|${estadoFilter ?? ""}|${qFilter}`}
           asientos={rows}
           periodos={periodoOptions}
           periodoOrigenId={periodoOrigenId}
