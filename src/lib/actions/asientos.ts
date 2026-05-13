@@ -8,12 +8,13 @@ import { db } from "@/lib/db";
 import {
   AsientoError,
   anularAsiento,
+  cambiarFechaAsientoEnTx,
   contabilizarAsiento,
   crearAsientoManual,
   moverAsientoDePeriodoEnTx,
   withNumeracionRetry,
 } from "@/lib/services/asiento-automatico";
-import { AsientoOrigen, Moneda } from "@/generated/prisma/client";
+import { AsientoOrigen, Moneda, Prisma } from "@/generated/prisma/client";
 
 const inputSchema = z.object({
   fecha: z.coerce.date(),
@@ -310,11 +311,218 @@ export async function moverAsientosDePeriodoAction(
     }
   }
 
+  revalidatePathsMoverPeriodo();
+
+  return { ok: true, resultados };
+}
+
+function revalidatePathsMoverPeriodo() {
   revalidatePath("/contabilidad/asientos");
   revalidatePath("/contabilidad/asientos/mover-periodo");
   revalidatePath("/contabilidad/periodos");
   revalidatePath("/reportes/libro-diario");
   revalidatePath("/reportes/libro-mayor");
+  revalidatePath("/dashboard");
+}
 
+const cambiarFechaInputSchema = z.object({
+  asientoIds: z.array(z.string().uuid()).min(1).max(500),
+  nuevaFecha: z.coerce.date(),
+});
+
+export type CambiarFechaInput = z.input<typeof cambiarFechaInputSchema>;
+
+export type CambiarFechaResultItem = {
+  asientoId: string;
+  ok: boolean;
+  fechaNueva?: string;
+  periodoNuevoId?: number;
+  numeroNuevo?: number;
+  error?: string;
+};
+
+export type CambiarFechaResult =
+  | { ok: true; resultados: CambiarFechaResultItem[] }
+  | { ok: false; error: string };
+
+export async function cambiarFechaAsientosAction(
+  raw: CambiarFechaInput,
+): Promise<CambiarFechaResult> {
+  const session = await auth();
+  if (!session) {
+    return { ok: false, error: "No autorizado." };
+  }
+
+  const parsed = cambiarFechaInputSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, error: "Datos inválidos." };
+  }
+
+  const { asientoIds, nuevaFecha } = parsed.data;
+
+  const resultados: CambiarFechaResultItem[] = [];
+  for (const asientoId of asientoIds) {
+    try {
+      const r = await withNumeracionRetry(() =>
+        db.$transaction((tx) => cambiarFechaAsientoEnTx(tx, asientoId, nuevaFecha)),
+      );
+      resultados.push({
+        asientoId,
+        ok: true,
+        fechaNueva: r.fechaNueva.toISOString(),
+        periodoNuevoId: r.periodoNuevoId,
+        numeroNuevo: r.numeroNuevo,
+      });
+    } catch (err) {
+      if (err instanceof AsientoError) {
+        resultados.push({ asientoId, ok: false, error: mapAsientoErrorMessage(err) });
+      } else {
+        console.error("cambiarFechaAsientosAction failed", err);
+        resultados.push({
+          asientoId,
+          ok: false,
+          error: "Error inesperado al cambiar la fecha.",
+        });
+      }
+    }
+  }
+
+  revalidatePathsMoverPeriodo();
+  return { ok: true, resultados };
+}
+
+const autoCorrigirInputSchema = z.object({
+  asientoIds: z.array(z.string().uuid()).min(1).max(500),
+});
+
+export type AutoCorrigirFechaInput = z.input<typeof autoCorrigirInputSchema>;
+
+export type AutoCorrigirFechaResultItem = {
+  asientoId: string;
+  ok: boolean;
+  fuente?: string;
+  fechaAnterior?: string;
+  fechaNueva?: string;
+  skipped?: boolean;
+  skipReason?: string;
+  error?: string;
+};
+
+export type AutoCorrigirFechaResult =
+  | { ok: true; resultados: AutoCorrigirFechaResultItem[] }
+  | { ok: false; error: string };
+
+const FUENTE_SELECT = {
+  id: true,
+  fecha: true,
+  movimiento: { select: { fecha: true } },
+  compra: { select: { fecha: true } },
+  venta: { select: { fecha: true } },
+  gasto: { select: { fecha: true } },
+  embarqueCosto: { select: { fechaFactura: true } },
+  despacho: { select: { fecha: true } },
+  entregaVenta: { select: { fecha: true } },
+  gastoFijoRegistro: { select: { fecha: true } },
+  chequeRecibidoCobro: { select: { fechaPago: true } },
+} satisfies Prisma.AsientoSelect;
+
+type AsientoConFuente = Prisma.AsientoGetPayload<{ select: typeof FUENTE_SELECT }>;
+
+function resolverFuenteFecha(a: AsientoConFuente): { fuente: string; fecha: Date } | null {
+  if (a.movimiento) return { fuente: "movimiento", fecha: a.movimiento.fecha };
+  if (a.compra) return { fuente: "compra", fecha: a.compra.fecha };
+  if (a.venta) return { fuente: "venta", fecha: a.venta.fecha };
+  if (a.gasto) return { fuente: "gasto", fecha: a.gasto.fecha };
+  if (a.embarqueCosto?.fechaFactura)
+    return { fuente: "embarqueCosto", fecha: a.embarqueCosto.fechaFactura };
+  if (a.despacho) return { fuente: "despacho", fecha: a.despacho.fecha };
+  if (a.entregaVenta) return { fuente: "entregaVenta", fecha: a.entregaVenta.fecha };
+  if (a.gastoFijoRegistro) return { fuente: "gastoFijoRegistro", fecha: a.gastoFijoRegistro.fecha };
+  if (a.chequeRecibidoCobro)
+    return { fuente: "chequeRecibidoCobro", fecha: a.chequeRecibidoCobro.fechaPago };
+  return null;
+}
+
+function sameDay(a: Date, b: Date): boolean {
+  return (
+    a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate()
+  );
+}
+
+export async function autoCorrigirFechaAsientosAction(
+  raw: AutoCorrigirFechaInput,
+): Promise<AutoCorrigirFechaResult> {
+  const session = await auth();
+  if (!session) {
+    return { ok: false, error: "No autorizado." };
+  }
+
+  const parsed = autoCorrigirInputSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, error: "Datos inválidos." };
+  }
+
+  const { asientoIds } = parsed.data;
+
+  const resultados: AutoCorrigirFechaResultItem[] = [];
+  for (const asientoId of asientoIds) {
+    try {
+      const asiento = await db.asiento.findUnique({
+        where: { id: asientoId },
+        select: FUENTE_SELECT,
+      });
+      if (!asiento) {
+        resultados.push({ asientoId, ok: false, error: "Asiento inexistente." });
+        continue;
+      }
+      const fuente = resolverFuenteFecha(asiento);
+      if (!fuente) {
+        resultados.push({
+          asientoId,
+          ok: true,
+          skipped: true,
+          skipReason: "Sin fuente para autocorrección (origen MANUAL/AJUSTE o préstamo/embarque).",
+        });
+        continue;
+      }
+      if (sameDay(asiento.fecha, fuente.fecha)) {
+        resultados.push({
+          asientoId,
+          ok: true,
+          skipped: true,
+          skipReason: "Fecha ya coincide con la fuente.",
+          fuente: fuente.fuente,
+          fechaAnterior: asiento.fecha.toISOString(),
+          fechaNueva: fuente.fecha.toISOString(),
+        });
+        continue;
+      }
+      const r = await withNumeracionRetry(() =>
+        db.$transaction((tx) => cambiarFechaAsientoEnTx(tx, asientoId, fuente.fecha)),
+      );
+      resultados.push({
+        asientoId,
+        ok: true,
+        fuente: fuente.fuente,
+        fechaAnterior: r.fechaAnterior.toISOString(),
+        fechaNueva: r.fechaNueva.toISOString(),
+      });
+    } catch (err) {
+      if (err instanceof AsientoError) {
+        resultados.push({ asientoId, ok: false, error: mapAsientoErrorMessage(err) });
+      } else {
+        console.error("autoCorrigirFechaAsientosAction failed", err);
+        resultados.push({
+          asientoId,
+          ok: false,
+          error: "Error inesperado al autocorregir la fecha.",
+        });
+      }
+    }
+  }
+
+  revalidatePathsMoverPeriodo();
   return { ok: true, resultados };
 }
