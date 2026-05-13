@@ -14,6 +14,9 @@ import {
   crearAsientoTransferencia,
   type LineaInput,
 } from "@/lib/services/asiento-automatico";
+import { TIPOS_PROVEEDOR_EXTERIOR } from "@/lib/services/cuentas-a-pagar";
+import { TRANSFERENCIA_CODIGOS } from "@/lib/services/cuenta-registry";
+import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { validarSaldoSuficientePrestamo } from "@/lib/services/prestamo";
 import {
   AsientoOrigen,
@@ -62,6 +65,21 @@ export async function listarCuentasBancariasParaMovimiento(): Promise<CuentaBanc
   }));
 }
 
+// IDs de cuentas contables vinculadas a proveedores MERCADERIA_EXTERIOR /
+// SERVICIOS_EXTERIOR. Sirve a la UI del form de pago para mostrar el input
+// "TC original" + preview de diferencia cambiaria cuando se selecciona una
+// de estas cuentas como contrapartida.
+export async function listarCuentasProveedoresExterior(): Promise<number[]> {
+  const proveedores = await db.proveedor.findMany({
+    where: {
+      tipoProveedor: { in: TIPOS_PROVEEDOR_EXTERIOR },
+      cuentaContableId: { not: null },
+    },
+    select: { cuentaContableId: true },
+  });
+  return proveedores.map((p) => p.cuentaContableId).filter((id): id is number => id !== null);
+}
+
 export async function listarCuentasContablesParaContrapartida(): Promise<
   CuentaContableContrapartidaOption[]
 > {
@@ -98,6 +116,15 @@ const lineaContrapartidaSchema = z.object({
     .string()
     .trim()
     .max(255)
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
+  // TC original al que se posteó la deuda (factura USD original). Opcional.
+  // Cuando presente + tipo=PAGO + cuenta es de proveedor exterior, el asiento
+  // se posta en ARS con DEBE proveedor = monto * tcOriginal y se inyecta
+  // línea adicional de diferencia cambiaria contra el TC del pago.
+  tcOriginal: z
+    .string()
+    .regex(FX_RE, "TC original inválido")
     .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
 });
@@ -283,6 +310,54 @@ export async function crearMovimientoTesoreriaAction(
 
   const primaryCuentaId = lineas[0]!.cuentaContableId;
 
+  // ============================================================
+  // FX-AWARE: detectar líneas a proveedor exterior con tcOriginal
+  // ============================================================
+  // Si tipo=PAGO + moneda=USD + al menos una línea tiene tcOriginal y la
+  // cuenta es de proveedor MERCADERIA_EXTERIOR/SERVICIOS_EXTERIOR, se
+  // toma un camino especial: asiento en ARS con DEBE proveedor =
+  // monto*tcOriginal y línea adicional de diferencia cambiaria contra
+  // tcPago. Compatible con líneas no-exterior en el mismo movimiento
+  // (ej: pagar factura USD + comisión bancaria USD).
+  type LineaExterior = {
+    cuentaContableId: number;
+    montoUsd: Decimal;
+    tcOriginalNum: Decimal;
+    descripcion: string | null;
+  };
+  const lineasExterior: LineaExterior[] = [];
+  let lineasNoExterior: typeof lineas = [];
+
+  if (tipo === MovimientoTesoreriaTipo.PAGO && moneda === Moneda.USD) {
+    const proveedoresPorCuenta = await db.proveedor.findMany({
+      where: {
+        cuentaContableId: { in: cuentaIds },
+        tipoProveedor: { in: TIPOS_PROVEEDOR_EXTERIOR },
+      },
+      select: { cuentaContableId: true },
+    });
+    const cuentasExteriorSet = new Set(
+      proveedoresPorCuenta.map((p) => p.cuentaContableId).filter((id): id is number => id !== null),
+    );
+
+    for (const l of lineas) {
+      if (l.tcOriginal && cuentasExteriorSet.has(l.cuentaContableId)) {
+        lineasExterior.push({
+          cuentaContableId: l.cuentaContableId,
+          montoUsd: new Decimal(l.monto),
+          tcOriginalNum: new Decimal(l.tcOriginal),
+          descripcion: l.descripcion,
+        });
+      } else {
+        lineasNoExterior.push(l);
+      }
+    }
+  } else {
+    lineasNoExterior = [...lineas];
+  }
+
+  const usaPagoFx = lineasExterior.length > 0;
+
   try {
     const result = await db.$transaction(async (tx) => {
       const mov = await tx.movimientoTesoreria.create({
@@ -304,7 +379,100 @@ export async function crearMovimientoTesoreriaAction(
       let asientoId: string;
       let asientoNumero: number;
 
-      if (lineas.length === 1) {
+      if (usaPagoFx) {
+        // ============================================================
+        // Pago FX-aware: asiento en ARS, línea diff cambiaria.
+        // ============================================================
+        const tcPago = new Decimal(tipoCambio);
+        const asientoLineas: LineaInput[] = [];
+        let diffNeta = new Decimal(0); // (+) gain, (-) loss
+
+        for (const le of lineasExterior) {
+          const debeArs = le.montoUsd
+            .times(le.tcOriginalNum)
+            .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+          asientoLineas.push({
+            cuentaId: le.cuentaContableId,
+            debe: debeArs.toFixed(2),
+            haber: 0,
+            descripcion:
+              le.descripcion ??
+              `Pago factura USD ${le.montoUsd.toFixed(2)} @ TC ${le.tcOriginalNum.toFixed(2)}`,
+          });
+          // Diferencia (tcPago - tcOriginal) * montoUsd. Negativa = perdida.
+          const diffLinea = le.montoUsd.times(le.tcOriginalNum.minus(tcPago));
+          diffNeta = diffNeta.plus(diffLinea);
+        }
+
+        for (const lne of lineasNoExterior) {
+          const debeArs = new Decimal(lne.monto)
+            .times(tcPago)
+            .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+          asientoLineas.push({
+            cuentaId: lne.cuentaContableId,
+            debe: debeArs.toFixed(2),
+            haber: 0,
+            descripcion: lne.descripcion ?? undefined,
+          });
+        }
+
+        // Inyectar línea de diferencia cambiaria si la diff es ≠ 0
+        const diffAbs = diffNeta.abs().toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+        if (diffAbs.gt(0)) {
+          const cuentaDef = diffNeta.gt(0)
+            ? TRANSFERENCIA_CODIGOS.DIF_CAMBIO_POSITIVA
+            : TRANSFERENCIA_CODIGOS.DIF_CAMBIO_NEGATIVA;
+          const fxCuentaId = await getOrCreateCuenta(tx, cuentaDef);
+          if (diffNeta.gt(0)) {
+            // Ganancia: HABER
+            asientoLineas.push({
+              cuentaId: fxCuentaId,
+              debe: 0,
+              haber: diffAbs.toFixed(2),
+              descripcion: "Ganancia por diferencia de cambio",
+            });
+          } else {
+            // Pérdida: DEBE
+            asientoLineas.push({
+              cuentaId: fxCuentaId,
+              debe: diffAbs.toFixed(2),
+              haber: 0,
+              descripcion: "Pérdida por diferencia de cambio",
+            });
+          }
+        }
+
+        // HABER banco: total real que sale = total USD * tcPago
+        const totalArs = new Decimal(totalStr)
+          .times(tcPago)
+          .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+        asientoLineas.push({
+          cuentaId: cuentaBancaria.cuentaContableId,
+          debe: 0,
+          haber: totalArs.toFixed(2),
+        });
+
+        const asiento = await crearAsientoManual(
+          {
+            fecha,
+            descripcion:
+              descripcion ??
+              `PAGO USD ${totalStr} @ TC ${tcPago.toFixed(2)} (con diferencia cambiaria)`,
+            origen: AsientoOrigen.TESORERIA,
+            moneda: Moneda.ARS,
+            tipoCambio: "1",
+            lineas: asientoLineas,
+          },
+          tx,
+        );
+        await tx.movimientoTesoreria.update({
+          where: { id: mov.id },
+          data: { asientoId: asiento.id },
+        });
+        const contabilizado = await contabilizarAsiento(asiento.id, tx);
+        asientoId = contabilizado.id;
+        asientoNumero = contabilizado.numero;
+      } else if (lineas.length === 1) {
         // 1 contrapartida — flujo clásico con split IDCB automático.
         const asiento = await crearAsientoMovimientoTesoreria(mov.id, tx);
         const contabilizado = await contabilizarAsiento(asiento.id, tx);

@@ -49,6 +49,10 @@ const lineaSchema = z.object({
   cuentaContableId: z.number().int().positive({ message: "Seleccione la cuenta" }),
   monto: z.string().regex(DECIMAL_RE, "Monto inválido (máx. 2 decimales)"),
   descripcion: z.string().trim().max(255).optional(),
+  // TC original al que se posteó la deuda (factura USD). Opcional. Cuando se
+  // completa + cuenta es proveedor exterior + tipo=PAGO + moneda=USD, el
+  // backend genera una línea de diferencia cambiaria en el asiento.
+  tcOriginal: z.string().regex(FX_RE, "TC original inválido").optional(),
 });
 
 const formSchema = z
@@ -143,6 +147,7 @@ function getDefaultFormValues(args: {
         cuentaContableId: i.cuentaContableId,
         monto: i.monto,
         descripcion: i.descripcion,
+        tcOriginal: "",
       },
     ],
     descripcion: "",
@@ -154,6 +159,7 @@ function getDefaultFormValues(args: {
 export function MovimientoForm({
   cuentasBancarias,
   cuentasContrapartida,
+  cuentasExteriorIds,
   initial,
   contextoAmortizacion,
   modoInicial,
@@ -161,11 +167,13 @@ export function MovimientoForm({
 }: {
   cuentasBancarias: CuentaBancariaOption[];
   cuentasContrapartida: CuentaContableContrapartidaOption[];
+  cuentasExteriorIds?: number[];
   initial?: MovimientoFormInitial;
   contextoAmortizacion?: ContextoAmortizacion | null;
   modoInicial?: ModoAmortizacion;
   defaultFecha?: string;
 }) {
+  const cuentasExteriorSet = useMemo(() => new Set(cuentasExteriorIds ?? []), [cuentasExteriorIds]);
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
   const [modo, setModo] = useState<ModoAmortizacion>(modoInicial ?? "amortizacion");
@@ -191,6 +199,7 @@ export function MovimientoForm({
   const tipo = useWatch({ control, name: "tipo" });
   const moneda = useWatch({ control, name: "moneda" });
   const cuentaBancariaId = useWatch({ control, name: "cuentaBancariaId" });
+  const tipoCambioActual = useWatch({ control, name: "tipoCambio" });
   const lineas = useWatch({ control, name: "lineas" });
   const totalCalculado = useMemo(() => {
     if (!lineas) return 0;
@@ -257,6 +266,7 @@ export function MovimientoForm({
           cuentaContableId: l.cuentaContableId,
           monto: l.monto,
           descripcion: l.descripcion,
+          tcOriginal: l.tcOriginal && l.tcOriginal.length > 0 ? l.tcOriginal : undefined,
         })),
         descripcion: values.descripcion,
         comprobante: values.comprobante,
@@ -456,66 +466,85 @@ export function MovimientoForm({
                 </Button>
               </div>
               <div className="flex flex-col gap-2">
-                {lineaFields.map((field, idx) => (
-                  <div
-                    key={field.id}
-                    className="grid grid-cols-1 gap-2 rounded-md border bg-card px-3 py-2 md:grid-cols-[2fr_1fr_2fr_auto]"
-                  >
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                        Cuenta {idx + 1}
-                      </Label>
-                      <Controller
-                        control={control}
-                        name={`lineas.${idx}.cuentaContableId`}
-                        render={({ field: f }) => (
-                          <CuentaCombobox
-                            value={f.value || null}
-                            onChange={f.onChange}
-                            cuentas={contrapartidasFiltradas}
-                            placeholder="Cuenta contable"
-                          />
+                {lineaFields.map((field, idx) => {
+                  const lineaCuentaId = lineas?.[idx]?.cuentaContableId ?? 0;
+                  const esExterior =
+                    tipo === "PAGO" && moneda === "USD" && cuentasExteriorSet.has(lineaCuentaId);
+                  return (
+                    <div
+                      key={field.id}
+                      className="grid grid-cols-1 gap-2 rounded-md border bg-card px-3 py-2 md:grid-cols-[2fr_1fr_2fr_auto]"
+                    >
+                      <div className="flex flex-col gap-1">
+                        <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                          Cuenta {idx + 1}
+                        </Label>
+                        <Controller
+                          control={control}
+                          name={`lineas.${idx}.cuentaContableId`}
+                          render={({ field: f }) => (
+                            <CuentaCombobox
+                              value={f.value || null}
+                              onChange={f.onChange}
+                              cuentas={contrapartidasFiltradas}
+                              placeholder="Cuenta contable"
+                            />
+                          )}
+                        />
+                        {errors.lineas?.[idx]?.cuentaContableId && (
+                          <FieldError message={errors.lineas[idx]?.cuentaContableId?.message} />
                         )}
-                      />
-                      {errors.lineas?.[idx]?.cuentaContableId && (
-                        <FieldError message={errors.lineas[idx]?.cuentaContableId?.message} />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                          Monto
+                        </Label>
+                        <Input
+                          inputMode="decimal"
+                          className="text-right tabular-nums"
+                          aria-invalid={!!errors.lineas?.[idx]?.monto}
+                          {...register(`lineas.${idx}.monto`)}
+                        />
+                        {errors.lineas?.[idx]?.monto && (
+                          <FieldError message={errors.lineas[idx]?.monto?.message} />
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                          Descripción
+                        </Label>
+                        <Input placeholder="opcional" {...register(`lineas.${idx}.descripcion`)} />
+                      </div>
+                      <div className="flex items-end">
+                        {lineaFields.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeLinea(idx)}
+                            aria-label="Eliminar línea"
+                          >
+                            <HugeiconsIcon
+                              icon={Delete02Icon}
+                              strokeWidth={2}
+                              className="size-3.5"
+                            />
+                          </Button>
+                        )}
+                      </div>
+                      {esExterior && (
+                        <FxBlock
+                          idx={idx}
+                          register={register}
+                          errors={errors}
+                          montoStr={lineas?.[idx]?.monto ?? "0"}
+                          tcOriginalStr={lineas?.[idx]?.tcOriginal ?? ""}
+                          tcPagoStr={tipoCambioActual}
+                        />
                       )}
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                        Monto
-                      </Label>
-                      <Input
-                        inputMode="decimal"
-                        className="text-right tabular-nums"
-                        aria-invalid={!!errors.lineas?.[idx]?.monto}
-                        {...register(`lineas.${idx}.monto`)}
-                      />
-                      {errors.lineas?.[idx]?.monto && (
-                        <FieldError message={errors.lineas[idx]?.monto?.message} />
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                        Descripción
-                      </Label>
-                      <Input placeholder="opcional" {...register(`lineas.${idx}.descripcion`)} />
-                    </div>
-                    <div className="flex items-end">
-                      {lineaFields.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeLinea(idx)}
-                          aria-label="Eliminar línea"
-                        >
-                          <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} className="size-3.5" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2 text-sm">
                 <span className="text-muted-foreground">
@@ -955,5 +984,103 @@ function DatePicker({
         />
       </PopoverContent>
     </Popover>
+  );
+}
+
+function FxBlock({
+  idx,
+  register,
+  errors,
+  montoStr,
+  tcOriginalStr,
+  tcPagoStr,
+}: {
+  idx: number;
+  register: ReturnType<typeof useForm<FormValues>>["register"];
+  errors: ReturnType<typeof useForm<FormValues>>["formState"]["errors"];
+  montoStr: string;
+  tcOriginalStr: string;
+  tcPagoStr: string;
+}) {
+  const monto = Number(montoStr) || 0;
+  const tcOriginal = Number(tcOriginalStr) || 0;
+  const tcPago = Number(tcPagoStr) || 0;
+  const hasInputs = monto > 0 && tcOriginal > 0 && tcPago > 0;
+  const diffArs = hasInputs ? monto * (tcPago - tcOriginal) : 0;
+  const tipoDiff = diffArs > 0 ? "loss" : diffArs < 0 ? "gain" : null;
+  const debeArs = hasInputs ? monto * tcOriginal : 0;
+  const haberBancoArs = hasInputs ? monto * tcPago : 0;
+
+  return (
+    <div className="md:col-span-4 mt-1 flex flex-col gap-2 rounded-md border-l-2 border-amber-500/40 bg-amber-50/50 px-3 py-2">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1">
+          <Label className="text-[11px] uppercase tracking-wider text-amber-800">
+            TC original (factura)
+          </Label>
+          <Input
+            inputMode="decimal"
+            className="w-32 text-right tabular-nums"
+            placeholder="ej: 1000.00"
+            aria-invalid={!!errors.lineas?.[idx]?.tcOriginal}
+            {...register(`lineas.${idx}.tcOriginal`)}
+          />
+          {errors.lineas?.[idx]?.tcOriginal && (
+            <FieldError message={errors.lineas[idx]?.tcOriginal?.message} />
+          )}
+        </div>
+        <p className="flex-1 text-xs text-muted-foreground">
+          Proveedor del exterior: pagas USD {montoStr || "0"} hoy a TC{" "}
+          <strong>{tcPago.toFixed(2)}</strong>; la factura se posteó a TC{" "}
+          <strong>{tcOriginal > 0 ? tcOriginal.toFixed(2) : "—"}</strong>. La diferencia genera una
+          línea de gain/loss en el asiento.
+        </p>
+      </div>
+      {hasInputs && (
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="rounded bg-background/60 px-2 py-1">
+            <div className="text-[10px] uppercase text-muted-foreground">DEBE proveedor</div>
+            <div className="font-mono tabular-nums">
+              ARS{" "}
+              {debeArs.toLocaleString("es-AR", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+            </div>
+          </div>
+          <div
+            className={`rounded px-2 py-1 ${
+              tipoDiff === "loss"
+                ? "bg-rose-100/60"
+                : tipoDiff === "gain"
+                  ? "bg-emerald-100/60"
+                  : "bg-background/60"
+            }`}
+          >
+            <div className="text-[10px] uppercase text-muted-foreground">
+              Diferencia cambiaria{" "}
+              {tipoDiff === "loss" ? "(pérdida)" : tipoDiff === "gain" ? "(ganancia)" : ""}
+            </div>
+            <div className="font-mono tabular-nums">
+              {tipoDiff === "loss" ? "+" : tipoDiff === "gain" ? "-" : ""}ARS{" "}
+              {Math.abs(diffArs).toLocaleString("es-AR", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+            </div>
+          </div>
+          <div className="rounded bg-background/60 px-2 py-1">
+            <div className="text-[10px] uppercase text-muted-foreground">HABER banco</div>
+            <div className="font-mono tabular-nums">
+              ARS{" "}
+              {haberBancoArs.toLocaleString("es-AR", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
