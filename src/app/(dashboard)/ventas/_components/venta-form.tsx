@@ -340,18 +340,19 @@ export function VentaForm({
     const i = new Decimal(safe(iibb));
     const o = new Decimal(safe(otros));
     const f = new Decimal(safe(flete));
-    // Percepción IIBB jurisdiccional (preview client-side). El factor
-    // viene de obtenerPercepcionInfoCliente y refleja la alícuota
-    // efectiva del cliente (override ?? jurisdicción) — o 0 si exento /
-    // sin agente / sin provincia.
+    // IIBB jurisdiccional embutido en el precio (no se cobra adicional
+    // al cliente — Sunset lo absorbe). El factor viene de
+    // obtenerPercepcionInfoCliente y refleja la alícuota efectiva del
+    // cliente (override ?? jurisdicción) — o 0 si exento / sin agente /
+    // sin provincia. Reduce la rentabilidad pero NO suma al total.
     const percepcionFactor = new Decimal(percepcionInfo.factor || "0");
     const percepcion = subtotal.times(percepcionFactor).toDecimalPlaces(2);
-    const total = subtotal.plus(iva).plus(i).plus(percepcion).plus(o);
+    const total = subtotal.plus(iva).plus(i).plus(o);
 
-    // Rentabilidad total de la operación (con flete deducido).
-    // Bruta = subtotal - costoTotal - flete.
+    // Rentabilidad total de la operación (con flete e IIBB embutido
+    // deducidos). Bruta = subtotal - costoTotal - flete - IIBB.
     // Neta = Bruta − Provisión Ganancias 35% (sólo si bruta > 0).
-    const utilidadBruta = subtotal.minus(costoTotal).minus(f);
+    const utilidadBruta = subtotal.minus(costoTotal).minus(f).minus(percepcion);
     const provisionGanancias = utilidadBruta.gt(0)
       ? utilidadBruta.times(0.35).toDecimalPlaces(2)
       : new Decimal(0);
@@ -614,11 +615,11 @@ export function VentaForm({
           </Field>
 
           <Field
-            label="Percepción IIBB"
+            label="IIBB embutido"
             hint={
               percepcionInfo.alicuota
-                ? `${percepcionInfo.jurisdiccionNombre} · ${percepcionInfo.alicuota}% (autocalc)`
-                : "Sin percepción (cliente sin provincia / no agente / exento)"
+                ? `${percepcionInfo.jurisdiccionNombre} · ${percepcionInfo.alicuota}% — embutido en el precio (no suma al total, descuenta margen)`
+                : "Sin IIBB embutido (cliente sin provincia / exento)"
             }
           >
             <Input value={totals.percepcionIIBB.toString()} disabled inputMode="decimal" />
@@ -844,7 +845,13 @@ export function VentaForm({
             <Total label="Subtotal" value={totals.subtotal.toString()} />
             <Total label="IVA" value={totals.iva.toString()} />
             <Total label="IIBB" value={totals.iibb.toString()} />
-            <Total label="Perc. IIBB" value={totals.percepcionIIBB.toString()} />
+            {totals.percepcionIIBB.gt(0) ? (
+              <Total
+                label="IIBB embut."
+                value={`-${totals.percepcionIIBB.toString()}`}
+                tone="negative"
+              />
+            ) : null}
             <Total label="Otros" value={totals.otros.toString()} />
             {totals.flete.gt(0) ? (
               <Total label="Flete" value={`-${totals.flete.toString()}`} tone="negative" />

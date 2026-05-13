@@ -1,20 +1,33 @@
 import Link from "next/link";
 
-import { listarMatrizInventario } from "@/lib/actions/inventario";
+import {
+  listarEnProduccion,
+  listarEnTransito,
+  listarMatrizInventario,
+} from "@/lib/actions/inventario";
 import { isStockDualEnabled } from "@/lib/features";
 
-import { InventarioMatrix } from "./_components/inventario-matrix";
+import { InventarioTabs } from "./_components/inventario-tabs";
 
-type SearchParams = Promise<{ q?: string }>;
+type SearchParams = Promise<{ q?: string; tab?: string }>;
 
 export default async function InventarioPage({
   searchParams,
 }: {
   searchParams: SearchParams;
 }) {
-  const { q } = await searchParams;
-  const { productos, depositos } = await listarMatrizInventario({ search: q });
+  const { q, tab } = await searchParams;
+
+  const [{ productos, depositos }, transito, produccion] = await Promise.all([
+    listarMatrizInventario({ search: q }),
+    listarEnTransito({ search: q }),
+    listarEnProduccion({ search: q }),
+  ]);
+
   const flagSuffix = isStockDualEnabled() ? "" : " · stock dual: OFF";
+
+  const tabsValidas = new Set<string>([...depositos.map((d) => d.id), "transito", "produccion"]);
+  const initialTab = tab && tabsValidas.has(tab) ? tab : (depositos[0]?.id ?? "transito");
 
   return (
     <main className="container mx-auto space-y-6 p-6">
@@ -22,7 +35,7 @@ export default async function InventarioPage({
         <div>
           <h1 className="text-2xl font-semibold">Inventario</h1>
           <p className="text-sm text-muted-foreground">
-            Stock por depósito · {productos.length} productos · {depositos.length} depósitos
+            {productos.length} productos · {depositos.length} depósitos
             {flagSuffix}
           </p>
         </div>
@@ -42,12 +55,19 @@ export default async function InventarioPage({
           placeholder="Buscar por código o nombre…"
           className="flex-1 rounded-md border bg-background px-3 py-2"
         />
+        {tab ? <input type="hidden" name="tab" value={tab} /> : null}
         <button type="submit" className="rounded-md border px-4 py-2 hover:bg-muted">
           Buscar
         </button>
       </form>
 
-      <InventarioMatrix productos={productos} depositos={depositos} />
+      <InventarioTabs
+        productos={productos}
+        depositos={depositos}
+        enTransito={transito.filas}
+        enProduccion={produccion.filas}
+        initialTab={initialTab}
+      />
     </main>
   );
 }

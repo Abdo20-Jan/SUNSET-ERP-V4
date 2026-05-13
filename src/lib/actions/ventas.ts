@@ -435,7 +435,11 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
     : { monto: toDecimal(0), alicuotaUsada: null, jurisdiccionId: null };
   const percepcionIIBBMoney = money(percepcion.monto);
 
-  const total = sumMoney([subtotal, iva, input.iibb, percepcionIIBBMoney, input.otros]);
+  // IIBB jurisdiccional embutido en el precio (no se cobra adicional al
+  // cliente). El total que paga el cliente es subtotal + iva + iibb_manual
+  // + otros. La percepción se almacena como snapshot pero se trata como
+  // gasto absorbido por Sunset (asiento DEBE 5.5.02 / HABER 2.1.3.05).
+  const total = sumMoney([subtotal, iva, input.iibb, input.otros]);
 
   try {
     const saved = await db.$transaction(async (tx) => {

@@ -50,7 +50,7 @@ export type EmbarqueRow = {
 };
 
 export type EmbarqueListFilters = {
-  estado?: EmbarqueEstado;
+  estado?: EmbarqueEstado | EmbarqueEstado[];
   moneda?: Moneda;
   proveedorId?: string;
 };
@@ -64,7 +64,9 @@ export async function listarEmbarques(
   filtros?: EmbarqueListFilters & { page?: number; perPage?: number },
 ): Promise<EmbarquesListPage> {
   const where: Prisma.EmbarqueWhereInput = {};
-  if (filtros?.estado) where.estado = filtros.estado;
+  if (filtros?.estado) {
+    where.estado = Array.isArray(filtros.estado) ? { in: filtros.estado } : filtros.estado;
+  }
   if (filtros?.moneda) where.moneda = filtros.moneda;
   if (filtros?.proveedorId) where.proveedorId = filtros.proveedorId;
 

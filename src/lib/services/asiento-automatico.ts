@@ -1620,13 +1620,18 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
 // Ventas — asiento automático
 // ============================================================
 //
-// DEBE  cliente.cuentaContableId (or 1.1.3.01 fallback)   total × TC (en ARS)
+// DEBE  cliente.cuentaContableId (or 1.1.3.01 fallback)   totalCliente × TC (en ARS)
 // HABER 4.1.1.01 Ventas Neumáticos                       subtotal × TC
 // HABER 2.1.6.01 IVA Ventas por Pagar                    iva × TC
 // HABER 2.1.3.02 IIBB por Pagar                          iibb × TC (si > 0)
 // HABER 2.1.3.04 Otros Impuestos                         otros × TC (si > 0)
+// DEBE  5.5.02 Ingresos Brutos (gasto)                   percepcionIIBB × TC (si > 0)
+// HABER 2.1.3.05 IIBB Jurisdiccional a Depositar         percepcionIIBB × TC (si > 0)
 //
 // El cliente es la contraparte deudora; la venta genera la cuenta a cobrar.
+// IIBB jurisdiccional NO se cobra adicional al cliente (embutido en
+// el precio): totalCliente = subtotal + iva + iibb + otros (sin perc).
+// Sunset absorbe el IIBB como gasto y lo deposita a la jurisdicción.
 // Cada componente se redondea a 2dp ANTES de sumar para que DEBE = HABER exacto.
 
 export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise<Asiento> {
@@ -1676,7 +1681,10 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
     const percepcionIIBB = toDecimal(venta.percepcionIIBB).times(tc).toDecimalPlaces(2);
     const otros = toDecimal(venta.otros).times(tc).toDecimalPlaces(2);
     const flete = toDecimal(venta.flete).times(tc).toDecimalPlaces(2);
-    const total = subtotal.plus(iva).plus(iibb).plus(percepcionIIBB).plus(otros);
+    // El total que paga el cliente NO incluye percepción IIBB —
+    // esa va embutida en el precio (subtotal). Sunset absorbe IIBB
+    // como gasto contra el pasivo a depositar a la jurisdicción.
+    const total = subtotal.plus(iva).plus(iibb).plus(otros);
 
     // Costo de mercadería vendida (CMV) — usa costoPromedio del producto
     // al momento de emitir la venta. En ARS porque costoPromedio se
@@ -1689,9 +1697,9 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
       .toDecimalPlaces(2);
 
     // Provisión Impuesto Ganancias sobre la utilidad bruta
-    // (subtotal_venta - costo - flete). El flete reduce la utilidad
-    // gravable porque es un gasto comercial deducible. Solo si > 0.
-    const utilidadBruta = subtotal.minus(totalCosto).minus(flete);
+    // (subtotal - costo - flete - IIBB embutido). Flete e IIBB
+    // jurisdiccional reducen la utilidad gravable (gastos deducibles).
+    const utilidadBruta = subtotal.minus(totalCosto).minus(flete).minus(percepcionIIBB);
     const provisionGanancias = utilidadBruta.gt(0)
       ? utilidadBruta.times(TASA_PROVISION_GANANCIAS).toDecimalPlaces(2)
       : toDecimal(0);
@@ -1747,12 +1755,21 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
         descripcion: `Venta ${venta.numero} — IIBB`,
       });
     }
+    // IIBB jurisdiccional embutido — Sunset absorbe el IIBB de la
+    // jurisdicción del cliente como gasto. DEBE 5.5.02 / HABER 2.1.3.05.
+    // El cliente NO paga este monto adicional (ya está en el subtotal).
     if (percepcionIIBB.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.IIBB_GASTO.codigo)!,
+        debe: money(percepcionIIBB).toString(),
+        haber: 0,
+        descripcion: `Venta ${venta.numero} — IIBB jurisdiccional embutido`,
+      });
       lineas.push({
         cuentaId: porCodigo.get(VENTA_CODIGOS.PERCEPCIONES_IIBB_A_DEPOSITAR.codigo)!,
         debe: 0,
         haber: money(percepcionIIBB).toString(),
-        descripcion: `Venta ${venta.numero} — Percepción IIBB jurisdiccional`,
+        descripcion: `Venta ${venta.numero} — IIBB jurisdiccional a depositar`,
       });
     }
     if (otros.gt(0)) {
