@@ -10,6 +10,8 @@ import {
   anularAsiento,
   contabilizarAsiento,
   crearAsientoManual,
+  moverAsientoDePeriodoEnTx,
+  withNumeracionRetry,
 } from "@/lib/services/asiento-automatico";
 import { AsientoOrigen, Moneda } from "@/generated/prisma/client";
 
@@ -237,7 +239,82 @@ function mapAsientoErrorMessage(err: AsientoError): string {
       return err.message;
     case "NUMERACION_FALHOU":
       return "No se pudo asignar número secuencial. Reintente.";
+    case "ASIENTO_ANULADO":
+      return "Un asiento anulado no se puede mover.";
+    case "PERIODO_ORIGEN_CERRADO":
+      return "El período origen está cerrado. Reabrilo antes de mover.";
+    case "PERIODO_DESTINO_CERRADO":
+      return "El período destino está cerrado. Reabrilo antes de mover.";
+    case "PERIODO_DESTINO_INEXISTENTE":
+      return "El período destino no existe.";
+    case "MISMO_PERIODO":
+      return "El asiento ya está en ese período.";
     default:
       return err.message;
   }
+}
+
+const moverInputSchema = z.object({
+  asientoIds: z.array(z.string().uuid()).min(1).max(500),
+  periodoDestinoId: z.number().int().positive(),
+});
+
+export type MoverAsientosInput = z.input<typeof moverInputSchema>;
+
+export type MoverAsientoResultItem = {
+  asientoId: string;
+  ok: boolean;
+  numeroAnterior?: number;
+  numeroNuevo?: number;
+  error?: string;
+};
+
+export type MoverAsientosResult =
+  | { ok: true; resultados: MoverAsientoResultItem[] }
+  | { ok: false; error: string };
+
+export async function moverAsientosDePeriodoAction(
+  raw: MoverAsientosInput,
+): Promise<MoverAsientosResult> {
+  const session = await auth();
+  if (!session) {
+    return { ok: false, error: "No autorizado." };
+  }
+
+  const parsed = moverInputSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, error: "Datos inválidos." };
+  }
+
+  const { asientoIds, periodoDestinoId } = parsed.data;
+
+  const resultados: MoverAsientoResultItem[] = [];
+  for (const asientoId of asientoIds) {
+    try {
+      const r = await withNumeracionRetry(() =>
+        db.$transaction((tx) => moverAsientoDePeriodoEnTx(tx, asientoId, periodoDestinoId)),
+      );
+      resultados.push({
+        asientoId,
+        ok: true,
+        numeroAnterior: r.numeroAnterior,
+        numeroNuevo: r.numeroNuevo,
+      });
+    } catch (err) {
+      if (err instanceof AsientoError) {
+        resultados.push({ asientoId, ok: false, error: mapAsientoErrorMessage(err) });
+      } else {
+        console.error("moverAsientosDePeriodoAction failed", err);
+        resultados.push({ asientoId, ok: false, error: "Error inesperado al mover el asiento." });
+      }
+    }
+  }
+
+  revalidatePath("/contabilidad/asientos");
+  revalidatePath("/contabilidad/asientos/mover-periodo");
+  revalidatePath("/contabilidad/periodos");
+  revalidatePath("/reportes/libro-diario");
+  revalidatePath("/reportes/libro-mayor");
+
+  return { ok: true, resultados };
 }

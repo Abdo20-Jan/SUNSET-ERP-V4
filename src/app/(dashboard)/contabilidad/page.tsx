@@ -5,6 +5,7 @@ import {
   Calendar03Icon,
   BookOpen01Icon,
   BalanceScaleIcon,
+  ArrowLeftRightIcon,
 } from "@hugeicons/core-free-icons";
 
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +28,12 @@ const SECTIONS = [
     title: "Asientos",
     description: "Listá, contabilizá y anulá asientos. Creación manual y auditoría.",
     icon: BookOpen01Icon,
+  },
+  {
+    href: "/contabilidad/asientos/mover-periodo",
+    title: "Mover Asientos de Período",
+    description: "Remapear asientos al período contable correcto (entradas retroactivas).",
+    icon: ArrowLeftRightIcon,
   },
   {
     href: "/contabilidad/reportes/balance",
