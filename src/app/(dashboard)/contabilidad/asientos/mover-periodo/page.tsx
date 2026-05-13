@@ -24,6 +24,140 @@ type SearchParams = Promise<{
   q?: string;
 }>;
 
+const asientoSelect = {
+  id: true,
+  numero: true,
+  fecha: true,
+  descripcion: true,
+  estado: true,
+  origen: true,
+  moneda: true,
+  totalDebe: true,
+  periodo: { select: { codigo: true } },
+  movimiento: {
+    select: {
+      tipo: true,
+      comprobante: true,
+      referenciaBanco: true,
+      descripcion: true,
+      cuentaBancaria: { select: { alias: true, banco: true } },
+    },
+  },
+  compra: {
+    select: { numero: true, proveedor: { select: { nombre: true } } },
+  },
+  venta: {
+    select: { numero: true, cliente: { select: { nombre: true } } },
+  },
+  gasto: {
+    select: {
+      numero: true,
+      facturaNumero: true,
+      proveedor: { select: { nombre: true } },
+    },
+  },
+  embarqueCierre: {
+    select: { codigo: true, proveedor: { select: { nombre: true } } },
+  },
+  embarqueZonaPrimaria: {
+    select: { codigo: true, proveedor: { select: { nombre: true } } },
+  },
+  embarqueCosto: {
+    select: {
+      embarque: { select: { codigo: true } },
+      proveedor: { select: { nombre: true } },
+    },
+  },
+  despacho: {
+    select: { codigo: true, embarque: { select: { codigo: true } } },
+  },
+  prestamo: { select: { prestamista: true } },
+  chequeRecibidoCobro: { select: { numero: true, banco: true } },
+  entregaVenta: {
+    select: { numero: true, venta: { select: { cliente: { select: { nombre: true } } } } },
+  },
+  gastoFijoRegistro: {
+    select: { gastoFijo: { select: { descripcion: true } } },
+  },
+} satisfies Prisma.AsientoSelect;
+
+type AsientoConRelaciones = Prisma.AsientoGetPayload<{ select: typeof asientoSelect }>;
+
+function buildContexto(a: AsientoConRelaciones): { etiqueta: string; lineas: string[] } {
+  if (a.movimiento) {
+    const m = a.movimiento;
+    const banco = m.cuentaBancaria.alias || m.cuentaBancaria.banco;
+    const lineas: string[] = [banco];
+    if (m.comprobante) lineas.push(`Comp ${m.comprobante}`);
+    if (m.referenciaBanco) lineas.push(`Ref ${m.referenciaBanco}`);
+    if (m.descripcion) lineas.push(m.descripcion);
+    return { etiqueta: m.tipo, lineas };
+  }
+  if (a.compra) {
+    return {
+      etiqueta: "Compra",
+      lineas: [`FAC ${a.compra.numero}`, a.compra.proveedor.nombre],
+    };
+  }
+  if (a.venta) {
+    return {
+      etiqueta: "Venta",
+      lineas: [`FAC ${a.venta.numero}`, a.venta.cliente.nombre],
+    };
+  }
+  if (a.gasto) {
+    const lineas: string[] = [`G-${a.gasto.numero}`];
+    if (a.gasto.facturaNumero) lineas.push(`Fact ${a.gasto.facturaNumero}`);
+    lineas.push(a.gasto.proveedor.nombre);
+    return { etiqueta: "Gasto", lineas };
+  }
+  if (a.embarqueZonaPrimaria) {
+    return {
+      etiqueta: "Zona Primaria",
+      lineas: [a.embarqueZonaPrimaria.codigo, a.embarqueZonaPrimaria.proveedor.nombre],
+    };
+  }
+  if (a.embarqueCierre) {
+    return {
+      etiqueta: "Embarque",
+      lineas: [a.embarqueCierre.codigo, a.embarqueCierre.proveedor.nombre],
+    };
+  }
+  if (a.embarqueCosto) {
+    return {
+      etiqueta: "Costo embarque",
+      lineas: [a.embarqueCosto.embarque.codigo, a.embarqueCosto.proveedor.nombre],
+    };
+  }
+  if (a.despacho) {
+    return {
+      etiqueta: "Despacho",
+      lineas: [a.despacho.codigo, `Embarque ${a.despacho.embarque.codigo}`],
+    };
+  }
+  if (a.prestamo) {
+    return { etiqueta: "Préstamo", lineas: [a.prestamo.prestamista] };
+  }
+  if (a.chequeRecibidoCobro) {
+    const lineas = [`Cheq ${a.chequeRecibidoCobro.numero}`];
+    if (a.chequeRecibidoCobro.banco) lineas.push(a.chequeRecibidoCobro.banco);
+    return { etiqueta: "Cheque", lineas };
+  }
+  if (a.entregaVenta) {
+    return {
+      etiqueta: "Entrega",
+      lineas: [a.entregaVenta.numero, a.entregaVenta.venta.cliente.nombre],
+    };
+  }
+  if (a.gastoFijoRegistro) {
+    return {
+      etiqueta: "Gasto fijo",
+      lineas: [a.gastoFijoRegistro.gastoFijo.descripcion],
+    };
+  }
+  return { etiqueta: "", lineas: [] };
+}
+
 export default async function MoverPeriodoPage({
   searchParams,
 }: {
@@ -76,17 +210,7 @@ export default async function MoverPeriodoPage({
     const asientos = await db.asiento.findMany({
       where,
       orderBy: [{ fecha: "asc" }, { numero: "asc" }],
-      select: {
-        id: true,
-        numero: true,
-        fecha: true,
-        descripcion: true,
-        estado: true,
-        origen: true,
-        moneda: true,
-        totalDebe: true,
-        periodo: { select: { codigo: true } },
-      },
+      select: asientoSelect,
     });
 
     rows = asientos.map((a) => ({
@@ -99,6 +223,7 @@ export default async function MoverPeriodoPage({
       moneda: a.moneda,
       totalDebe: a.totalDebe.toFixed(2),
       periodoCodigo: a.periodo.codigo,
+      contexto: buildContexto(a),
     }));
   }
 
