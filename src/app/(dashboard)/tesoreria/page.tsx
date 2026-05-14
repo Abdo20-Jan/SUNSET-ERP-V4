@@ -59,6 +59,12 @@ const SECTIONS = [
     description: "Saldos pendientes a proveedores, despachante, Aduana e impuestos",
   },
   {
+    href: "/tesoreria/cuentas-a-cobrar",
+    icon: ReceiptDollarIcon,
+    title: "Cuentas a cobrar",
+    description: "Saldos deudores de clientes por ventas, con aging de vencimiento",
+  },
+  {
     href: "/tesoreria/saldos-proveedores",
     icon: Calendar03Icon,
     title: "Saldos por proveedor",
