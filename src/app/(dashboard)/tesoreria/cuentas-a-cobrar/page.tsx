@@ -288,7 +288,7 @@ function VentaRow({ venta }: { venta: VentaPendiente }) {
         </Link>
       </TableCell>
       <TableCell className="text-xs text-muted-foreground">
-        {fecha.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}
+        {fecha.toLocaleDateString("es-AR", { timeZone: "UTC" })}
       </TableCell>
       <TableCell>
         <DateBadge fecha={fechaVenc} />
@@ -301,8 +301,7 @@ function VentaRow({ venta }: { venta: VentaPendiente }) {
         </span>
       </TableCell>
       <TableCell className="text-right font-mono tabular-nums">
-        {venta.moneda === "ARS" ? "ARS " : `${venta.moneda} `}
-        {fmtMoney(venta.monto)}
+        ARS {fmtMoney(venta.monto)}
       </TableCell>
     </TableRow>
   );

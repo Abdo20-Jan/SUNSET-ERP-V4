@@ -47,7 +47,7 @@ export async function ComprasTab({
       <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <KpiCard
           label="Importado período"
-          value={`USD ${money(r.kpis.importadoUsd)}`}
+          value={`USD ${fmtMoney(r.kpis.importadoUsd.toString())}`}
           icon={CargoShipIcon}
           accent="info"
           hint="Σ FOB embarques creados en rango"

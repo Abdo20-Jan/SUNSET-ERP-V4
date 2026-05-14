@@ -80,10 +80,14 @@ function dateWhere(rng: DateRange) {
 
 function previousRange(rng: DateRange): DateRange {
   if (!rng.desde || !rng.hasta) return rng;
-  const ms = rng.hasta.getTime() - rng.desde.getTime();
+  // Current rng.hasta es end-of-day (T23:59:59.999Z). prev.hasta debe ser
+  // end-of-day del día inmediatamente anterior a rng.desde para no perder
+  // ~24h de comparación. prev.desde mantiene el mismo span temporal.
+  const span = rng.hasta.getTime() - rng.desde.getTime();
+  const prevHasta = new Date(rng.desde.getTime() - 1);
   return {
-    desde: new Date(rng.desde.getTime() - ms - 86_400_000),
-    hasta: new Date(rng.desde.getTime() - 86_400_000),
+    desde: new Date(prevHasta.getTime() - span),
+    hasta: prevHasta,
   };
 }
 
