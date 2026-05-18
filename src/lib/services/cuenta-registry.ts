@@ -108,6 +108,16 @@ export const VENTA_CODIGOS = {
     nombre: "VALORES A COBRAR (CHEQUES DE TERCEROS)",
     categoria: CuentaCategoria.ACTIVO,
   },
+  // Excedente cuando los cheques de terceros recibidos suman MÁS que el
+  // total facturado. El sobrante queda como pasivo (saldo a favor del
+  // cliente) aplicable a facturas futuras. Antes esta diferencia se
+  // descartaba silenciosamente en asiento-automatico (cheques truncados
+  // al total); ahora se contabiliza para reflejar el efectivo recibido.
+  ANTICIPOS_CLIENTES: {
+    codigo: "2.1.7.01",
+    nombre: "ANTICIPOS DE CLIENTES",
+    categoria: CuentaCategoria.PASIVO,
+  },
   // Flete sobre ventas — gasto cuando lo pagamos nosotros (no se cobra
   // al cliente). Reduce el margen neto y la utilidad bruta sobre la que
   // se devenga la provisión Ganancias.
