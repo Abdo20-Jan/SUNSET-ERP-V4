@@ -1506,7 +1506,9 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
     const seguroOrigenArs = embarque.valorSeguroOrigen
       ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
       : toDecimal(0);
-    const facturasZP = embarque.costos.filter((f) => f.momento === "ZONA_PRIMARIA");
+    const facturasZP = embarque.costos.filter(
+      (f) => f.momento === "ZONA_PRIMARIA" && f.estado !== "ANULADA",
+    );
     let zpFacturasArs = toDecimal(0);
     for (const f of facturasZP) {
       const tc = toDecimal(f.tipoCambio);
