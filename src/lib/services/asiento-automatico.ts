@@ -1840,30 +1840,43 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
     const clienteCuentaId =
       venta.cliente.cuentaContableId ?? porCodigo.get(VENTA_CODIGOS.CLIENTE_FALLBACK.codigo)!;
 
-    // Cheques recibidos como cobro: van a 1.1.4.20 VALORES A COBRAR.
-    // El residual (total - cheques) queda como saldo del cliente.
+    // Cheques recibidos como cobro: DEBE 1.1.4.20 por el valor REAL de
+    // los cheques (no por el total facturado). Si los cheques exceden
+    // el total, el sobrante queda en 2.1.7.01 ANTICIPOS DE CLIENTES
+    // (pasivo) — saldo a favor del cliente aplicable a facturas futuras.
+    // Si los cheques cubren menos que el total, el residual queda como
+    // saldo deudor del cliente (cuenta corriente).
     const totalCheques = venta.chequesRecibidos
       .reduce((acc, c) => acc.plus(toDecimal(c.importe)), toDecimal(0))
       .toDecimalPlaces(2);
     const cuentaChequesId = porCodigo.get(VENTA_CODIGOS.VALORES_A_COBRAR.codigo)!;
-    const totalEnCheques = totalCheques.gt(total) ? total : totalCheques;
-    const totalEnCliente = total.minus(totalEnCheques);
+    const diferenciaCheques = totalCheques.minus(total);
+    const saldoCliente = diferenciaCheques.lt(0) ? diferenciaCheques.abs() : toDecimal(0);
+    const excedenteAnticipo = diferenciaCheques.gt(0) ? diferenciaCheques : toDecimal(0);
 
     const lineas: LineaInput[] = [];
-    if (totalEnCheques.gt(0)) {
+    if (totalCheques.gt(0)) {
       lineas.push({
         cuentaId: cuentaChequesId,
-        debe: money(totalEnCheques).toString(),
+        debe: money(totalCheques).toString(),
         haber: 0,
         descripcion: `Venta ${venta.numero} — cheques de terceros recibidos`,
       });
     }
-    if (totalEnCliente.gt(0)) {
+    if (saldoCliente.gt(0)) {
       lineas.push({
         cuentaId: clienteCuentaId,
-        debe: money(totalEnCliente).toString(),
+        debe: money(saldoCliente).toString(),
         haber: 0,
         descripcion: `Venta ${venta.numero} — ${venta.cliente.nombre}`,
+      });
+    }
+    if (excedenteAnticipo.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.ANTICIPOS_CLIENTES.codigo)!,
+        debe: 0,
+        haber: money(excedenteAnticipo).toString(),
+        descripcion: `Venta ${venta.numero} — anticipo (cheques exceden total facturado)`,
       });
     }
     lineas.push({

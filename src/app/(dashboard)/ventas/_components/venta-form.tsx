@@ -378,6 +378,22 @@ export function VentaForm({
     };
   }, [items, iibb, otros, flete, productos, percepcionInfo.factor]);
 
+  // Comparación cheques recibidos vs total facturado. El asiento
+  // automático debita 1.1.4.20 por la suma real de los cheques; si
+  // excede el total, el sobrante va a 2.1.7.01 ANTICIPOS DE CLIENTES.
+  // Mostramos un indicador en tiempo real para que el usuario sepa
+  // qué va a pasar antes de emitir.
+  const chequesWatched = useWatch({ control, name: "cheques" }) ?? [];
+  const chequesDiff = useMemo(() => {
+    if (chequesWatched.length === 0) return null;
+    const suma = chequesWatched.reduce(
+      (acc, c) => acc.plus(new Decimal(safe(c?.importe))),
+      new Decimal(0),
+    );
+    const diff = suma.minus(totals.total);
+    return { suma: suma.toDecimalPlaces(2), diff: diff.toDecimalPlaces(2) };
+  }, [chequesWatched, totals.total]);
+
   // Warning si IVA total no coincide con 21% del subtotal
   const ivaWarning = useMemo(() => {
     const sub = totals.subtotal;
@@ -723,6 +739,23 @@ export function VentaForm({
             </p>
           ) : (
             <div className="flex flex-col gap-2">
+              {chequesDiff &&
+                (chequesDiff.diff.abs().lte("0.01") ? (
+                  <p className="text-xs text-emerald-600">
+                    Cheques = total venta ({fmtMoney(chequesDiff.suma.toString())}) ✓
+                  </p>
+                ) : chequesDiff.diff.gt(0) ? (
+                  <p className="text-xs text-amber-600">
+                    Cheques suman {fmtMoney(chequesDiff.suma.toString())} — exceden el total en{" "}
+                    {fmtMoney(chequesDiff.diff.toString())}. El sobrante quedará como{" "}
+                    <strong>anticipo del cliente</strong> (2.1.7.01).
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Cheques suman {fmtMoney(chequesDiff.suma.toString())} — cliente debe{" "}
+                    {fmtMoney(chequesDiff.diff.abs().toString())} (saldo en cuenta corriente).
+                  </p>
+                ))}
               {chequeFields.map((f, idx) => (
                 <div
                   key={f.id}
