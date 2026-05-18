@@ -5,6 +5,7 @@ import { saldoPendientePorItemVenta } from "@/lib/actions/entregas";
 import { db } from "@/lib/db";
 import { isStockDualEnabled } from "@/lib/features";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
+import { TipoDeposito } from "@/generated/prisma/client";
 
 import { NuevaEntregaForm } from "./_components/nueva-entrega-form";
 
@@ -54,7 +55,9 @@ export default async function NuevaEntregaPage({
   const [pendientes, depositos, defaultFecha] = await Promise.all([
     saldoPendientePorItemVenta(id),
     db.deposito.findMany({
-      where: { activo: true },
+      // Excluye ZPA — mercadería en custodia aduanera, no disponible
+      // para entregar al cliente hasta nacionalizarse.
+      where: { activo: true, tipo: TipoDeposito.NACIONAL },
       orderBy: { nombre: "asc" },
       select: { id: true, nombre: true },
     }),

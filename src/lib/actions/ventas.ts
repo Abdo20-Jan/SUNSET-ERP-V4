@@ -14,12 +14,17 @@ import {
 } from "@/lib/services/asiento-automatico";
 import { calcularPercepcionIIBB } from "@/lib/services/percepcion-iibb";
 import { aplicarReservaSPD, liberarReservaSPD } from "@/lib/services/stock";
-import { getDepositoPorDefecto, validarDisponible } from "@/lib/services/stock-helpers";
+import {
+  getDepositoPorDefecto,
+  validarDepositoVenta,
+  validarDisponible,
+} from "@/lib/services/stock-helpers";
 import {
   ChequeRecibidoEstado,
   CondicionPago,
   Moneda,
   Prisma,
+  TipoDeposito,
   VentaEstado,
 } from "@/generated/prisma/client";
 
@@ -151,8 +156,11 @@ export async function listarProductosParaVenta(): Promise<ProductoParaVenta[]> {
 }
 
 export async function listarDepositosParaVenta(): Promise<DepositoParaVenta[]> {
+  // Excluye depósitos de tipo ZONA_PRIMARIA — la mercadería ahí está
+  // bajo custodia aduanera y no disponible para venta hasta ser
+  // despachada (transferida al depósito nacional).
   const rows = await db.deposito.findMany({
-    where: { activo: true },
+    where: { activo: true, tipo: TipoDeposito.NACIONAL },
     orderBy: { nombre: "asc" },
     select: { id: true, nombre: true },
   });
@@ -576,6 +584,9 @@ async function reservarStockEmision(
   const defaultDepId = await getDepositoPorDefecto(tx);
   for (const it of items) {
     const depId = it.depositoId ?? defaultDepId;
+    // Defensa en profundidad: el dropdown ya filtra ZPA, pero acá
+    // bloqueamos cualquier bypass (ej: API directo).
+    await validarDepositoVenta(tx, depId);
     await validarDisponible(tx, it.productoId, depId, it.cantidad);
     await aplicarReservaSPD(tx, it.productoId, depId, it.cantidad);
   }

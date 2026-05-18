@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
+import { TipoDeposito } from "@/generated/prisma/client";
 import { AsientoError } from "@/lib/services/asiento-automatico";
 
 type TxClient = Prisma.TransactionClient;
@@ -47,33 +48,58 @@ export async function ensureStockPorDeposito(
 /**
  * Resuelve el depósito por defecto para emisión de venta (cuando el
  * operador no eligió uno explícitamente). Estrategia:
- *  1. Si existe un Deposito activo con nombre exacto "NACIONAL", devolverlo.
- *  2. Caso contrario, devolver el primer Deposito activo en orden alfabético.
- *  3. Si no hay ningún Deposito activo, throw `AsientoError` DOMINIO_INVALIDO.
+ *  1. Primer Deposito activo de tipo NACIONAL en orden alfabético.
+ *  2. Fallback histórico: nombre exacto "NACIONAL" activo (instalaciones
+ *     pre-Fase A donde el campo `tipo` todavía no fue marcado vía
+ *     prisma/backfill-tipo-deposito.ts).
+ *  3. Si no hay nada disponible, throw AsientoError DOMINIO_INVALIDO.
  *
- * Nota: instalaciones pre-W3 pueden tener depósitos con nomenclatura
- * propia (ej: "Depósito Principal — Buenos Aires"); en esos casos cae
- * en la regla 2.
+ * NUNCA devuelve depósito tipo ZONA_PRIMARIA — mercadería ahí está bajo
+ * custodia aduanera y no es vendable.
  */
 export async function getDepositoPorDefecto(tx: TxClient): Promise<string> {
-  const nacional = await tx.deposito.findFirst({
-    where: { nombre: "NACIONAL", activo: true },
-    select: { id: true },
-  });
-  if (nacional) return nacional.id;
-
-  const primero = await tx.deposito.findFirst({
-    where: { activo: true },
+  const porTipo = await tx.deposito.findFirst({
+    where: { tipo: TipoDeposito.NACIONAL, activo: true },
     orderBy: { nombre: "asc" },
     select: { id: true },
   });
-  if (!primero) {
+  if (porTipo) return porTipo.id;
+
+  // Fallback: instalación sin backfill — buscar por nombre.
+  const porNombre = await tx.deposito.findFirst({
+    where: { nombre: "NACIONAL", activo: true },
+    select: { id: true },
+  });
+  if (porNombre) return porNombre.id;
+
+  throw new AsientoError(
+    "DOMINIO_INVALIDO",
+    "No hay depósito tipo NACIONAL activo configurado en el sistema.",
+  );
+}
+
+/**
+ * Valida que el depósito no sea de tipo ZONA_PRIMARIA. Usado por
+ * operaciones de venta/entrega para impedir bypass del filtro de UI.
+ * No-op si el depósito es NACIONAL.
+ */
+export async function validarDepositoVenta(tx: TxClient, depositoId: string): Promise<void> {
+  const deposito = await tx.deposito.findUnique({
+    where: { id: depositoId },
+    select: { nombre: true, tipo: true, activo: true },
+  });
+  if (!deposito) {
+    throw new AsientoError("DOMINIO_INVALIDO", `Depósito ${depositoId} no encontrado.`);
+  }
+  if (!deposito.activo) {
+    throw new AsientoError("DOMINIO_INVALIDO", `Depósito "${deposito.nombre}" está inactivo.`);
+  }
+  if (deposito.tipo === TipoDeposito.ZONA_PRIMARIA) {
     throw new AsientoError(
       "DOMINIO_INVALIDO",
-      "No hay ningún depósito activo configurado en el sistema.",
+      `Depósito "${deposito.nombre}" es tipo Zona Primaria — mercadería bajo custodia aduanera, no disponible para venta. Espere a la nacionalización del despacho.`,
     );
   }
-  return primero.id;
 }
 
 /**
