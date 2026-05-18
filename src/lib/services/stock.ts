@@ -2,7 +2,7 @@ import "server-only";
 
 import Decimal from "decimal.js";
 
-import { MovimientoStockTipo, type Prisma } from "@/generated/prisma/client";
+import { MovimientoStockTipo, TipoDeposito, type Prisma } from "@/generated/prisma/client";
 import { money, toDecimal } from "@/lib/decimal";
 import { AsientoError } from "@/lib/services/asiento-automatico";
 
@@ -118,6 +118,76 @@ async function aplicarIngresoProducto(
       costoPromedio: money(nuevoCostoPromedio),
     },
   });
+}
+
+/**
+ * Aplica el ingreso de stock a un depósito tipo ZONA_PRIMARIA generado
+ * al confirmar la Zona Primaria del embarque. Mismo mecanismo que
+ * aplicarIngresoEmbarque, pero exige que el depósito sea de tipo
+ * ZONA_PRIMARIA — si no, falla con mensaje claro.
+ *
+ * El stock entra físicamente al depósito ZPA. Quedará luego para
+ * transferirse al depósito Nacional al contabilizar el despacho (Fase C).
+ *
+ * Los `MovimientoStock` quedan ligados al `itemEmbarqueId`, idéntico
+ * a aplicarIngresoEmbarque, permitiendo reversión limpia via
+ * revertirIngresoEmbarque al revertir la Zona Primaria.
+ */
+export async function aplicarIngresoEmbarqueZpa(
+  tx: TxClient,
+  params: {
+    depositoZpaId: string;
+    fecha: Date;
+    items: readonly IngresoItem[];
+  },
+): Promise<void> {
+  const deposito = await tx.deposito.findUnique({
+    where: { id: params.depositoZpaId },
+    select: { id: true, nombre: true, activo: true, tipo: true },
+  });
+  if (!deposito) {
+    throw new AsientoError("DOMINIO_INVALIDO", "El depósito ZPA no existe.");
+  }
+  if (!deposito.activo) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `El depósito ZPA "${deposito.nombre}" está inactivo.`,
+    );
+  }
+  if (deposito.tipo !== TipoDeposito.ZONA_PRIMARIA) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `El depósito "${deposito.nombre}" no es tipo Zona Primaria. Marcalo en /maestros/depositos o use otro depósito.`,
+    );
+  }
+
+  for (const item of params.items) {
+    await tx.itemEmbarque.update({
+      where: { id: item.itemEmbarqueId },
+      data: { costoUnitario: money(item.costoUnitario) },
+    });
+
+    await tx.movimientoStock.create({
+      data: {
+        productoId: item.productoId,
+        depositoId: params.depositoZpaId,
+        tipo: MovimientoStockTipo.INGRESO,
+        cantidad: item.cantidad,
+        costoUnitario: money(item.costoUnitario),
+        fecha: params.fecha,
+        itemEmbarqueId: item.itemEmbarqueId,
+      },
+    });
+
+    await aplicarIngresoProducto(tx, item.productoId, item.cantidad, item.costoUnitario);
+    await aplicarIngresoSPD(
+      tx,
+      item.productoId,
+      params.depositoZpaId,
+      item.cantidad,
+      item.costoUnitario,
+    );
+  }
 }
 
 type IngresoDespachoItem = {
