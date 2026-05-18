@@ -113,6 +113,32 @@ export async function anularAsientoAction(asientoId: string): Promise<AsientoSta
     return { ok: false, error: "No autorizado." };
   }
 
+  // Bloquear anulación directa de asientos que son de Zona Primaria o de
+  // Despacho — esos flujos tienen actions dedicadas (revertirZonaPrimaria /
+  // anularDespacho) que limpian atómicamente embarque.asientoZonaPrimariaId
+  // y despacho.asientoId + revierten stock. Anular vía /contabilidad/asientos
+  // dejaba huérfanos los datos operacionales (BC-1).
+  const embarqueZP = await db.embarque.findFirst({
+    where: { asientoZonaPrimariaId: asientoId },
+    select: { codigo: true },
+  });
+  if (embarqueZP) {
+    return {
+      ok: false,
+      error: `Este asiento es de Zona Primaria del embarque ${embarqueZP.codigo}. Use "Revertir zona primaria" desde el embarque para anularlo.`,
+    };
+  }
+  const despachoLinkado = await db.despacho.findFirst({
+    where: { asientoId },
+    select: { codigo: true, embarque: { select: { codigo: true } } },
+  });
+  if (despachoLinkado) {
+    return {
+      ok: false,
+      error: `Este asiento es del despacho ${despachoLinkado.codigo} (embarque ${despachoLinkado.embarque.codigo}). Use "Anular despacho" desde el embarque.`,
+    };
+  }
+
   try {
     const asiento = await anularAsiento(asientoId);
     revalidatePath("/contabilidad/asientos");
