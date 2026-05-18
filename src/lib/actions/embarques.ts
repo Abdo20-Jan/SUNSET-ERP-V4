@@ -1174,6 +1174,19 @@ export async function cerrarYContabilizarEmbarqueAction(
           `El embarque ${embarque.codigo} no tiene depósito de destino asignado.`,
         );
       }
+      // Bloquear cierre monolítico con destino ZPA: no tiene sentido
+      // cerrar (que ingresa mercadería en 1.1.5.01) hacia un depósito
+      // aduanero. Use confirmar zona primaria + despachos parciales.
+      const depositoDestino = await tx.deposito.findUnique({
+        where: { id: embarque.depositoDestinoId },
+        select: { nombre: true, tipo: true },
+      });
+      if (depositoDestino?.tipo === "ZONA_PRIMARIA") {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `El depósito destino "${depositoDestino.nombre}" es tipo Zona Primaria. Use "Confirmar zona primaria" y luego despachos parciales en lugar de cierre monolítico.`,
+        );
+      }
       if (embarque.items.length === 0) {
         throw new AsientoError(
           "DOMINIO_INVALIDO",

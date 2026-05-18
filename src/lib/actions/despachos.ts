@@ -11,8 +11,15 @@ import {
   contabilizarAsiento,
   crearAsientoDespacho,
 } from "@/lib/services/asiento-automatico";
-import { aplicarIngresoDespacho, revertirIngresoDespacho } from "@/lib/services/stock";
-import { Prisma } from "@/generated/prisma/client";
+import {
+  aplicarIngresoDespacho,
+  aplicarTransferenciaDespacho,
+  revertirIngresoDespacho,
+  revertirTransferenciaDespacho,
+} from "@/lib/services/stock";
+import { resolverDepositoZpa } from "@/lib/services/embarque-zpa";
+import { validarDisponible } from "@/lib/services/stock-helpers";
+import { Prisma, TipoDeposito } from "@/generated/prisma/client";
 
 // ============================================================
 // Types — compartidos UI ↔ action
@@ -400,7 +407,13 @@ export async function contabilizarDespachoAction(
 
       const embarque = await tx.embarque.findUnique({
         where: { id: despachoCheck.embarqueId },
-        select: { id: true, codigo: true, depositoDestinoId: true },
+        select: {
+          id: true,
+          codigo: true,
+          depositoDestinoId: true,
+          asientoZonaPrimariaId: true,
+          depositoZonaPrimariaId: true,
+        },
       });
       if (!embarque?.depositoDestinoId) {
         throw new AsientoError(
@@ -416,13 +429,14 @@ export async function contabilizarDespachoAction(
       const despachoConItems = await tx.despacho.findUnique({
         where: { id: despachoId },
         select: {
+          codigo: true,
           fecha: true,
           items: {
             select: {
               id: true,
               cantidad: true,
               costoUnitario: true,
-              itemEmbarque: { select: { productoId: true } },
+              itemEmbarque: { select: { id: true, productoId: true, costoUnitario: true } },
             },
           },
         },
@@ -431,16 +445,50 @@ export async function contabilizarDespachoAction(
         throw new AsientoError("DOMINIO_INVALIDO", "Despacho no existe.");
       }
 
-      await aplicarIngresoDespacho(tx, {
-        depositoDestinoId: embarque.depositoDestinoId,
-        fecha: despachoConItems.fecha,
-        items: despachoConItems.items.map((i) => ({
-          itemDespachoId: i.id,
-          productoId: i.itemEmbarque.productoId,
-          cantidad: i.cantidad,
-          costoUnitario: toDecimal(i.costoUnitario),
-        })),
-      });
+      if (embarque.asientoZonaPrimariaId) {
+        // Flujo modular: stock ya está en ZPA (ingresado al confirmar ZP).
+        // Transferir cantidad despachada ZPA → destino preservando el costo
+        // original del ItemEmbarque (no el promedio mezclado de la ZPA).
+        const depositoZpa = await resolverDepositoZpa(tx, {
+          codigo: embarque.codigo,
+          depositoZonaPrimariaId: embarque.depositoZonaPrimariaId,
+        });
+
+        // Defensa en profundidad: validar stock disponible en ZPA antes
+        // de transferir. Si la confirmación ZP no creó stock (embarque
+        // legacy pre-Fase B sin backfill), falla acá con mensaje claro.
+        for (const it of despachoConItems.items) {
+          await validarDisponible(tx, it.itemEmbarque.productoId, depositoZpa.id, it.cantidad);
+        }
+
+        await aplicarTransferenciaDespacho(tx, {
+          despachoId,
+          despachoCodigo: despachoConItems.codigo,
+          depositoZpaId: depositoZpa.id,
+          depositoDestinoId: embarque.depositoDestinoId,
+          fecha: despachoConItems.fecha,
+          items: despachoConItems.items.map((i) => ({
+            productoId: i.itemEmbarque.productoId,
+            cantidad: i.cantidad,
+            // Usa costoUnitario del ItemEmbarque (preservado en Fase B
+            // al confirmar ZP), no el costo del rateio actual.
+            costoUnitario: toDecimal(i.itemEmbarque.costoUnitario),
+          })),
+        });
+      } else {
+        // Flujo legacy: sin Zona Primaria previa. Stock ingresa
+        // directamente al destino (puede ser NACIONAL o cualquier otro).
+        await aplicarIngresoDespacho(tx, {
+          depositoDestinoId: embarque.depositoDestinoId,
+          fecha: despachoConItems.fecha,
+          items: despachoConItems.items.map((i) => ({
+            itemDespachoId: i.id,
+            productoId: i.itemEmbarque.productoId,
+            cantidad: i.cantidad,
+            costoUnitario: toDecimal(i.costoUnitario),
+          })),
+        });
+      }
 
       await tx.despacho.update({
         where: { id: despachoId },
@@ -476,7 +524,26 @@ export async function anularDespachoAction(despachoId: string): Promise<AnularDe
     await db.$transaction(async (tx) => {
       const d = await tx.despacho.findUnique({
         where: { id: despachoId },
-        select: { id: true, codigo: true, estado: true, asientoId: true },
+        select: {
+          id: true,
+          codigo: true,
+          estado: true,
+          asientoId: true,
+          embarque: {
+            select: {
+              id: true,
+              codigo: true,
+              depositoDestinoId: true,
+              asientoZonaPrimariaId: true,
+            },
+          },
+          items: {
+            select: {
+              cantidad: true,
+              itemEmbarque: { select: { productoId: true } },
+            },
+          },
+        },
       });
       if (!d) {
         throw new AsientoError("DOMINIO_INVALIDO", "Despacho no existe.");
@@ -486,8 +553,27 @@ export async function anularDespachoAction(despachoId: string): Promise<AnularDe
       }
 
       if (d.asientoId) {
+        const usoFlujoZpa = !!d.embarque.asientoZonaPrimariaId;
+
+        if (usoFlujoZpa && d.embarque.depositoDestinoId) {
+          // Defensa en profundidad: si la mercadería ya fue vendida/
+          // entregada desde el destino, revertir generaría stock negativo.
+          // Validamos disponibilidad en el destino antes de revertir.
+          for (const it of d.items) {
+            await validarDisponible(
+              tx,
+              it.itemEmbarque.productoId,
+              d.embarque.depositoDestinoId,
+              it.cantidad,
+            );
+          }
+          await revertirTransferenciaDespacho(tx, despachoId);
+        } else {
+          // Flujo legacy: stock ingresó directo al destino sin pasar por ZPA.
+          await revertirIngresoDespacho(tx, despachoId);
+        }
+
         await anularAsiento(d.asientoId, tx);
-        await revertirIngresoDespacho(tx, despachoId);
       }
 
       await tx.despacho.update({
