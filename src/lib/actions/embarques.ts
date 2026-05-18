@@ -22,6 +22,7 @@ import type { CuentaOption } from "@/components/cuenta-combobox";
 import {
   CuentaCategoria,
   CuentaTipo,
+  DespachoEstado,
   EmbarqueEstado,
   Incoterm,
   Moneda,
@@ -245,6 +246,7 @@ export type EmbarqueDetalle = {
     precioUnitarioFob: string;
   }>;
   costos: EmbarqueCostoDetalle[];
+  despachosActivosCount: number;
 };
 
 export async function obtenerEmbarquePorId(id: string): Promise<EmbarqueDetalle | null> {
@@ -261,6 +263,11 @@ export async function obtenerEmbarquePorId(id: string): Promise<EmbarqueDetalle 
       },
       asiento: { select: { id: true, numero: true, estado: true } },
       asientoZonaPrimaria: { select: { id: true, numero: true, estado: true } },
+      _count: {
+        select: {
+          despachos: { where: { estado: { not: DespachoEstado.ANULADO } } },
+        },
+      },
     },
   });
 
@@ -341,6 +348,7 @@ export async function obtenerEmbarquePorId(id: string): Promise<EmbarqueDetalle 
       asientoId: c.asientoId,
       asientoNumero: c.asiento?.numero ?? null,
     })),
+    despachosActivosCount: embarque._count.despachos,
   };
 }
 
@@ -962,6 +970,18 @@ export async function revertirZonaPrimariaAction(
           `El embarque ${embarque.codigo} ya tiene cierre — anule primero el asiento de cierre.`,
         );
       }
+      const despachosActivosCount = await tx.despacho.count({
+        where: {
+          embarqueId,
+          estado: { not: DespachoEstado.ANULADO },
+        },
+      });
+      if (despachosActivosCount > 0) {
+        throw new AsientoError(
+          "ESTADO_INVALIDO",
+          `El embarque ${embarque.codigo} tiene ${despachosActivosCount} despacho(s) parcial(es) activo(s) — anule los despachos primero.`,
+        );
+      }
 
       await anularAsiento(embarque.asientoZonaPrimariaId, tx);
 
@@ -1045,6 +1065,18 @@ export async function cerrarYContabilizarEmbarqueAction(
           `El embarque ${embarque.codigo} ya tiene un asiento asociado.`,
         );
       }
+      const despachosActivosCount = await tx.despacho.count({
+        where: {
+          embarqueId,
+          estado: { not: DespachoEstado.ANULADO },
+        },
+      });
+      if (despachosActivosCount > 0) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `El embarque ${embarque.codigo} tiene despachos parciales activos. Use el flujo de despachos para nacionalizar, o anule los despachos primero.`,
+        );
+      }
       if (!embarque.depositoDestinoId) {
         throw new AsientoError(
           "DOMINIO_INVALIDO",
@@ -1063,12 +1095,15 @@ export async function cerrarYContabilizarEmbarqueAction(
 
       // Para el rateio aplanamos cada línea de cada factura: el TC de la
       // factura aplica a cada línea (todas las líneas comparten moneda y TC).
-      const costosRateio = embarque.costos.flatMap((factura) =>
-        factura.lineas.map((l) => ({
-          subtotal: l.subtotal,
-          tipoCambio: factura.tipoCambio,
-        })),
-      );
+      // Excluimos facturas ANULADA: no contribuyen al costo del inventario.
+      const costosRateio = embarque.costos
+        .filter((factura) => factura.estado !== "ANULADA")
+        .flatMap((factura) =>
+          factura.lineas.map((l) => ({
+            subtotal: l.subtotal,
+            tipoCambio: factura.tipoCambio,
+          })),
+        );
       const rateio = calcularRateioEmbarque(
         {
           fobTotal: embarque.fobTotal,
