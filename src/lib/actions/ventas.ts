@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { money, precioUnitario as toPrecioUnitario, sumMoney, toDecimal } from "@/lib/decimal";
+import { money, precioUnitario as toPrecioUnitario, toDecimal } from "@/lib/decimal";
 import { isStockDualEnabled } from "@/lib/features";
 import {
   AsientoError,
@@ -62,24 +62,28 @@ export type VentasListPage = {
   total: number;
   emitidas: number;
   borradores: number;
+  canceladas: number;
 };
 
 export async function listarVentas(opts?: {
   page?: number;
   perPage?: number;
+  incluirCanceladas?: boolean;
 }): Promise<VentasListPage> {
   const page = Math.max(1, Math.floor(opts?.page ?? 1));
   const perPage = Math.max(1, Math.min(500, Math.floor(opts?.perPage ?? 50)));
   const skip = (page - 1) * perPage;
+  const where = opts?.incluirCanceladas ? {} : { estado: { not: VentaEstado.CANCELADA } };
 
   const [rows, total, byEstado] = await Promise.all([
     db.venta.findMany({
+      where,
       orderBy: { createdAt: "desc" },
       include: { cliente: { select: { id: true, nombre: true } } },
       take: perPage,
       skip,
     }),
-    db.venta.count(),
+    db.venta.count({ where }),
     db.venta.groupBy({ by: ["estado"], _count: { _all: true } }),
   ]);
 
@@ -102,6 +106,7 @@ export async function listarVentas(opts?: {
     total,
     emitidas: counts.get(VentaEstado.EMITIDA) ?? 0,
     borradores: counts.get(VentaEstado.BORRADOR) ?? 0,
+    canceladas: counts.get(VentaEstado.CANCELADA) ?? 0,
   };
 }
 
@@ -375,18 +380,24 @@ export type VentaActionResult =
   | { ok: true; id: string; numero: string }
   | { ok: false; error: string };
 
-function calcItem(item: {
-  cantidad: number;
-  precioUnitario: string;
-  ivaPorcentaje: string;
-}) {
-  const sub = toDecimal(item.precioUnitario).times(item.cantidad);
+// Devuelve los importes raw (sin redondear) además de los redondeados
+// para Decimal(18,2). Los totales de la venta deben sumarse a partir de
+// los raw y redondearse al final, sino aparece desvío de ±1 cent vs lo
+// que el form muestra en tiempo real (ej: 30 × 295519.2327 × 1.21 da
+// 20.799.975,60 sumando raw, pero 20.799.975,61 si se redondea el IVA
+// por línea antes de sumar).
+function calcItem(item: { cantidad: number; precioUnitario: string; ivaPorcentaje: string }) {
+  const subRaw = toDecimal(item.precioUnitario).times(item.cantidad);
   const ivaPct = toDecimal(item.ivaPorcentaje).dividedBy(100);
-  const iva = sub.times(ivaPct);
+  const ivaRaw = subRaw.times(ivaPct);
+  const totalRaw = subRaw.plus(ivaRaw);
   return {
-    subtotal: sub.toDecimalPlaces(2),
-    iva: iva.toDecimalPlaces(2),
-    total: sub.plus(iva).toDecimalPlaces(2),
+    subRaw,
+    ivaRaw,
+    totalRaw,
+    subtotal: subRaw.toDecimalPlaces(2),
+    iva: ivaRaw.toDecimalPlaces(2),
+    total: totalRaw.toDecimalPlaces(2),
   };
 }
 
@@ -402,8 +413,14 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
     ...it,
     ...calcItem(it),
   }));
-  const subtotal = sumMoney(itemsCalc.map((i) => i.subtotal));
-  const iva = sumMoney(itemsCalc.map((i) => i.iva));
+  // Sumamos los importes raw (sin redondear por línea) y redondeamos
+  // recién al asignar al header. Los ItemVenta sí guardan los importes
+  // redondeados — schema obliga Decimal(18,2). Puede aparecer ±0,01
+  // entre Σ ItemVenta y Venta.subtotal/iva en casos límite; es esperado.
+  const subtotalRaw = itemsCalc.reduce((acc, i) => acc.plus(i.subRaw), toDecimal(0));
+  const ivaRaw = itemsCalc.reduce((acc, i) => acc.plus(i.ivaRaw), toDecimal(0));
+  const subtotal = money(subtotalRaw);
+  const iva = money(ivaRaw);
 
   // Lookup cliente con provincia + jurisdicción para autocálculo de
   // Percepción IIBB. El monto se snapshot-ea en el momento de guardar
@@ -439,7 +456,11 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
   // cliente). El total que paga el cliente es subtotal + iva + iibb_manual
   // + otros. La percepción se almacena como snapshot pero se trata como
   // gasto absorbido por Sunset (asiento DEBE 5.5.02 / HABER 2.1.3.05).
-  const total = sumMoney([subtotal, iva, input.iibb, input.otros]);
+  // Igual que subtotal/iva, sumamos raw + iibb + otros antes de redondear
+  // para que el total coincida con el del form en tiempo real.
+  const total = money(
+    subtotalRaw.plus(ivaRaw).plus(toDecimal(input.iibb)).plus(toDecimal(input.otros)),
+  );
 
   try {
     const saved = await db.$transaction(async (tx) => {
