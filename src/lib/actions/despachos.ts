@@ -19,7 +19,7 @@ import {
 } from "@/lib/services/stock";
 import { resolverDepositoZpa } from "@/lib/services/embarque-zpa";
 import { validarDisponible } from "@/lib/services/stock-helpers";
-import { Prisma, TipoDeposito } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 
 // ============================================================
 // Types — compartidos UI ↔ action
@@ -495,6 +495,11 @@ export async function contabilizarDespachoAction(
         data: { estado: "CONTABILIZADO" },
       });
 
+      // Auto-generar VepDespacho con la suma de tributos en ARS
+      // (montos del despacho × TC del despacho). El operador lo paga
+      // luego via pagarVepDespachoAction (Tesorería).
+      await crearOActualizarVepDespacho(tx, despachoId);
+
       return { asientoNumero: contabilizado.numero };
     });
 
@@ -581,6 +586,23 @@ export async function anularDespachoAction(despachoId: string): Promise<AnularDe
         data: { estado: "ANULADO" },
       });
 
+      // Marcar VepDespacho como ANULADO (no eliminarlo — preserva trail).
+      // Si ya estaba PAGADO, no se anula automáticamente — el operador
+      // debe revertir el pago primero. Detectamos eso aquí.
+      const vep = await tx.vepDespacho.findUnique({
+        where: { despachoId },
+        select: { id: true, estado: true },
+      });
+      if (vep) {
+        if (vep.estado === "PAGADO") {
+          throw new AsientoError(
+            "ESTADO_INVALIDO",
+            "El VEP de este despacho ya fue pagado. Anule el pago en Tesorería antes de anular el despacho.",
+          );
+        }
+        await tx.vepDespacho.delete({ where: { id: vep.id } });
+      }
+
       // Liberar facturas linkadas para que puedan asignarse a un nuevo
       // despacho.
       await tx.embarqueCosto.updateMany({
@@ -643,4 +665,63 @@ export async function eliminarDespachoAction(despachoId: string): Promise<Elimin
     console.error("eliminarDespachoAction failed", err);
     return { ok: false, error: "Error inesperado al eliminar." };
   }
+}
+
+// ============================================================
+// VEP Despacho — generación al contabilizar
+// ============================================================
+
+/**
+ * Crea o actualiza el VepDespacho asociado a un despacho recién
+ * contabilizado. El monto total son los tributos aduaneros del despacho
+ * (DIE + Tasa + Arancel + IVA + IVA Adic + IIBB + Ganancias) convertidos
+ * a ARS via el TC oficializado del despacho.
+ *
+ * Idempotente: si ya existe un VEP en estado GENERADO para este despacho,
+ * actualiza el montoTotal (caso re-contabilización tras anulación). No
+ * toca VEPs PAGADO (situación anómala — el caller debe validar antes).
+ */
+async function crearOActualizarVepDespacho(
+  tx: Prisma.TransactionClient,
+  despachoId: string,
+): Promise<void> {
+  const d = await tx.despacho.findUnique({
+    where: { id: despachoId },
+    select: {
+      tipoCambio: true,
+      die: true,
+      tasaEstadistica: true,
+      arancelSim: true,
+      iva: true,
+      ivaAdicional: true,
+      iibb: true,
+      ganancias: true,
+    },
+  });
+  if (!d) return;
+
+  const tc = toDecimal(d.tipoCambio);
+  const montoTotal = toDecimal(d.die)
+    .plus(toDecimal(d.tasaEstadistica))
+    .plus(toDecimal(d.arancelSim))
+    .plus(toDecimal(d.iva))
+    .plus(toDecimal(d.ivaAdicional))
+    .plus(toDecimal(d.iibb))
+    .plus(toDecimal(d.ganancias))
+    .times(tc)
+    .toDecimalPlaces(2);
+
+  await tx.vepDespacho.upsert({
+    where: { despachoId },
+    create: {
+      despachoId,
+      montoTotal: money(montoTotal),
+      estado: "GENERADO",
+    },
+    update: {
+      // Solo actualiza si está en GENERADO; el caller ya validó que no
+      // está en PAGADO.
+      montoTotal: money(montoTotal),
+    },
+  });
 }
