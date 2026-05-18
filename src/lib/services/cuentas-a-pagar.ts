@@ -464,6 +464,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
     totalArs: ReturnType<typeof toDecimal>;
     pagadoNumero: ReturnType<typeof toDecimal>;
     pagadoEmbarque: ReturnType<typeof toDecimal>;
+    pagadoFifoSinId: ReturnType<typeof toDecimal>;
     pagadoFifo: ReturnType<typeof toDecimal>;
   };
 
@@ -480,6 +481,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       totalArs,
       pagadoNumero,
       pagadoEmbarque: toDecimal(0),
+      pagadoFifoSinId: toDecimal(0),
       pagadoFifo: toDecimal(0),
     });
     facturasPorProveedor.set(proveedorId, arr);
@@ -624,6 +626,45 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
     }
   }
 
+  // ============================================================
+  // Layer 4 — Pagos sin identificador (FIFO por cuenta del proveedor):
+  // Captura pagos efectivos en la cuenta del proveedor cuya descripción
+  // no menciona ni número de factura (Layer 1) ni código de embarque
+  // (Layer 2) — ej. "PAGO ARS 159373.40", "TP LOGISTICA - LOGISTICA",
+  // o descripción vacía. Distribuye via FIFO (factura más antigua
+  // primero) entre las pendientes del proveedor, limitado al
+  // sumaPendientes para no descontar de más.
+  //
+  // Estrictamente más robusto que Layer 3 (FIFO contra saldoContable),
+  // porque no se confunde con "deuda fantasma" antigua acumulada en la
+  // cuenta. Layer 3 se mantiene como fallback para casos en que el
+  // pago se acreditó en una cuenta distinta del proveedor (no aparece
+  // en pagosPorCuentaTokens) pero sí en el ledger contable.
+  // ============================================================
+  for (const [proveedorId, fcts] of facturasPorProveedor) {
+    const cuentaId = cuentaPorProveedor.get(proveedorId) ?? null;
+    if (cuentaId === null) continue;
+
+    const pagos = pagosPorCuentaTokens.get(cuentaId) ?? [];
+    const pagoTotalCuenta = pagos.reduce((acc, l) => acc.plus(l.debe), toDecimal(0));
+    const pagoAtribuido = fcts.reduce(
+      (acc, f) => acc.plus(f.pagadoNumero).plus(f.pagadoEmbarque),
+      toDecimal(0),
+    );
+    let pagoNoAtribuido = pagoTotalCuenta.minus(pagoAtribuido);
+    if (pagoNoAtribuido.lte(0.005)) continue;
+
+    const fctsOrdenadas = [...fcts].sort((a, b) => a.fecha.localeCompare(b.fecha));
+    for (const f of fctsOrdenadas) {
+      if (pagoNoAtribuido.lte(0.005)) break;
+      const pendienteFactura = f.totalArs.minus(f.pagadoNumero).minus(f.pagadoEmbarque);
+      if (pendienteFactura.lte(0.005)) continue;
+      const tomar = pendienteFactura.gt(pagoNoAtribuido) ? pagoNoAtribuido : pendienteFactura;
+      f.pagadoFifoSinId = f.pagadoFifoSinId.plus(tomar);
+      pagoNoAtribuido = pagoNoAtribuido.minus(tomar);
+    }
+  }
+
   const result: SaldoProveedorAging[] = [];
   for (const p of proveedores) {
     const facturasInternas = facturasPorProveedor.get(p.id) ?? [];
@@ -640,12 +681,15 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       continue;
     }
 
-    // Pendientes brutos por factura (después de Layer 1 + Layer 2)
+    // Pendientes brutos por factura (después de Layer 1 + Layer 2 + Layer 4)
     type Pendiente = { f: FacturaInterna; pendiente: ReturnType<typeof toDecimal> };
     const pendientes: Pendiente[] = facturasInternas
       .map((f) => ({
         f,
-        pendiente: f.totalArs.minus(f.pagadoNumero).minus(f.pagadoEmbarque),
+        pendiente: f.totalArs
+          .minus(f.pagadoNumero)
+          .minus(f.pagadoEmbarque)
+          .minus(f.pagadoFifoSinId),
       }))
       .filter((x) => x.pendiente.gt(0.005));
 
