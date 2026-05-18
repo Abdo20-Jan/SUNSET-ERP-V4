@@ -1305,15 +1305,18 @@ export function EmbarqueForm(props: Props) {
                   </Button>
                 </>
               )}
-            {!readonly && props.mode === "edit" && !props.initialData.asiento && (
-              <CerrarEmbarqueDialog
-                embarqueId={props.initialData.id}
-                embarqueCodigo={props.initialData.codigo}
-                previewTotalDebe={formatMoney(costoTotal.toString())}
-                disabled={isSubmitting}
-                defaultFecha={props.defaultFecha}
-              />
-            )}
+            {!readonly &&
+              props.mode === "edit" &&
+              !props.initialData.asiento &&
+              props.initialData.despachosActivosCount === 0 && (
+                <CerrarEmbarqueDialog
+                  embarqueId={props.initialData.id}
+                  embarqueCodigo={props.initialData.codigo}
+                  previewTotalDebe={formatMoney(costoTotal.toString())}
+                  disabled={isSubmitting}
+                  defaultFecha={props.defaultFecha}
+                />
+              )}
           </div>
         </div>
       </div>
