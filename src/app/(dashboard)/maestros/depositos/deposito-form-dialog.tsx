@@ -12,6 +12,7 @@ import {
   crearDepositoAction,
   type DepositoRow,
 } from "@/lib/actions/depositos";
+import { TipoDeposito } from "@/generated/prisma/client";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -38,12 +39,13 @@ const formSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio."),
   direccion: z.string().trim().optional().or(z.literal("")),
   activo: z.enum(["si", "no"]),
+  tipo: z.nativeEnum(TipoDeposito),
 });
 
 type FormValues = z.infer<typeof formSchema>;
 
 function emptyDefaults(): FormValues {
-  return { nombre: "", direccion: "", activo: "si" };
+  return { nombre: "", direccion: "", activo: "si", tipo: TipoDeposito.NACIONAL };
 }
 
 function defaultsFromRow(row: DepositoRow): FormValues {
@@ -51,6 +53,7 @@ function defaultsFromRow(row: DepositoRow): FormValues {
     nombre: row.nombre,
     direccion: row.direccion ?? "",
     activo: row.activo ? "si" : "no",
+    tipo: row.tipo,
   };
 }
 
@@ -89,6 +92,7 @@ export function DepositoFormDialog({
         nombre: values.nombre,
         direccion: values.direccion && values.direccion.length > 0 ? values.direccion : undefined,
         activo: values.activo === "si",
+        tipo: values.tipo,
       };
 
       const result =
@@ -133,6 +137,33 @@ export function DepositoFormDialog({
           <div className="flex flex-col gap-2">
             <Label htmlFor="direccion">Dirección</Label>
             <Input id="direccion" {...register("direccion")} />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label>Tipo *</Label>
+            <Controller
+              control={control}
+              name="tipo"
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={TipoDeposito.NACIONAL}>
+                      Nacional (mercadería disponible para venta)
+                    </SelectItem>
+                    <SelectItem value={TipoDeposito.ZONA_PRIMARIA}>
+                      Zona Primaria Aduanera (pendiente de despacho)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            <p className="text-xs text-muted-foreground">
+              Depósitos de tipo &quot;Zona Primaria&quot; reciben mercadería al confirmar zona
+              primaria del embarque y no aparecen como opciones de venta.
+            </p>
           </div>
 
           <div className="flex flex-col gap-2">

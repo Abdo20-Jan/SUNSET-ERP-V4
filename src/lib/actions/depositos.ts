@@ -5,13 +5,14 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { Prisma } from "@/generated/prisma/client";
+import { Prisma, TipoDeposito } from "@/generated/prisma/client";
 
 export type DepositoRow = {
   id: string;
   nombre: string;
   direccion: string | null;
   activo: boolean;
+  tipo: TipoDeposito;
 };
 
 export async function listarDepositos(): Promise<DepositoRow[]> {
@@ -22,6 +23,7 @@ export async function listarDepositos(): Promise<DepositoRow[]> {
       nombre: true,
       direccion: true,
       activo: true,
+      tipo: true,
     },
   });
   return rows;
@@ -36,6 +38,7 @@ const depositoSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio."),
   direccion: nullableStr,
   activo: z.boolean().optional().default(true),
+  tipo: z.nativeEnum(TipoDeposito).optional().default(TipoDeposito.NACIONAL),
 });
 
 export type DepositoInput = z.input<typeof depositoSchema>;

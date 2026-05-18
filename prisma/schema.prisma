@@ -194,6 +194,22 @@ enum MovimientoStockTipo {
   TRANSFERENCIA
 }
 
+// Clasificación del depósito para distinguir mercadería nacionalizada
+// (NACIONAL, disponible para venta) de mercadería en zona primaria
+// aduanera (ZONA_PRIMARIA, sin disponibilidad de venta hasta el despacho).
+enum TipoDeposito {
+  NACIONAL
+  ZONA_PRIMARIA
+}
+
+// Estado del VEP (Volante Electrónico de Pago) generado al contabilizar
+// un despacho. Agrupa los tributos aduaneros pagables a la Aduana.
+enum VepEstado {
+  GENERADO
+  PAGADO
+  VENCIDO
+}
+
 enum CondicionIva {
   RI
   MONOTRIBUTO
@@ -400,6 +416,7 @@ model MovimientoTesoreria {
   cuentaContable CuentaContable           @relation(fields: [cuentaContableId], references: [id])
   asiento        Asiento?                 @relation(fields: [asientoId], references: [id])
   lineaExtracto  LineaExtractoSugerencia?
+  vepDespacho    VepDespacho?
 
   @@index([fecha])
 }
@@ -472,17 +489,22 @@ model Embarque {
   // del asiento de Zona Primaria (NO la del clic).
   fechaZonaPrimaria      DateTime?
   depositoDestinoId      String?
+  // Depósito tipo ZONA_PRIMARIA donde ingresa el stock físico al
+  // confirmar la zona primaria. Si null, se usa el ZPA predeterminado
+  // (helper getDepositoZonaPrimariaPredeterminado).
+  depositoZonaPrimariaId String?
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 
-  proveedor           Proveedor       @relation(fields: [proveedorId], references: [id])
-  items               ItemEmbarque[]
-  costos              EmbarqueCosto[]
-  asiento             Asiento?        @relation("EmbarqueAsientoCierre", fields: [asientoId], references: [id])
-  asientoZonaPrimaria Asiento?        @relation("EmbarqueAsientoZP", fields: [asientoZonaPrimariaId], references: [id])
-  depositoDestino     Deposito?       @relation(fields: [depositoDestinoId], references: [id])
-  pedidoCompra        PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
-  despachos           Despacho[]
+  proveedor             Proveedor       @relation(fields: [proveedorId], references: [id])
+  items                 ItemEmbarque[]
+  costos                EmbarqueCosto[]
+  asiento               Asiento?        @relation("EmbarqueAsientoCierre", fields: [asientoId], references: [id])
+  asientoZonaPrimaria   Asiento?        @relation("EmbarqueAsientoZP", fields: [asientoZonaPrimariaId], references: [id])
+  depositoDestino       Deposito?       @relation("EmbarqueDepositoDestino", fields: [depositoDestinoId], references: [id])
+  depositoZonaPrimaria  Deposito?       @relation("EmbarqueDepositoZP", fields: [depositoZonaPrimariaId], references: [id])
+  pedidoCompra          PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
+  despachos             Despacho[]
 }
 
 // Factura de proveedor local (gastos de nacionalización: despachante,
@@ -617,10 +639,12 @@ model Despacho {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  embarque Embarque        @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
-  asiento  Asiento?        @relation(fields: [asientoId], references: [id])
-  items    ItemDespacho[]
-  costos   EmbarqueCosto[]
+  embarque       Embarque        @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
+  asiento        Asiento?        @relation(fields: [asientoId], references: [id])
+  items          ItemDespacho[]
+  costos         EmbarqueCosto[]
+  transferencias Transferencia[]
+  vep            VepDespacho?
 
   @@index([embarqueId])
   @@index([estado])
@@ -857,18 +881,24 @@ model Producto {
 }
 
 model Deposito {
-  id        String  @id @default(uuid())
+  id        String       @id @default(uuid())
   nombre    String
   direccion String?
-  activo    Boolean @default(true)
+  activo    Boolean      @default(true)
+  // Distingue depósitos NACIONAL (mercadería nacionalizada, disponible
+  // para venta) de ZONA_PRIMARIA (mercadería pendiente de despacho
+  // aduanero, sin disponibilidad para venta). Default NACIONAL para
+  // retro-compatibilidad — el seed/migration marca explícitamente la ZPA.
+  tipo      TipoDeposito @default(NACIONAL)
 
-  movimientos           MovimientoStock[]
-  embarques             Embarque[]
-  stockPorDeposito      StockPorDeposito[]
-  entregas              EntregaVenta[]
-  itemsVenta            ItemVenta[]
-  transferenciasOrigen  Transferencia[]    @relation("TransferenciaOrigen")
-  transferenciasDestino Transferencia[]    @relation("TransferenciaDestino")
+  movimientos              MovimientoStock[]
+  embarques                Embarque[]         @relation("EmbarqueDepositoDestino")
+  embarquesZonaPrimaria    Embarque[]         @relation("EmbarqueDepositoZP")
+  stockPorDeposito         StockPorDeposito[]
+  entregas                 EntregaVenta[]
+  itemsVenta               ItemVenta[]
+  transferenciasOrigen     Transferencia[]    @relation("TransferenciaOrigen")
+  transferenciasDestino    Transferencia[]    @relation("TransferenciaDestino")
 }
 
 // ============================================================
@@ -1110,16 +1140,45 @@ model Transferencia {
   fecha             DateTime
   estado            TransferenciaEstado @default(CONFIRMADA)
   observacion       String?
+  // FK opcional al despacho que generó la transferencia automática
+  // ZPA → Nacional al contabilizar el despacho aduanero. Permite
+  // revertir limpiamente al anular el despacho.
+  despachoId        String?
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
 
   producto         Producto          @relation(fields: [productoId], references: [id])
   origen           Deposito          @relation("TransferenciaOrigen", fields: [depositoOrigenId], references: [id])
   destino          Deposito          @relation("TransferenciaDestino", fields: [depositoDestinoId], references: [id])
+  despacho         Despacho?         @relation(fields: [despachoId], references: [id], onDelete: SetNull)
   movimientosStock MovimientoStock[]
 
   @@index([productoId])
   @@index([fecha])
+  @@index([despachoId])
+}
+
+// VEP (Volante Electrónico de Pago) generado al contabilizar un
+// despacho aduanero. Agrupa los tributos a pagar a la Aduana (DIE,
+// Tasa Estadística, Arancel SIM, IVA importación, IVA adicional,
+// IIBB importación, Ganancias) — todos convertidos a ARS con el TC
+// oficializado del despacho. Cuando se paga, se vincula a un
+// MovimientoTesoreria que ejecuta el desembolso.
+model VepDespacho {
+  id                    Int       @id @default(autoincrement())
+  despachoId            String    @unique
+  numero                String?
+  fechaPago             DateTime?
+  montoTotal            Decimal   @db.Decimal(18, 2)
+  estado                VepEstado @default(GENERADO)
+  movimientoTesoreriaId String?   @unique
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  despacho            Despacho             @relation(fields: [despachoId], references: [id], onDelete: Cascade)
+  movimientoTesoreria MovimientoTesoreria? @relation(fields: [movimientoTesoreriaId], references: [id])
+
+  @@index([estado])
 }
 
 // ============================================================
