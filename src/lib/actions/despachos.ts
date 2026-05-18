@@ -179,11 +179,19 @@ const decimalish = z.union([z.string(), z.number()]).transform((v) => {
   return Number.isFinite(n) && n >= 0 ? v.toString() : "0";
 });
 
+const decimalishPositive = z
+  .union([z.string(), z.number()])
+  .transform((v) => (typeof v === "string" ? Number(v) : v))
+  .refine((n) => Number.isFinite(n) && n > 0, {
+    message: "Debe ser un número mayor que 0.",
+  })
+  .transform((n) => n.toString());
+
 const crearDespachoSchema = z.object({
   embarqueId: z.string().min(1),
   fecha: z.union([z.string(), z.date()]),
   numeroOM: z.string().trim().optional().nullable(),
-  tipoCambio: decimalish,
+  tipoCambio: decimalishPositive,
   die: decimalish.default("0"),
   tasaEstadistica: decimalish.default("0"),
   arancelSim: decimalish.default("0"),

@@ -132,10 +132,23 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }:
     const lineas = seleccionados.map((p) => {
       const override = montosOverride[p.proveedorId];
       const monto = override !== undefined ? override : p.saldoTotal;
+      // Incluir números específicos de las facturas pendientes para que el
+      // algoritmo de cuentas-a-pagar pueda cruzar pago↔fatura via Layer 1
+      // (match por número). Sin esto, los layers de matching fallan y las
+      // facturas siguen pendientes pese al pago efectivo.
+      const numerosEspecificos = p.facturas
+        .map((f) => f.numero)
+        .filter((n) => n && !n.startsWith("Factura #"));
+      const sufijoFacts =
+        numerosEspecificos.length > 0
+          ? ` — Facts: ${numerosEspecificos.slice(0, 5).join(", ")}${
+              numerosEspecificos.length > 5 ? "…" : ""
+            }`
+          : "";
       return {
         cuentaContableId: p.cuentaContableId!,
         monto,
-        descripcion: p.proveedorNombre,
+        descripcion: `${p.proveedorNombre}${sufijoFacts}`.slice(0, 255),
       };
     });
 
