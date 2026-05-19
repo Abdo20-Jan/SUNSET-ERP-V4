@@ -893,61 +893,205 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
     }),
   );
 
-  // Pagos aplicados por (cuentaProveedorId + embarqueCodigo): suma del
-  // NETO (DEBE − HABER) de cada asiento que menciona el código del
-  // embarque en la cuenta del proveedor. Usar NETO en vez de DEBE bruto
-  // descuenta correctamente flows tipo "Pago múltiple intermediário"
-  // donde el asiento debita el total bruto y luego acredita la mayor
-  // parte como "Saldo pendiente con intermediário" en la misma cuenta —
-  // el pago real es lo que sale del banco (neto), no el bruto.
-  const pagosPorClave = new Map<string, string>();
-  await Promise.all(
-    Array.from(groups.values()).map(async (g) => {
-      if (!g.proveedorCuentaContableId) return;
-      // Asientos que tienen al menos una línea DEBE en la cuenta del
-      // proveedor con el código del embarque en la descripción
-      const lineasConCodigo = await db.lineaAsiento.findMany({
-        where: {
-          cuentaId: g.proveedorCuentaContableId,
-          debe: { gt: 0 },
-          asiento: { estado: AsientoEstado.CONTABILIZADO },
-          OR: [
-            { descripcion: { contains: g.embarqueCodigo } },
-            { asiento: { descripcion: { contains: g.embarqueCodigo } } },
-          ],
-        },
-        select: { asientoId: true },
-      });
-      const asientoIds = Array.from(new Set(lineasConCodigo.map((l) => l.asientoId)));
-      if (asientoIds.length === 0) {
-        pagosPorClave.set(`${g.proveedorCuentaContableId}::${g.embarqueCodigo}`, "0");
-        return;
-      }
-      // Para cada asiento, calcular NETO en la cuenta del proveedor
-      const todasLineas = await db.lineaAsiento.findMany({
-        where: {
-          cuentaId: g.proveedorCuentaContableId,
-          asientoId: { in: asientoIds },
-        },
-        select: { asientoId: true, debe: true, haber: true },
-      });
-      const netoPorAsiento = new Map<string, ReturnType<typeof toDecimal>>();
-      for (const l of todasLineas) {
-        const cur = netoPorAsiento.get(l.asientoId) ?? toDecimal(0);
-        netoPorAsiento.set(l.asientoId, cur.plus(toDecimal(l.debe)).minus(toDecimal(l.haber)));
-      }
-      let netoTotal = toDecimal(0);
-      for (const neto of netoPorAsiento.values()) {
-        if (neto.gt(0)) netoTotal = netoTotal.plus(neto);
-      }
-      pagosPorClave.set(
-        `${g.proveedorCuentaContableId}::${g.embarqueCodigo}`,
-        netoTotal.toFixed(2),
-      );
-    }),
-  );
+  // Construir pagosPorCuentaTokens espelhando la lógica de
+  // getSaldosPorProveedorConAging: por cuenta del proveedor, lista de
+  // asientos contabilizados con NETO (DEBE − HABER) > 0 y los tokens
+  // de descripción de las líneas DEBE. Esto habilita Layer 1 (match
+  // por número de factura) y Layer 4 (FIFO sin id) en este endpoint —
+  // antes solo detectaba pagos mencionando el código del embarque.
+  const lineasTodas =
+    cuentaIds.length > 0
+      ? await db.lineaAsiento.findMany({
+          where: {
+            cuentaId: { in: cuentaIds },
+            asiento: { estado: AsientoEstado.CONTABILIZADO },
+          },
+          select: {
+            cuentaId: true,
+            asientoId: true,
+            debe: true,
+            haber: true,
+            descripcion: true,
+          },
+        })
+      : [];
 
-  for (const g of groups.values()) {
+  function tokensDescripcion(desc: string | null): Set<string> {
+    if (!desc) return new Set();
+    return new Set(desc.split(/[\s—,;]+/).filter((t) => t.length > 0));
+  }
+
+  type AsientoCuentaInfo = {
+    neto: ReturnType<typeof toDecimal>;
+    tokens: Set<string>;
+  };
+  const porAsientoCuenta = new Map<string, AsientoCuentaInfo>();
+  for (const l of lineasTodas) {
+    const key = `${l.cuentaId}::${l.asientoId}`;
+    let info = porAsientoCuenta.get(key);
+    if (!info) {
+      info = { neto: toDecimal(0), tokens: new Set() };
+      porAsientoCuenta.set(key, info);
+    }
+    const debe = toDecimal(l.debe);
+    const haber = toDecimal(l.haber);
+    info.neto = info.neto.plus(debe).minus(haber);
+    if (debe.gt(0)) {
+      for (const t of tokensDescripcion(l.descripcion)) info.tokens.add(t);
+    }
+  }
+
+  const pagosPorCuentaTokens = new Map<
+    number,
+    Array<{ tokens: Set<string>; debe: ReturnType<typeof toDecimal> }>
+  >();
+  for (const [key, info] of porAsientoCuenta) {
+    if (info.neto.lte(0.005)) continue;
+    const cuentaId = Number(key.split("::")[0]);
+    const arr = pagosPorCuentaTokens.get(cuentaId) ?? [];
+    arr.push({ tokens: info.tokens, debe: info.neto });
+    pagosPorCuentaTokens.set(cuentaId, arr);
+  }
+
+  const TOKENS_GENERICOS = new Set(["Factura", "factura", "Pago", "pago"]);
+
+  function montoPagadoFactura(
+    numero: string,
+    cuentaId: number | null,
+  ): ReturnType<typeof toDecimal> {
+    if (cuentaId === null) return toDecimal(0);
+    const lineas = pagosPorCuentaTokens.get(cuentaId);
+    if (!lineas) return toDecimal(0);
+    const numeroTokens = numero.split(/[\s—,;]+/).filter((t) => t.length > 0);
+    if (numeroTokens.length === 0) return toDecimal(0);
+    const tokensEspecificos = numeroTokens.filter((t) => !TOKENS_GENERICOS.has(t));
+    if (tokensEspecificos.length === 0) return toDecimal(0);
+    let pagado = toDecimal(0);
+    for (const l of lineas) {
+      if (numeroTokens.every((t) => l.tokens.has(t))) pagado = pagado.plus(l.debe);
+    }
+    return pagado;
+  }
+
+  function montoPagadoEmbarque(
+    embarqueCodigo: string,
+    cuentaId: number | null,
+  ): ReturnType<typeof toDecimal> {
+    if (cuentaId === null) return toDecimal(0);
+    const lineas = pagosPorCuentaTokens.get(cuentaId);
+    if (!lineas) return toDecimal(0);
+    let pagado = toDecimal(0);
+    for (const l of lineas) {
+      if (l.tokens.has(embarqueCodigo)) pagado = pagado.plus(l.debe);
+    }
+    return pagado;
+  }
+
+  // Per proveedor: lista de todas las facturas de este endpoint (con
+  // pendiente acumulado por Layer 1 y Layer 2). Layer 4 FIFO se aplica
+  // después distribuyendo el remanente no atribuido.
+  type FacturaCalc = {
+    grupoKey: string;
+    facturaId: number;
+    numero: string;
+    fecha: string;
+    embarqueCodigo: string;
+    totalArs: ReturnType<typeof toDecimal>;
+    pagadoNumero: ReturnType<typeof toDecimal>;
+    pagadoEmbarque: ReturnType<typeof toDecimal>;
+    pagadoFifoSinId: ReturnType<typeof toDecimal>;
+  };
+  const facturasPorProveedor = new Map<string, FacturaCalc[]>();
+  const cuentaPorProveedor = new Map<string, number | null>();
+  for (const [key, g] of groups) {
+    cuentaPorProveedor.set(g.proveedorId, g.proveedorCuentaContableId);
+    const arr = facturasPorProveedor.get(g.proveedorId) ?? [];
+    for (const f of g.facturas) {
+      arr.push({
+        grupoKey: key,
+        facturaId: f.id,
+        numero: f.numero,
+        fecha: f.fecha,
+        embarqueCodigo: g.embarqueCodigo,
+        totalArs: toDecimal(f.totalArs),
+        pagadoNumero: montoPagadoFactura(f.numero, g.proveedorCuentaContableId),
+        pagadoEmbarque: toDecimal(0),
+        pagadoFifoSinId: toDecimal(0),
+      });
+    }
+    facturasPorProveedor.set(g.proveedorId, arr);
+  }
+
+  // Layer 2 — pago por código de embarque con threshold 98% del grupo
+  const COBERTURA_MINIMA = 0.98;
+  for (const [proveedorId, fcts] of facturasPorProveedor) {
+    const cuentaId = cuentaPorProveedor.get(proveedorId) ?? null;
+    if (cuentaId === null) continue;
+    const porEmbarque = new Map<string, FacturaCalc[]>();
+    for (const f of fcts) {
+      const arr = porEmbarque.get(f.embarqueCodigo) ?? [];
+      arr.push(f);
+      porEmbarque.set(f.embarqueCodigo, arr);
+    }
+    for (const [embarqueCodigo, grupo] of porEmbarque) {
+      const pagoEmbarqueTotal = montoPagadoEmbarque(embarqueCodigo, cuentaId);
+      const pagoYaAtribuido = grupo.reduce((acc, f) => acc.plus(f.pagadoNumero), toDecimal(0));
+      const pagoExtra = pagoEmbarqueTotal.minus(pagoYaAtribuido);
+      if (pagoExtra.lte(0.005)) continue;
+      const totalPendienteGrupo = grupo.reduce(
+        (acc, f) => acc.plus(f.totalArs.minus(f.pagadoNumero)),
+        toDecimal(0),
+      );
+      if (totalPendienteGrupo.lte(0.005)) continue;
+      const cobertura = pagoExtra.div(totalPendienteGrupo).toNumber();
+      if (cobertura < COBERTURA_MINIMA) continue;
+      for (const f of grupo) {
+        f.pagadoEmbarque = f.totalArs.minus(f.pagadoNumero);
+      }
+    }
+  }
+
+  // Layer 4 — pagos sin identificador (FIFO por cuenta del proveedor)
+  for (const [proveedorId, fcts] of facturasPorProveedor) {
+    const cuentaId = cuentaPorProveedor.get(proveedorId) ?? null;
+    if (cuentaId === null) continue;
+    const pagos = pagosPorCuentaTokens.get(cuentaId) ?? [];
+    const pagoTotalCuenta = pagos.reduce((acc, l) => acc.plus(l.debe), toDecimal(0));
+    const pagoAtribuido = fcts.reduce(
+      (acc, f) => acc.plus(f.pagadoNumero).plus(f.pagadoEmbarque),
+      toDecimal(0),
+    );
+    let pagoNoAtribuido = pagoTotalCuenta.minus(pagoAtribuido);
+    if (pagoNoAtribuido.lte(0.005)) continue;
+    const fctsOrdenadas = [...fcts].sort((a, b) => a.fecha.localeCompare(b.fecha));
+    for (const f of fctsOrdenadas) {
+      if (pagoNoAtribuido.lte(0.005)) break;
+      const pendienteFactura = f.totalArs.minus(f.pagadoNumero).minus(f.pagadoEmbarque);
+      if (pendienteFactura.lte(0.005)) continue;
+      const tomar = pendienteFactura.gt(pagoNoAtribuido) ? pagoNoAtribuido : pendienteFactura;
+      f.pagadoFifoSinId = f.pagadoFifoSinId.plus(tomar);
+      pagoNoAtribuido = pagoNoAtribuido.minus(tomar);
+    }
+  }
+
+  // Indexar facturas calculadas por grupo para sumar pendiente
+  const pendientePorGrupo = new Map<string, ReturnType<typeof toDecimal>>();
+  const pagadoEmbarquePorGrupo = new Map<string, ReturnType<typeof toDecimal>>();
+  for (const fcts of facturasPorProveedor.values()) {
+    for (const f of fcts) {
+      const pendF = f.totalArs
+        .minus(f.pagadoNumero)
+        .minus(f.pagadoEmbarque)
+        .minus(f.pagadoFifoSinId);
+      const curPend = pendientePorGrupo.get(f.grupoKey) ?? toDecimal(0);
+      pendientePorGrupo.set(f.grupoKey, curPend.plus(pendF.gt(0) ? pendF : toDecimal(0)));
+      const pagadoF = f.pagadoNumero.plus(f.pagadoEmbarque).plus(f.pagadoFifoSinId);
+      const curPag = pagadoEmbarquePorGrupo.get(f.grupoKey) ?? toDecimal(0);
+      pagadoEmbarquePorGrupo.set(f.grupoKey, curPag.plus(pagadoF));
+    }
+  }
+
+  for (const [key, g] of groups) {
     const totalGrupo = g.facturas.reduce((acc, f) => acc.plus(toDecimal(f.totalArs)), toDecimal(0));
     g.totalArs = totalGrupo.toFixed(2);
 
@@ -956,25 +1100,14 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
       : toDecimal(0);
     g.saldoVivoProveedorArs = saldoVivo.toFixed(2);
 
-    // Pagos ya aplicados a este embarque (NETO por asiento — DEBE − HABER
-    // de cada asiento de la cuenta del proveedor que mencione el código
-    // del embarque). El neto descuenta correctamente los flows
-    // "Pago múltiple intermediário" donde parte del DEBE se reclasifica
-    // como "Saldo pendiente con intermediário" en la misma cuenta.
-    const pagadoEmbarque = g.proveedorCuentaContableId
-      ? toDecimal(pagosPorClave.get(`${g.proveedorCuentaContableId}::${g.embarqueCodigo}`) ?? "0")
-      : toDecimal(0);
+    const pagadoTotal = pagadoEmbarquePorGrupo.get(key) ?? toDecimal(0);
+    const pendienteEmbarque = pendientePorGrupo.get(key) ?? totalGrupo;
 
-    // Threshold de cobertura: si el pago neto cubre ≥98% del total del
-    // grupo, considerar pagado y omitir — consistente con el threshold de
-    // Layer 2 en getSaldosPorProveedorConAging. Evita mostrar grupos con
-    // residuo de saldo intermediário que el usuario considera ya pago.
-    // (Subido de 80% a 98% en 2026-05-06 para que facturas con saldo
-    // intermediário ~20% reaparezcan como pendientes.)
-    if (totalGrupo.gt(0) && pagadoEmbarque.div(totalGrupo).toNumber() >= 0.98) continue;
+    // Threshold de cobertura: si el pago (Layer 1 + 2 + 4) cubre ≥98% del
+    // total del grupo, considerar pagado y omitir.
+    if (totalGrupo.gt(0) && pagadoTotal.div(totalGrupo).toNumber() >= COBERTURA_MINIMA) continue;
 
-    const pendienteEmbarque = totalGrupo.minus(pagadoEmbarque);
-    if (pendienteEmbarque.lte(0.005)) continue;
+    if (pendienteEmbarque.lte(0.5)) continue;
 
     // También respetar el saldo vivo global: si <=0, todo está pagado.
     if (saldoVivo.lte(0)) continue;
