@@ -12,7 +12,6 @@ import {
   crearDepositoAction,
   type DepositoRow,
 } from "@/lib/actions/depositos";
-import { TipoDeposito } from "@/generated/prisma/client";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -39,13 +38,13 @@ const formSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio."),
   direccion: z.string().trim().optional().or(z.literal("")),
   activo: z.enum(["si", "no"]),
-  tipo: z.nativeEnum(TipoDeposito),
+  tipo: z.enum(["NACIONAL", "ZONA_PRIMARIA"]),
 });
 
 type FormValues = z.infer<typeof formSchema>;
 
 function emptyDefaults(): FormValues {
-  return { nombre: "", direccion: "", activo: "si", tipo: TipoDeposito.NACIONAL };
+  return { nombre: "", direccion: "", activo: "si", tipo: "NACIONAL" };
 }
 
 function defaultsFromRow(row: DepositoRow): FormValues {
@@ -150,10 +149,10 @@ export function DepositoFormDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={TipoDeposito.NACIONAL}>
+                    <SelectItem value="NACIONAL">
                       Nacional (mercadería disponible para venta)
                     </SelectItem>
-                    <SelectItem value={TipoDeposito.ZONA_PRIMARIA}>
+                    <SelectItem value="ZONA_PRIMARIA">
                       Zona Primaria Aduanera (pendiente de despacho)
                     </SelectItem>
                   </SelectContent>

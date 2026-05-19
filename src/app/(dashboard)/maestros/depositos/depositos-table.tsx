@@ -14,7 +14,6 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import { eliminarDepositoAction, type DepositoRow } from "@/lib/actions/depositos";
-import { TipoDeposito } from "@/generated/prisma/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -68,8 +67,8 @@ export function DepositosTable({ depositos }: { depositos: DepositoRow[] }) {
       id: "tipo",
       header: "Tipo",
       cell: ({ row }) => (
-        <Badge variant={row.original.tipo === TipoDeposito.ZONA_PRIMARIA ? "secondary" : "outline"}>
-          {row.original.tipo === TipoDeposito.ZONA_PRIMARIA ? "Zona Primaria" : "Nacional"}
+        <Badge variant={row.original.tipo === "ZONA_PRIMARIA" ? "secondary" : "outline"}>
+          {row.original.tipo === "ZONA_PRIMARIA" ? "Zona Primaria" : "Nacional"}
         </Badge>
       ),
     },
