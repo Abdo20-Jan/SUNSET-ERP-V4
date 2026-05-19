@@ -29,7 +29,7 @@ import "dotenv/config";
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { recalcularReservasPorProducto } from "../src/lib/services/stock";
+import { recalcularReservasPorProducto } from "../src/lib/services/stock-recalc";
 
 type Violacion = {
   invariante: string;
