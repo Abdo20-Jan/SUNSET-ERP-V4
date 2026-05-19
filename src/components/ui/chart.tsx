@@ -77,6 +77,13 @@ function ChartContainer({
   );
 }
 
+// Whitelist de caracteres seguros para interpolación en CSS generado.
+// El id viene de React.useId (formato ":R\d+:") y config viene del dev,
+// pero validamos defensivamente para neutralizar cualquier path donde
+// un valor del config llegue desde input untrusted.
+const SAFE_CHART_ID = /^[a-zA-Z0-9:_-]+$/;
+const SAFE_CSS_VALUE = /^[a-zA-Z0-9.,#%()\s_-]+$/;
+
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   const colorConfig = Object.entries(config).filter(([, config]) => config.theme ?? config.color);
 
@@ -84,26 +91,27 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null;
   }
 
-  return (
-    <style
-      dangerouslySetInnerHTML={{
-        __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ?? itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
-  })
-  .join("\n")}
-}
-`,
-          )
-          .join("\n"),
-      }}
-    />
-  );
+  // Sanitización: si el id contiene caracteres no esperados, no renderiza.
+  if (!SAFE_CHART_ID.test(id)) {
+    return null;
+  }
+
+  const css = Object.entries(THEMES)
+    .map(([theme, prefix]) => {
+      const lines = colorConfig
+        .map(([key, itemConfig]) => {
+          const color =
+            itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ?? itemConfig.color;
+          if (!color || !SAFE_CHART_ID.test(key) || !SAFE_CSS_VALUE.test(color)) return null;
+          return `  --color-${key}: ${color};`;
+        })
+        .filter((l): l is string => l !== null)
+        .join("\n");
+      return `${prefix} [data-chart=${id}] {\n${lines}\n}`;
+    })
+    .join("\n");
+
+  return <style dangerouslySetInnerHTML={{ __html: css }} />;
 };
 
 const ChartTooltip = RechartsPrimitive.Tooltip;
