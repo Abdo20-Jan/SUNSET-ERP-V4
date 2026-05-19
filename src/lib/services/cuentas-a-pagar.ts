@@ -294,6 +294,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
             asiento: { estado: AsientoEstado.CONTABILIZADO },
           },
           select: {
+            id: true,
             cuentaId: true,
             asientoId: true,
             debe: true,
@@ -302,6 +303,48 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
           },
         })
       : [];
+
+  // ============================================================
+  // Layer 0 — Aplicaciones de pago con FK estructural (PR hardening 2026-05-19)
+  // ============================================================
+  // Cuando un pago vincula explícitamente una linea DEBE a una factura
+  // (via AplicacionPagoEmbarqueCosto/Compra/Gasto), Layer 0 es la fuente
+  // de verdad — no depende de tokens en descripción.
+  //
+  // Para evitar double-counting con Layer 1/2/4 (que parsean descripciones),
+  // las líneas DEBE referenciadas por una AplicacionPago* se EXCLUYEN del
+  // construcción de `pagosPorCuentaTokens`. Layer 1/2/4 ven solamente las
+  // líneas DEBE sin FK — token matching opera sobre pagos legacy.
+  const lineaIdsConAplicacion = new Set<number>();
+  const [aplPagoEmbCosto, aplPagoCompra, aplPagoGasto] = await Promise.all([
+    db.aplicacionPagoEmbarqueCosto.findMany({
+      select: { lineaAsientoId: true, embarqueCostoId: true, montoArs: true },
+    }),
+    db.aplicacionPagoCompra.findMany({
+      select: { lineaAsientoId: true, compraId: true, montoArs: true },
+    }),
+    db.aplicacionPagoGasto.findMany({
+      select: { lineaAsientoId: true, gastoId: true, montoArs: true },
+    }),
+  ]);
+  const pagadoFkPorEmbCosto = new Map<number, ReturnType<typeof toDecimal>>();
+  const pagadoFkPorCompra = new Map<string, ReturnType<typeof toDecimal>>();
+  const pagadoFkPorGasto = new Map<string, ReturnType<typeof toDecimal>>();
+  for (const a of aplPagoEmbCosto) {
+    lineaIdsConAplicacion.add(a.lineaAsientoId);
+    const prev = pagadoFkPorEmbCosto.get(a.embarqueCostoId) ?? toDecimal(0);
+    pagadoFkPorEmbCosto.set(a.embarqueCostoId, prev.plus(toDecimal(a.montoArs)));
+  }
+  for (const a of aplPagoCompra) {
+    lineaIdsConAplicacion.add(a.lineaAsientoId);
+    const prev = pagadoFkPorCompra.get(a.compraId) ?? toDecimal(0);
+    pagadoFkPorCompra.set(a.compraId, prev.plus(toDecimal(a.montoArs)));
+  }
+  for (const a of aplPagoGasto) {
+    lineaIdsConAplicacion.add(a.lineaAsientoId);
+    const prev = pagadoFkPorGasto.get(a.gastoId) ?? toDecimal(0);
+    pagadoFkPorGasto.set(a.gastoId, prev.plus(toDecimal(a.montoArs)));
+  }
 
   function tokensDescripcion(desc: string | null): Set<string> {
     if (!desc) return new Set();
@@ -315,6 +358,9 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
   };
   const porAsientoCuenta = new Map<string, AsientoCuentaInfo>();
   for (const l of lineasTodas) {
+    // Layer 0 ya cubrió esta línea — saltar para evitar double-count
+    // con Layer 1/2/4 token-based.
+    if (lineaIdsConAplicacion.has(l.id)) continue;
     const key = `${l.cuentaId}::${l.asientoId}`;
     let info = porAsientoCuenta.get(key);
     if (!info) {
@@ -462,6 +508,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
   // match de número de factura.
   type FacturaInterna = FacturaPendiente & {
     totalArs: ReturnType<typeof toDecimal>;
+    pagadoFk: ReturnType<typeof toDecimal>; // Layer 0 — AplicacionPago*
     pagadoNumero: ReturnType<typeof toDecimal>;
     pagadoEmbarque: ReturnType<typeof toDecimal>;
     pagadoFifoSinId: ReturnType<typeof toDecimal>;
@@ -472,6 +519,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
     factura: FacturaPendiente,
     totalArs: ReturnType<typeof toDecimal>,
     proveedorId: string,
+    pagadoFk: ReturnType<typeof toDecimal>,
   ) {
     const cuentaId = cuentaPorProveedor.get(proveedorId) ?? null;
     const pagadoNumero = montoPagadoFactura(factura.numero, cuentaId);
@@ -479,6 +527,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
     arr.push({
       ...factura,
       totalArs,
+      pagadoFk,
       pagadoNumero,
       pagadoEmbarque: toDecimal(0),
       pagadoFifoSinId: toDecimal(0),
@@ -507,6 +556,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       },
       totalArs,
       c.proveedorId,
+      pagadoFkPorCompra.get(c.id) ?? toDecimal(0),
     );
   }
 
@@ -536,6 +586,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       },
       totalArs,
       c.proveedorId,
+      pagadoFkPorEmbCosto.get(c.id) ?? toDecimal(0),
     );
   }
 
@@ -561,6 +612,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       },
       totalArs,
       g.proveedorId,
+      pagadoFkPorGasto.get(g.id) ?? toDecimal(0),
     );
   }
 
@@ -681,12 +733,13 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       continue;
     }
 
-    // Pendientes brutos por factura (después de Layer 1 + Layer 2 + Layer 4)
+    // Pendientes brutos por factura (después de Layer 0 + 1 + 2 + 4)
     type Pendiente = { f: FacturaInterna; pendiente: ReturnType<typeof toDecimal> };
     const pendientes: Pendiente[] = facturasInternas
       .map((f) => ({
         f,
         pendiente: f.totalArs
+          .minus(f.pagadoFk)
           .minus(f.pagadoNumero)
           .minus(f.pagadoEmbarque)
           .minus(f.pagadoFifoSinId),
@@ -907,6 +960,7 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
             asiento: { estado: AsientoEstado.CONTABILIZADO },
           },
           select: {
+            id: true,
             cuentaId: true,
             asientoId: true,
             debe: true,
@@ -915,6 +969,20 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
           },
         })
       : [];
+
+  // Layer 0 — AplicacionPagoEmbarqueCosto (este endpoint solo cubre
+  // facturas EmbarqueCosto). Construye pagadoFkPorEmbCosto y registra
+  // las líneas DEBE ya cubiertas para excluirlas de Layer 1/2/4.
+  const aplicaciones = await db.aplicacionPagoEmbarqueCosto.findMany({
+    select: { lineaAsientoId: true, embarqueCostoId: true, montoArs: true },
+  });
+  const pagadoFkPorEmbCosto = new Map<number, ReturnType<typeof toDecimal>>();
+  const lineaIdsConAplicacion = new Set<number>();
+  for (const a of aplicaciones) {
+    lineaIdsConAplicacion.add(a.lineaAsientoId);
+    const prev = pagadoFkPorEmbCosto.get(a.embarqueCostoId) ?? toDecimal(0);
+    pagadoFkPorEmbCosto.set(a.embarqueCostoId, prev.plus(toDecimal(a.montoArs)));
+  }
 
   function tokensDescripcion(desc: string | null): Set<string> {
     if (!desc) return new Set();
@@ -927,6 +995,7 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
   };
   const porAsientoCuenta = new Map<string, AsientoCuentaInfo>();
   for (const l of lineasTodas) {
+    if (lineaIdsConAplicacion.has(l.id)) continue; // Layer 0 ya cubrió
     const key = `${l.cuentaId}::${l.asientoId}`;
     let info = porAsientoCuenta.get(key);
     if (!info) {
@@ -997,6 +1066,7 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
     fecha: string;
     embarqueCodigo: string;
     totalArs: ReturnType<typeof toDecimal>;
+    pagadoFk: ReturnType<typeof toDecimal>; // Layer 0 — AplicacionPagoEmbarqueCosto
     pagadoNumero: ReturnType<typeof toDecimal>;
     pagadoEmbarque: ReturnType<typeof toDecimal>;
     pagadoFifoSinId: ReturnType<typeof toDecimal>;
@@ -1014,6 +1084,7 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
         fecha: f.fecha,
         embarqueCodigo: g.embarqueCodigo,
         totalArs: toDecimal(f.totalArs),
+        pagadoFk: pagadoFkPorEmbCosto.get(f.id) ?? toDecimal(0),
         pagadoNumero: montoPagadoFactura(f.numero, g.proveedorCuentaContableId),
         pagadoEmbarque: toDecimal(0),
         pagadoFifoSinId: toDecimal(0),
@@ -1035,18 +1106,21 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
     }
     for (const [embarqueCodigo, grupo] of porEmbarque) {
       const pagoEmbarqueTotal = montoPagadoEmbarque(embarqueCodigo, cuentaId);
-      const pagoYaAtribuido = grupo.reduce((acc, f) => acc.plus(f.pagadoNumero), toDecimal(0));
+      const pagoYaAtribuido = grupo.reduce(
+        (acc, f) => acc.plus(f.pagadoFk).plus(f.pagadoNumero),
+        toDecimal(0),
+      );
       const pagoExtra = pagoEmbarqueTotal.minus(pagoYaAtribuido);
       if (pagoExtra.lte(0.005)) continue;
       const totalPendienteGrupo = grupo.reduce(
-        (acc, f) => acc.plus(f.totalArs.minus(f.pagadoNumero)),
+        (acc, f) => acc.plus(f.totalArs.minus(f.pagadoFk).minus(f.pagadoNumero)),
         toDecimal(0),
       );
       if (totalPendienteGrupo.lte(0.005)) continue;
       const cobertura = pagoExtra.div(totalPendienteGrupo).toNumber();
       if (cobertura < COBERTURA_MINIMA) continue;
       for (const f of grupo) {
-        f.pagadoEmbarque = f.totalArs.minus(f.pagadoNumero);
+        f.pagadoEmbarque = f.totalArs.minus(f.pagadoFk).minus(f.pagadoNumero);
       }
     }
   }
@@ -1061,12 +1135,17 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
       (acc, f) => acc.plus(f.pagadoNumero).plus(f.pagadoEmbarque),
       toDecimal(0),
     );
+    // pagosPorCuentaTokens YA excluye líneas con AplicacionPago (Layer 0).
+    // No incluimos pagadoFk en pagoAtribuido aquí — sería double-discount.
     let pagoNoAtribuido = pagoTotalCuenta.minus(pagoAtribuido);
     if (pagoNoAtribuido.lte(0.005)) continue;
     const fctsOrdenadas = [...fcts].sort((a, b) => a.fecha.localeCompare(b.fecha));
     for (const f of fctsOrdenadas) {
       if (pagoNoAtribuido.lte(0.005)) break;
-      const pendienteFactura = f.totalArs.minus(f.pagadoNumero).minus(f.pagadoEmbarque);
+      const pendienteFactura = f.totalArs
+        .minus(f.pagadoFk)
+        .minus(f.pagadoNumero)
+        .minus(f.pagadoEmbarque);
       if (pendienteFactura.lte(0.005)) continue;
       const tomar = pendienteFactura.gt(pagoNoAtribuido) ? pagoNoAtribuido : pendienteFactura;
       f.pagadoFifoSinId = f.pagadoFifoSinId.plus(tomar);
@@ -1080,12 +1159,16 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
   for (const fcts of facturasPorProveedor.values()) {
     for (const f of fcts) {
       const pendF = f.totalArs
+        .minus(f.pagadoFk)
         .minus(f.pagadoNumero)
         .minus(f.pagadoEmbarque)
         .minus(f.pagadoFifoSinId);
       const curPend = pendientePorGrupo.get(f.grupoKey) ?? toDecimal(0);
       pendientePorGrupo.set(f.grupoKey, curPend.plus(pendF.gt(0) ? pendF : toDecimal(0)));
-      const pagadoF = f.pagadoNumero.plus(f.pagadoEmbarque).plus(f.pagadoFifoSinId);
+      const pagadoF = f.pagadoFk
+        .plus(f.pagadoNumero)
+        .plus(f.pagadoEmbarque)
+        .plus(f.pagadoFifoSinId);
       const curPag = pagadoEmbarquePorGrupo.get(f.grupoKey) ?? toDecimal(0);
       pagadoEmbarquePorGrupo.set(f.grupoKey, curPag.plus(pagadoF));
     }
