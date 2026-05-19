@@ -90,6 +90,18 @@ export type EmbarqueRateio = {
   valorSeguroOrigen?: DineroInput | null;
 };
 
+// Subset del rateio aplicable solo a Zona Primaria (sin tributos
+// aduaneros DIE/Tasa/Arancel — esos se devengan en el despacho).
+export type EmbarqueRateioZP = {
+  fobTotal: DineroInput;
+  embarqueTipoCambio: DineroInput;
+  // Costos logísticos con momento=ZONA_PRIMARIA (excluyendo facturas
+  // ANULADA). Cada uno trae subtotal en su moneda original + su TC.
+  costosZp: readonly CostoLogisticoInput[];
+  valorFleteOrigen?: DineroInput | null;
+  valorSeguroOrigen?: DineroInput | null;
+};
+
 export type ItemRateioInput = {
   cantidad: number;
   precioUnitarioFob: DineroInput;
@@ -107,6 +119,75 @@ export type ItemRateioResult<T> = T & {
 // Todo se convierte a ARS antes de ratear: FOB, flete/seguro origen y
 // tributos aduaneros usan el TC del embarque (el despacho viene en USD);
 // cada costo logístico local usa su propio TC.
+/**
+ * Rateio aplicable al ingreso de stock en Zona Primaria. Base rateable:
+ *   FOB + flete/seguro origen + Σ facturas ZP (subtotal en ARS)
+ *
+ * NO incluye tributos aduaneros (DIE, Tasa Estadística, Arancel SIM) ni
+ * gastos DESPACHO — esos se devengan al contabilizar el despacho y
+ * van a egresos/créditos fiscales, no al costo del inventario.
+ *
+ * Fallback FOB=0 (muestras): ratea por cantidad en lugar de proporción
+ * FOB. Pattern espelhado de crearAsientoDespacho.
+ *
+ * Mantiene `last-idx-absorbs-residue` para reconciliación al centavo
+ * con el saldo contable de 1.1.5.02.
+ */
+export function calcularRateioZonaPrimaria<T extends ItemRateioInput>(
+  embarque: EmbarqueRateioZP,
+  items: readonly T[],
+): Array<ItemRateioResult<T>> {
+  if (items.length === 0) return [];
+
+  const fobTotal = toDecimal(embarque.fobTotal);
+  const embarqueTC = toDecimal(embarque.embarqueTipoCambio);
+  const fobTotalArs = round2(fobTotal.times(embarqueTC));
+
+  const fleteOrigenArs = embarque.valorFleteOrigen
+    ? round2(toDecimal(embarque.valorFleteOrigen).times(embarqueTC))
+    : new Decimal(0);
+  const seguroOrigenArs = embarque.valorSeguroOrigen
+    ? round2(toDecimal(embarque.valorSeguroOrigen).times(embarqueTC))
+    : new Decimal(0);
+
+  const costosZpArs = embarque.costosZp.reduce((acc, c) => {
+    const ars = round2(toDecimal(c.subtotal).times(toDecimal(c.tipoCambio)));
+    return acc.plus(ars);
+  }, new Decimal(0));
+
+  const costoRateable = round2(
+    fobTotalArs.plus(fleteOrigenArs).plus(seguroOrigenArs).plus(costosZpArs),
+  );
+
+  const cantidadTotalItems = items.reduce((acc, it) => acc + it.cantidad, 0);
+  const usarRateioPorCantidad = !fobTotal.gt(0);
+
+  const lastIdx = items.length - 1;
+  let acumulado = new Decimal(0);
+
+  return items.map((item, idx) => {
+    const fobItem = round2(toDecimal(item.precioUnitarioFob).times(item.cantidad));
+
+    let costoTotal: Decimal;
+    if (idx === lastIdx) {
+      costoTotal = round2(costoRateable.minus(acumulado));
+    } else {
+      const proporcion = usarRateioPorCantidad
+        ? cantidadTotalItems > 0
+          ? new Decimal(item.cantidad).dividedBy(cantidadTotalItems)
+          : new Decimal(0)
+        : fobItem.dividedBy(fobTotal);
+      costoTotal = round2(costoRateable.times(proporcion));
+      acumulado = acumulado.plus(costoTotal);
+    }
+
+    const costoUnitario =
+      item.cantidad > 0 ? round2(costoTotal.dividedBy(item.cantidad)) : new Decimal(0);
+
+    return { ...item, fobItem, costoTotal, costoUnitario };
+  });
+}
+
 export function calcularRateioEmbarque<T extends ItemRateioInput>(
   embarque: EmbarqueRateio,
   items: readonly T[],

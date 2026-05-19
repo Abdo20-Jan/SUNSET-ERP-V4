@@ -2,7 +2,7 @@ import "server-only";
 
 import Decimal from "decimal.js";
 
-import { MovimientoStockTipo, type Prisma } from "@/generated/prisma/client";
+import { MovimientoStockTipo, TipoDeposito, type Prisma } from "@/generated/prisma/client";
 import { money, toDecimal } from "@/lib/decimal";
 import { AsientoError } from "@/lib/services/asiento-automatico";
 
@@ -118,6 +118,76 @@ async function aplicarIngresoProducto(
       costoPromedio: money(nuevoCostoPromedio),
     },
   });
+}
+
+/**
+ * Aplica el ingreso de stock a un depósito tipo ZONA_PRIMARIA generado
+ * al confirmar la Zona Primaria del embarque. Mismo mecanismo que
+ * aplicarIngresoEmbarque, pero exige que el depósito sea de tipo
+ * ZONA_PRIMARIA — si no, falla con mensaje claro.
+ *
+ * El stock entra físicamente al depósito ZPA. Quedará luego para
+ * transferirse al depósito Nacional al contabilizar el despacho (Fase C).
+ *
+ * Los `MovimientoStock` quedan ligados al `itemEmbarqueId`, idéntico
+ * a aplicarIngresoEmbarque, permitiendo reversión limpia via
+ * revertirIngresoEmbarque al revertir la Zona Primaria.
+ */
+export async function aplicarIngresoEmbarqueZpa(
+  tx: TxClient,
+  params: {
+    depositoZpaId: string;
+    fecha: Date;
+    items: readonly IngresoItem[];
+  },
+): Promise<void> {
+  const deposito = await tx.deposito.findUnique({
+    where: { id: params.depositoZpaId },
+    select: { id: true, nombre: true, activo: true, tipo: true },
+  });
+  if (!deposito) {
+    throw new AsientoError("DOMINIO_INVALIDO", "El depósito ZPA no existe.");
+  }
+  if (!deposito.activo) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `El depósito ZPA "${deposito.nombre}" está inactivo.`,
+    );
+  }
+  if (deposito.tipo !== TipoDeposito.ZONA_PRIMARIA) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `El depósito "${deposito.nombre}" no es tipo Zona Primaria. Marcalo en /maestros/depositos o use otro depósito.`,
+    );
+  }
+
+  for (const item of params.items) {
+    await tx.itemEmbarque.update({
+      where: { id: item.itemEmbarqueId },
+      data: { costoUnitario: money(item.costoUnitario) },
+    });
+
+    await tx.movimientoStock.create({
+      data: {
+        productoId: item.productoId,
+        depositoId: params.depositoZpaId,
+        tipo: MovimientoStockTipo.INGRESO,
+        cantidad: item.cantidad,
+        costoUnitario: money(item.costoUnitario),
+        fecha: params.fecha,
+        itemEmbarqueId: item.itemEmbarqueId,
+      },
+    });
+
+    await aplicarIngresoProducto(tx, item.productoId, item.cantidad, item.costoUnitario);
+    await aplicarIngresoSPD(
+      tx,
+      item.productoId,
+      params.depositoZpaId,
+      item.cantidad,
+      item.costoUnitario,
+    );
+  }
 }
 
 type IngresoDespachoItem = {
@@ -429,6 +499,11 @@ export async function aplicarTransferenciaSPD(
     cantidad: number;
     fecha: Date;
     transferenciaId: string;
+    // Override opcional del costo unitario. Útil para la transferencia
+    // automática de despacho ZPA→Nacional, donde queremos preservar el
+    // costo original del ItemEmbarque (no el promedio mezclado de la
+    // ZPA si hay varios embarques).
+    costoUnitarioOverride?: Decimal;
   },
 ): Promise<void> {
   const origen = await tx.stockPorDeposito.findUnique({
@@ -446,7 +521,7 @@ export async function aplicarTransferenciaSPD(
       `No hay stock del producto ${params.productoId} en el depósito origen ${params.depositoOrigenId}.`,
     );
   }
-  const costoUnitario = toDecimal(origen.costoPromedio);
+  const costoUnitario = params.costoUnitarioOverride ?? toDecimal(origen.costoPromedio);
 
   // Decrementar origen
   await tx.stockPorDeposito.update({
@@ -495,6 +570,120 @@ export async function aplicarTransferenciaSPD(
       },
     ],
   });
+}
+
+type TransferenciaDespachoItem = {
+  productoId: string;
+  cantidad: number;
+  /** Costo unitario del ItemEmbarque-pai — preservado del rateio ZPA. */
+  costoUnitario: Decimal;
+};
+
+/**
+ * Aplica las transferencias de stock generadas por contabilizar un
+ * Despacho parcial: por cada ItemDespacho, mueve la cantidad despachada
+ * desde el depósito ZPA al depósito destino del embarque (típicamente
+ * NACIONAL). Crea 1 `Transferencia` row por producto + 2 MovimientoStock
+ * (egreso ZPA + ingreso destino).
+ *
+ * Usa `costoUnitarioOverride` igual al ItemEmbarque.costoUnitario para
+ * preservar el costo FOB+ZP original del embarque-pai, evitando que la
+ * media ponderada de la ZPA (potencialmente mezclada con otros embarques)
+ * contamine el costo del stock nacionalizado.
+ *
+ * NO pasa por crearTransferenciaAction (que es feature-flagged para uso
+ * manual). Esta vía es automática y siempre activa.
+ */
+export async function aplicarTransferenciaDespacho(
+  tx: TxClient,
+  params: {
+    despachoId: string;
+    despachoCodigo: string;
+    depositoZpaId: string;
+    depositoDestinoId: string;
+    fecha: Date;
+    items: readonly TransferenciaDespachoItem[];
+  },
+): Promise<void> {
+  if (params.depositoZpaId === params.depositoDestinoId) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      "El depósito de origen y destino del despacho no pueden ser el mismo.",
+    );
+  }
+
+  for (const item of params.items) {
+    const numero = await siguienteNumeroTransferenciaDespacho(tx, params.despachoCodigo);
+    const transferencia = await tx.transferencia.create({
+      data: {
+        numero,
+        productoId: item.productoId,
+        depositoOrigenId: params.depositoZpaId,
+        depositoDestinoId: params.depositoDestinoId,
+        cantidad: item.cantidad,
+        fecha: params.fecha,
+        despachoId: params.despachoId,
+        observacion: `Despacho ${params.despachoCodigo} — transferencia automática ZPA → destino`,
+        // estado default = CONFIRMADA
+      },
+      select: { id: true },
+    });
+
+    await aplicarTransferenciaSPD(tx, {
+      productoId: item.productoId,
+      depositoOrigenId: params.depositoZpaId,
+      depositoDestinoId: params.depositoDestinoId,
+      cantidad: item.cantidad,
+      fecha: params.fecha,
+      transferenciaId: transferencia.id,
+      costoUnitarioOverride: item.costoUnitario,
+    });
+  }
+}
+
+async function siguienteNumeroTransferenciaDespacho(
+  tx: TxClient,
+  despachoCodigo: string,
+): Promise<string> {
+  // Número derivado del código del despacho + sufijo incremental para
+  // soportar múltiples productos en el mismo despacho.
+  const prefix = `${despachoCodigo}-T`;
+  const existentes = await tx.transferencia.count({
+    where: { numero: { startsWith: prefix } },
+  });
+  return `${prefix}${existentes + 1}`;
+}
+
+/**
+ * Revierte las transferencias de stock generadas por un despacho.
+ * Deleta los MovimientoStock + Transferencia ligados al despacho y
+ * recalcula SPD de los productos afectados. Usado al anular despacho
+ * que usaba flujo ZPA (Fase C).
+ */
+export async function revertirTransferenciaDespacho(
+  tx: TxClient,
+  despachoId: string,
+): Promise<void> {
+  const transferencias = await tx.transferencia.findMany({
+    where: { despachoId },
+    select: { id: true, productoId: true },
+  });
+  if (transferencias.length === 0) return;
+
+  const transferenciaIds = transferencias.map((t) => t.id);
+  const productoIds = Array.from(new Set(transferencias.map((t) => t.productoId)));
+
+  // Borrar movimientos antes de las transferencias (FK).
+  await tx.movimientoStock.deleteMany({
+    where: { transferenciaId: { in: transferenciaIds } },
+  });
+  await tx.transferencia.deleteMany({
+    where: { id: { in: transferenciaIds } },
+  });
+
+  for (const productoId of productoIds) {
+    await recalcularSPDPorProducto(tx, productoId);
+  }
 }
 
 /**

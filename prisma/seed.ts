@@ -7,6 +7,7 @@ import {
   PeriodoEstado,
   CuentaTipo,
   CuentaCategoria,
+  TipoDeposito,
 } from "../src/generated/prisma/client";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
@@ -349,11 +350,13 @@ const DEPOSITOS_DEFAULT = [
     nombre: "NACIONAL",
     direccion: "Depósito propio — mercadería nacionalizada",
     activo: true,
+    tipo: TipoDeposito.NACIONAL,
   },
   {
     nombre: "ZONA PRIMARIA ADUANEIRA",
     direccion: "Mercadería en zona primaria — pendiente de despacho",
     activo: true,
+    tipo: TipoDeposito.ZONA_PRIMARIA,
   },
 ];
 

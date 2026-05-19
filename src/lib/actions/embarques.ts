@@ -5,7 +5,8 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { money, sumMoney, toDecimal } from "@/lib/decimal";
-import { calcularRateioEmbarque } from "@/lib/services/comex";
+import { calcularRateioEmbarque, calcularRateioZonaPrimaria } from "@/lib/services/comex";
+import { resolverDepositoZpa } from "@/lib/services/embarque-zpa";
 import {
   anularAsiento,
   anularAsientoEmbarqueCosto,
@@ -15,7 +16,11 @@ import {
   crearAsientoEmbarqueCosto,
   crearAsientoZonaPrimaria,
 } from "@/lib/services/asiento-automatico";
-import { aplicarIngresoEmbarque } from "@/lib/services/stock";
+import {
+  aplicarIngresoEmbarque,
+  aplicarIngresoEmbarqueZpa,
+  revertirIngresoEmbarque,
+} from "@/lib/services/stock";
 import type { ProveedorOption } from "@/components/proveedor-combobox";
 import type { ProductoOption } from "@/components/producto-combobox";
 import type { CuentaOption } from "@/components/cuenta-combobox";
@@ -666,11 +671,21 @@ export async function guardarEmbarqueAction(
       if (input.id) {
         const actual = await tx.embarque.findUnique({
           where: { id: input.id },
-          select: { estado: true },
+          select: { estado: true, asientoId: true, asientoZonaPrimariaId: true },
         });
         if (actual?.estado === EmbarqueEstado.CERRADO) {
           throw new Error(
             "El embarque está CERRADO y no puede editarse. Anule el asiento primero.",
+          );
+        }
+        if (actual?.asientoZonaPrimariaId) {
+          throw new Error(
+            'El embarque tiene Zona Primaria confirmada y no puede editarse — sus valores y stock ya están contabilizados. Use "Revertir zona primaria" para abrirlo a edición.',
+          );
+        }
+        if (actual?.asientoId) {
+          throw new Error(
+            "El embarque tiene cierre contabilizado y no puede editarse. Anule el asiento de cierre primero.",
           );
         }
         const embarque = await tx.embarque.update({
@@ -819,6 +834,23 @@ export async function anularEmbarqueCostoFacturaAction(
   costoId: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
+    // Bloquear anulación de factura ZP de embarque con Zona Primaria
+    // ya confirmada — el costo de esta factura ya está incorporado al
+    // stock ZPA. Revertir requiere primero "Revertir zona primaria".
+    const costo = await db.embarqueCosto.findUnique({
+      where: { id: costoId },
+      select: {
+        momento: true,
+        embarque: { select: { codigo: true, asientoZonaPrimariaId: true } },
+      },
+    });
+    if (costo && costo.momento === "ZONA_PRIMARIA" && costo.embarque.asientoZonaPrimariaId) {
+      return {
+        ok: false,
+        error: `El embarque ${costo.embarque.codigo} tiene Zona Primaria confirmada — el costo de esta factura ya está incorporado al stock ZPA. Use "Revertir zona primaria" antes de anular la factura.`,
+      };
+    }
+
     await anularAsientoEmbarqueCosto(costoId);
     revalidatePath("/comex/embarques");
     revalidatePath("/tesoreria/cuentas-a-pagar");
@@ -868,6 +900,7 @@ export async function confirmarZonaPrimariaAction(
       const embarque = await tx.embarque.findUnique({
         where: { id: embarqueId },
         include: {
+          items: { orderBy: { id: "asc" } },
           costos: {
             orderBy: { id: "asc" },
             include: { lineas: { orderBy: { id: "asc" } } },
@@ -890,8 +923,17 @@ export async function confirmarZonaPrimariaAction(
           `El embarque ${embarque.codigo} ya está cerrado/despachado.`,
         );
       }
+      if (embarque.items.length === 0) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `El embarque ${embarque.codigo}: no tiene ítems para ingresar a Zona Primaria.`,
+        );
+      }
 
-      const tieneFacturasZP = embarque.costos.some((f) => f.momento === "ZONA_PRIMARIA");
+      const facturasZpActivas = embarque.costos.filter(
+        (f) => f.momento === "ZONA_PRIMARIA" && f.estado !== "ANULADA",
+      );
+      const tieneFacturasZP = facturasZpActivas.length > 0;
       const tieneFob = Number(embarque.fobTotal) > 0;
       if (!tieneFob && !tieneFacturasZP) {
         throw new AsientoError(
@@ -900,13 +942,57 @@ export async function confirmarZonaPrimariaAction(
         );
       }
 
+      // Resolver el depósito ZPA antes que nada para fallar cedo si no hay.
+      const depositoZpa = await resolverDepositoZpa(tx, {
+        codigo: embarque.codigo,
+        depositoZonaPrimariaId: embarque.depositoZonaPrimariaId,
+      });
+
+      // Calcular el rateio para el stock ZPA — solo FOB + flete/seguro
+      // origen + facturas ZP (sin tributos aduaneros).
+      const rateioItems = calcularRateioZonaPrimaria(
+        {
+          fobTotal: embarque.fobTotal,
+          embarqueTipoCambio: embarque.tipoCambio,
+          costosZp: facturasZpActivas.flatMap((f) =>
+            f.lineas.map((l) => ({ subtotal: l.subtotal, tipoCambio: f.tipoCambio })),
+          ),
+          valorFleteOrigen: embarque.valorFleteOrigen,
+          valorSeguroOrigen: embarque.valorSeguroOrigen,
+        },
+        embarque.items.map((it) => ({
+          id: it.id,
+          productoId: it.productoId,
+          cantidad: it.cantidad,
+          precioUnitarioFob: it.precioUnitarioFob,
+        })),
+      );
+
+      // 1) Asiento de Zona Primaria (DEBE 1.1.5.02 vs HABER proveedores).
       const asiento = await crearAsientoZonaPrimaria(embarqueId, tx, fecha);
       const contabilizado = await contabilizarAsiento(asiento.id, tx);
 
-      // Persistir fecha del fato contábil en el embarque (no la del clic).
+      // 2) Ingreso de stock físico en el depósito ZPA.
+      const fechaIngreso = fecha ?? new Date();
+      await aplicarIngresoEmbarqueZpa(tx, {
+        depositoZpaId: depositoZpa.id,
+        fecha: fechaIngreso,
+        items: rateioItems.map((r) => ({
+          itemEmbarqueId: r.id,
+          productoId: r.productoId,
+          cantidad: r.cantidad,
+          costoUnitario: r.costoUnitario,
+        })),
+      });
+
+      // 3) Persistir fechaZonaPrimaria y, si fue resuelto via predeterminado,
+      //    persistir depositoZonaPrimariaId para idempotencia futura.
       await tx.embarque.update({
         where: { id: embarqueId },
-        data: { fechaZonaPrimaria: fecha ?? new Date() },
+        data: {
+          fechaZonaPrimaria: fechaIngreso,
+          depositoZonaPrimariaId: depositoZpa.id,
+        },
       });
 
       return {
@@ -929,10 +1015,10 @@ export async function confirmarZonaPrimariaAction(
   }
 }
 
-// Revertir zona primaria — anula el asiento ZP y deja el embarque
-// disponible para corregir facturas/FOB y volver a confirmar. NO toca
-// stock (en ZP no se generan MovimientoStock). Sólo permitido si el
-// embarque NO tiene cierre (asientoId) — primero anular el cierre.
+// Revertir zona primaria — anula el asiento ZP, revierte el ingreso de
+// stock en ZPA y deja el embarque disponible para corregir facturas/FOB
+// y volver a confirmar. Sólo permitido si el embarque NO tiene cierre
+// (asientoId) ni despachos activos.
 
 export type RevertirZonaPrimariaResult = { ok: true } | { ok: false; error: string };
 
@@ -983,6 +1069,11 @@ export async function revertirZonaPrimariaAction(
         );
       }
 
+      // 1) Revertir el ingreso de stock en ZPA (deleta MovimientoStock
+      //    ligados a ItemEmbarque + recalcula stockActual y SPD).
+      await revertirIngresoEmbarque(tx, embarqueId);
+
+      // 2) Anular el asiento ZP (DEBE 1.1.5.02 vs HABER proveedores).
       await anularAsiento(embarque.asientoZonaPrimariaId, tx);
 
       await tx.embarque.update({
@@ -1081,6 +1172,19 @@ export async function cerrarYContabilizarEmbarqueAction(
         throw new AsientoError(
           "DOMINIO_INVALIDO",
           `El embarque ${embarque.codigo} no tiene depósito de destino asignado.`,
+        );
+      }
+      // Bloquear cierre monolítico con destino ZPA: no tiene sentido
+      // cerrar (que ingresa mercadería en 1.1.5.01) hacia un depósito
+      // aduanero. Use confirmar zona primaria + despachos parciales.
+      const depositoDestino = await tx.deposito.findUnique({
+        where: { id: embarque.depositoDestinoId },
+        select: { nombre: true, tipo: true },
+      });
+      if (depositoDestino?.tipo === "ZONA_PRIMARIA") {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `El depósito destino "${depositoDestino.nombre}" es tipo Zona Primaria. Use "Confirmar zona primaria" y luego despachos parciales en lugar de cierre monolítico.`,
         );
       }
       if (embarque.items.length === 0) {
