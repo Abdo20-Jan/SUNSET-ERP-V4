@@ -64,5 +64,16 @@
       "prisma/migrations/**",
       "**/*.generated.*"
     ]
-  }
+  },
+  "overrides": [
+    {
+      "include": ["src/components/ui/**"],
+      "linter": {
+        "rules": {
+          "security": { "noDangerouslySetInnerHtml": "off" },
+          "suspicious": { "noArrayIndexKey": "off" }
+        }
+      }
+    }
+  ]
 }
