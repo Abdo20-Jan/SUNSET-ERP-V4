@@ -157,7 +157,6 @@ async function main() {
           estado: true,
           fechaSalida: true,
           fechaLlegada: true,
-          fechaContabilizacion: true,
           depositoDestinoId: true,
           depositoDestino: { select: { nombre: true } },
           proveedor: { select: { nombre: true } },
@@ -169,10 +168,10 @@ async function main() {
 
   console.log(`ItemEmbarque (${items.length}):`);
   console.log(
-    `  ${"itemId".padStart(8)}  ${"cant".padStart(6)}  ${"embarque".padEnd(20)} ${"estado".padEnd(20)} ${"deposito".padEnd(20)} ${"fContab".padEnd(11)} proveedor`,
+    `  ${"itemId".padStart(8)}  ${"cant".padStart(6)}  ${"embarque".padEnd(20)} ${"estado".padEnd(20)} ${"deposito".padEnd(20)} ${"fLlegada".padEnd(11)} proveedor`,
   );
   for (const it of items) {
-    const fc = it.embarque.fechaContabilizacion?.toISOString().slice(0, 10) ?? "—";
+    const fc = it.embarque.fechaLlegada?.toISOString().slice(0, 10) ?? "—";
     console.log(
       `  ${it.id.toString().padStart(8)}  ${it.cantidad.toString().padStart(6)}  ${it.embarque.codigo.padEnd(20)} ${it.embarque.estado.padEnd(20)} ${(it.embarque.depositoDestino?.nombre ?? "—").padEnd(20)} ${fc.padEnd(11)} ${it.embarque.proveedor.nombre}`,
     );
