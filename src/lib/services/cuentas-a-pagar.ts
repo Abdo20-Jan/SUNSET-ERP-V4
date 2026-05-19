@@ -1799,3 +1799,23 @@ export async function getSaldosExteriorPorProveedor(): Promise<ProveedorExterior
 
   return result.sort((a, b) => toDecimal(b.saldoUsd).minus(toDecimal(a.saldoUsd)).toNumber());
 }
+
+// ============================================================
+// Facturas pendientes indexadas por cuentaContableId del proveedor.
+// Usado por el selector "Aplicar a facturas pendientes" en el
+// formulario de Nuevo movimiento de tesorería. Devuelve solo
+// proveedores con saldo > 0 y al menos una factura identificable.
+// ============================================================
+
+export async function getFacturasPendientesPorCuenta(): Promise<
+  Record<number, FacturaPendiente[]>
+> {
+  const saldos = await getSaldosPorProveedorConAging();
+  const out: Record<number, FacturaPendiente[]> = {};
+  for (const p of saldos) {
+    if (p.cuentaContableId === null) continue;
+    if (p.facturas.length === 0) continue;
+    out[p.cuentaContableId] = p.facturas;
+  }
+  return out;
+}

@@ -7,8 +7,11 @@ import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight02Icon } from "@hugeicons/core-free-icons";
 
+import Decimal from "decimal.js";
+
 import { fmtMoney } from "@/lib/format";
 import {
+  type AplicarPagoA,
   crearMovimientoTesoreriaAction,
   pagarConIntermediarioAction,
   type CuentaBancariaOption,
@@ -132,10 +135,8 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }:
     const lineas = seleccionados.map((p) => {
       const override = montosOverride[p.proveedorId];
       const monto = override !== undefined ? override : p.saldoTotal;
-      // Incluir números específicos de las facturas pendientes para que el
-      // algoritmo de cuentas-a-pagar pueda cruzar pago↔fatura via Layer 1
-      // (match por número). Sin esto, los layers de matching fallan y las
-      // facturas siguen pendientes pese al pago efectivo.
+      // Sufijo de números (Layer 1 fallback — sigue siendo útil si por algún
+      // motivo AplicacionPago* no se grava).
       const numerosEspecificos = p.facturas
         .map((f) => f.numero)
         .filter((n) => n && !n.startsWith("Factura #"));
@@ -145,10 +146,33 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }:
               numerosEspecificos.length > 5 ? "…" : ""
             }`
           : "";
+
+      // Layer 0 — distribuir `monto` entre las facturas pendientes FIFO
+      // (más antiguas primero). Cada porción pagada se materializa como
+      // AplicacionPago{EmbarqueCosto|Compra|Gasto} via server action.
+      let remaining = new Decimal(monto);
+      const appliedTo: AplicarPagoA[] = [];
+      const facturasOrdered = [...p.facturas].sort((a, b) => a.fecha.localeCompare(b.fecha));
+      for (const f of facturasOrdered) {
+        if (remaining.lte(0.005)) break;
+        const facturaMonto = new Decimal(f.monto);
+        const tomar = facturaMonto.gt(remaining) ? remaining : facturaMonto;
+        const montoArs = tomar.toFixed(2);
+        if (f.origen === "embarque") {
+          appliedTo.push({ tipo: "embarqueCosto", id: Number(f.id), montoArs });
+        } else if (f.origen === "compra") {
+          appliedTo.push({ tipo: "compra", id: f.id, montoArs });
+        } else {
+          appliedTo.push({ tipo: "gasto", id: f.id, montoArs });
+        }
+        remaining = remaining.minus(tomar);
+      }
+
       return {
         cuentaContableId: p.cuentaContableId!,
         monto,
         descripcion: `${p.proveedorNombre}${sufijoFacts}`.slice(0, 255),
+        appliedTo: appliedTo.length > 0 ? appliedTo : undefined,
       };
     });
 

@@ -503,7 +503,9 @@ const pagoIntermediarioSchema = z
             .transform((v) => (v && v.length > 0 ? v : null)),
           // Opcional: vincular esta factura a un EmbarqueCosto / Compra / Gasto.
           // El montoArs debe coincidir con `monto` (mismo significado en ARS).
-          appliedTo: aplicarPagoSchema.optional(),
+          // Acepta singular (1 factura por línea DEBE) o array (split FIFO de
+          // varias facturas pagadas con un único monto agregado).
+          appliedTo: z.union([aplicarPagoSchema, z.array(aplicarPagoSchema)]).optional(),
         }),
       )
       .min(1),

@@ -17,13 +17,16 @@ import {
   Delete02Icon,
   InformationCircleIcon,
 } from "@hugeicons/core-free-icons";
+import Decimal from "decimal.js";
 
 import {
+  type AplicarPagoA,
   crearMovimientoTesoreriaAction,
   type CuentaBancariaOption,
   type CuentaContableContrapartidaOption,
 } from "@/lib/actions/movimientos-tesoreria";
 import type { ContextoAmortizacion } from "@/lib/actions/prestamos";
+import type { FacturaPendiente } from "@/lib/services/cuentas-a-pagar";
 import { cn } from "@/lib/utils";
 import { parseDefaultFecha } from "@/lib/utils/parse-default-fecha";
 import { Button } from "@/components/ui/button";
@@ -126,6 +129,51 @@ const FORM_INITIAL_DEFAULTS = {
   referenciaBanco: "",
 } satisfies Required<MovimientoFormInitial>;
 
+function facturaKey(f: { origen: string; id: string }): string {
+  return `${f.origen}::${f.id}`;
+}
+
+/**
+ * Distribuye el `monto` FIFO (por fecha asc) entre las facturas
+ * seleccionadas, generando un array `AplicarPagoA[]`. Si no hay
+ * cuenta o no hay facturas seleccionadas, devuelve undefined
+ * (caída al matching token-based de Layer 1/2/4).
+ */
+function buildAppliedToForLinea(args: {
+  monto: string;
+  cuentaContableId: number;
+  selectedKeys: Set<string> | undefined;
+  facturasPendientesPorCuenta?: Record<number, FacturaPendiente[]>;
+}): AplicarPagoA[] | undefined {
+  if (!args.selectedKeys || args.selectedKeys.size === 0) return undefined;
+  if (!args.facturasPendientesPorCuenta) return undefined;
+  const pendientes = args.facturasPendientesPorCuenta[args.cuentaContableId];
+  if (!pendientes || pendientes.length === 0) return undefined;
+
+  const seleccionadas = pendientes
+    .filter((f) => args.selectedKeys!.has(facturaKey(f)))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  if (seleccionadas.length === 0) return undefined;
+
+  let remaining = new Decimal(args.monto);
+  const out: AplicarPagoA[] = [];
+  for (const f of seleccionadas) {
+    if (remaining.lte(0.005)) break;
+    const facturaMonto = new Decimal(f.monto);
+    const tomar = facturaMonto.gt(remaining) ? remaining : facturaMonto;
+    const montoArs = tomar.toFixed(2);
+    if (f.origen === "embarque") {
+      out.push({ tipo: "embarqueCosto", id: Number(f.id), montoArs });
+    } else if (f.origen === "compra") {
+      out.push({ tipo: "compra", id: f.id, montoArs });
+    } else {
+      out.push({ tipo: "gasto", id: f.id, montoArs });
+    }
+    remaining = remaining.minus(tomar);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 function getDefaultFormValues(args: {
   initial?: MovimientoFormInitial;
   defaultFecha?: string;
@@ -154,6 +202,7 @@ function getDefaultFormValues(args: {
 export function MovimientoForm({
   cuentasBancarias,
   cuentasContrapartida,
+  facturasPendientesPorCuenta,
   initial,
   contextoAmortizacion,
   modoInicial,
@@ -161,6 +210,7 @@ export function MovimientoForm({
 }: {
   cuentasBancarias: CuentaBancariaOption[];
   cuentasContrapartida: CuentaContableContrapartidaOption[];
+  facturasPendientesPorCuenta?: Record<number, FacturaPendiente[]>;
   initial?: MovimientoFormInitial;
   contextoAmortizacion?: ContextoAmortizacion | null;
   modoInicial?: ModoAmortizacion;
@@ -169,6 +219,9 @@ export function MovimientoForm({
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
   const [modo, setModo] = useState<ModoAmortizacion>(modoInicial ?? "amortizacion");
+  // Map de lineaIdx → set de facturaKey (`${origen}::${id}`) seleccionadas
+  // para aplicar el pago. Vacío = sin Layer 0 (fallback a tokens).
+  const [appliedFactByLinea, setAppliedFactByLinea] = useState<Record<number, Set<string>>>({});
 
   const {
     control,
@@ -253,10 +306,19 @@ export function MovimientoForm({
         fecha: values.fecha,
         moneda: values.moneda,
         tipoCambio: values.tipoCambio,
-        lineas: values.lineas.map((l) => ({
+        lineas: values.lineas.map((l, idx) => ({
           cuentaContableId: l.cuentaContableId,
           monto: l.monto,
           descripcion: l.descripcion,
+          appliedTo:
+            values.tipo === "PAGO"
+              ? buildAppliedToForLinea({
+                  monto: l.monto,
+                  cuentaContableId: l.cuentaContableId,
+                  selectedKeys: appliedFactByLinea[idx],
+                  facturasPendientesPorCuenta,
+                })
+              : undefined,
         })),
         descripcion: values.descripcion,
         comprobante: values.comprobante,
@@ -456,66 +518,108 @@ export function MovimientoForm({
                 </Button>
               </div>
               <div className="flex flex-col gap-2">
-                {lineaFields.map((field, idx) => (
-                  <div
-                    key={field.id}
-                    className="grid grid-cols-1 gap-2 rounded-md border bg-card px-3 py-2 md:grid-cols-[2fr_1fr_2fr_auto]"
-                  >
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                        Cuenta {idx + 1}
-                      </Label>
-                      <Controller
-                        control={control}
-                        name={`lineas.${idx}.cuentaContableId`}
-                        render={({ field: f }) => (
-                          <CuentaCombobox
-                            value={f.value || null}
-                            onChange={f.onChange}
-                            cuentas={contrapartidasFiltradas}
-                            placeholder="Cuenta contable"
+                {lineaFields.map((field, idx) => {
+                  const lineaCuentaId = lineas?.[idx]?.cuentaContableId ?? 0;
+                  const facturasParaCuenta =
+                    tipo === "PAGO" && lineaCuentaId
+                      ? facturasPendientesPorCuenta?.[lineaCuentaId]
+                      : undefined;
+                  return (
+                    <div
+                      key={field.id}
+                      className="flex flex-col gap-2 rounded-md border bg-card px-3 py-2"
+                    >
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-[2fr_1fr_2fr_auto]">
+                        <div className="flex flex-col gap-1">
+                          <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                            Cuenta {idx + 1}
+                          </Label>
+                          <Controller
+                            control={control}
+                            name={`lineas.${idx}.cuentaContableId`}
+                            render={({ field: f }) => (
+                              <CuentaCombobox
+                                value={f.value || null}
+                                onChange={(v) => {
+                                  f.onChange(v);
+                                  setAppliedFactByLinea((prev) => {
+                                    if (!prev[idx]) return prev;
+                                    const next = { ...prev };
+                                    delete next[idx];
+                                    return next;
+                                  });
+                                }}
+                                cuentas={contrapartidasFiltradas}
+                                placeholder="Cuenta contable"
+                              />
+                            )}
                           />
-                        )}
-                      />
-                      {errors.lineas?.[idx]?.cuentaContableId && (
-                        <FieldError message={errors.lineas[idx]?.cuentaContableId?.message} />
+                          {errors.lineas?.[idx]?.cuentaContableId && (
+                            <FieldError message={errors.lineas[idx]?.cuentaContableId?.message} />
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                            Monto
+                          </Label>
+                          <Input
+                            inputMode="decimal"
+                            className="text-right tabular-nums"
+                            aria-invalid={!!errors.lineas?.[idx]?.monto}
+                            {...register(`lineas.${idx}.monto`)}
+                          />
+                          {errors.lineas?.[idx]?.monto && (
+                            <FieldError message={errors.lineas[idx]?.monto?.message} />
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                            Descripción
+                          </Label>
+                          <Input
+                            placeholder="opcional"
+                            {...register(`lineas.${idx}.descripcion`)}
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          {lineaFields.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                removeLinea(idx);
+                                setAppliedFactByLinea((prev) => {
+                                  if (!prev[idx]) return prev;
+                                  const next = { ...prev };
+                                  delete next[idx];
+                                  return next;
+                                });
+                              }}
+                              aria-label="Eliminar línea"
+                            >
+                              <HugeiconsIcon
+                                icon={Delete02Icon}
+                                strokeWidth={2}
+                                className="size-3.5"
+                              />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                      {facturasParaCuenta && facturasParaCuenta.length > 0 && (
+                        <FacturasPendientesSelector
+                          facturas={facturasParaCuenta}
+                          selectedKeys={appliedFactByLinea[idx] ?? new Set()}
+                          onChange={(next) =>
+                            setAppliedFactByLinea((prev) => ({ ...prev, [idx]: next }))
+                          }
+                          montoLinea={lineas?.[idx]?.monto ?? "0"}
+                        />
                       )}
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                        Monto
-                      </Label>
-                      <Input
-                        inputMode="decimal"
-                        className="text-right tabular-nums"
-                        aria-invalid={!!errors.lineas?.[idx]?.monto}
-                        {...register(`lineas.${idx}.monto`)}
-                      />
-                      {errors.lineas?.[idx]?.monto && (
-                        <FieldError message={errors.lineas[idx]?.monto?.message} />
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                        Descripción
-                      </Label>
-                      <Input placeholder="opcional" {...register(`lineas.${idx}.descripcion`)} />
-                    </div>
-                    <div className="flex items-end">
-                      {lineaFields.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeLinea(idx)}
-                          aria-label="Eliminar línea"
-                        >
-                          <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} className="size-3.5" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2 text-sm">
                 <span className="text-muted-foreground">
@@ -918,6 +1022,195 @@ function FieldError({ message }: { message?: string }) {
       <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="size-3" />
       {message}
     </p>
+  );
+}
+
+function FacturasPendientesSelector({
+  facturas,
+  selectedKeys,
+  onChange,
+  montoLinea,
+}: {
+  facturas: FacturaPendiente[];
+  selectedKeys: Set<string>;
+  onChange: (next: Set<string>) => void;
+  montoLinea: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const facturasOrdered = useMemo(
+    () => [...facturas].sort((a, b) => a.fecha.localeCompare(b.fecha)),
+    [facturas],
+  );
+
+  const seleccionadas = facturasOrdered.filter((f) => selectedKeys.has(facturaKey(f)));
+  const totalSeleccionado = seleccionadas.reduce(
+    (s, f) => s.plus(new Decimal(f.monto)),
+    new Decimal(0),
+  );
+  const montoNum = new Decimal(montoLinea && /^\d+(\.\d{1,2})?$/.test(montoLinea) ? montoLinea : 0);
+
+  // Distribución preview (FIFO igual al server)
+  const distribucion = useMemo(() => {
+    let remaining = montoNum;
+    const out: Array<{ key: string; numero: string; monto: string }> = [];
+    for (const f of seleccionadas) {
+      if (remaining.lte(0.005)) break;
+      const fMonto = new Decimal(f.monto);
+      const tomar = fMonto.gt(remaining) ? remaining : fMonto;
+      out.push({ key: facturaKey(f), numero: f.numero, monto: tomar.toFixed(2) });
+      remaining = remaining.minus(tomar);
+    }
+    return { items: out, sobrante: remaining };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKeys, montoLinea, seleccionadas.length]);
+
+  const toggleFactura = (f: FacturaPendiente) => {
+    const k = facturaKey(f);
+    const next = new Set(selectedKeys);
+    if (next.has(k)) next.delete(k);
+    else next.add(k);
+    onChange(next);
+  };
+
+  const seleccionarVencidas = () => {
+    const next = new Set<string>();
+    for (const f of facturasOrdered) {
+      if (f.bucket === "vencida") next.add(facturaKey(f));
+    }
+    onChange(next);
+  };
+
+  const cantidad = seleccionadas.length;
+  const labelHeader =
+    cantidad === 0
+      ? `Aplicar a facturas pendientes (${facturasOrdered.length} disponibles)`
+      : `${cantidad} factura${cantidad === 1 ? "" : "s"} seleccionada${cantidad === 1 ? "" : "s"} — ARS ${totalSeleccionado.toFixed(2)}`;
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-dashed border-primary/30 bg-primary/5 px-2 py-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center justify-between gap-2 text-left text-xs font-medium hover:underline"
+      >
+        <span className="flex items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Layer 0
+          </span>
+          <span>{labelHeader}</span>
+        </span>
+        <span className="text-[10px] text-muted-foreground">{open ? "Ocultar" : "Mostrar"}</span>
+      </button>
+      {open && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-[11px]">
+            <Button type="button" size="sm" variant="outline" onClick={seleccionarVencidas}>
+              Seleccionar vencidas
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => onChange(new Set())}
+              disabled={cantidad === 0}
+            >
+              Limpiar
+            </Button>
+            <span className="ml-auto text-muted-foreground">
+              Monto línea: ARS {montoNum.toFixed(2)}
+            </span>
+          </div>
+
+          <div className="max-h-60 overflow-y-auto rounded border bg-card">
+            <table className="w-full text-[11px]">
+              <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="w-6 px-2 py-1"></th>
+                  <th className="px-2 py-1 text-left">Tipo</th>
+                  <th className="px-2 py-1 text-left">Número</th>
+                  <th className="px-2 py-1 text-left">Vence</th>
+                  <th className="px-2 py-1 text-right">Pendiente</th>
+                  <th className="px-2 py-1 text-right">Se aplicará</th>
+                </tr>
+              </thead>
+              <tbody>
+                {facturasOrdered.map((f) => {
+                  const k = facturaKey(f);
+                  const checked = selectedKeys.has(k);
+                  const dist = distribucion.items.find((d) => d.key === k);
+                  return (
+                    <tr key={k} className={checked ? "bg-primary/10" : "border-t"}>
+                      <td className="px-2 py-1">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleFactura(f)}
+                          aria-label={`Seleccionar ${f.numero}`}
+                        />
+                      </td>
+                      <td className="px-2 py-1 font-mono uppercase">
+                        {f.origen === "compra" ? "C" : f.origen === "gasto" ? "G" : "EMB"}
+                      </td>
+                      <td className="px-2 py-1 font-mono">{f.numero}</td>
+                      <td className="px-2 py-1">
+                        {f.fechaVencimiento ? (
+                          <span
+                            className={
+                              f.bucket === "vencida"
+                                ? "text-rose-700 dark:text-rose-300"
+                                : f.bucket === "proxima"
+                                  ? "text-amber-700 dark:text-amber-300"
+                                  : "text-muted-foreground"
+                            }
+                          >
+                            {f.fechaVencimiento.slice(0, 10)}
+                            {f.diasParaVencer !== null && f.diasParaVencer < 0
+                              ? ` (${Math.abs(f.diasParaVencer)}d atras)`
+                              : ""}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1 text-right font-mono tabular-nums">{f.monto}</td>
+                      <td className="px-2 py-1 text-right font-mono tabular-nums">
+                        {dist ? (
+                          <span className="font-semibold text-primary">{dist.monto}</span>
+                        ) : checked ? (
+                          <span className="text-muted-foreground">0.00</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {cantidad > 0 && (
+            <div className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="text-muted-foreground">
+                FIFO por fecha. Si el monto cubre solo parte, la última factura se aplica parcial.
+              </span>
+              <span className="font-mono tabular-nums">
+                {distribucion.sobrante.gt(0.005) ? (
+                  <span className="text-amber-700 dark:text-amber-300">
+                    Sobra ARS {distribucion.sobrante.toFixed(2)} (sin aplicar)
+                  </span>
+                ) : (
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    Monto distribuido completamente
+                  </span>
+                )}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
