@@ -1,0 +1,129 @@
+name: validar-stock
+
+# Valida invariantes SPD diariamente contra DB de produção (Railway).
+# Invariantes:
+#   1: SUM(SPD.cantidadFisica) por producto == Producto.stockActual
+#   2: SPD.cantidadReservada >= 0 && SPD.cantidadFisica >= SPD.cantidadReservada
+#   3: SPD.cantidadFisica >= 0
+#
+# Falha → abre issue automática com detalhes da violação.
+
+on:
+  schedule:
+    # 06:00 ART (UTC-3) = 09:00 UTC
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+    inputs:
+      recalcular_reservas:
+        description: "Reconstruir SPD.cantidadReservada antes de validar (replay)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+concurrency:
+  group: validar-stock-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  validar:
+    name: validar invariantes SPD
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@739bfe42ca9233c5e6aca07c1a25a9d34aca49b0 # v6.0.7
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm prisma generate
+
+      - name: Validar invariantes
+        id: validar
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}
+          RECALCULAR_RESERVAS: ${{ inputs.recalcular_reservas }}
+        run: |
+          set +e
+          if [ "$RECALCULAR_RESERVAS" = "true" ]; then
+            pnpm db:validar-stock --recalcular-reservas 2>&1 | tee validar-stock.log
+          else
+            pnpm db:validar-stock 2>&1 | tee validar-stock.log
+          fi
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validar-stock-log
+          path: validar-stock.log
+          retention-days: 30
+
+      - name: Criar issue em caso de violação
+        if: steps.validar.outputs.exit_code != '0' && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const log = fs.readFileSync('validar-stock.log', 'utf8').slice(0, 60000);
+            const today = new Date().toISOString().slice(0, 10);
+            const title = `[validar-stock] Invariante SPD violada — ${today}`;
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'validar-stock'
+            });
+            if (existing.data.some(i => i.title === title)) {
+              core.info('Issue já existe pra hoje — skip');
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['validar-stock', 'bug', 'prod'],
+              body: [
+                '## Violação de invariante SPD detectada',
+                '',
+                `Workflow: ${context.workflow} · Run: [${context.runId}](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+                '',
+                '### Output do validador',
+                '',
+                '```',
+                log,
+                '```',
+                '',
+                '### Próximos passos',
+                '',
+                '1. Identificar producto/depósito afetado no log.',
+                '2. Rodar `pnpm db:validar-stock --recalcular-reservas` local com DATABASE_URL prod (se for invariante 2).',
+                '3. Investigar causa raiz no MovimientoStock (ver `bug-spd-desincronizado.md` no vault).',
+              ].join('\n'),
+            });
+
+      - name: Falhar workflow se violação
+        if: steps.validar.outputs.exit_code != '0'
+        run: |
+          echo "::error::Invariante SPD violada — ver log + issue automática."
+          exit 1
