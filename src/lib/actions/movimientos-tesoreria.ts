@@ -20,7 +20,54 @@ import {
   CuentaTipo,
   Moneda,
   MovimientoTesoreriaTipo,
+  Prisma,
 } from "@/generated/prisma/client";
+
+type TxClient = Prisma.TransactionClient;
+
+// Grava rows en AplicacionPagoEmbarqueCosto/Compra/Gasto vinculando línea
+// DEBE del asiento a la(s) factura(s) que está pagando. Las líneas se
+// matchean por ORDEN: el caller pasa `bindings` en el mismo orden que las
+// líneas DEBE fueron insertadas en el asiento; este helper queries las
+// líneas DEBE ordenadas por id (orden de inserción) y aplica los appliedTo.
+async function gravarAplicacionesPago(
+  tx: TxClient,
+  asientoId: string,
+  bindings: Array<{ appliedTo?: AplicarPagoA | AplicarPagoA[] | null }>,
+): Promise<void> {
+  const tieneAppliedTo = bindings.some((b) => b.appliedTo);
+  if (!tieneAppliedTo) return;
+
+  const lineasDebe = await tx.lineaAsiento.findMany({
+    where: { asientoId, debe: { gt: 0 } },
+    select: { id: true },
+    orderBy: { id: "asc" },
+  });
+
+  for (let i = 0; i < bindings.length; i++) {
+    const b = bindings[i];
+    if (!b?.appliedTo) continue;
+    const linea = lineasDebe[i];
+    if (!linea) continue;
+    const apls = Array.isArray(b.appliedTo) ? b.appliedTo : [b.appliedTo];
+    for (const apl of apls) {
+      const data = { lineaAsientoId: linea.id, montoArs: apl.montoArs } as const;
+      if (apl.tipo === "embarqueCosto") {
+        await tx.aplicacionPagoEmbarqueCosto.create({
+          data: { ...data, embarqueCostoId: apl.id },
+        });
+      } else if (apl.tipo === "compra") {
+        await tx.aplicacionPagoCompra.create({
+          data: { ...data, compraId: apl.id },
+        });
+      } else {
+        await tx.aplicacionPagoGasto.create({
+          data: { ...data, gastoId: apl.id },
+        });
+      }
+    }
+  }
+}
 
 export type CuentaBancariaOption = {
   id: string;
@@ -91,6 +138,29 @@ export async function listarCuentasContablesParaContrapartida(): Promise<
 const MONEY_RE = /^\d+(\.\d{1,2})?$/;
 const FX_RE = /^\d+(\.\d{1,6})?$/;
 
+// Discriminated union para vincular linea DEBE a factura específica.
+// Cuando presente, grava una row en AplicacionPagoEmbarqueCosto|Compra|Gasto
+// que sirve como Layer 0 (FK estructural) en las views de cuentas-a-pagar.
+const aplicarPagoSchema = z.discriminatedUnion("tipo", [
+  z.object({
+    tipo: z.literal("embarqueCosto"),
+    id: z.number().int().positive(),
+    montoArs: z.string().regex(MONEY_RE, "montoArs inválido"),
+  }),
+  z.object({
+    tipo: z.literal("compra"),
+    id: z.string().uuid(),
+    montoArs: z.string().regex(MONEY_RE, "montoArs inválido"),
+  }),
+  z.object({
+    tipo: z.literal("gasto"),
+    id: z.string().uuid(),
+    montoArs: z.string().regex(MONEY_RE, "montoArs inválido"),
+  }),
+]);
+
+export type AplicarPagoA = z.infer<typeof aplicarPagoSchema>;
+
 const lineaContrapartidaSchema = z.object({
   cuentaContableId: z.number().int().positive(),
   monto: z.string().regex(MONEY_RE, "Monto inválido (máx. 2 decimales)"),
@@ -100,6 +170,9 @@ const lineaContrapartidaSchema = z.object({
     .max(255)
     .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
+  // Opcional: vincular esta línea DEBE a una o más facturas pagadas.
+  // El total de montoArs debe coincidir con `monto` (validado en superRefine).
+  appliedTo: z.array(aplicarPagoSchema).optional(),
 });
 
 const crearMovimientoSchema = z
@@ -310,6 +383,11 @@ export async function crearMovimientoTesoreriaAction(
         const contabilizado = await contabilizarAsiento(asiento.id, tx);
         asientoId = contabilizado.id;
         asientoNumero = contabilizado.numero;
+        // Línea DEBE = primera línea del asiento split (la otra es el banco HABER).
+        // Si hay appliedTo, vincular esa línea con la(s) factura(s).
+        if (tipo === MovimientoTesoreriaTipo.PAGO && lineas[0]!.appliedTo) {
+          await gravarAplicacionesPago(tx, contabilizado.id, [{ appliedTo: lineas[0]!.appliedTo }]);
+        }
       } else {
         // N contrapartidas — asiento manual de N+1 líneas.
         const asientoLineas: LineaInput[] = [];
@@ -353,13 +431,24 @@ export async function crearMovimientoTesoreriaAction(
           },
           tx,
         );
-        await tx.movimientoTesoreria.update({
-          where: { id: mov.id },
+        const updMovMulti = await tx.movimientoTesoreria.updateMany({
+          where: { id: mov.id, asientoId: null },
           data: { asientoId: asiento.id },
         });
+        if (updMovMulti.count !== 1) {
+          throw new AsientoError(
+            "CONCURRENCIA",
+            `MovimientoTesoreria ${mov.id} fue contabilizado simultáneamente por otro proceso.`,
+          );
+        }
         const contabilizado = await contabilizarAsiento(asiento.id, tx);
         asientoId = contabilizado.id;
         asientoNumero = contabilizado.numero;
+        // Para PAGO multi-contrapartida, las primeras N líneas son las DEBE
+        // (en orden de `lineas`). Pasamos los bindings en mismo orden.
+        if (tipo === MovimientoTesoreriaTipo.PAGO) {
+          await gravarAplicacionesPago(tx, contabilizado.id, lineas);
+        }
       }
 
       return { movimientoId: mov.id, asientoId, asientoNumero };
@@ -412,6 +501,9 @@ const pagoIntermediarioSchema = z
             .max(255)
             .optional()
             .transform((v) => (v && v.length > 0 ? v : null)),
+          // Opcional: vincular esta factura a un EmbarqueCosto / Compra / Gasto.
+          // El montoArs debe coincidir con `monto` (mismo significado en ARS).
+          appliedTo: aplicarPagoSchema.optional(),
         }),
       )
       .min(1),
@@ -622,11 +714,26 @@ export async function pagarConIntermediarioAction(
         },
         tx,
       );
-      await tx.movimientoTesoreria.update({
-        where: { id: mov.id },
+      const updMovInter = await tx.movimientoTesoreria.updateMany({
+        where: { id: mov.id, asientoId: null },
         data: { asientoId: asiento.id },
       });
+      if (updMovInter.count !== 1) {
+        throw new AsientoError(
+          "CONCURRENCIA",
+          `MovimientoTesoreria ${mov.id} fue contabilizado simultáneamente por otro proceso.`,
+        );
+      }
       const contabilizado = await contabilizarAsiento(asiento.id, tx);
+
+      // Gravar AplicacionPago* para las facturas que tienen appliedTo.
+      // El orden de DEBE en el asiento es: facturas[] primero (en orden),
+      // luego eventual beneficiario anticipo. Los primeros N DEBE = facturas.
+      await gravarAplicacionesPago(
+        tx,
+        contabilizado.id,
+        data.facturas.map((f) => ({ appliedTo: f.appliedTo })),
+      );
 
       return {
         movimientoId: mov.id,
