@@ -369,7 +369,74 @@ model LineaAsiento {
   asiento Asiento        @relation(fields: [asientoId], references: [id], onDelete: Restrict)
   cuenta  CuentaContable @relation(fields: [cuentaId], references: [id])
 
+  aplicacionesPagoEmbarqueCosto AplicacionPagoEmbarqueCosto[]
+  aplicacionesPagoCompra        AplicacionPagoCompra[]
+  aplicacionesPagoGasto         AplicacionPagoGasto[]
+
   @@index([cuentaId])
+}
+
+// ============================================================
+// APLICACIÓN DE PAGOS — FK estructural entre LineaAsiento DEBE y factura
+// ============================================================
+//
+// Vincula explícitamente una línea DEBE de un asiento de pago con la
+// factura que está cancelando (EmbarqueCosto / Compra / Gasto). Reemplaza
+// el matching frágil por tokens en descripción (Layer 1/2/4) — cuando
+// existe row aquí, la view de cuentas-a-pagar usa este FK como fuente
+// de verdad (Layer 0). Los layers token-based se mantienen como fallback
+// para pagos legacy sin AplicacionPago* asociada.
+//
+// Una LineaAsiento puede aplicar a múltiples facturas via split
+// (1 LineaAsiento DEBE → N AplicacionPago*). Por eso son tablas
+// separadas y no FK directo en LineaAsiento.
+//
+// Tablas separadas por type-safety (vs FK polimórfica): cada tabla tiene
+// un FK fuertemente tipado, sin nullable union.
+
+model AplicacionPagoEmbarqueCosto {
+  id              Int      @id @default(autoincrement())
+  lineaAsientoId  Int
+  embarqueCostoId Int
+  montoArs        Decimal  @db.Decimal(18, 2)
+  createdAt       DateTime @default(now())
+
+  lineaAsiento  LineaAsiento  @relation(fields: [lineaAsientoId], references: [id], onDelete: Cascade)
+  embarqueCosto EmbarqueCosto @relation(fields: [embarqueCostoId], references: [id], onDelete: Cascade)
+
+  @@unique([lineaAsientoId, embarqueCostoId])
+  @@index([embarqueCostoId])
+  @@index([lineaAsientoId])
+}
+
+model AplicacionPagoCompra {
+  id             Int      @id @default(autoincrement())
+  lineaAsientoId Int
+  compraId       String
+  montoArs       Decimal  @db.Decimal(18, 2)
+  createdAt      DateTime @default(now())
+
+  lineaAsiento LineaAsiento @relation(fields: [lineaAsientoId], references: [id], onDelete: Cascade)
+  compra       Compra       @relation(fields: [compraId], references: [id], onDelete: Cascade)
+
+  @@unique([lineaAsientoId, compraId])
+  @@index([compraId])
+  @@index([lineaAsientoId])
+}
+
+model AplicacionPagoGasto {
+  id             Int      @id @default(autoincrement())
+  lineaAsientoId Int
+  gastoId        String
+  montoArs       Decimal  @db.Decimal(18, 2)
+  createdAt      DateTime @default(now())
+
+  lineaAsiento LineaAsiento @relation(fields: [lineaAsientoId], references: [id], onDelete: Cascade)
+  gasto        Gasto        @relation(fields: [gastoId], references: [id], onDelete: Cascade)
+
+  @@unique([lineaAsientoId, gastoId])
+  @@index([gastoId])
+  @@index([lineaAsientoId])
 }
 
 // ============================================================
@@ -496,15 +563,15 @@ model Embarque {
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 
-  proveedor             Proveedor       @relation(fields: [proveedorId], references: [id])
-  items                 ItemEmbarque[]
-  costos                EmbarqueCosto[]
-  asiento               Asiento?        @relation("EmbarqueAsientoCierre", fields: [asientoId], references: [id])
-  asientoZonaPrimaria   Asiento?        @relation("EmbarqueAsientoZP", fields: [asientoZonaPrimariaId], references: [id])
-  depositoDestino       Deposito?       @relation("EmbarqueDepositoDestino", fields: [depositoDestinoId], references: [id])
-  depositoZonaPrimaria  Deposito?       @relation("EmbarqueDepositoZP", fields: [depositoZonaPrimariaId], references: [id])
-  pedidoCompra          PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
-  despachos             Despacho[]
+  proveedor            Proveedor       @relation(fields: [proveedorId], references: [id])
+  items                ItemEmbarque[]
+  costos               EmbarqueCosto[]
+  asiento              Asiento?        @relation("EmbarqueAsientoCierre", fields: [asientoId], references: [id])
+  asientoZonaPrimaria  Asiento?        @relation("EmbarqueAsientoZP", fields: [asientoZonaPrimariaId], references: [id])
+  depositoDestino      Deposito?       @relation("EmbarqueDepositoDestino", fields: [depositoDestinoId], references: [id])
+  depositoZonaPrimaria Deposito?       @relation("EmbarqueDepositoZP", fields: [depositoZonaPrimariaId], references: [id])
+  pedidoCompra         PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
+  despachos            Despacho[]
 }
 
 // Factura de proveedor local (gastos de nacionalización: despachante,
@@ -558,6 +625,8 @@ model EmbarqueCosto {
   despacho  Despacho?            @relation(fields: [despachoId], references: [id], onDelete: SetNull)
   asiento   Asiento?             @relation(fields: [asientoId], references: [id])
   lineas    EmbarqueCostoLinea[]
+
+  aplicacionesPago AplicacionPagoEmbarqueCosto[]
 
   @@index([embarqueId])
   @@index([proveedorId])
@@ -694,6 +763,8 @@ model Compra {
   asiento      Asiento?      @relation(fields: [asientoId], references: [id])
   pedidoCompra PedidoCompra? @relation(fields: [pedidoCompraId], references: [id])
 
+  aplicacionesPago AplicacionPagoCompra[]
+
   @@index([fechaVencimiento])
   @@index([proveedorId])
 }
@@ -742,6 +813,8 @@ model Gasto {
   proveedor Proveedor    @relation(fields: [proveedorId], references: [id])
   asiento   Asiento?     @relation(fields: [asientoId], references: [id])
   lineas    LineaGasto[]
+
+  aplicacionesPago AplicacionPagoGasto[]
 
   @@index([proveedorId])
   @@index([fecha])
@@ -891,14 +964,14 @@ model Deposito {
   // retro-compatibilidad — el seed/migration marca explícitamente la ZPA.
   tipo      TipoDeposito @default(NACIONAL)
 
-  movimientos              MovimientoStock[]
-  embarques                Embarque[]         @relation("EmbarqueDepositoDestino")
-  embarquesZonaPrimaria    Embarque[]         @relation("EmbarqueDepositoZP")
-  stockPorDeposito         StockPorDeposito[]
-  entregas                 EntregaVenta[]
-  itemsVenta               ItemVenta[]
-  transferenciasOrigen     Transferencia[]    @relation("TransferenciaOrigen")
-  transferenciasDestino    Transferencia[]    @relation("TransferenciaDestino")
+  movimientos           MovimientoStock[]
+  embarques             Embarque[]         @relation("EmbarqueDepositoDestino")
+  embarquesZonaPrimaria Embarque[]         @relation("EmbarqueDepositoZP")
+  stockPorDeposito      StockPorDeposito[]
+  entregas              EntregaVenta[]
+  itemsVenta            ItemVenta[]
+  transferenciasOrigen  Transferencia[]    @relation("TransferenciaOrigen")
+  transferenciasDestino Transferencia[]    @relation("TransferenciaDestino")
 }
 
 // ============================================================
