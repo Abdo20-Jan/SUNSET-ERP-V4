@@ -1,17 +1,14 @@
 "use client";
 
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  type ChartConfig,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
 
 const fmtCompact = new Intl.NumberFormat("es-AR", {
   notation: "compact",
@@ -48,6 +45,10 @@ export function StackedBarChart({
   series: StackedSeries[];
   height?: number;
 }) {
+  const config = Object.fromEntries(
+    series.map((s) => [s.key, { label: s.label, color: s.color }]),
+  ) satisfies ChartConfig;
+
   return (
     <Card size="sm">
       <CardHeader className="flex-row items-center justify-between border-b border-border/60 pb-2">
@@ -65,50 +66,54 @@ export function StackedBarChart({
         </div>
       </CardHeader>
       <CardContent className="pt-2">
-        <div style={{ height }} className="w-full">
-          <ResponsiveContainer width="100%" height="100%" minHeight={200}>
-            <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="2 4" stroke="var(--border)" vertical={false} />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                tickLine={false}
-                axisLine={{ stroke: "var(--border)" }}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
-                tickFormatter={(v) => fmtCompact.format(Number(v))}
-                tickLine={false}
-                axisLine={false}
-                width={52}
-              />
-              <Tooltip
-                cursor={{ fill: "var(--accent)", opacity: 0.4 }}
-                contentStyle={{
-                  borderRadius: 6,
-                  border: "1px solid var(--border)",
-                  background: "var(--popover)",
-                  color: "var(--popover-foreground)",
-                  fontSize: 12,
-                  padding: "6px 10px",
-                  boxShadow: "0 4px 16px rgba(20,20,20,0.08)",
-                }}
-                formatter={(v, name) => [fmtPesos.format(Number(v ?? 0)), String(name)]}
-              />
-              <Legend content={() => null} />
-              {series.map((s) => (
-                <Bar
-                  key={s.key}
-                  dataKey={s.key}
-                  stackId="stack"
-                  fill={s.color}
-                  name={s.label}
-                  radius={[0, 0, 0, 0]}
+        <ChartContainer config={config} className="aspect-auto w-full" style={{ height }}>
+          <BarChart
+            accessibilityLayer
+            data={data}
+            margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
+          >
+            <CartesianGrid strokeDasharray="2 4" stroke="var(--border)" vertical={false} />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+              tickLine={false}
+              axisLine={{ stroke: "var(--border)" }}
+            />
+            <YAxis
+              tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+              tickFormatter={(v) => fmtCompact.format(Number(v))}
+              tickLine={false}
+              axisLine={false}
+              width={52}
+            />
+            <ChartTooltip
+              cursor={{ fill: "var(--accent)", opacity: 0.4 }}
+              content={
+                <ChartTooltipContent
+                  labelKey="label"
+                  formatter={(v, name) => (
+                    <div className="flex flex-1 justify-between gap-2">
+                      <span className="text-muted-foreground">{String(name)}</span>
+                      <span className="font-mono font-medium text-foreground tabular-nums">
+                        {fmtPesos.format(Number(v ?? 0))}
+                      </span>
+                    </div>
+                  )}
                 />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+              }
+            />
+            {series.map((s) => (
+              <Bar
+                key={s.key}
+                dataKey={s.key}
+                stackId="stack"
+                fill={`var(--color-${s.key})`}
+                name={s.label}
+                radius={[0, 0, 0, 0]}
+              />
+            ))}
+          </BarChart>
+        </ChartContainer>
       </CardContent>
     </Card>
   );

@@ -1,8 +1,14 @@
 "use client";
 
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { Cell, Pie, PieChart } from "recharts";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  type ChartConfig,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
 
 const fmtPesos = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -49,6 +55,10 @@ export function PieChartDistribution({
   const fmtValue = (v: number) =>
     valueFormat === "money" ? fmtPesos.format(v) : v.toLocaleString("es-AR");
 
+  const config = Object.fromEntries(
+    sorted.map((d, i) => [d.label, { label: d.label, color: PALETTE[i % PALETTE.length] }]),
+  ) satisfies ChartConfig;
+
   return (
     <Card size="sm">
       <CardHeader className="flex-row items-center justify-between border-b border-border/60 pb-2">
@@ -58,37 +68,38 @@ export function PieChartDistribution({
         </div>
       </CardHeader>
       <CardContent className="pt-2">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
-          <div style={{ height }} className="w-full">
-            <ResponsiveContainer width="100%" height="100%" minHeight={200}>
-              <PieChart>
-                <Pie
-                  data={sorted}
-                  dataKey="value"
-                  nameKey="label"
-                  outerRadius={Math.max(60, height / 2 - 16)}
-                  innerRadius={Math.max(30, height / 2 - 56)}
-                  paddingAngle={1}
-                >
-                  {sorted.map((d, i) => (
-                    <Cell key={d.label} fill={PALETTE[i % PALETTE.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    borderRadius: 6,
-                    border: "1px solid var(--border)",
-                    background: "var(--popover)",
-                    color: "var(--popover-foreground)",
-                    fontSize: 12,
-                    padding: "6px 10px",
-                    boxShadow: "0 4px 16px rgba(20,20,20,0.08)",
-                  }}
-                  formatter={(v, name) => [fmtValue(Number(v ?? 0)), String(name)]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+          <ChartContainer config={config} className="aspect-auto w-full" style={{ height }}>
+            <PieChart>
+              <Pie
+                data={sorted}
+                dataKey="value"
+                nameKey="label"
+                outerRadius={Math.max(60, height / 2 - 16)}
+                innerRadius={Math.max(30, height / 2 - 56)}
+                paddingAngle={1}
+              >
+                {sorted.map((d, i) => (
+                  <Cell key={d.label} fill={PALETTE[i % PALETTE.length]} />
+                ))}
+              </Pie>
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent
+                    nameKey="label"
+                    formatter={(v, name) => (
+                      <div className="flex flex-1 justify-between gap-2">
+                        <span className="text-muted-foreground">{String(name)}</span>
+                        <span className="font-mono font-medium text-foreground tabular-nums">
+                          {fmtValue(Number(v ?? 0))}
+                        </span>
+                      </div>
+                    )}
+                  />
+                }
+              />
+            </PieChart>
+          </ChartContainer>
           <ul className="flex flex-col gap-1.5 text-[11px]">
             {sorted.map((d, i) => (
               <li key={d.label} className="flex items-center gap-2">
