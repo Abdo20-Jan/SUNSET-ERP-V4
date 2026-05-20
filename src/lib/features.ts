@@ -60,3 +60,51 @@ export function isStockDualEnabled(): boolean {
 export function isCrmEnabled(): boolean {
   return process.env.CRM_ENABLED === "true";
 }
+
+/**
+ * Feature flag: contenedores + desconsolidación + despacho parcial
+ * cruzado (Comex ZPA). Modela contêineres físicos, evento de
+ * desconsolidación en depósito fiscal, divergencia formal (D9) y
+ * despachos parciales que cruzan contêineres.
+ *
+ * **Cuando está OFF (default)**: comportamiento legacy — el flujo
+ * embarque-céntrico (Embarque → ItemEmbarque → Despacho → ItemDespacho)
+ * opera sin cambios. Las tablas Contenedor/ItemContenedor/Desconsolidacion/
+ * DivergenciaInvestigacion existen pero quedan huérfanas; los counters de
+ * ItemContenedor no se usan. Zero regresión.
+ *
+ * **Cuando está ON**: habilita la captura de packing list por contenedor,
+ * la desconsolidación con counters (D1-bis) y el despacho parcial cruzado
+ * (Fases 2-4).
+ *
+ * **Activación**: setear `CONTENEDOR_DESCONSOLIDACION_ENABLED=true`.
+ * Default: off. Activar primero en staging.
+ *
+ * **Pre-requisitos** antes de prender la flag:
+ *  1. `pnpm db:push` ejecutado (tablas Fase 1 creadas).
+ *  2. `pnpm db:partial-indexes-contenedor --apply` ejecutado (UNIQUE
+ *     parciales de ItemContenedor — Q11).
+ */
+export function isContenedorDesconsolidacionEnabled(): boolean {
+  return process.env.CONTENEDOR_DESCONSOLIDACION_ENABLED === "true";
+}
+
+/**
+ * Feature flag: rastreo unitario de inventario (D1-bis lazy).
+ *
+ * **Cuando está OFF (default)**: la tabla `UnidadInventario` permanece
+ * VACÍA en producción. El día a día opera con los counters agregados de
+ * `ItemContenedor` (cantidadDisponible / cantidadEnDespacho /
+ * cantidadDespachada). Es el comportamiento normal.
+ *
+ * **Cuando está ON**: habilita la materialización on-demand de unidades
+ * individuales (helper futuro `materializarUnidades`) para casos de
+ * recall / garantía / sinistro. NO obliga a materializar — sólo la
+ * vuelve disponible.
+ *
+ * **Activación**: setear `UNIDAD_INVENTARIO_TRACKING_ENABLED=true`.
+ * Default: off. Depende de `CONTENEDOR_DESCONSOLIDACION_ENABLED`.
+ */
+export function isUnidadInventarioTrackingEnabled(): boolean {
+  return process.env.UNIDAD_INVENTARIO_TRACKING_ENABLED === "true";
+}
