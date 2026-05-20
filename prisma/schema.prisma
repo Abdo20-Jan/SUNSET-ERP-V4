@@ -244,6 +244,30 @@ enum UnidadEstadoAduanero {
   ANULADA
 }
 
+// Divergencia formal (D9): físico ≠ declarado en la desconsolidación.
+// No es ajuste mecánico — es investigación con tratamiento contable
+// dependiente de la causa-raíz.
+enum DivergenciaEstado {
+  EM_ANALISE
+  CONCLUIDA
+  ARQUIVADA
+}
+
+enum DivergenciaCausa {
+  FABRICA_ORIGEM
+  TRANSPORTE
+  DEPOSITARIO
+  SINISTRO_SEGURADO
+  NAO_IDENTIFICADA
+}
+
+enum DivergenciaResp {
+  FORNECEDOR
+  TRANSPORTADOR
+  SEGURADORA
+  NENHUM
+}
+
 // Estado del VEP (Volante Electrónico de Pago) generado al contabilizar
 // un despacho. Agrupa los tributos aduaneros pagables a la Aduana.
 enum VepEstado {
@@ -380,20 +404,21 @@ model Asiento {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  periodo              PeriodoContable      @relation(fields: [periodoId], references: [id])
+  periodo              PeriodoContable           @relation(fields: [periodoId], references: [id])
   lineas               LineaAsiento[]
   movimiento           MovimientoTesoreria?
   prestamo             PrestamoExterno?
   venta                Venta?
   compra               Compra?
-  embarqueCierre       Embarque?            @relation("EmbarqueAsientoCierre")
-  embarqueZonaPrimaria Embarque?            @relation("EmbarqueAsientoZP")
+  embarqueCierre       Embarque?                 @relation("EmbarqueAsientoCierre")
+  embarqueZonaPrimaria Embarque?                 @relation("EmbarqueAsientoZP")
   embarqueCosto        EmbarqueCosto?
   despacho             Despacho?
   gastoFijoRegistro    GastoFijoRegistro?
   gasto                Gasto?
   chequeRecibidoCobro  ChequeRecibido?
   entregaVenta         EntregaVenta?
+  divergenciaAjuste    DivergenciaInvestigacion?
 
   @@unique([periodoId, numero])
   @@index([fecha])
@@ -869,6 +894,7 @@ model ItemContenedor {
   producto           Producto           @relation(fields: [productoId], references: [id])
   movimientosStock   MovimientoStock[]
   unidadesInventario UnidadInventario[]
+  divergenciaItems   DivergenciaItem[]
 
   // El UNIQUE por (contenedor, producto, lote) se crea como PARTIAL INDEX
   // en raw SQL (PR 1.5), porque @@unique de Prisma no soporta WHERE y
@@ -894,9 +920,10 @@ model Desconsolidacion {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
-  contenedor       Contenedor        @relation(fields: [contenedorId], references: [id], onDelete: Cascade)
-  depositoFiscal   Deposito?         @relation("DesconsolidacionDepositoFiscal", fields: [depositoFiscalId], references: [id])
+  contenedor       Contenedor                @relation(fields: [contenedorId], references: [id], onDelete: Cascade)
+  depositoFiscal   Deposito?                 @relation("DesconsolidacionDepositoFiscal", fields: [depositoFiscalId], references: [id])
   movimientosStock MovimientoStock[]
+  divergencia      DivergenciaInvestigacion?
 
   @@index([contenedorId])
 }
@@ -971,6 +998,62 @@ model DespachoBorrador {
 
   @@index([userId, expiresAt])
   @@index([estadoActual, expiresAt])
+}
+
+// Investigación de divergencia formal (D9), 1:1 con Desconsolidacion.
+// Registra la conferencia física (peso, lacres, evidencias), el
+// diagnóstico de causa-raíz y el asiento de ajuste resultante. La
+// desconsolidación queda en AGUARDANDO_INVESTIGACAO hasta CONCLUIDA.
+model DivergenciaInvestigacion {
+  id                  String            @id @default(uuid())
+  desconsolidacionId  String            @unique
+  estado              DivergenciaEstado @default(EM_ANALISE)
+  // Conferencia física
+  pesoContenedorKg    Decimal?          @db.Decimal(10, 3) // peso real medido
+  pesoEsperadoKg      Decimal?          @db.Decimal(10, 3) // Σ pesoUnitario × cantidadDeclarada
+  lacreOrigemOk       Boolean?
+  lacreOrigemObs      String?
+  lacrePemaOk         Boolean?
+  lacreCustomsOk      Boolean?
+  gravacaoDescargaUrl String?
+  fotosUrls           String[]
+  documentosUrls      String[]
+  // Diagnóstico
+  causaIdentificada   DivergenciaCausa?
+  responsavelTipo     DivergenciaResp?
+  responsavelId       String? // ref. soft (Proveedor/Cliente/Seguradora — polimórfico por tipo)
+  polizaSeguro        String? // nº de póliza cuando SINISTRO_SEGURADO
+  // Resultado contable
+  asientoAjusteId     String?           @unique
+  observaciones       String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  closedAt            DateTime?
+  closedBy            Int? // ref. soft a User
+
+  desconsolidacion Desconsolidacion  @relation(fields: [desconsolidacionId], references: [id], onDelete: Cascade)
+  asientoAjuste    Asiento?          @relation(fields: [asientoAjusteId], references: [id])
+  items            DivergenciaItem[]
+
+  @@index([estado])
+}
+
+// Detalle por SKU de la divergencia (físico vs declarado + valor impactado).
+model DivergenciaItem {
+  id                         Int     @id @default(autoincrement())
+  divergenciaInvestigacionId String
+  itemContenedorId           Int
+  cantidadDeclarada          Int
+  cantidadFisica             Int
+  diferenciaUnidades         Int // física − declarada (negativo = falta; positivo = sobra)
+  valorImpactadoUSD          Decimal @db.Decimal(18, 4) // diff × FC unitario
+  observacaoItem             String?
+
+  divergencia    DivergenciaInvestigacion @relation(fields: [divergenciaInvestigacionId], references: [id], onDelete: Cascade)
+  itemContenedor ItemContenedor           @relation(fields: [itemContenedorId], references: [id])
+
+  @@index([divergenciaInvestigacionId])
+  @@index([itemContenedorId])
 }
 
 model Compra {
