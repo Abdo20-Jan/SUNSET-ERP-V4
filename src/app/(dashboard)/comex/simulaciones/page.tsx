@@ -8,6 +8,8 @@ import { Card } from "@/components/ui/card";
 
 import { SimulacionesTable } from "./simulaciones-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function SimulacionesPage() {
   const rows = await listarSimulaciones();
 

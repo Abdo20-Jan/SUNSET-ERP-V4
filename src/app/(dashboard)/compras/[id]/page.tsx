@@ -12,6 +12,8 @@ import { CompraDetailView } from "../_components/compra-detail-view";
 
 type PageParams = Promise<{ id: string }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function CompraDetailPage({
   params,
 }: {

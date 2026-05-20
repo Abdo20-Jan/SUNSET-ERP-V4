@@ -6,6 +6,8 @@ import { Card } from "@/components/ui/card";
 
 import { CuentasBancariasTable } from "./cuentas-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function CuentasBancariasPage() {
   const [cuentas, cuentasContables] = await Promise.all([
     listarCuentasBancariasConSaldo(),

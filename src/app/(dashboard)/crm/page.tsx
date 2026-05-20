@@ -40,6 +40,8 @@ async function fetchKpis(userId: string | undefined): Promise<Kpis> {
   };
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function CrmDashboardPage() {
   if (!isCrmEnabled()) {
     return (

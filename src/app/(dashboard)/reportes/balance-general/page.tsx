@@ -37,6 +37,8 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function BalanceGeneralPage({
   searchParams,
 }: {

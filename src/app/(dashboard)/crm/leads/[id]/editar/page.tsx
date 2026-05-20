@@ -5,6 +5,8 @@ import { isCrmEnabled } from "@/lib/features";
 
 import { LeadForm } from "../../_components/lead-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function EditarLeadPage({
   params,
 }: {

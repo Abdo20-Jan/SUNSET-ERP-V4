@@ -71,6 +71,8 @@ function mapValues(
   return out;
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function FlujoCajaPage({
   searchParams,
 }: {

@@ -4,6 +4,8 @@ import { listarTemplates } from "@/lib/actions/templates";
 import { isCrmEnabled } from "@/lib/features";
 import { fmtDate } from "@/lib/format";
 
+export const dynamic = "force-dynamic";
+
 export default async function TemplatesPage() {
   if (!isCrmEnabled()) {
     return (

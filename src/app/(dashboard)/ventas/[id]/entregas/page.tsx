@@ -10,6 +10,8 @@ import { EntregaActions } from "./_components/entrega-actions";
 
 type PageParams = Promise<{ id: string }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function EntregasPage({
   params,
 }: {

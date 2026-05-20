@@ -48,6 +48,8 @@ function parseMoneda(v: string | undefined): Moneda | null {
   return null;
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function EmbarquesPage({
   searchParams,
 }: {

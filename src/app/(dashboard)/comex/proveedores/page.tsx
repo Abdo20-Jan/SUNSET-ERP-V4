@@ -2,6 +2,8 @@ import { getSaldosExteriorPorProveedor } from "@/lib/services/cuentas-a-pagar";
 
 import { ProveedoresExteriorTable } from "./proveedores-exterior-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function ComexProveedoresPage() {
   const proveedores = await getSaldosExteriorPorProveedor();
 

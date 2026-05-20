@@ -19,6 +19,8 @@ import { SaldosBatchPago } from "./saldos-batch-pago";
 
 type SearchParams = Promise<{ filtro?: string }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function SaldosProveedoresPage({
   searchParams,
 }: {

@@ -10,6 +10,8 @@ import { PagosHistorialTable } from "../../../tesoreria/pagos-historial/pagos-hi
 
 type Params = Promise<{ id: string }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function ProveedorDetalleePage({ params }: { params: Params }) {
   const { id } = await params;
 
