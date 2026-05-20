@@ -311,6 +311,16 @@ function ContenedorCard({ contenedor, opcionesProducto, readonly }: ContenedorCa
             </span>
           )}
         </div>
+        {contenedor.estado === "EN_DEPOSITO_FISCAL" && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => router.push(`/comex/contenedores/${contenedor.id}/desconsolidacion`)}
+          >
+            Desconsolidar
+          </Button>
+        )}
         {editable && (
           <div className="flex items-center gap-2">
             {confirmDelete ? (
