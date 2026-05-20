@@ -20,7 +20,9 @@
     "db:setup": "prisma db push && tsx prisma/seed.ts",
     "db:backfill-stock": "tsx prisma/backfill-stock-por-deposito.ts",
     "db:validar-stock": "tsx prisma/validar-invariantes-stock.ts",
-    "db:partial-indexes-contenedor": "tsx prisma/add-partial-indexes-contenedor.ts"
+    "db:partial-indexes-contenedor": "tsx prisma/add-partial-indexes-contenedor.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "lint-staged": {
     "src/**/*.{ts,tsx,js,jsx,json,jsonc}": [
@@ -63,6 +65,7 @@
     "@biomejs/biome": "^1.9.4",
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@testcontainers/postgresql": "^11.14.0",
     "@types/node": "^20",
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
@@ -76,13 +79,16 @@
     "shadcn": "^4.7.0",
     "tailwindcss": "^4",
     "tsx": "^4.22.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^3.2.4"
   },
   "pnpm": {
     "overrides": {
       "postcss@<8.5.10": "^8.5.10",
       "@hono/node-server@<1.19.13": "^1.19.13",
       "qs@<6.15.2": "^6.15.2"
-    }
+    },
+    "onlyBuiltDependencies": ["esbuild"]
   }
 }
