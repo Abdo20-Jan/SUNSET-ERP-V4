@@ -3,12 +3,13 @@ import "server-only";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { eqMoney, gtZero, money, sumMoney, toDecimal } from "@/lib/decimal";
+import { eqMoney, gtZero, money, type MoneyInput, sumMoney, toDecimal } from "@/lib/decimal";
 import { isStockDualEnabled } from "@/lib/features";
 import { secureRandomInt } from "@/lib/secure-random";
-import { ensureCuentasMap, getOrCreateCuenta } from "@/lib/services/cuenta-auto";
+import { type CuentaDef, ensureCuentasMap, getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { revertirIngresoEmbarque } from "@/lib/services/stock";
 import {
+  COMEX_ZPA_CODIGOS,
   COMPRA_CODIGOS,
   EMBARQUE_CODIGOS,
   EXTRACTO_BANCARIO_CODIGOS,
@@ -22,6 +23,7 @@ import {
   AsientoEstado,
   AsientoOrigen,
   CuentaTipo,
+  DivergenciaCausa,
   EmbarqueEstado,
   Moneda,
   MovimientoTesoreriaTipo,
@@ -1367,6 +1369,236 @@ export async function crearAsientoZonaPrimaria(
     }
 
     return asiento;
+  };
+
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
+// Comex ZPA — transferencias entre subcuentas de bienes de cambio (PR 3.1)
+// ============================================================
+//
+// Helpers de bajo nivel que mueven el costo de la mercadería entre las
+// subcuentas según su estado físico/aduanero. Los consumen los servicios
+// de desconsolidación (Fase 3) y nacionalización; acá NO hay callers aún
+// (flag CONTENEDOR_DESCONSOLIDACION_ENABLED apagada). El asiento de
+// Responsabilidad Sustituta (cuentas de orden 9.x) se difiere a un PR
+// dedicado de Fase 3 — requiere la categoría ORDEN en CuentaCategoria.
+
+/** Flujo de mercadería entre subcuentas de bienes de cambio (1.1.5.x). */
+export type FlujoSubcuentaComex =
+  | "ARRIBO_ZONA_PRIMARIA" // DEBE 1.1.5.04 / HABER 1.1.5.02 (tránsito → ZPA)
+  | "TRASLADO_DEPOSITO_FISCAL" // DEBE 1.1.5.05 / HABER 1.1.5.04 (ZPA → DF)
+  | "NACIONALIZACION_VIA_DF" // DEBE 1.1.5.01 / HABER 1.1.5.05 (DF → nacional)
+  | "NACIONALIZACION_DIRECTA"; // DEBE 1.1.5.01 / HABER 1.1.5.04 (ZPA → nacional)
+
+const FLUJO_SUBCUENTA: Record<
+  FlujoSubcuentaComex,
+  { debe: CuentaDef; haber: CuentaDef; label: string }
+> = {
+  ARRIBO_ZONA_PRIMARIA: {
+    debe: COMEX_ZPA_CODIGOS.MERCADERIAS_EN_ZONA_PRIMARIA,
+    haber: EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO,
+    label: "Arribo a zona primaria aduanera",
+  },
+  TRASLADO_DEPOSITO_FISCAL: {
+    debe: COMEX_ZPA_CODIGOS.MERCADERIAS_EN_DEPOSITO_FISCAL,
+    haber: COMEX_ZPA_CODIGOS.MERCADERIAS_EN_ZONA_PRIMARIA,
+    label: "Traslado a depósito fiscal",
+  },
+  NACIONALIZACION_VIA_DF: {
+    debe: EMBARQUE_CODIGOS.MERCADERIAS,
+    haber: COMEX_ZPA_CODIGOS.MERCADERIAS_EN_DEPOSITO_FISCAL,
+    label: "Nacionalización vía depósito fiscal",
+  },
+  NACIONALIZACION_DIRECTA: {
+    debe: EMBARQUE_CODIGOS.MERCADERIAS,
+    haber: COMEX_ZPA_CODIGOS.MERCADERIAS_EN_ZONA_PRIMARIA,
+    label: "Nacionalización directa en puerto",
+  },
+};
+
+export interface AsientoTransferenciaSubcuentaInput {
+  flujo: FlujoSubcuentaComex;
+  /** Monto en ARS (costo de la mercadería transferida). Debe ser > 0. */
+  monto: MoneyInput;
+  fecha: Date;
+  /** Si no se pasa, se usa el label del flujo. */
+  descripcion?: string;
+}
+
+/**
+ * Asiento de transferencia de costo entre dos subcuentas de bienes de
+ * cambio, según el `flujo` aduanero. Dos líneas balanceadas (DEBE/HABER).
+ * Crea las cuentas lazy vía `getOrCreateCuenta` si aún no existen.
+ */
+export async function crearAsientoTransferenciaSubcuenta(
+  input: AsientoTransferenciaSubcuentaInput,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    if (!gtZero(input.monto)) {
+      throw new AsientoError(
+        "LINEA_INVALIDA",
+        "El monto de la transferencia entre subcuentas debe ser mayor a cero.",
+      );
+    }
+    const mapping = FLUJO_SUBCUENTA[input.flujo];
+    const debeId = await getOrCreateCuenta(inner, mapping.debe);
+    const haberId = await getOrCreateCuenta(inner, mapping.haber);
+    const valor = money(input.monto).toString();
+
+    return crearAsientoEnTx(inner, {
+      fecha: input.fecha,
+      descripcion: input.descripcion?.trim() || mapping.label,
+      origen: AsientoOrigen.COMEX,
+      lineas: [
+        {
+          cuentaId: debeId,
+          debe: valor,
+          haber: 0,
+          descripcion: `${mapping.label} (${mapping.debe.codigo})`,
+        },
+        {
+          cuentaId: haberId,
+          debe: 0,
+          haber: valor,
+          descripcion: `${mapping.label} (${mapping.haber.codigo})`,
+        },
+      ],
+    });
+  };
+
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
+// Comex ZPA — divergencia formal D9 (físico ≠ declarado) (PR 3.1)
+// ============================================================
+
+/** Sentido de la divergencia detectada en la conferencia física. */
+export type TipoDivergencia = "FALTA" | "SOBRA";
+/** Subcuenta donde está contabilizada la mercadería al detectar la divergencia. */
+export type UbicacionMercaderia = "ZONA_PRIMARIA" | "DEPOSITO_FISCAL";
+
+export interface AsientoDivergenciaInput {
+  tipo: TipoDivergencia;
+  causa: DivergenciaCausa;
+  /** Monto en ARS del costo de la diferencia. Debe ser > 0. */
+  monto: MoneyInput;
+  ubicacion: UbicacionMercaderia;
+  /**
+   * Cuenta a cobrar al responsable. Obligatoria en FALTA con causa
+   * distinta de NAO_IDENTIFICADA (proveedor/transportista/depositario/
+   * aseguradora). Ignorada en SOBRA o falta sin responsable.
+   */
+  cuentaPorCobrarId?: number;
+  fecha: Date;
+  descripcion?: string;
+}
+
+/**
+ * Asiento de regularización de una divergencia formal (D9).
+ *
+ *  - SOBRA: DEBE subcuenta stock / HABER 4.9.1.01 (ingreso por diferencia).
+ *  - FALTA sin responsable (NAO_IDENTIFICADA): DEBE 5.9.2.01 (pérdida) /
+ *    HABER subcuenta stock.
+ *  - FALTA con responsable: DEBE `cuentaPorCobrarId` / HABER subcuenta stock.
+ *
+ * `ubicacion` decide la subcuenta de stock (1.1.5.04 ZPA o 1.1.5.05 DF).
+ */
+export async function crearAsientoDivergencia(
+  input: AsientoDivergenciaInput,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    if (!gtZero(input.monto)) {
+      throw new AsientoError("LINEA_INVALIDA", "El monto de la divergencia debe ser mayor a cero.");
+    }
+
+    const subcuentaDef =
+      input.ubicacion === "DEPOSITO_FISCAL"
+        ? COMEX_ZPA_CODIGOS.MERCADERIAS_EN_DEPOSITO_FISCAL
+        : COMEX_ZPA_CODIGOS.MERCADERIAS_EN_ZONA_PRIMARIA;
+    const subcuentaId = await getOrCreateCuenta(inner, subcuentaDef);
+    const valor = money(input.monto).toString();
+    const ubicacionLabel = `${subcuentaDef.codigo}`;
+
+    let lineas: LineaInput[];
+    let descripcion: string;
+
+    if (input.tipo === "SOBRA") {
+      const ingresoId = await getOrCreateCuenta(
+        inner,
+        COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO,
+      );
+      descripcion = input.descripcion?.trim() || `Divergencia D9 — sobra (${ubicacionLabel})`;
+      lineas = [
+        {
+          cuentaId: subcuentaId,
+          debe: valor,
+          haber: 0,
+          descripcion: `Sobra de inventario (${ubicacionLabel})`,
+        },
+        {
+          cuentaId: ingresoId,
+          debe: 0,
+          haber: valor,
+          descripcion: `Ingreso por diferencia de inventario (${COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO.codigo})`,
+        },
+      ];
+    } else if (input.causa === DivergenciaCausa.NAO_IDENTIFICADA) {
+      const perdidaId = await getOrCreateCuenta(inner, COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS);
+      descripcion =
+        input.descripcion?.trim() || `Divergencia D9 — falta sin responsable (${ubicacionLabel})`;
+      lineas = [
+        {
+          cuentaId: perdidaId,
+          debe: valor,
+          haber: 0,
+          descripcion: `Pérdida logística (${COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS.codigo})`,
+        },
+        {
+          cuentaId: subcuentaId,
+          debe: 0,
+          haber: valor,
+          descripcion: `Faltante de inventario (${ubicacionLabel})`,
+        },
+      ];
+    } else {
+      if (input.cuentaPorCobrarId == null) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `Divergencia D9 con responsable (${input.causa}) requiere cuentaPorCobrarId.`,
+        );
+      }
+      descripcion =
+        input.descripcion?.trim() ||
+        `Divergencia D9 — falta a cobrar a ${input.causa} (${ubicacionLabel})`;
+      lineas = [
+        {
+          cuentaId: input.cuentaPorCobrarId,
+          debe: valor,
+          haber: 0,
+          descripcion: `A cobrar al responsable (${input.causa})`,
+        },
+        {
+          cuentaId: subcuentaId,
+          debe: 0,
+          haber: valor,
+          descripcion: `Faltante de inventario (${ubicacionLabel})`,
+        },
+      ];
+    }
+
+    return crearAsientoEnTx(inner, {
+      fecha: input.fecha,
+      descripcion,
+      origen: AsientoOrigen.COMEX,
+      lineas,
+    });
   };
 
   if (tx) return run(tx);
