@@ -79,7 +79,7 @@ jobs:
 
       - name: Criar issue em caso de violação
         if: steps.validar.outputs.exit_code != '0' && github.event_name == 'schedule'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
