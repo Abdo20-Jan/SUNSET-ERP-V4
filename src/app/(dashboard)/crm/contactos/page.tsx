@@ -3,6 +3,8 @@ import { isCrmEnabled } from "@/lib/features";
 
 import { ContactosTable } from "./_components/contactos-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function ContactosPage() {
   if (!isCrmEnabled()) {
     return (

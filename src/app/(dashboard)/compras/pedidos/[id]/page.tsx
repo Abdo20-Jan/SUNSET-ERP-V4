@@ -13,6 +13,8 @@ import { PedidoCompraForm } from "../_components/pedido-compra-form";
 type PageParams = Promise<{ id: string }>;
 type SearchParams = Promise<{ editar?: string }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function PedidoCompraDetailPage({
   params,
   searchParams,

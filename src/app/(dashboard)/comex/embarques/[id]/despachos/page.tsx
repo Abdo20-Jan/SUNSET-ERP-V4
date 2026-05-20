@@ -16,6 +16,8 @@ import { CrearDespachoForm } from "./_components/crear-despacho-form";
 
 type PageParams = Promise<{ id: string }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function DespachosEmbarquePage({
   params,
 }: {

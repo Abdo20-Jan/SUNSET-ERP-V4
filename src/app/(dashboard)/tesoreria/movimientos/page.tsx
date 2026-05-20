@@ -60,6 +60,8 @@ type SearchParams = Promise<{
   tipo?: string;
 }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function MovimientosPage({
   searchParams,
 }: {

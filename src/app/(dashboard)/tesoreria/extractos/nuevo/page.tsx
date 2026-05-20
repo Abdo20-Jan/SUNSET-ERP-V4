@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { ExtractoUploadForm, type CuentaBancariaOption } from "./upload-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevoExtractoPage() {
   const cuentasRaw = await db.cuentaBancaria.findMany({
     orderBy: [{ banco: "asc" }, { moneda: "asc" }],

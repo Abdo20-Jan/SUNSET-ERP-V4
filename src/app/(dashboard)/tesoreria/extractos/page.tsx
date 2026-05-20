@@ -34,6 +34,8 @@ const STATUS_LABEL: Record<ImportacionExtractoStatus, string> = {
   CANCELADO: "Cancelado",
 };
 
+export const dynamic = "force-dynamic";
+
 export default async function ExtractosPage() {
   const importaciones = await db.importacionExtracto.findMany({
     orderBy: [{ periodoYear: "desc" }, { periodoMonth: "desc" }, { createdAt: "desc" }],

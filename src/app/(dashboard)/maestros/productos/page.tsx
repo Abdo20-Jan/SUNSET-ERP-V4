@@ -3,6 +3,8 @@ import { Card } from "@/components/ui/card";
 
 import { ProductosTable } from "./productos-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function ProductosPage() {
   const productos = await listarProductos();
 

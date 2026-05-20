@@ -14,6 +14,8 @@ import { EmbarqueForm } from "../_components/embarque-form";
 
 type PageParams = Promise<{ id: string }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function EditarEmbarquePage({
   params,
 }: {

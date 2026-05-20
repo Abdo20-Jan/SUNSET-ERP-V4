@@ -3,6 +3,8 @@ import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { TransferenciaForm } from "./transferencia-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevaTransferenciaPage() {
   const [cuentasBancarias, defaultFecha] = await Promise.all([
     listarCuentasBancariasParaMovimiento(),

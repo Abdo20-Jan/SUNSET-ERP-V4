@@ -26,6 +26,8 @@ const SECTIONS = [
   },
 ] as const;
 
+export const dynamic = "force-dynamic";
+
 export default function ComexPage() {
   return (
     <div className="flex flex-col gap-3">

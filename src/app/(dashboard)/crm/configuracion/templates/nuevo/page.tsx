@@ -2,6 +2,8 @@ import { isCrmEnabled } from "@/lib/features";
 
 import { TemplateForm } from "../_components/template-form";
 
+export const dynamic = "force-dynamic";
+
 export default function NuevoTemplatePage() {
   if (!isCrmEnabled()) {
     return (

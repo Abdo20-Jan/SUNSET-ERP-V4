@@ -25,6 +25,8 @@ function parseDate(v: string | undefined): Date | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function PagosHistorialPage({
   searchParams,
 }: {
