@@ -368,5 +368,76 @@ export async function validarInvariantePackingList(
   return run(db);
 }
 
+// ----- Lectura para la UI (PR 2.3) ---------------------------------------
+
+/** Línea del packing list serializable (Decimals → string, fechas → ISO). */
+export interface PackingItemDTO {
+  id: number;
+  productoId: string;
+  cantidadDeclarada: number;
+  costoFCUnitario: string | null;
+  pesoUnitarioKg: string | null;
+  ncm: string | null;
+  paisOrigen: string | null;
+  loteFabricacion: string | null;
+  observaciones: string | null;
+}
+
+/** Contenedor + su packing list, listo para cruzar el boundary server→client. */
+export interface ContenedorPackingDTO {
+  id: string;
+  numeroContenedor: string;
+  tipo: string | null;
+  numeroBL: string | null;
+  numeroHBL: string | null;
+  estado: ContenedorEstado;
+  /** Editable mientras no haya llegado a depósito fiscal (mismo gate que el service). */
+  editable: boolean;
+  /** Token de bloqueo optimista (Contenedor.updatedAt en ISO). */
+  updatedAt: string;
+  items: PackingItemDTO[];
+}
+
+/**
+ * Lista los contenedores de un embarque con su packing list, en una forma
+ * serializable para Server Components / Client Components (la UI de PR 2.3).
+ */
+export async function listarPackingListDeEmbarque(
+  embarqueId: string,
+  tx?: TxClient,
+): Promise<ContenedorPackingDTO[]> {
+  const run = async (inner: TxClient): Promise<ContenedorPackingDTO[]> => {
+    const contenedores = await inner.contenedor.findMany({
+      where: { embarqueId },
+      orderBy: { createdAt: "asc" },
+      include: { items: { orderBy: { id: "asc" } } },
+    });
+    return contenedores.map((c) => ({
+      id: c.id,
+      numeroContenedor: c.numeroContenedor,
+      tipo: c.tipo,
+      numeroBL: c.numeroBL,
+      numeroHBL: c.numeroHBL,
+      estado: c.estado,
+      editable: esEditable(c.estado),
+      updatedAt: c.updatedAt.toISOString(),
+      items: c.items.map((it) => ({
+        id: it.id,
+        productoId: it.productoId,
+        cantidadDeclarada: it.cantidadDeclarada,
+        costoFCUnitario: it.costoFCUnitario?.toString() ?? null,
+        pesoUnitarioKg: it.pesoUnitarioKg?.toString() ?? null,
+        ncm: it.ncm,
+        paisOrigen: it.paisOrigen,
+        loteFabricacion: it.loteFabricacion,
+        observaciones: it.observaciones,
+      })),
+    }));
+  };
+
+  if (tx) return run(tx);
+  return run(db);
+}
+
 // Re-export para callers que necesiten el tipo del item persistido.
 export type { ItemContenedor };

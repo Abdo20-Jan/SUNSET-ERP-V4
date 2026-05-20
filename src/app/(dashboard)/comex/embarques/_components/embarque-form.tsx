@@ -31,6 +31,8 @@ import {
 } from "./cerrar-embarque-dialog";
 import { ProveedorCombobox, type ProveedorOption } from "@/components/proveedor-combobox";
 import { ProductoCombobox, type ProductoOption } from "@/components/producto-combobox";
+import { ContenedorMatriz } from "./contenedor-matriz";
+import type { ContenedorPackingDTO } from "@/lib/services/contenedor";
 import { CuentaCombobox, type CuentaOption } from "@/components/cuenta-combobox";
 import Decimal from "decimal.js";
 
@@ -282,6 +284,8 @@ type Props =
       initialData: EmbarqueDetalle;
       readonly: boolean;
       defaultFecha?: string;
+      contenedorEnabled: boolean;
+      contenedores: ContenedorPackingDTO[];
     };
 
 export function EmbarqueForm(props: Props) {
@@ -1239,6 +1243,20 @@ export function EmbarqueForm(props: Props) {
           </p>
         </CardContent>
       </Card>
+
+      {/* Sección 6: Contenedores (flag CONTENEDOR_DESCONSOLIDACION_ENABLED) */}
+      {props.mode === "edit" && props.contenedorEnabled && (
+        <ContenedorMatriz
+          embarqueId={props.initialData.id}
+          productos={props.productos}
+          itemsEmbarque={props.initialData.items.map((it) => ({
+            productoId: it.productoId,
+            cantidad: it.cantidad,
+          }))}
+          contenedores={props.contenedores}
+          readonly={readonly}
+        />
+      )}
 
       {/* Spacer pra que el contenido no quede oculto detrás del action bar */}
       <div className="h-16" aria-hidden />
