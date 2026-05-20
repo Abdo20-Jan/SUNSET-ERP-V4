@@ -439,5 +439,86 @@ export async function listarPackingListDeEmbarque(
   return run(db);
 }
 
+// ----- Lectura para la desconsolidación (PR 3.4) -------------------------
+
+/** Línea del packing list lista para la UI de conferencia física. */
+export interface ItemDesconsolidacionDTO {
+  /** itemContenedorId — la clave de la conferencia. */
+  id: number;
+  productoId: string;
+  /** "código — nombre" resuelto en el server. */
+  productoLabel: string;
+  cantidadDeclarada: number;
+  costoFCUnitario: string | null;
+}
+
+/** Contenedor + sus gates de desconsolidación, serializable server→client. */
+export interface ContenedorDesconsolidacionDTO {
+  id: string;
+  numeroContenedor: string;
+  embarqueId: string;
+  embarqueCodigo: string;
+  estado: ContenedorEstado;
+  /** Sólo se desconsolida desde EN_DEPOSITO_FISCAL. */
+  puedeDesconsolidar: boolean;
+  /** Todos los items tienen costoFCUnitario != null (gate D3). */
+  fcCerrado: boolean;
+  depositoFiscalAsignado: boolean;
+  tipoCambioValido: boolean;
+  items: ItemDesconsolidacionDTO[];
+}
+
+/**
+ * Carga un contenedor con los datos y gates que la página de desconsolidación
+ * (PR 3.4) necesita. Devuelve `null` si no existe. Centraliza la
+ * serialización (Decimal→string) y el cálculo de los gates espejados en la UI;
+ * el service `desconsolidar` revalida igual estos invariantes.
+ */
+export async function obtenerContenedorParaDesconsolidacion(
+  contenedorId: string,
+  tx?: TxClient,
+): Promise<ContenedorDesconsolidacionDTO | null> {
+  const run = async (inner: TxClient): Promise<ContenedorDesconsolidacionDTO | null> => {
+    const contenedor = await inner.contenedor.findUnique({
+      where: { id: contenedorId },
+      include: {
+        items: { orderBy: { id: "asc" } },
+        embarque: { select: { codigo: true, tipoCambio: true } },
+      },
+    });
+    if (!contenedor) return null;
+
+    const productoIds = Array.from(new Set(contenedor.items.map((it) => it.productoId)));
+    const productos = await inner.producto.findMany({
+      where: { id: { in: productoIds } },
+      select: { id: true, codigo: true, nombre: true },
+    });
+    const labelMap = new Map(productos.map((p) => [p.id, `${p.codigo} — ${p.nombre}`]));
+
+    return {
+      id: contenedor.id,
+      numeroContenedor: contenedor.numeroContenedor,
+      embarqueId: contenedor.embarqueId,
+      embarqueCodigo: contenedor.embarque.codigo,
+      estado: contenedor.estado,
+      puedeDesconsolidar: contenedor.estado === ContenedorEstado.EN_DEPOSITO_FISCAL,
+      fcCerrado:
+        contenedor.items.length > 0 && contenedor.items.every((it) => it.costoFCUnitario != null),
+      depositoFiscalAsignado: contenedor.depositoFiscalId != null,
+      tipoCambioValido: contenedor.embarque.tipoCambio.greaterThan(0),
+      items: contenedor.items.map((it) => ({
+        id: it.id,
+        productoId: it.productoId,
+        productoLabel: labelMap.get(it.productoId) ?? it.productoId,
+        cantidadDeclarada: it.cantidadDeclarada,
+        costoFCUnitario: it.costoFCUnitario?.toString() ?? null,
+      })),
+    };
+  };
+
+  if (tx) return run(tx);
+  return run(db);
+}
+
 // Re-export para callers que necesiten el tipo del item persistido.
 export type { ItemContenedor };
