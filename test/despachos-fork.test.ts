@@ -16,9 +16,14 @@ const h = vi.hoisted(() => {
       {},
       {
         get(_t, prop) {
-          // biome-ignore lint/suspicious/noExplicitAny: forwarding genérico al client
-          const value = (client as any)?.[prop];
-          return typeof value === "function" ? value.bind(client) : value;
+          // Forwarding genérico al client: tipamos como record para evitar `any`.
+          const target = client as unknown as
+            | Record<string | symbol, unknown>
+            | undefined;
+          const value = target?.[prop];
+          return typeof value === "function"
+            ? (value as (...args: unknown[]) => unknown).bind(client)
+            : value;
         },
       },
     ),
