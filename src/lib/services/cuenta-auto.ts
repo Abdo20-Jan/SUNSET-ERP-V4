@@ -37,6 +37,11 @@ const SINTETICA_DEFAULTS: Record<string, string> = {
   "1.1.6": "INVERSIONES",
   "5.9.1": "PROVISIONES",
   "5.7.1": "GASTOS NO OPERATIVOS",
+  // Comex ZPA / divergencia D9 (PR 1.4): padres sintéticos de las
+  // cuentas de diferencia de inventario, para evitar "RUBRO 4.9/5.9.2".
+  "4.9": "OTROS INGRESOS",
+  "4.9.1": "DIFERENCIAS DE INVENTARIO",
+  "5.9.2": "PÉRDIDAS Y FALTANTES",
 };
 
 /**
