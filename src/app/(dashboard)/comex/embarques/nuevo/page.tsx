@@ -9,6 +9,8 @@ import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { EmbarqueForm } from "../_components/embarque-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevoEmbarquePage() {
   const [proveedores, productos, depositos, cuentasGasto, codigoSugerido, defaultFecha] =
     await Promise.all([

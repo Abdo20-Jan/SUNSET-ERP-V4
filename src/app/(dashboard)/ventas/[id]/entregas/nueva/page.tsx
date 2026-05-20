@@ -11,6 +11,8 @@ import { NuevaEntregaForm } from "./_components/nueva-entrega-form";
 
 type PageParams = Promise<{ id: string }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevaEntregaPage({
   params,
 }: {

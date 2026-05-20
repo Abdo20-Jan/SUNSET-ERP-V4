@@ -6,6 +6,8 @@ import {
 
 import { PedidoVentaForm } from "../_components/pedido-venta-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevoPedidoVentaPage() {
   const [clientes, productos, numero] = await Promise.all([
     listarClientesParaPedidoVenta(),

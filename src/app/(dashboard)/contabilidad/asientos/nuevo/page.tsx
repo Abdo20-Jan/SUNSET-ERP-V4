@@ -4,6 +4,8 @@ import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { AsientoForm } from "./asiento-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevoAsientoPage() {
   const [cuentas, defaultFecha] = await Promise.all([
     db.cuentaContable.findMany({

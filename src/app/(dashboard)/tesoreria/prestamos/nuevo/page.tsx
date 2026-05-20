@@ -8,6 +8,8 @@ import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { PrestamoForm } from "./prestamo-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevoPrestamoPage() {
   const [
     cuentasBancarias,

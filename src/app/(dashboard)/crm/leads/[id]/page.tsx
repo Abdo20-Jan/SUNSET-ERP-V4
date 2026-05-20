@@ -9,6 +9,8 @@ import { AiSection } from "./_components/ai-section";
 import { ConvertirClienteButton } from "./_components/convertir-cliente-button";
 import { EliminarLeadButton } from "./_components/eliminar-lead-button";
 
+export const dynamic = "force-dynamic";
+
 export default async function LeadDetailPage({
   params,
 }: {

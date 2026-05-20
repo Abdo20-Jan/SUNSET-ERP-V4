@@ -4,6 +4,8 @@ import { Card } from "@/components/ui/card";
 
 import { ClientesTable } from "./clientes-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function ClientesPage() {
   const [clientes, cuentas, provincias] = await Promise.all([
     listarClientes(),

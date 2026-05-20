@@ -4,6 +4,8 @@ import { isCrmEnabled } from "@/lib/features";
 
 import { ImportForm } from "./_components/import-form";
 
+export const dynamic = "force-dynamic";
+
 export default function ImportLeadsPage() {
   if (!isCrmEnabled()) {
     return (

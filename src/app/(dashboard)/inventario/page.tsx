@@ -11,6 +11,8 @@ import { InventarioTabs } from "./_components/inventario-tabs";
 
 type SearchParams = Promise<{ q?: string; tab?: string }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function InventarioPage({
   searchParams,
 }: {

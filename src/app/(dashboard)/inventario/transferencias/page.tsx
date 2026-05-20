@@ -5,6 +5,8 @@ import { isStockDualEnabled } from "@/lib/features";
 
 import { TransferenciaRow } from "./_components/transferencia-row";
 
+export const dynamic = "force-dynamic";
+
 export default async function TransferenciasPage() {
   if (!isStockDualEnabled()) {
     return (

@@ -3,6 +3,8 @@ import { Card } from "@/components/ui/card";
 
 import { CuentasTreeTable, type CuentaNode } from "./cuentas-tree-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function CuentasPage() {
   const cuentas = await db.cuentaContable.findMany({
     orderBy: { codigo: "asc" },

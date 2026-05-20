@@ -19,7 +19,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:setup": "prisma db push && tsx prisma/seed.ts",
     "db:backfill-stock": "tsx prisma/backfill-stock-por-deposito.ts",
-    "db:validar-stock": "tsx prisma/validar-invariantes-stock.ts"
+    "db:validar-stock": "tsx prisma/validar-invariantes-stock.ts",
+    "db:partial-indexes-contenedor": "tsx prisma/add-partial-indexes-contenedor.ts"
   },
   "lint-staged": {
     "src/**/*.{ts,tsx,js,jsx,json,jsonc}": [

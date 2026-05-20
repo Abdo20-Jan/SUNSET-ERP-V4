@@ -158,6 +158,8 @@ function buildContexto(a: AsientoConRelaciones): { etiqueta: string; lineas: str
   return { etiqueta: "", lineas: [] };
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function MoverPeriodoPage({
   searchParams,
 }: {

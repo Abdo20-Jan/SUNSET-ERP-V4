@@ -10,6 +10,8 @@ import { SimulacionForm } from "../_components/simulacion-form";
 
 type Params = Promise<{ id: string }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function EditarSimulacionPage({ params }: { params: Params }) {
   const { id } = await params;
 

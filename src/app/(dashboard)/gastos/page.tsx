@@ -9,6 +9,8 @@ import { DateRangeFilter } from "@/components/date-range-filter";
 
 import { GastosTable } from "./_components/gastos-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function GastosPage({
   searchParams,
 }: {
