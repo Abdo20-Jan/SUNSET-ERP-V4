@@ -23,8 +23,20 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         const parsed = credentialsSchema.safeParse(raw);
         if (!parsed.success) return null;
 
+        // `select` explícito previne vazamento de colunas novas para o session
+        // token quando o schema User ganhar campos (princípio de menor surpresa).
         const user = await db.user.findUnique({
           where: { username: parsed.data.username },
+          select: {
+            id: true,
+            username: true,
+            nombre: true,
+            role: true,
+            activo: true,
+            passwordHash: true,
+            monedaPreferida: true,
+            modoRetroactivo: true,
+          },
         });
         if (!user || !user.activo) return null;
 

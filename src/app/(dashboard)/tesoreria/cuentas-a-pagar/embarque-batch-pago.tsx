@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 
+import Decimal from "decimal.js";
+
 import {
+  type AplicarPagoA,
   crearMovimientoTesoreriaAction,
   pagarConIntermediarioAction,
   type CuentaBancariaOption,
@@ -130,10 +133,29 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, default
     const lineas = seleccionados.map((r) => {
       const override = montosOverride[rowKey(r)];
       const monto = override !== undefined ? override : r.pendienteArs;
+
+      // Layer 0 — distribuir `monto` FIFO entre las facturas de este
+      // grupo (embarque+proveedor). Todas las facturas son EmbarqueCosto.
+      let remaining = new Decimal(monto);
+      const appliedTo: AplicarPagoA[] = [];
+      const facturasOrdered = [...r.facturas].sort((a, b) => a.fecha.localeCompare(b.fecha));
+      for (const f of facturasOrdered) {
+        if (remaining.lte(0.005)) break;
+        const facturaMonto = new Decimal(f.totalArs);
+        const tomar = facturaMonto.gt(remaining) ? remaining : facturaMonto;
+        appliedTo.push({
+          tipo: "embarqueCosto",
+          id: f.id,
+          montoArs: tomar.toFixed(2),
+        });
+        remaining = remaining.minus(tomar);
+      }
+
       return {
         cuentaContableId: r.proveedorCuentaContableId!,
         monto,
         descripcion: `${r.embarqueCodigo} — ${r.proveedorNombre}`,
+        appliedTo: appliedTo.length > 0 ? appliedTo : undefined,
       };
     });
 

@@ -48,7 +48,8 @@ export type AsientoErrorCode =
   | "PERIODO_ORIGEN_CERRADO"
   | "PERIODO_DESTINO_CERRADO"
   | "PERIODO_DESTINO_INEXISTENTE"
-  | "MISMO_PERIODO";
+  | "MISMO_PERIODO"
+  | "CONCURRENCIA";
 
 export class AsientoError extends Error {
   readonly code: AsientoErrorCode;
@@ -577,10 +578,16 @@ export async function crearAsientoPrestamo(
       ],
     });
 
-    await inner.prestamoExterno.update({
-      where: { id: prestamoId },
+    const updPrestamo = await inner.prestamoExterno.updateMany({
+      where: { id: prestamoId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updPrestamo.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Préstamo ${prestamoId} fue contabilizado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
 
     return asiento;
   };
@@ -682,10 +689,16 @@ export async function crearAsientoMovimientoTesoreria(
       lineas,
     });
 
-    await inner.movimientoTesoreria.update({
-      where: { id: movimientoId },
+    const updMov = await inner.movimientoTesoreria.updateMany({
+      where: { id: movimientoId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updMov.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `MovimientoTesoreria ${movimientoId} fue contabilizado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
 
     return asiento;
   };
@@ -1135,10 +1148,16 @@ export async function crearAsientoEmbarque(
       lineas: lineasInput,
     });
 
-    await inner.embarque.update({
-      where: { id: embarqueId },
+    const updEmbCierre = await inner.embarque.updateMany({
+      where: { id: embarqueId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updEmbCierre.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Embarque ${embarqueId} fue cerrado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
 
     return asiento;
   };
@@ -1333,13 +1352,19 @@ export async function crearAsientoZonaPrimaria(
       lineas: lineasInput,
     });
 
-    await inner.embarque.update({
-      where: { id: embarqueId },
+    const updEmbZP = await inner.embarque.updateMany({
+      where: { id: embarqueId, asientoZonaPrimariaId: null },
       data: {
         asientoZonaPrimariaId: asiento.id,
         estado: "EN_ZONA_PRIMARIA",
       },
     });
+    if (updEmbZP.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Embarque ${embarqueId}: zona primaria fue confirmada simultáneamente por otro proceso (race detectado).`,
+      );
+    }
 
     return asiento;
   };
@@ -1739,10 +1764,16 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
       }
     }
 
-    await inner.despacho.update({
-      where: { id: despacho.id },
+    const updDesp = await inner.despacho.updateMany({
+      where: { id: despacho.id, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updDesp.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Despacho ${despacho.id} fue contabilizado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
 
     return asiento;
   };
@@ -1998,10 +2029,16 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
       tipoCambio: 1,
       lineas,
     });
-    await inner.venta.update({
-      where: { id: ventaId },
+    const updVenta = await inner.venta.updateMany({
+      where: { id: ventaId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updVenta.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Venta ${ventaId} fue emitida simultáneamente por otro proceso (race detectado).`,
+      );
+    }
     return asiento;
   };
   if (tx) return run(tx);
@@ -2079,10 +2116,16 @@ export async function crearAsientoEntrega(entregaId: string, tx?: TxClient): Pro
       tipoCambio: 1,
       lineas,
     });
-    await inner.entregaVenta.update({
-      where: { id: entregaId },
+    const updEntrega = await inner.entregaVenta.updateMany({
+      where: { id: entregaId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updEntrega.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `EntregaVenta ${entregaId} fue contabilizada simultáneamente por otro proceso (race detectado).`,
+      );
+    }
     return asiento;
   };
   if (tx) return run(tx);
@@ -2198,10 +2241,16 @@ export async function crearAsientoCompra(compraId: string, tx?: TxClient): Promi
       tipoCambio: 1,
       lineas,
     });
-    await inner.compra.update({
-      where: { id: compraId },
+    const updCompra = await inner.compra.updateMany({
+      where: { id: compraId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updCompra.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Compra ${compraId} fue emitida simultáneamente por otro proceso (race detectado).`,
+      );
+    }
     return asiento;
   };
   if (tx) return run(tx);
@@ -2337,10 +2386,16 @@ export async function crearAsientoGasto(gastoId: string, tx?: TxClient): Promise
       tipoCambio: 1,
       lineas,
     });
-    await inner.gasto.update({
-      where: { id: gastoId },
+    const updGasto = await inner.gasto.updateMany({
+      where: { id: gastoId, asientoId: null },
       data: { asientoId: asiento.id, estado: "CONTABILIZADO" },
     });
+    if (updGasto.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Gasto ${gastoId} fue contabilizado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
     return asiento;
   };
   if (tx) return run(tx);
@@ -2483,10 +2538,16 @@ export async function crearAsientoEmbarqueCosto(
       lineas,
     });
     await contabilizarEnTx(inner, asiento.id);
-    await inner.embarqueCosto.update({
-      where: { id: costoId },
+    const updCosto = await inner.embarqueCosto.updateMany({
+      where: { id: costoId, asientoId: null },
       data: { asientoId: asiento.id, estado: "EMITIDA" },
     });
+    if (updCosto.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `EmbarqueCosto ${costoId} fue emitido simultáneamente por otro proceso (race detectado).`,
+      );
+    }
     return asiento;
   };
   if (tx) return run(tx);
