@@ -229,6 +229,21 @@ enum ContenedorEstado {
   CANCELADO
 }
 
+// Estado aduanero de una unidad individual (D1-bis). La tabla
+// UnidadInventario se crea vacía en prod y sólo se materializa on-demand
+// (recall/garantía futuros); este enum define su máquina de estados.
+enum UnidadEstadoAduanero {
+  EN_TRANSITO
+  ZPA
+  DEPOSITO_FISCAL
+  BONDED
+  EN_DESPACHO
+  NACIONALIZADA
+  BLOQUEADA
+  DIVERGENTE
+  ANULADA
+}
+
 // Estado del VEP (Volante Electrónico de Pago) generado al contabilizar
 // un despacho. Agrupa los tributos aduaneros pagables a la Aduana.
 enum VepEstado {
@@ -590,16 +605,17 @@ model Embarque {
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 
-  proveedor            Proveedor       @relation(fields: [proveedorId], references: [id])
+  proveedor            Proveedor          @relation(fields: [proveedorId], references: [id])
   items                ItemEmbarque[]
   costos               EmbarqueCosto[]
-  asiento              Asiento?        @relation("EmbarqueAsientoCierre", fields: [asientoId], references: [id])
-  asientoZonaPrimaria  Asiento?        @relation("EmbarqueAsientoZP", fields: [asientoZonaPrimariaId], references: [id])
-  depositoDestino      Deposito?       @relation("EmbarqueDepositoDestino", fields: [depositoDestinoId], references: [id])
-  depositoZonaPrimaria Deposito?       @relation("EmbarqueDepositoZP", fields: [depositoZonaPrimariaId], references: [id])
-  pedidoCompra         PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
+  asiento              Asiento?           @relation("EmbarqueAsientoCierre", fields: [asientoId], references: [id])
+  asientoZonaPrimaria  Asiento?           @relation("EmbarqueAsientoZP", fields: [asientoZonaPrimariaId], references: [id])
+  depositoDestino      Deposito?          @relation("EmbarqueDepositoDestino", fields: [depositoDestinoId], references: [id])
+  depositoZonaPrimaria Deposito?          @relation("EmbarqueDepositoZP", fields: [depositoZonaPrimariaId], references: [id])
+  pedidoCompra         PedidoCompra?      @relation(fields: [pedidoCompraId], references: [id])
   despachos            Despacho[]
   contenedores         Contenedor[]
+  unidadesInventario   UnidadInventario[]
 }
 
 // Factura de proveedor local (gastos de nacionalización: despachante,
@@ -695,11 +711,12 @@ model ItemEmbarque {
   precioUnitarioFob Decimal @db.Decimal(18, 2)
   costoUnitario     Decimal @default(0) @db.Decimal(18, 2)
 
-  embarque         Embarque          @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
-  producto         Producto          @relation(fields: [productoId], references: [id])
-  movimientosStock MovimientoStock[]
-  itemsDespacho    ItemDespacho[]
-  itemsContenedor  ItemContenedor[]
+  embarque           Embarque           @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
+  producto           Producto           @relation(fields: [productoId], references: [id])
+  movimientosStock   MovimientoStock[]
+  itemsDespacho      ItemDespacho[]
+  itemsContenedor    ItemContenedor[]
+  unidadesInventario UnidadInventario[]
 }
 
 // Despacho aduanero — un embarque puede tener 1..N despachos parciales.
@@ -737,12 +754,13 @@ model Despacho {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  embarque       Embarque        @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
-  asiento        Asiento?        @relation(fields: [asientoId], references: [id])
-  items          ItemDespacho[]
-  costos         EmbarqueCosto[]
-  transferencias Transferencia[]
-  vep            VepDespacho?
+  embarque           Embarque           @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
+  asiento            Asiento?           @relation(fields: [asientoId], references: [id])
+  items              ItemDespacho[]
+  costos             EmbarqueCosto[]
+  transferencias     Transferencia[]
+  vep                VepDespacho?
+  unidadesInventario UnidadInventario[]
 
   @@index([embarqueId])
   @@index([estado])
@@ -758,9 +776,10 @@ model ItemDespacho {
   // contabilizar y queda como referencia.
   costoUnitario  Decimal @default(0) @db.Decimal(18, 2)
 
-  despacho         Despacho          @relation(fields: [despachoId], references: [id], onDelete: Cascade)
-  itemEmbarque     ItemEmbarque      @relation(fields: [itemEmbarqueId], references: [id])
-  movimientosStock MovimientoStock[]
+  despacho           Despacho           @relation(fields: [despachoId], references: [id], onDelete: Cascade)
+  itemEmbarque       ItemEmbarque       @relation(fields: [itemEmbarqueId], references: [id])
+  movimientosStock   MovimientoStock[]
+  unidadesInventario UnidadInventario[]
 
   @@unique([despachoId, itemEmbarqueId])
   @@index([itemEmbarqueId])
@@ -803,13 +822,14 @@ model Contenedor {
   createdAt              DateTime         @default(now())
   updatedAt              DateTime         @updatedAt
 
-  embarque             Embarque          @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
-  depositoZonaPrimaria Deposito?         @relation("ContenedorDepositoZP", fields: [depositoZonaPrimariaId], references: [id])
-  depositoFiscal       Deposito?         @relation("ContenedorDepositoFiscal", fields: [depositoFiscalId], references: [id])
-  depositoDestino      Deposito?         @relation("ContenedorDepositoDestino", fields: [depositoDestinoId], references: [id])
+  embarque             Embarque           @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
+  depositoZonaPrimaria Deposito?          @relation("ContenedorDepositoZP", fields: [depositoZonaPrimariaId], references: [id])
+  depositoFiscal       Deposito?          @relation("ContenedorDepositoFiscal", fields: [depositoFiscalId], references: [id])
+  depositoDestino      Deposito?          @relation("ContenedorDepositoDestino", fields: [depositoDestinoId], references: [id])
   items                ItemContenedor[]
   desconsolidacion     Desconsolidacion?
   movimientosStock     MovimientoStock[]
+  unidadesInventario   UnidadInventario[]
 
   @@index([embarqueId])
   @@index([estado])
@@ -844,10 +864,11 @@ model ItemContenedor {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  contenedor       Contenedor        @relation(fields: [contenedorId], references: [id], onDelete: Cascade)
-  itemEmbarque     ItemEmbarque?     @relation(fields: [itemEmbarqueId], references: [id], onDelete: SetNull)
-  producto         Producto          @relation(fields: [productoId], references: [id])
-  movimientosStock MovimientoStock[]
+  contenedor         Contenedor         @relation(fields: [contenedorId], references: [id], onDelete: Cascade)
+  itemEmbarque       ItemEmbarque?      @relation(fields: [itemEmbarqueId], references: [id], onDelete: SetNull)
+  producto           Producto           @relation(fields: [productoId], references: [id])
+  movimientosStock   MovimientoStock[]
+  unidadesInventario UnidadInventario[]
 
   // El UNIQUE por (contenedor, producto, lote) se crea como PARTIAL INDEX
   // en raw SQL (PR 1.5), porque @@unique de Prisma no soporta WHERE y
@@ -878,6 +899,78 @@ model Desconsolidacion {
   movimientosStock MovimientoStock[]
 
   @@index([contenedorId])
+}
+
+// Unidad individual de inventario (D1-bis lazy). El SCHEMA se crea ahora,
+// pero la TABLA queda VACÍA en prod: el día a día opera con los counters
+// de ItemContenedor. Sólo se materializa on-demand (vía helper futuro
+// materializarUnidades) cuando recall/garantía lo requieran — gobernado
+// por la flag UNIDAD_INVENTARIO_TRACKING_ENABLED. dot? queda reservado
+// para carga MANUAL futura (garantía/sinistro), no se colecta hoy.
+model UnidadInventario {
+  id                       String               @id @default(uuid())
+  productoId               String
+  embarqueId               String
+  contenedorId             String
+  itemContenedorId         Int
+  despachoId               String?
+  itemDespachoId           Int?
+  depositoActualId         String
+  statusAduanero           UnidadEstadoAduanero @default(EN_TRANSITO)
+  costoFCUnitario          Decimal              @db.Decimal(18, 4)
+  costoLandedUnitarioFinal Decimal?             @db.Decimal(18, 4)
+  loteFabricacion          String?
+  dot                      String? // reservado p/ carga MANUAL futura (garantía/sinistro)
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+
+  producto         Producto          @relation(fields: [productoId], references: [id])
+  embarque         Embarque          @relation(fields: [embarqueId], references: [id])
+  contenedor       Contenedor        @relation(fields: [contenedorId], references: [id])
+  itemContenedor   ItemContenedor    @relation(fields: [itemContenedorId], references: [id])
+  despacho         Despacho?         @relation(fields: [despachoId], references: [id])
+  itemDespacho     ItemDespacho?     @relation(fields: [itemDespachoId], references: [id])
+  depositoActual   Deposito          @relation(fields: [depositoActualId], references: [id])
+  movimientosStock MovimientoStock[]
+  itemEmbarque     ItemEmbarque?     @relation(fields: [itemEmbarqueId], references: [id])
+  itemEmbarqueId   Int?
+
+  @@index([productoId, statusAduanero, depositoActualId])
+  @@index([contenedorId])
+  @@index([itemContenedorId])
+  @@index([despachoId])
+  @@index([itemDespachoId])
+}
+
+// Llave de idempotencia para reentrada HTTP (P1-6). Una request con la
+// misma `key` devuelve la `response` cacheada en vez de re-ejecutar.
+model IdempotencyKey {
+  key       String   @id
+  response  Json
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+// Borrador server-side del despacho parcial cruzado (Fase 4). Persiste el
+// diff de cantidades + los counts trabados en ItemContenedor.cantidadEnDespacho
+// (countsTrabados) para reversión exacta en la expiración (P0-4). version
+// para optimistic locking.
+model DespachoBorrador {
+  id             String   @id @default(cuid())
+  userId         Int // ref. soft a User (sin FK en Fase 1)
+  embarqueId     String? // ref. soft al embarque en edición
+  estadoActual   String   @default("EN_EDICION") // EN_EDICION | CONFIRMADO_TRABA_COUNTS | EXPIRADO
+  payloadDiff    Json
+  countsTrabados Json?
+  version        Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  expiresAt      DateTime
+
+  @@index([userId, expiresAt])
+  @@index([estadoActual, expiresAt])
 }
 
 model Compra {
@@ -1085,16 +1178,17 @@ model Producto {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  itemsEmbarque     ItemEmbarque[]
-  itemsCompra       ItemCompra[]
-  itemsVenta        ItemVenta[]
-  movimientosStock  MovimientoStock[]
-  itemsPedidoCompra ItemPedidoCompra[]
-  itemsPedidoVenta  ItemPedidoVenta[]
-  stockPorDeposito  StockPorDeposito[]
-  transferencias    Transferencia[]
-  itemsSimulacion   ItemSimulacionImportacion[]
-  itemsContenedor   ItemContenedor[]
+  itemsEmbarque      ItemEmbarque[]
+  itemsCompra        ItemCompra[]
+  itemsVenta         ItemVenta[]
+  movimientosStock   MovimientoStock[]
+  itemsPedidoCompra  ItemPedidoCompra[]
+  itemsPedidoVenta   ItemPedidoVenta[]
+  stockPorDeposito   StockPorDeposito[]
+  transferencias     Transferencia[]
+  itemsSimulacion    ItemSimulacionImportacion[]
+  itemsContenedor    ItemContenedor[]
+  unidadesInventario UnidadInventario[]
 }
 
 model Deposito {
@@ -1129,6 +1223,7 @@ model Deposito {
   contenedoresFiscal       Contenedor[]       @relation("ContenedorDepositoFiscal")
   contenedoresDestino      Contenedor[]       @relation("ContenedorDepositoDestino")
   desconsolidaciones       Desconsolidacion[] @relation("DesconsolidacionDepositoFiscal")
+  unidadesInventario       UnidadInventario[]
 }
 
 // ============================================================
@@ -1160,6 +1255,9 @@ model MovimientoStock {
   contenedorId       String?
   itemContenedorId   Int?
   desconsolidacionId String?
+  // FK opcional a la unidad individual (D1-bis). Sólo poblada tras una
+  // materialización futura de UnidadInventario; null en el flujo normal.
+  unidadInventarioId String?
 
   producto         Producto          @relation(fields: [productoId], references: [id])
   deposito         Deposito          @relation(fields: [depositoId], references: [id])
@@ -1170,6 +1268,7 @@ model MovimientoStock {
   contenedor       Contenedor?       @relation(fields: [contenedorId], references: [id], onDelete: SetNull)
   itemContenedor   ItemContenedor?   @relation(fields: [itemContenedorId], references: [id], onDelete: SetNull)
   desconsolidacion Desconsolidacion? @relation(fields: [desconsolidacionId], references: [id], onDelete: SetNull)
+  unidadInventario UnidadInventario? @relation(fields: [unidadInventarioId], references: [id], onDelete: SetNull)
 
   @@index([productoId])
   @@index([itemEmbarqueId])
@@ -1179,6 +1278,7 @@ model MovimientoStock {
   @@index([contenedorId])
   @@index([itemContenedorId])
   @@index([desconsolidacionId])
+  @@index([unidadInventarioId])
 }
 
 model Venta {
