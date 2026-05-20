@@ -200,7 +200,7 @@ export async function getBalanceSumasYSaldos(filter: {
   // Post-order: rola saldoInicial / debe / haber / saldoFinal das filhas nas SINTÉTICAS.
   const rollUp = (node: BalanceNode) => {
     if (node.tipo !== "SINTETICA" || !node.children || node.children.length === 0) {
-      if (node.children && node.children.length === 0) delete node.children;
+      if (node.children && node.children.length === 0) node.children = undefined;
       return;
     }
     for (const child of node.children) rollUp(child);

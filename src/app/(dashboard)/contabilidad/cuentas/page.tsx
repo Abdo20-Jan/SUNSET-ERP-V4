@@ -30,7 +30,7 @@ export default async function CuentasPage() {
   const stripEmptyChildren = (node: CuentaNode) => {
     if (!node.children) return;
     if (node.children.length === 0) {
-      delete node.children;
+      node.children = undefined;
       return;
     }
     node.children.forEach(stripEmptyChildren);

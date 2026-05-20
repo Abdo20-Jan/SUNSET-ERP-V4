@@ -16,11 +16,7 @@ type PageParams = Promise<{ id: string }>;
 
 export const dynamic = "force-dynamic";
 
-export default async function EditarEmbarquePage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export default async function EditarEmbarquePage({ params }: { params: PageParams }) {
   const { id } = await params;
 
   const [embarque, proveedores, productos, depositos, cuentasGasto, defaultFecha] =

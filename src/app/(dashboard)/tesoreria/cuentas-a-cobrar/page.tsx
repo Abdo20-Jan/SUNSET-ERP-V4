@@ -27,11 +27,7 @@ type SearchParams = Promise<{ filtro?: string }>;
 
 export const dynamic = "force-dynamic";
 
-export default async function CuentasACobrarPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export default async function CuentasACobrarPage({ searchParams }: { searchParams: SearchParams }) {
   const { filtro } = await searchParams;
 
   const [data, clientes] = await Promise.all([getCuentasACobrar(), getSaldosPorClienteConAging()]);
@@ -136,13 +132,7 @@ export default async function CuentasACobrarPage({
 // =============================================================
 // Sección principal — Clientes con detalle de ventas pendientes
 // =============================================================
-function ClientesSection({
-  list,
-  emptyMsg,
-}: {
-  list: SaldoClienteAging[];
-  emptyMsg: string;
-}) {
+function ClientesSection({ list, emptyMsg }: { list: SaldoClienteAging[]; emptyMsg: string }) {
   if (list.length === 0) {
     return (
       <Card>
@@ -310,15 +300,7 @@ function VentaRow({ venta }: { venta: VentaPendiente }) {
 // =============================================================
 // Sección genérica — Valores a cobrar (cheques en cartera)
 // =============================================================
-function Section({
-  title,
-  subtitle,
-  rows,
-}: {
-  title: string;
-  subtitle: string;
-  rows: CxCRow[];
-}) {
+function Section({ title, subtitle, rows }: { title: string; subtitle: string; rows: CxCRow[] }) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-3">

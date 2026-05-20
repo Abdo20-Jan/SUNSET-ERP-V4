@@ -76,7 +76,7 @@ function detectarPeriodoFromLineas(
 ): { year: number; month: number } | null {
   if (lineas.length === 0) return null;
   // Usamos la fecha más reciente (saldo final del mes)
-  const fechas = lineas.map((l) => new Date(l.fecha + "T12:00:00Z"));
+  const fechas = lineas.map((l) => new Date(`${l.fecha}T12:00:00Z`));
   const last = fechas.reduce((a, b) => (a > b ? a : b));
   return {
     year: last.getUTCFullYear(),
@@ -320,7 +320,7 @@ export async function importarExtractoAction(
             data: {
               importacionId: importacion.id,
               ordenLinea: i + 1,
-              fecha: new Date(l.fecha + "T12:00:00Z"),
+              fecha: new Date(`${l.fecha}T12:00:00Z`),
               descripcion: l.descripcion.slice(0, 500),
               comprobante: l.comprobante,
               referenciaBanco: l.referenciaBanco?.slice(0, 100) ?? null,

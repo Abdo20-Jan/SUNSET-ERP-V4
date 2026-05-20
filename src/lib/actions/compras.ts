@@ -262,11 +262,7 @@ export type CompraActionResult =
   | { ok: true; id: string; numero: string }
   | { ok: false; error: string };
 
-function calcItem(item: {
-  cantidad: number;
-  precioUnitario: string;
-  ivaPorcentaje: string;
-}) {
+function calcItem(item: { cantidad: number; precioUnitario: string; ivaPorcentaje: string }) {
   const sub = toDecimal(item.precioUnitario).times(item.cantidad);
   const ivaPct = toDecimal(item.ivaPorcentaje).dividedBy(100);
   const iva = sub.times(ivaPct);

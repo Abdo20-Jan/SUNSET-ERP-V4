@@ -13,11 +13,7 @@ type SearchParams = Promise<{ q?: string; tab?: string }>;
 
 export const dynamic = "force-dynamic";
 
-export default async function InventarioPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export default async function InventarioPage({ searchParams }: { searchParams: SearchParams }) {
   const { q, tab } = await searchParams;
 
   const [{ productos, depositos }, transito, produccion] = await Promise.all([

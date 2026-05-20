@@ -83,7 +83,7 @@ async function ensureDepositoActivoConId(
     where: { id: depositoId },
     select: { id: true, activo: true },
   });
-  if (!dep || !dep.activo) {
+  if (!dep?.activo) {
     throw new AsientoError("DOMINIO_INVALIDO", `Depósito ${rol} no existe o está inactivo.`);
   }
 }

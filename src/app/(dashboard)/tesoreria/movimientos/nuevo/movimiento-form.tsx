@@ -1126,7 +1126,7 @@ function FacturasPendientesSelector({
             <table className="w-full text-[11px]">
               <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
                 <tr>
-                  <th className="w-6 px-2 py-1"></th>
+                  <th className="w-6 px-2 py-1" />
                   <th className="px-2 py-1 text-left">Tipo</th>
                   <th className="px-2 py-1 text-left">Número</th>
                   <th className="px-2 py-1 text-left">Vence</th>

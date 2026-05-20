@@ -49,7 +49,7 @@ export default async function TransferenciasPage() {
                 <th className="px-3 py-2 text-right">Cantidad</th>
                 <th className="px-3 py-2">Origen → Destino</th>
                 <th className="px-3 py-2">Estado</th>
-                <th className="px-3 py-2"></th>
+                <th className="px-3 py-2" />
               </tr>
             </thead>
             <tbody>

@@ -20,11 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { fmtMoney, fmtTipoCambio } from "@/lib/format";
 import type { PrestamoActivo } from "@/lib/services/dashboard";
 
-export function PrestamosActivosCard({
-  prestamos,
-}: {
-  prestamos: PrestamoActivo[];
-}) {
+export function PrestamosActivosCard({ prestamos }: { prestamos: PrestamoActivo[] }) {
   return (
     <Card>
       <CardHeader className="border-b">

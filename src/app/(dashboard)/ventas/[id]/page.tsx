@@ -15,11 +15,7 @@ type PageParams = Promise<{ id: string }>;
 
 export const dynamic = "force-dynamic";
 
-export default async function VentaDetailPage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export default async function VentaDetailPage({ params }: { params: PageParams }) {
   const { id } = await params;
 
   const venta = await obtenerVentaPorId(id);

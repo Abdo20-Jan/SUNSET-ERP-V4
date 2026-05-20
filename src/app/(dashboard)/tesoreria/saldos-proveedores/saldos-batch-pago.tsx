@@ -295,7 +295,7 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }:
               <TableHead className="text-right">Al día</TableHead>
               <TableHead className="text-right">Saldo contable</TableHead>
               <TableHead className="text-right">A pagar</TableHead>
-              <TableHead></TableHead>
+              <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -702,7 +702,7 @@ function ProveedorRow({
                     monto: p.saldoTotal,
                     descripcion: `Pago a ${p.proveedorNombre}${p.facturas.length > 0 ? ` — ${p.facturas.length} factura(s)` : ""}`,
                   }).toString()}`
-                : `/tesoreria/movimientos/nuevo?tipo=PAGO`
+                : "/tesoreria/movimientos/nuevo?tipo=PAGO"
             }
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >

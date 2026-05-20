@@ -276,7 +276,7 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, default
               <TableHead className="text-right">Total facturado</TableHead>
               <TableHead className="text-right">Saldo proveedor</TableHead>
               <TableHead className="text-right">A pagar</TableHead>
-              <TableHead className="w-24 text-right"></TableHead>
+              <TableHead className="w-24 text-right" />
             </TableRow>
           </TableHeader>
           <TableBody>
