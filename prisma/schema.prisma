@@ -202,6 +202,33 @@ enum TipoDeposito {
   ZONA_PRIMARIA
 }
 
+// Subtipo opcional del depósito (decisión D2). Ortogonal a TipoDeposito:
+// distingue puerto / depósito fiscal / depósito propio con sector bonded.
+// Sólo relevante con la feature flag CONTENEDOR_DESCONSOLIDACION_ENABLED.
+enum DepositoSubtipo {
+  PUERTO // zona primaria del puerto
+  DEPOSITO_FISCAL // depósito fiscal habilitado AFIP (propio o de terceros)
+  NACIONAL_DEDICADO_BONDED // depósito propio con sector bonded
+}
+
+// Máquina de estados del contenedor físico, desde el embarque hasta el
+// despacho total. AGUARDANDO_INVESTIGACAO (D9) es el gate cuando la
+// conferencia física detecta divergencia (físico ≠ declarado).
+enum ContenedorEstado {
+  BORRADOR
+  EN_TRANSITO
+  ARRIBADO_PUERTO
+  EN_ZONA_PRIMARIA
+  TRASLADO_DEPOSITO_FISCAL
+  EN_DEPOSITO_FISCAL
+  AGUARDANDO_INVESTIGACAO
+  DESCONSOLIDADO
+  PARCIALMENTE_DESPACHADO
+  TOTALMENTE_DESPACHADO
+  NACIONALIZADO_DIRECTO
+  CANCELADO
+}
+
 // Estado del VEP (Volante Electrónico de Pago) generado al contabilizar
 // un despacho. Agrupa los tributos aduaneros pagables a la Aduana.
 enum VepEstado {
@@ -572,6 +599,7 @@ model Embarque {
   depositoZonaPrimaria Deposito?       @relation("EmbarqueDepositoZP", fields: [depositoZonaPrimariaId], references: [id])
   pedidoCompra         PedidoCompra?   @relation(fields: [pedidoCompraId], references: [id])
   despachos            Despacho[]
+  contenedores         Contenedor[]
 }
 
 // Factura de proveedor local (gastos de nacionalización: despachante,
@@ -671,6 +699,7 @@ model ItemEmbarque {
   producto         Producto          @relation(fields: [productoId], references: [id])
   movimientosStock MovimientoStock[]
   itemsDespacho    ItemDespacho[]
+  itemsContenedor  ItemContenedor[]
 }
 
 // Despacho aduanero — un embarque puede tener 1..N despachos parciales.
@@ -735,6 +764,120 @@ model ItemDespacho {
 
   @@unique([despachoId, itemEmbarqueId])
   @@index([itemEmbarqueId])
+}
+
+// ============================================================
+// CONTENEDORES / DESCONSOLIDACIÓN (Fase 1)
+// Tablas aditivas, huérfanas hasta activar la feature flag
+// CONTENEDOR_DESCONSOLIDACION_ENABLED (rollback = DROP seguro).
+// ============================================================
+
+// Contenedor físico dentro de un embarque. Un embarque puede traer N
+// contenedores; cada uno se desconsolida en depósito fiscal y alimenta
+// despachos parciales cruzados.
+model Contenedor {
+  id                     String           @id @default(uuid())
+  embarqueId             String
+  numeroContenedor       String // nº físico ISO 6346
+  tipo                   String? // 20' / 40' / 40HC / Reefer / Open Top
+  numeroBL               String?
+  numeroHBL              String?
+  precintoOrigen         String?
+  precintoPEMA           String?
+  precintoCustoms        String?
+  estado                 ContenedorEstado @default(BORRADOR)
+  // Fechas del ciclo físico/aduanero
+  fechaSalidaOrigen      DateTime?
+  fechaLlegadaPuerto     DateTime?
+  fechaIngresoZpa        DateTime?
+  fechaTrasladoDF        DateTime?
+  fechaDesconsolidacion  DateTime?
+  // Depósitos involucrados (pistas físicas)
+  depositoZonaPrimariaId String?
+  depositoFiscalId       String?
+  depositoDestinoId      String?
+  pesoBrutoKg            Decimal?         @db.Decimal(10, 3)
+  pesoNetoKg             Decimal?         @db.Decimal(10, 3)
+  volumenM3              Decimal?         @db.Decimal(10, 3)
+  observaciones          String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  embarque             Embarque          @relation(fields: [embarqueId], references: [id], onDelete: Cascade)
+  depositoZonaPrimaria Deposito?         @relation("ContenedorDepositoZP", fields: [depositoZonaPrimariaId], references: [id])
+  depositoFiscal       Deposito?         @relation("ContenedorDepositoFiscal", fields: [depositoFiscalId], references: [id])
+  depositoDestino      Deposito?         @relation("ContenedorDepositoDestino", fields: [depositoDestinoId], references: [id])
+  items                ItemContenedor[]
+  desconsolidacion     Desconsolidacion?
+  movimientosStock     MovimientoStock[]
+
+  @@index([embarqueId])
+  @@index([estado])
+  @@index([numeroContenedor])
+}
+
+// Línea de packing list: cantidad de un SKU dentro de un contenedor.
+// Lleva los counters del modelo lazy (D1-bis): el día a día opera sobre
+// estos contadores, sin materializar UnidadInventario.
+// Invariante (post-desconsolidación):
+//   cantidadDisponible + cantidadEnDespacho + cantidadDespachada == cantidadFisica
+model ItemContenedor {
+  id                 Int      @id @default(autoincrement())
+  contenedorId       String
+  itemEmbarqueId     Int?
+  productoId         String
+  cantidadDeclarada  Int
+  cantidadFisica     Int? // registrada en la conferencia de desconsolidación
+  cantidadDisponible Int      @default(0)
+  cantidadEnDespacho Int      @default(0)
+  cantidadDespachada Int      @default(0)
+  // Costo FC unitario — poblado al cerrar costos del contenedor (gate D3)
+  // vía calcularRateioZonaPrimaria. 4 decimales (igual que precioUnitario).
+  costoFCUnitario    Decimal? @db.Decimal(18, 4)
+  pesoUnitarioKg     Decimal? @db.Decimal(10, 3)
+  ncm                String?
+  paisOrigen         String?
+  loteFabricacion    String? // nunca obligatorio (Q11)
+  observaciones      String?
+  // Optimistic locking (P0-3): bloquea edición concurrente del packing list.
+  version            Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  contenedor       Contenedor        @relation(fields: [contenedorId], references: [id], onDelete: Cascade)
+  itemEmbarque     ItemEmbarque?     @relation(fields: [itemEmbarqueId], references: [id], onDelete: SetNull)
+  producto         Producto          @relation(fields: [productoId], references: [id])
+  movimientosStock MovimientoStock[]
+
+  // El UNIQUE por (contenedor, producto, lote) se crea como PARTIAL INDEX
+  // en raw SQL (PR 1.5), porque @@unique de Prisma no soporta WHERE y
+  // loteFabricacion es nullable (Q11). NO declarar @@unique acá.
+  @@index([contenedorId])
+  @@index([productoId])
+}
+
+// Evento de desconsolidación de un contenedor en depósito fiscal (1:1).
+// Opera sobre cantidadFisica (D9). Header del evento; el detalle vive en
+// los counters de ItemContenedor + MovimientoStock consolidado por SKU.
+model Desconsolidacion {
+  id                     String   @id @default(uuid())
+  contenedorId           String   @unique
+  fecha                  DateTime @default(now())
+  usuarioId              Int? // ref. soft a User (sin FK en Fase 1)
+  depositoFiscalId       String?
+  cantidadDeclaradaTotal Int      @default(0)
+  cantidadFisicaTotal    Int      @default(0)
+  documentosUrls         String[]
+  fotosUrls              String[]
+  observaciones          String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  contenedor       Contenedor        @relation(fields: [contenedorId], references: [id], onDelete: Cascade)
+  depositoFiscal   Deposito?         @relation("DesconsolidacionDepositoFiscal", fields: [depositoFiscalId], references: [id])
+  movimientosStock MovimientoStock[]
+
+  @@index([contenedorId])
 }
 
 model Compra {
@@ -951,27 +1094,41 @@ model Producto {
   stockPorDeposito  StockPorDeposito[]
   transferencias    Transferencia[]
   itemsSimulacion   ItemSimulacionImportacion[]
+  itemsContenedor   ItemContenedor[]
 }
 
 model Deposito {
-  id        String       @id @default(uuid())
-  nombre    String
-  direccion String?
-  activo    Boolean      @default(true)
+  id                     String           @id @default(uuid())
+  nombre                 String
+  direccion              String?
+  activo                 Boolean          @default(true)
   // Distingue depósitos NACIONAL (mercadería nacionalizada, disponible
   // para venta) de ZONA_PRIMARIA (mercadería pendiente de despacho
   // aduanero, sin disponibilidad para venta). Default NACIONAL para
   // retro-compatibilidad — el seed/migration marca explícitamente la ZPA.
-  tipo      TipoDeposito @default(NACIONAL)
+  tipo                   TipoDeposito     @default(NACIONAL)
+  // Extensiones D2 (flag CONTENEDOR_DESCONSOLIDACION_ENABLED). Aditivas:
+  // subtipo/jurisdiccion nullable y esDeTerceros con default para no
+  // romper depósitos existentes. jurisdiccion se backfillea y se vuelve
+  // obligatoria en una fase posterior (validación en capa de aplicación).
+  subtipo                DepositoSubtipo?
+  jurisdiccion           String? // provincia ARG (CABA, BUENOS_AIRES, ...)
+  esDeTerceros           Boolean          @default(false)
+  depositarioRazonSocial String? // si esDeTerceros (Resp. Sustituta Aduanera)
+  depositarioCuit        String?
 
-  movimientos           MovimientoStock[]
-  embarques             Embarque[]         @relation("EmbarqueDepositoDestino")
-  embarquesZonaPrimaria Embarque[]         @relation("EmbarqueDepositoZP")
-  stockPorDeposito      StockPorDeposito[]
-  entregas              EntregaVenta[]
-  itemsVenta            ItemVenta[]
-  transferenciasOrigen  Transferencia[]    @relation("TransferenciaOrigen")
-  transferenciasDestino Transferencia[]    @relation("TransferenciaDestino")
+  movimientos              MovimientoStock[]
+  embarques                Embarque[]         @relation("EmbarqueDepositoDestino")
+  embarquesZonaPrimaria    Embarque[]         @relation("EmbarqueDepositoZP")
+  stockPorDeposito         StockPorDeposito[]
+  entregas                 EntregaVenta[]
+  itemsVenta               ItemVenta[]
+  transferenciasOrigen     Transferencia[]    @relation("TransferenciaOrigen")
+  transferenciasDestino    Transferencia[]    @relation("TransferenciaDestino")
+  contenedoresZonaPrimaria Contenedor[]       @relation("ContenedorDepositoZP")
+  contenedoresFiscal       Contenedor[]       @relation("ContenedorDepositoFiscal")
+  contenedoresDestino      Contenedor[]       @relation("ContenedorDepositoDestino")
+  desconsolidaciones       Desconsolidacion[] @relation("DesconsolidacionDepositoFiscal")
 }
 
 // ============================================================
@@ -979,38 +1136,49 @@ model Deposito {
 // ============================================================
 
 model MovimientoStock {
-  id              String              @id @default(uuid())
-  productoId      String
-  depositoId      String
-  tipo            MovimientoStockTipo
-  cantidad        Int
-  costoUnitario   Decimal             @db.Decimal(18, 2)
-  fecha           DateTime            @default(now())
+  id                 String              @id @default(uuid())
+  productoId         String
+  depositoId         String
+  tipo               MovimientoStockTipo
+  cantidad           Int
+  costoUnitario      Decimal             @db.Decimal(18, 2)
+  fecha              DateTime            @default(now())
   // FK opcional al ítem de embarque que originó el ingreso (para poder
   // revertir limpiamente en una anulación). Sólo seteado cuando el
   // movimiento viene de cerrar y contabilizar un embarque (flujo legacy
   // monolítico).
-  itemEmbarqueId  Int?
+  itemEmbarqueId     Int?
   // FK opcional al ítem de despacho que originó el ingreso. Sólo seteado
   // cuando el movimiento viene de contabilizar un Despacho parcial.
-  itemDespachoId  Int?
+  itemDespachoId     Int?
   // FK opcional al ítem de entrega de venta que originó el egreso (W3).
-  itemEntregaId   Int?
+  itemEntregaId      Int?
   // FK opcional a la transferencia que originó el par origen/destino (W3).
-  transferenciaId String?
+  transferenciaId    String?
+  // FKs opcionales del flujo de contenedores (flag CONTENEDOR_DESCONSOLIDACION_ENABLED).
+  // Sólo seteadas cuando el movimiento viene de una desconsolidación.
+  contenedorId       String?
+  itemContenedorId   Int?
+  desconsolidacionId String?
 
-  producto      Producto       @relation(fields: [productoId], references: [id])
-  deposito      Deposito       @relation(fields: [depositoId], references: [id])
-  itemEmbarque  ItemEmbarque?  @relation(fields: [itemEmbarqueId], references: [id], onDelete: SetNull)
-  itemDespacho  ItemDespacho?  @relation(fields: [itemDespachoId], references: [id], onDelete: SetNull)
-  itemEntrega   ItemEntrega?   @relation(fields: [itemEntregaId], references: [id], onDelete: SetNull)
-  transferencia Transferencia? @relation(fields: [transferenciaId], references: [id], onDelete: SetNull)
+  producto         Producto          @relation(fields: [productoId], references: [id])
+  deposito         Deposito          @relation(fields: [depositoId], references: [id])
+  itemEmbarque     ItemEmbarque?     @relation(fields: [itemEmbarqueId], references: [id], onDelete: SetNull)
+  itemDespacho     ItemDespacho?     @relation(fields: [itemDespachoId], references: [id], onDelete: SetNull)
+  itemEntrega      ItemEntrega?      @relation(fields: [itemEntregaId], references: [id], onDelete: SetNull)
+  transferencia    Transferencia?    @relation(fields: [transferenciaId], references: [id], onDelete: SetNull)
+  contenedor       Contenedor?       @relation(fields: [contenedorId], references: [id], onDelete: SetNull)
+  itemContenedor   ItemContenedor?   @relation(fields: [itemContenedorId], references: [id], onDelete: SetNull)
+  desconsolidacion Desconsolidacion? @relation(fields: [desconsolidacionId], references: [id], onDelete: SetNull)
 
   @@index([productoId])
   @@index([itemEmbarqueId])
   @@index([itemDespachoId])
   @@index([itemEntregaId])
   @@index([transferenciaId])
+  @@index([contenedorId])
+  @@index([itemContenedorId])
+  @@index([desconsolidacionId])
 }
 
 model Venta {
