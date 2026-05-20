@@ -28,7 +28,7 @@
     ]
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.96.0",
+    "@anthropic-ai/sdk": "^0.97.1",
     "@base-ui/react": "^1.4.1",
     "@hookform/resolvers": "^5.2.2",
     "@hugeicons/core-free-icons": "^4.1.4",
