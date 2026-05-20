@@ -8,6 +8,8 @@ import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { VentaForm } from "../_components/venta-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevaVentaPage() {
   const [clientes, productos, depositos, numeroSugerido, defaultFecha] = await Promise.all([
     listarClientesParaVenta(),

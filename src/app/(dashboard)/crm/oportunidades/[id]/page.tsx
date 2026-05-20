@@ -10,6 +10,8 @@ import { OportunidadEstado } from "@/generated/prisma/client";
 import { CerrarButtons } from "./_components/cerrar-buttons";
 import { MoverStageSelect } from "./_components/mover-stage-select";
 
+export const dynamic = "force-dynamic";
+
 export default async function OportunidadDetailPage({
   params,
 }: {

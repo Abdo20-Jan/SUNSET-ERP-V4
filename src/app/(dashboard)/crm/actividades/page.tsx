@@ -4,6 +4,8 @@ import { isCrmEnabled } from "@/lib/features";
 
 import { ActividadItem } from "./_components/actividad-item";
 
+export const dynamic = "force-dynamic";
+
 export default async function ActividadesPage() {
   if (!isCrmEnabled()) {
     return (

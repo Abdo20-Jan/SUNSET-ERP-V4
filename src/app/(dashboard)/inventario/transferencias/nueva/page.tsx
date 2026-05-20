@@ -6,6 +6,8 @@ import { isStockDualEnabled } from "@/lib/features";
 
 import { NuevaTransferenciaForm } from "./_components/nueva-transferencia-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevaTransferenciaPage() {
   if (!isStockDualEnabled()) {
     return (

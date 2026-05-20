@@ -49,6 +49,8 @@ const ESTADO_SHORT: Record<PrestamoEstadoFiltro, string> = {
   SIN_ASIENTO: "sin asiento",
 };
 
+export const dynamic = "force-dynamic";
+
 export default async function PrestamosPage({
   searchParams,
 }: {

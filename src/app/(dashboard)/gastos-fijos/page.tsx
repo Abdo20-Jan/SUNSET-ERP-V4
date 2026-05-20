@@ -7,6 +7,8 @@ import { Card } from "@/components/ui/card";
 
 import { GastosFijosTable } from "./gastos-fijos-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function GastosFijosPage() {
   const [gastos, proveedores, cuentas] = await Promise.all([
     listarGastosFijos(),

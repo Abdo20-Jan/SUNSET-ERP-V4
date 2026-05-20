@@ -52,6 +52,8 @@ type SearchParams = Promise<{
   q?: string;
 }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function AsientosPage({
   searchParams,
 }: {
