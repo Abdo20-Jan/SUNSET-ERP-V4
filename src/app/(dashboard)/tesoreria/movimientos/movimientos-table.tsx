@@ -207,7 +207,7 @@ export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
   });
 
   const onConfirm = () => {
-    if (!pending || !pending.asiento) return;
+    if (!pending?.asiento) return;
     const asientoId = pending.asiento.id;
     startTransition(async () => {
       const result = await anularAsientoAction(asientoId);
@@ -265,7 +265,7 @@ export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
         }}
       >
         <DialogContent>
-          {pending && pending.asiento && (
+          {pending?.asiento && (
             <>
               <DialogHeader>
                 <DialogTitle>Anular movimiento Nº {pending.asiento.numero}</DialogTitle>

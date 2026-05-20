@@ -1,11 +1,6 @@
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Alert02Icon,
-  ArrowRight02Icon,
-  Calendar03Icon,
-  CheckmarkCircle02Icon,
-} from "@hugeicons/core-free-icons";
+import { Alert02Icon, Calendar03Icon, CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 
 import { getSaldosPorProveedorConAging } from "@/lib/services/cuentas-a-pagar";
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";

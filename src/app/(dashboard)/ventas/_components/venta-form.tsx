@@ -976,15 +976,7 @@ function Field({
   );
 }
 
-function Total({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "negative";
-}) {
+function Total({ label, value, tone }: { label: string; value: string; tone?: "negative" }) {
   return (
     <div className="flex items-baseline gap-1">
       <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>

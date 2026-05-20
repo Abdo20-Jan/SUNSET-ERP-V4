@@ -12,11 +12,7 @@ type PageParams = Promise<{ id: string }>;
 
 export const dynamic = "force-dynamic";
 
-export default async function EntregasPage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export default async function EntregasPage({ params }: { params: PageParams }) {
   const { id } = await params;
 
   const venta = await db.venta.findUnique({

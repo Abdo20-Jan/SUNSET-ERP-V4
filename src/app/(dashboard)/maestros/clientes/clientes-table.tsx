@@ -258,13 +258,7 @@ export function ClientesTable({
   );
 }
 
-function RowActions({
-  onEdit,
-  onDelete,
-}: {
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
+function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Acciones" />}>

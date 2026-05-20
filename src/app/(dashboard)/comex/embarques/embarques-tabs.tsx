@@ -9,13 +9,7 @@ export type EmbarqueTabKey = "transito" | "porto" | "finalizados" | "borrador";
 
 type Counts = Record<EmbarqueTabKey, number>;
 
-export function EmbarquesTabs({
-  current,
-  counts,
-}: {
-  current: EmbarqueTabKey;
-  counts: Counts;
-}) {
+export function EmbarquesTabs({ current, counts }: { current: EmbarqueTabKey; counts: Counts }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 

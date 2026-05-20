@@ -126,13 +126,7 @@ function VirtualMatrix({
   );
 }
 
-function Thead({
-  depositos,
-  sticky = false,
-}: {
-  depositos: Deposito[];
-  sticky?: boolean;
-}) {
+function Thead({ depositos, sticky = false }: { depositos: Deposito[]; sticky?: boolean }) {
   return (
     <thead className={`bg-muted text-left ${sticky ? "sticky top-0 z-10" : ""}`}>
       <tr>

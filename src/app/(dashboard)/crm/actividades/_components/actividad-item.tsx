@@ -48,13 +48,7 @@ function VinculoChips({ a }: { a: ActividadVinculos }) {
   );
 }
 
-function FechaLabel({
-  fecha,
-  ahora,
-}: {
-  fecha: Date | null;
-  ahora: number;
-}) {
+function FechaLabel({ fecha, ahora }: { fecha: Date | null; ahora: number }) {
   if (!fecha) {
     return <>Sin fecha programada</>;
   }
@@ -67,13 +61,7 @@ function FechaLabel({
   );
 }
 
-export function ActividadItem({
-  a,
-  ahora,
-}: {
-  a: ActividadCard;
-  ahora: number;
-}) {
+export function ActividadItem({ a, ahora }: { a: ActividadCard; ahora: number }) {
   return (
     <li className="rounded-md border p-3 text-sm">
       <div className="flex items-start justify-between gap-3">

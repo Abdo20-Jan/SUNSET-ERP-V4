@@ -15,13 +15,13 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseDate(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T00:00:00Z");
+  const d = new Date(`${value}T00:00:00Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 function endOfDay(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T23:59:59.999Z");
+  const d = new Date(`${value}T23:59:59.999Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
@@ -36,11 +36,7 @@ function firstOfMonthIso(): string {
 
 export const dynamic = "force-dynamic";
 
-export default async function BalancePage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export default async function BalancePage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
   const desdeStr = params.desde ?? firstOfMonthIso();

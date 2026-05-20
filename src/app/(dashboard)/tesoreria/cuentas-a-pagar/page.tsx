@@ -164,7 +164,7 @@ function Section({
               <TableHead>Nombre</TableHead>
               {showProveedores && <TableHead>Proveedores</TableHead>}
               <TableHead className="text-right">Saldo (ARS)</TableHead>
-              <TableHead className="w-28 text-right"></TableHead>
+              <TableHead className="w-28 text-right" />
             </TableRow>
           </TableHeader>
           <TableBody>

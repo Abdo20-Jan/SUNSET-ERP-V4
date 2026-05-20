@@ -14,11 +14,7 @@ type PageParams = Promise<{ id: string }>;
 
 export const dynamic = "force-dynamic";
 
-export default async function GastoDetailPage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export default async function GastoDetailPage({ params }: { params: PageParams }) {
   const { id } = await params;
 
   const gasto = await obtenerGastoPorId(id);

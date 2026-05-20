@@ -18,11 +18,7 @@ type SearchParams = Promise<{
 
 export const dynamic = "force-dynamic";
 
-export default async function VentasPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export default async function VentasPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const { page, perPage } = parsePaginationParams(params);
   const incluirCanceladas = params.incluirCanceladas === "1";

@@ -115,7 +115,7 @@ async function ensureDepositoActivo(tx: TxClient, depositoId: string): Promise<v
     where: { id: depositoId },
     select: { id: true, nombre: true, activo: true, tipo: true },
   });
-  if (!dep || !dep.activo) {
+  if (!dep?.activo) {
     throw new AsientoError("DOMINIO_INVALIDO", "Depósito de entrega no existe o está inactivo.");
   }
   if (dep.tipo === "ZONA_PRIMARIA") {

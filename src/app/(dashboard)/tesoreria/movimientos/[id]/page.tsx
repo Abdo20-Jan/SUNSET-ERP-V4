@@ -22,11 +22,7 @@ type PageParams = Promise<{ id: string }>;
 
 export const dynamic = "force-dynamic";
 
-export default async function MovimientoDetallePage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export default async function MovimientoDetallePage({ params }: { params: PageParams }) {
   const { id } = await params;
 
   const mov = await db.movimientoTesoreria.findUnique({
@@ -304,15 +300,7 @@ export default async function MovimientoDetallePage({
   );
 }
 
-function DataRow({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
+function DataRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex flex-col gap-0.5">
       <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</dt>

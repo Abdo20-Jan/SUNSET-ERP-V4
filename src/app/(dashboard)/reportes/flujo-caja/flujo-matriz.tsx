@@ -63,13 +63,7 @@ const SECCION_ORDER: SerializedNode["categoria"][] = [
 // Cell rendering — sign nativo del cashflow.
 //   Positivo = entrou no caixa (verde, "+ X").
 //   Negativo = saiu do caixa (rojo, "(X)").
-function MontoCell({
-  monto,
-  destacar = false,
-}: {
-  monto: string;
-  destacar?: boolean;
-}) {
+function MontoCell({ monto, destacar = false }: { monto: string; destacar?: boolean }) {
   const num = Number(monto);
   if (!Number.isFinite(num) || Math.abs(num) < 0.01) {
     return (
@@ -377,13 +371,7 @@ export function FlujoMatriz({ meses, contrapartidas, transferencias, totales }: 
   );
 }
 
-function SaldoCell({
-  value,
-  signo,
-}: {
-  value: string;
-  signo: ReturnType<typeof fmtSigno>;
-}) {
+function SaldoCell({ value, signo }: { value: string; signo: ReturnType<typeof fmtSigno> }) {
   const num = Number(value);
   const abs = fmtMoney(Math.abs(num).toFixed(2));
   if (signo === "zero") {

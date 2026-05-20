@@ -28,11 +28,7 @@ const config = {
   egresos: { label: "Egresos", color: "var(--chart-2)" },
 } satisfies ChartConfig;
 
-export function IngresosEgresosChart({
-  data,
-}: {
-  data: IngresoEgresoMensual[];
-}) {
+export function IngresosEgresosChart({ data }: { data: IngresoEgresoMensual[] }) {
   return (
     <Card size="sm">
       <CardHeader className="flex-row items-center justify-between border-b border-border/60 pb-2">

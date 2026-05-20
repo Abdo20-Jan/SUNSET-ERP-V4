@@ -40,11 +40,7 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-export function ExtractoUploadForm({
-  cuentas,
-}: {
-  cuentas: CuentaBancariaOption[];
-}) {
+export function ExtractoUploadForm({ cuentas }: { cuentas: CuentaBancariaOption[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [cuentaId, setCuentaId] = useState<string>("");
