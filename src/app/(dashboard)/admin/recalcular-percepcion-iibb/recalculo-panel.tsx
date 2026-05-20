@@ -29,11 +29,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 
-export function RecalculoPercepcionPanel({
-  ventas,
-}: {
-  ventas: VentaParaRecalculoRow[];
-}) {
+export function RecalculoPercepcionPanel({ ventas }: { ventas: VentaParaRecalculoRow[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [confirmacion, setConfirmacion] = useState("");

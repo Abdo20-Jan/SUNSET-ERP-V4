@@ -160,11 +160,7 @@ function buildContexto(a: AsientoConRelaciones): { etiqueta: string; lineas: str
 
 export const dynamic = "force-dynamic";
 
-export default async function MoverPeriodoPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export default async function MoverPeriodoPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const periodoOrigenId = parsePeriodoId(params.periodoOrigenId);
   const estadoFilter = parseEstado(params.estado);

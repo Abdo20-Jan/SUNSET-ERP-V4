@@ -18,13 +18,7 @@ type Card = {
   leadOClienteHref: string | null;
 };
 
-export function KanbanBoard({
-  stages,
-  cards: initialCards,
-}: {
-  stages: Stage[];
-  cards: Card[];
-}) {
+export function KanbanBoard({ stages, cards: initialCards }: { stages: Stage[]; cards: Card[] }) {
   const router = useRouter();
   const [cards, setCards] = useState(initialCards);
   const [pending, start] = useTransition();

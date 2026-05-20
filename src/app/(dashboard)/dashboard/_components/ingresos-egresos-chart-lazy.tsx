@@ -22,10 +22,6 @@ const IngresosEgresosChart = dynamic(
   },
 );
 
-export function IngresosEgresosChartLazy({
-  data,
-}: {
-  data: IngresoEgresoMensual[];
-}) {
+export function IngresosEgresosChartLazy({ data }: { data: IngresoEgresoMensual[] }) {
   return <IngresosEgresosChart data={data} />;
 }

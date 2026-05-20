@@ -1,14 +1,6 @@
 import Link from "next/link";
 
-export function KpiCard({
-  label,
-  value,
-  href,
-}: {
-  label: string;
-  value: number;
-  href: string;
-}) {
+export function KpiCard({ label, value, href }: { label: string; value: number; href: string }) {
   return (
     <Link href={href} className="rounded-md border p-4 hover:bg-muted">
       <div className="text-sm text-muted-foreground">{label}</div>

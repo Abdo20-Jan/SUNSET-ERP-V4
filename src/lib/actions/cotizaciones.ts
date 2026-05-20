@@ -32,7 +32,7 @@ export async function upsertCotizacionAction(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Inválido" };
   }
 
-  const fechaUtc = new Date(parsed.data.fecha + "T00:00:00.000Z");
+  const fechaUtc = new Date(`${parsed.data.fecha}T00:00:00.000Z`);
 
   await db.cotizacion.upsert({
     where: { fecha: fechaUtc },

@@ -349,7 +349,7 @@ export function PagoPorFactura({ proveedores, cuentasBancarias, defaultFecha }: 
                 <TableHead>Fecha</TableHead>
                 <TableHead>Vencimiento</TableHead>
                 <TableHead className="text-right">Monto</TableHead>
-                <TableHead className="w-24"></TableHead>
+                <TableHead className="w-24" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -493,7 +493,7 @@ function PagoFacturaDialog({
   };
 
   const handleSubmit = () => {
-    if (!proveedor || !proveedor.cuentaContableId) {
+    if (!proveedor?.cuentaContableId) {
       toast.error("Falta cuenta contable del proveedor.");
       return;
     }

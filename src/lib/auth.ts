@@ -38,7 +38,7 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
             modoRetroactivo: true,
           },
         });
-        if (!user || !user.activo) return null;
+        if (!user?.activo) return null;
 
         const ok = await bcrypt.compare(parsed.data.password, user.passwordHash);
         if (!ok) return null;

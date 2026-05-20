@@ -103,7 +103,7 @@ export function VepSection({
                   <TableHead className="w-40">Embarque</TableHead>
                   <TableHead>Tributos</TableHead>
                   <TableHead className="text-right">Total VEP (ARS)</TableHead>
-                  <TableHead className="w-32 text-right"></TableHead>
+                  <TableHead className="w-32 text-right" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -159,7 +159,7 @@ export function VepSection({
                   <TableRow>
                     <TableHead>Embarque</TableHead>
                     <TableHead className="text-right">Total ARS</TableHead>
-                    <TableHead></TableHead>
+                    <TableHead />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -200,7 +200,7 @@ export function VepSection({
                   <TableHead className="w-40">Embarque</TableHead>
                   <TableHead>Origen</TableHead>
                   <TableHead className="text-right">Saldo (ARS)</TableHead>
-                  <TableHead className="w-32 text-right"></TableHead>
+                  <TableHead className="w-32 text-right" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -320,7 +320,7 @@ function PagarVepDialog({
       const result = await pagarVepEmbarqueAction({
         embarqueId: vep.embarqueId,
         cuentaBancariaId: cuentaBancariaId || undefined,
-        fecha: new Date(fecha + "T12:00:00Z"),
+        fecha: new Date(`${fecha}T12:00:00Z`),
         comprobante: comprobante.trim() || undefined,
         referenciaBanco: referenciaBanco.trim() || undefined,
         montoPagado: bancoNum.toFixed(2),
@@ -597,7 +597,7 @@ function PagarRefuerzoVepDialog({
       const result = await pagarRefuerzoVepAction({
         embarqueCodigo: refuerzo.embarqueCodigo,
         cuentaBancariaId: cuentaBancariaId || undefined,
-        fecha: new Date(fecha + "T12:00:00Z"),
+        fecha: new Date(`${fecha}T12:00:00Z`),
         comprobante: comprobante.trim() || undefined,
         referenciaBanco: referenciaBanco.trim() || undefined,
         montoBanco: bancoNum.toFixed(2),

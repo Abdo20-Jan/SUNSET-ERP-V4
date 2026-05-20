@@ -34,13 +34,13 @@ function parseUuid(value: string | undefined): string | null {
 
 function parseDate(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T00:00:00Z");
+  const d = new Date(`${value}T00:00:00Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 function endOfDay(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T23:59:59.999Z");
+  const d = new Date(`${value}T23:59:59.999Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
@@ -62,11 +62,7 @@ type SearchParams = Promise<{
 
 export const dynamic = "force-dynamic";
 
-export default async function MovimientosPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export default async function MovimientosPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
   const cuentasBancarias = await db.cuentaBancaria.findMany({

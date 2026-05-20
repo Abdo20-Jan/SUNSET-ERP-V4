@@ -198,7 +198,7 @@ export function CrearDespachoForm({
           <table className="w-full text-[13px]">
             <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
               <tr>
-                <th className="w-8 px-2.5 py-1.5"></th>
+                <th className="w-8 px-2.5 py-1.5" />
                 <th className="px-2.5 py-1.5 text-left">Producto</th>
                 <th className="px-2.5 py-1.5 text-right">Total</th>
                 <th className="px-2.5 py-1.5 text-right">Ya despachado</th>

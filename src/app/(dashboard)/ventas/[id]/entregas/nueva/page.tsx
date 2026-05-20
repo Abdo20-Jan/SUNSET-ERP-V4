@@ -13,11 +13,7 @@ type PageParams = Promise<{ id: string }>;
 
 export const dynamic = "force-dynamic";
 
-export default async function NuevaEntregaPage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export default async function NuevaEntregaPage({ params }: { params: PageParams }) {
   const { id } = await params;
 
   if (!isStockDualEnabled()) {

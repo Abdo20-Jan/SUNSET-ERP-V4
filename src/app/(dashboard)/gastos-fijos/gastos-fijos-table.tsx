@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -403,7 +403,7 @@ function GastoFijoFormDialog({
               cuentas={cuentas}
               placeholder={
                 proveedorSeleccionado?.cuentaGastoContableId
-                  ? `Default del proveedor — opcional override`
+                  ? "Default del proveedor — opcional override"
                   : "Default por tipo de proveedor — opcional override"
               }
             />
@@ -527,7 +527,7 @@ function RegistrarDialog({
         gastoFijoId: g.id,
         year,
         month,
-        fecha: new Date(fechaIso + "T12:00:00Z"),
+        fecha: new Date(`${fechaIso}T12:00:00Z`),
         tipoCambio: g.moneda === "ARS" ? "1" : tipoCambio,
       });
       if (!result.ok) {

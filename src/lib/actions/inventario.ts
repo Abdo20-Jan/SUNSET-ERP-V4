@@ -8,10 +8,7 @@ import { db } from "@/lib/db";
  * Devuelve la matriz de stock por (producto, depósito) para la UI de
  * inventario. Filtra productos activos. Orden estable por código.
  */
-export async function listarMatrizInventario(opts?: {
-  search?: string;
-  take?: number;
-}) {
+export async function listarMatrizInventario(opts?: { search?: string; take?: number }) {
   const search = opts?.search?.trim();
   const take = opts?.take ?? 100;
 

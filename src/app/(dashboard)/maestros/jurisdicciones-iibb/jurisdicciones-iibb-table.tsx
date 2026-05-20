@@ -98,13 +98,7 @@ export function JurisdiccionesIIBBTable({ rows }: { rows: JurisdiccionIIBBRow[] 
   );
 }
 
-function EditDialog({
-  row,
-  onClose,
-}: {
-  row: JurisdiccionIIBBRow | null;
-  onClose: () => void;
-}) {
+function EditDialog({ row, onClose }: { row: JurisdiccionIIBBRow | null; onClose: () => void }) {
   const router = useRouter();
   const [isSaving, startSave] = useTransition();
   const [alicuota, setAlicuota] = useState("");

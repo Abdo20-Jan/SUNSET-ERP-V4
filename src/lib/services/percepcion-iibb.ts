@@ -47,7 +47,7 @@ export function calcularPercepcionIIBB(args: {
   if (cliente.exentoPercepcionIIBB) return CERO;
 
   const jurisdiccion = cliente.provincia?.jurisdiccionIIBB;
-  if (!jurisdiccion || !jurisdiccion.esAgentePercepcion) return CERO;
+  if (!jurisdiccion?.esAgentePercepcion) return CERO;
 
   const subtotal = new Decimal(args.subtotal.toString());
   const alicuotaJurisdiccion = new Decimal(jurisdiccion.alicuotaPercepcion.toString());

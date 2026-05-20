@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { money, sumMoney, toDecimal } from "@/lib/decimal";
+import { money, sumMoney } from "@/lib/decimal";
 import {
   AsientoError,
   anularAsiento,

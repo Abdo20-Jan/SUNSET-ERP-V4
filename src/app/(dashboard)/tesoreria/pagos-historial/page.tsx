@@ -27,11 +27,7 @@ function parseDate(v: string | undefined): Date | undefined {
 
 export const dynamic = "force-dynamic";
 
-export default async function PagosHistorialPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export default async function PagosHistorialPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
   const desde = parseDate(params.desde);
