@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { money, toDecimal } from "@/lib/decimal";
+import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
 import {
   anularAsiento,
   AsientoError,
@@ -227,6 +228,163 @@ async function siguienteCodigoDespacho(
   return `${embarqueCodigo}-D${existentes + 1}`;
 }
 
+type CrearDespachoData = z.infer<typeof crearDespachoSchema>;
+type TxClient = Prisma.TransactionClient;
+
+// Fork legacy/nuevo del despacho (P1-5). Con la flag apagada (default prod)
+// se ejecuta SIEMPRE el flujo legacy (bundled, a nivel ItemEmbarque), idéntico
+// al histórico. El flujo por contenedor (Fase 4) sólo se activa en staging.
+
+/**
+ * Flujo legacy (bundled): el despacho consume cantidades a nivel ItemEmbarque
+ * del embarque. Comportamiento histórico extraído sin cambios — NO modificar
+ * acá; las divergencias del flujo cruzado van en `crearDespachoContenedor`.
+ */
+async function crearDespachoLegacy(
+  tx: TxClient,
+  data: CrearDespachoData,
+  fecha: Date,
+): Promise<{ despachoId: string; codigo: string }> {
+  const embarque = await tx.embarque.findUnique({
+    where: { id: data.embarqueId },
+    select: {
+      id: true,
+      codigo: true,
+      asientoId: true,
+      asientoZonaPrimariaId: true,
+      items: { select: { id: true, cantidad: true } },
+    },
+  });
+  if (!embarque) {
+    throw new AsientoError("DOMINIO_INVALIDO", "El embarque no existe.");
+  }
+  if (embarque.asientoId) {
+    throw new AsientoError(
+      "ESTADO_INVALIDO",
+      `El embarque ${embarque.codigo} ya tiene cierre monolítico — anule primero el cierre o use el flujo legacy.`,
+    );
+  }
+  if (!embarque.asientoZonaPrimariaId) {
+    throw new AsientoError(
+      "ESTADO_INVALIDO",
+      `El embarque ${embarque.codigo}: confirmá zona primaria antes de despachar.`,
+    );
+  }
+
+  // Validar items pertenecen al embarque + cantidades vs remanente
+  const itemsEmbById = new Map(embarque.items.map((i) => [i.id, i.cantidad]));
+  const otrosItems = await tx.itemDespacho.findMany({
+    where: {
+      despacho: { embarqueId: embarque.id, estado: { not: "ANULADO" } },
+    },
+    select: { itemEmbarqueId: true, cantidad: true },
+  });
+  const yaDespachadoPorIE = new Map<number, number>();
+  for (const oi of otrosItems) {
+    yaDespachadoPorIE.set(
+      oi.itemEmbarqueId,
+      (yaDespachadoPorIE.get(oi.itemEmbarqueId) ?? 0) + oi.cantidad,
+    );
+  }
+  for (const it of data.items) {
+    const cantTotal = itemsEmbById.get(it.itemEmbarqueId);
+    if (cantTotal == null) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Ítem ${it.itemEmbarqueId} no pertenece al embarque.`,
+      );
+    }
+    const remanente = cantTotal - (yaDespachadoPorIE.get(it.itemEmbarqueId) ?? 0);
+    if (it.cantidad > remanente) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Cantidad ${it.cantidad} excede remanente ${remanente} del ítem #${it.itemEmbarqueId}.`,
+      );
+    }
+  }
+
+  // Validar facturas (si pasaron) son del embarque + momento DESPACHO
+  // + no están linkadas a otro despacho activo
+  if (data.facturasIds.length > 0) {
+    const facturas = await tx.embarqueCosto.findMany({
+      where: { id: { in: data.facturasIds } },
+      select: { id: true, embarqueId: true, momento: true, despachoId: true },
+    });
+    for (const fid of data.facturasIds) {
+      const f = facturas.find((x) => x.id === fid);
+      if (!f) {
+        throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no existe.`);
+      }
+      if (f.embarqueId !== embarque.id) {
+        throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no pertenece al embarque.`);
+      }
+      if (f.momento !== "DESPACHO") {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `Factura ${fid}: sólo facturas con momento DESPACHO se pueden linkar.`,
+        );
+      }
+      if (f.despachoId) {
+        throw new AsientoError(
+          "ESTADO_INVALIDO",
+          `Factura ${fid} ya está linkada a otro despacho.`,
+        );
+      }
+    }
+  }
+
+  const codigo = await siguienteCodigoDespacho(tx, embarque.codigo);
+
+  const despacho = await tx.despacho.create({
+    data: {
+      codigo,
+      embarqueId: embarque.id,
+      fecha,
+      numeroOM: data.numeroOM?.trim() || null,
+      tipoCambio: money(toDecimal(data.tipoCambio)),
+      die: money(toDecimal(data.die)),
+      tasaEstadistica: money(toDecimal(data.tasaEstadistica)),
+      arancelSim: money(toDecimal(data.arancelSim)),
+      iva: money(toDecimal(data.iva)),
+      ivaAdicional: money(toDecimal(data.ivaAdicional)),
+      iibb: money(toDecimal(data.iibb)),
+      ganancias: money(toDecimal(data.ganancias)),
+      notas: data.notas?.trim() || null,
+      items: {
+        create: data.items.map((i) => ({
+          itemEmbarqueId: i.itemEmbarqueId,
+          cantidad: i.cantidad,
+        })),
+      },
+    },
+  });
+
+  if (data.facturasIds.length > 0) {
+    await tx.embarqueCosto.updateMany({
+      where: { id: { in: data.facturasIds } },
+      data: { despachoId: despacho.id },
+    });
+  }
+
+  return { despachoId: despacho.id, codigo: despacho.codigo };
+}
+
+/**
+ * Flujo nuevo (despacho cruzado por contenedor): consumirá counters de
+ * ItemContenedor en lugar de cantidades a nivel ItemEmbarque. Se implementa
+ * en Fase 4 (PR 4.2+). Inalcanzable en prod mientras la flag esté apagada.
+ */
+async function crearDespachoContenedor(
+  _tx: TxClient,
+  _data: CrearDespachoData,
+  _fecha: Date,
+): Promise<{ despachoId: string; codigo: string }> {
+  throw new AsientoError(
+    "DOMINIO_INVALIDO",
+    "El flujo de despacho cruzado por contenedor todavía no está implementado (Fase 4).",
+  );
+}
+
 export async function crearDespachoAction(input: CrearDespachoInput): Promise<CrearDespachoResult> {
   const parsed = crearDespachoSchema.safeParse(input);
   if (!parsed.success) {
@@ -239,130 +397,11 @@ export async function crearDespachoAction(input: CrearDespachoInput): Promise<Cr
   const fecha = data.fecha instanceof Date ? data.fecha : new Date(data.fecha);
 
   try {
-    const result = await db.$transaction(async (tx) => {
-      const embarque = await tx.embarque.findUnique({
-        where: { id: data.embarqueId },
-        select: {
-          id: true,
-          codigo: true,
-          asientoId: true,
-          asientoZonaPrimariaId: true,
-          items: { select: { id: true, cantidad: true } },
-        },
-      });
-      if (!embarque) {
-        throw new AsientoError("DOMINIO_INVALIDO", "El embarque no existe.");
-      }
-      if (embarque.asientoId) {
-        throw new AsientoError(
-          "ESTADO_INVALIDO",
-          `El embarque ${embarque.codigo} ya tiene cierre monolítico — anule primero el cierre o use el flujo legacy.`,
-        );
-      }
-      if (!embarque.asientoZonaPrimariaId) {
-        throw new AsientoError(
-          "ESTADO_INVALIDO",
-          `El embarque ${embarque.codigo}: confirmá zona primaria antes de despachar.`,
-        );
-      }
-
-      // Validar items pertenecen al embarque + cantidades vs remanente
-      const itemsEmbById = new Map(embarque.items.map((i) => [i.id, i.cantidad]));
-      const otrosItems = await tx.itemDespacho.findMany({
-        where: {
-          despacho: { embarqueId: embarque.id, estado: { not: "ANULADO" } },
-        },
-        select: { itemEmbarqueId: true, cantidad: true },
-      });
-      const yaDespachadoPorIE = new Map<number, number>();
-      for (const oi of otrosItems) {
-        yaDespachadoPorIE.set(
-          oi.itemEmbarqueId,
-          (yaDespachadoPorIE.get(oi.itemEmbarqueId) ?? 0) + oi.cantidad,
-        );
-      }
-      for (const it of data.items) {
-        const cantTotal = itemsEmbById.get(it.itemEmbarqueId);
-        if (cantTotal == null) {
-          throw new AsientoError(
-            "DOMINIO_INVALIDO",
-            `Ítem ${it.itemEmbarqueId} no pertenece al embarque.`,
-          );
-        }
-        const remanente = cantTotal - (yaDespachadoPorIE.get(it.itemEmbarqueId) ?? 0);
-        if (it.cantidad > remanente) {
-          throw new AsientoError(
-            "DOMINIO_INVALIDO",
-            `Cantidad ${it.cantidad} excede remanente ${remanente} del ítem #${it.itemEmbarqueId}.`,
-          );
-        }
-      }
-
-      // Validar facturas (si pasaron) son del embarque + momento DESPACHO
-      // + no están linkadas a otro despacho activo
-      if (data.facturasIds.length > 0) {
-        const facturas = await tx.embarqueCosto.findMany({
-          where: { id: { in: data.facturasIds } },
-          select: { id: true, embarqueId: true, momento: true, despachoId: true },
-        });
-        for (const fid of data.facturasIds) {
-          const f = facturas.find((x) => x.id === fid);
-          if (!f) {
-            throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no existe.`);
-          }
-          if (f.embarqueId !== embarque.id) {
-            throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no pertenece al embarque.`);
-          }
-          if (f.momento !== "DESPACHO") {
-            throw new AsientoError(
-              "DOMINIO_INVALIDO",
-              `Factura ${fid}: sólo facturas con momento DESPACHO se pueden linkar.`,
-            );
-          }
-          if (f.despachoId) {
-            throw new AsientoError(
-              "ESTADO_INVALIDO",
-              `Factura ${fid} ya está linkada a otro despacho.`,
-            );
-          }
-        }
-      }
-
-      const codigo = await siguienteCodigoDespacho(tx, embarque.codigo);
-
-      const despacho = await tx.despacho.create({
-        data: {
-          codigo,
-          embarqueId: embarque.id,
-          fecha,
-          numeroOM: data.numeroOM?.trim() || null,
-          tipoCambio: money(toDecimal(data.tipoCambio)),
-          die: money(toDecimal(data.die)),
-          tasaEstadistica: money(toDecimal(data.tasaEstadistica)),
-          arancelSim: money(toDecimal(data.arancelSim)),
-          iva: money(toDecimal(data.iva)),
-          ivaAdicional: money(toDecimal(data.ivaAdicional)),
-          iibb: money(toDecimal(data.iibb)),
-          ganancias: money(toDecimal(data.ganancias)),
-          notas: data.notas?.trim() || null,
-          items: {
-            create: data.items.map((i) => ({
-              itemEmbarqueId: i.itemEmbarqueId,
-              cantidad: i.cantidad,
-            })),
-          },
-        },
-      });
-
-      if (data.facturasIds.length > 0) {
-        await tx.embarqueCosto.updateMany({
-          where: { id: { in: data.facturasIds } },
-          data: { despachoId: despacho.id },
-        });
-      }
-
-      return { despachoId: despacho.id, codigo: despacho.codigo };
-    });
+    const result = await db.$transaction((tx) =>
+      isContenedorDesconsolidacionEnabled()
+        ? crearDespachoContenedor(tx, data, fecha)
+        : crearDespachoLegacy(tx, data, fecha),
+    );
 
     revalidatePath(`/comex/embarques/${data.embarqueId}`);
     return { ok: true, ...result };
