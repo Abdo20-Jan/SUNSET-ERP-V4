@@ -23,6 +23,8 @@ function parseFuente(v: string | undefined): LeadFuente | undefined {
   return (Object.values(LeadFuente) as string[]).includes(v) ? (v as LeadFuente) : undefined;
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function LeadsPage({
   searchParams,
 }: {

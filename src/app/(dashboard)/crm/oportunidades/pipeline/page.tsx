@@ -8,6 +8,8 @@ import { OportunidadEstado } from "@/generated/prisma/client";
 import { KanbanBoard } from "./_components/kanban-board";
 import { buildKanbanCards } from "./_helpers";
 
+export const dynamic = "force-dynamic";
+
 export default async function PipelinePage() {
   if (!isCrmEnabled()) {
     return (

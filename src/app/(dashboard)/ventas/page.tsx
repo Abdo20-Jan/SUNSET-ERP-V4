@@ -16,6 +16,8 @@ type SearchParams = Promise<{
   incluirCanceladas?: string;
 }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function VentasPage({
   searchParams,
 }: {

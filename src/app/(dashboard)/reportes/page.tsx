@@ -45,6 +45,8 @@ const REPORTES = [
   },
 ] as const;
 
+export const dynamic = "force-dynamic";
+
 export default function ReportesPage() {
   return (
     <div className="flex flex-col gap-3">

@@ -38,6 +38,8 @@ function firstOfMonthIso(): string {
   return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function LibroDiarioPage({
   searchParams,
 }: {

@@ -7,6 +7,8 @@ import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { GastoForm } from "../_components/gasto-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevoGastoPage() {
   const [proveedores, cuentas, numeroSugerido, defaultFecha] = await Promise.all([
     listarProveedoresParaGasto(),

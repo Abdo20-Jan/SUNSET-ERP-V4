@@ -13,6 +13,8 @@ import { VentaDetailView } from "../_components/venta-detail-view";
 
 type PageParams = Promise<{ id: string }>;
 
+export const dynamic = "force-dynamic";
+
 export default async function VentaDetailPage({
   params,
 }: {

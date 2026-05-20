@@ -5,6 +5,8 @@ import { OportunidadEstado } from "@/generated/prisma/client";
 
 import { OportunidadForm } from "../_components/oportunidad-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevaOportunidadPage() {
   if (!isCrmEnabled()) {
     return (

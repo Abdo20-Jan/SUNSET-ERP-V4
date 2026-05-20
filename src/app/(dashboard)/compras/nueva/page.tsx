@@ -7,6 +7,8 @@ import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { CompraForm } from "../_components/compra-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevaCompraPage() {
   const [proveedores, productos, numeroSugerido, defaultFecha] = await Promise.all([
     listarProveedoresParaCompra(),

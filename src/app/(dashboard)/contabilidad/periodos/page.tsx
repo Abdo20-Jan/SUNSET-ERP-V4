@@ -4,6 +4,8 @@ import { Card } from "@/components/ui/card";
 
 import { PeriodosTable, type PeriodoRow } from "./periodos-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function PeriodosPage() {
   const periodos = await db.periodoContable.findMany({
     orderBy: { codigo: "asc" },
