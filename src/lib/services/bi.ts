@@ -827,7 +827,17 @@ export async function getAnalisisStock(): Promise<AnalisisStock> {
         costoPromedio: true,
         ultimoMovimiento: true,
         producto: {
-          select: { id: true, codigo: true, nombre: true, stockMinimo: true },
+          select: {
+            id: true,
+            codigo: true,
+            nombre: true,
+            stockMinimo: true,
+            movimientosStock: {
+              select: { tipo: true },
+              where: { tipo: MovimientoStockTipo.INGRESO },
+              take: 1,
+            },
+          },
         },
         deposito: { select: { id: true, nombre: true } },
       },
@@ -858,6 +868,14 @@ export async function getAnalisisStock(): Promise<AnalisisStock> {
 
   for (const s of stock) {
     const cant = s.cantidadFisica;
+
+    // Filtro inteligente: excluir SKUs que não têm stock E nunca tiveram entrada
+    const hadIngresoMovement =
+      s.producto.movimientosStock && s.producto.movimientosStock.length > 0;
+    if (cant === 0 && !hadIngresoMovement) {
+      continue; // Skip SKUs nunca entrados
+    }
+
     const valor = toDecimal(s.costoPromedio).times(cant);
     valorado = valorado.plus(valor);
     unidades += cant;
