@@ -4,6 +4,7 @@ import Decimal from "decimal.js";
 
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
+import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
 import {
   AsientoEstado,
   ChequeRecibidoEstado,
@@ -928,6 +929,168 @@ export async function getAnalisisStock(): Promise<AnalisisStock> {
       cantidad: t.cantidad,
       fecha: t.fecha,
     })),
+  };
+}
+
+// =====================================================================
+// 4-bis. STOCK BONDED (depósito fiscal) — comex ZPA (PR 5.3)
+// =====================================================================
+
+export type AnalisisBonded = {
+  kpis: {
+    /** Σ cantidadDisponible × costoFCUnitario (FC del embarque, típicamente USD). */
+    valorUsd: Money;
+    unidadesDisponibles: number;
+    skus: number;
+    contenedores: number;
+  };
+  /** Días en depósito fiscal de los contenedores con saldo vivo (percentiles). */
+  aging: { p50: number; p90: number; max: number };
+  porSku: {
+    codigo: string;
+    producto: string;
+    disponible: number;
+    enDespacho: number;
+    valorUsd: Money;
+  }[];
+  despachosAbiertos: { codigo: string; producto: string; unidades: number; valorUsd: Money }[];
+};
+
+// Estados en los que la mercadería está físicamente en depósito fiscal con
+// saldo vivo posible (alineado con FASE_POR_ESTADO "EN_DF" de inventario).
+const ESTADOS_DF_BONDED = [
+  "EN_DEPOSITO_FISCAL",
+  "AGUARDANDO_INVESTIGACAO",
+  "DESCONSOLIDADO",
+  "PARCIALMENTE_DESPACHADO",
+] as const;
+
+/** Percentil (método del rango más cercano, base 1) sobre un array ya ordenado asc. */
+function percentil(ordenAsc: number[], p: number): number {
+  if (ordenAsc.length === 0) return 0;
+  const idx = Math.ceil((p / 100) * ordenAsc.length) - 1;
+  return ordenAsc[Math.min(Math.max(idx, 0), ordenAsc.length - 1)] ?? 0;
+}
+
+/**
+ * BI del stock bonded (depósito fiscal): valor USD inmovilizado, antigüedad
+ * (aging) de los contenedores y despachos abiertos por SKU. Se basa en los
+ * counters de ItemContenedor + costoFCUnitario + las fechas del ciclo aduanero
+ * del Contenedor. Devuelve `null` con la flag de desconsolidación apagada
+ * (la pestaña Stock no muestra la sección). Detrás de la flag (PR 5.3).
+ */
+export async function getAnalisisBonded(): Promise<AnalisisBonded | null> {
+  if (!isContenedorDesconsolidacionEnabled()) return null;
+
+  const items = await db.itemContenedor.findMany({
+    where: {
+      contenedor: { estado: { in: [...ESTADOS_DF_BONDED] } },
+      OR: [{ cantidadDisponible: { gt: 0 } }, { cantidadEnDespacho: { gt: 0 } }],
+    },
+    select: {
+      cantidadDisponible: true,
+      cantidadEnDespacho: true,
+      costoFCUnitario: true,
+      producto: { select: { codigo: true, nombre: true } },
+      contenedor: {
+        select: {
+          id: true,
+          fechaDesconsolidacion: true,
+          fechaTrasladoDF: true,
+          fechaIngresoZpa: true,
+          createdAt: true,
+        },
+      },
+    },
+  });
+
+  const ahora = Date.now();
+  let valorUsd = new Decimal(0);
+  let unidadesDisponibles = 0;
+  const skus = new Set<string>();
+  const agingPorContenedor = new Map<string, number>();
+  const porSku = new Map<
+    string,
+    { codigo: string; producto: string; disponible: number; enDespacho: number; valor: Decimal }
+  >();
+  const despachos = new Map<string, { codigo: string; producto: string; unidades: number; valor: Decimal }>();
+
+  for (const it of items) {
+    const fc = toDecimal(it.costoFCUnitario ?? 0);
+    const valorLinea = fc.times(it.cantidadDisponible);
+    valorUsd = valorUsd.plus(valorLinea);
+    unidadesDisponibles += it.cantidadDisponible;
+    if (it.cantidadDisponible > 0) skus.add(it.producto.codigo);
+
+    if (!agingPorContenedor.has(it.contenedor.id)) {
+      const ref =
+        it.contenedor.fechaDesconsolidacion ??
+        it.contenedor.fechaTrasladoDF ??
+        it.contenedor.fechaIngresoZpa ??
+        it.contenedor.createdAt;
+      agingPorContenedor.set(
+        it.contenedor.id,
+        Math.max(Math.floor((ahora - ref.getTime()) / 86_400_000), 0),
+      );
+    }
+
+    const sku = porSku.get(it.producto.codigo) ?? {
+      codigo: it.producto.codigo,
+      producto: it.producto.nombre,
+      disponible: 0,
+      enDespacho: 0,
+      valor: new Decimal(0),
+    };
+    sku.disponible += it.cantidadDisponible;
+    sku.enDespacho += it.cantidadEnDespacho;
+    sku.valor = sku.valor.plus(valorLinea);
+    porSku.set(it.producto.codigo, sku);
+
+    if (it.cantidadEnDespacho > 0) {
+      const d = despachos.get(it.producto.codigo) ?? {
+        codigo: it.producto.codigo,
+        producto: it.producto.nombre,
+        unidades: 0,
+        valor: new Decimal(0),
+      };
+      d.unidades += it.cantidadEnDespacho;
+      d.valor = d.valor.plus(fc.times(it.cantidadEnDespacho));
+      despachos.set(it.producto.codigo, d);
+    }
+  }
+
+  const edades = [...agingPorContenedor.values()].sort((a, b) => a - b);
+
+  return {
+    kpis: {
+      valorUsd: num(valorUsd),
+      unidadesDisponibles,
+      skus: skus.size,
+      contenedores: agingPorContenedor.size,
+    },
+    aging: {
+      p50: percentil(edades, 50),
+      p90: percentil(edades, 90),
+      max: edades.at(-1) ?? 0,
+    },
+    porSku: [...porSku.values()]
+      .sort((a, b) => b.valor.cmp(a.valor))
+      .slice(0, 20)
+      .map((s) => ({
+        codigo: s.codigo,
+        producto: s.producto,
+        disponible: s.disponible,
+        enDespacho: s.enDespacho,
+        valorUsd: num(s.valor),
+      })),
+    despachosAbiertos: [...despachos.values()]
+      .sort((a, b) => b.unidades - a.unidades)
+      .map((d) => ({
+        codigo: d.codigo,
+        producto: d.producto,
+        unidades: d.unidades,
+        valorUsd: num(d.valor),
+      })),
   };
 }
 
