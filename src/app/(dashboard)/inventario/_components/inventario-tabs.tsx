@@ -59,7 +59,7 @@ export function InventarioTabs({
   const countTransito = enTransito.reduce((a, f) => a + f.cantidad, 0);
   const countProduccion = enProduccion.reduce((a, f) => a + f.cantidadEnProduccion, 0);
   const countAduana = (stockAduanero ?? []).reduce(
-    (a, f) => a + f.totalDisponible + f.totalEnDespacho,
+    (a, f) => a + f.enTransito + f.enZpa + f.enDf + f.enDespacho,
     0,
   );
 
@@ -94,7 +94,7 @@ export function InventarioTabs({
         </TabsTrigger>
         {stockAduanero && (
           <TabsTrigger value="aduana">
-            Depósito fiscal
+            Comex / Aduana
             <Badge variant="outline" className="ml-1">
               {countAduana}
             </Badge>

@@ -158,7 +158,7 @@ export async function listarEnTransito(opts?: {
 }
 
 // ============================================================
-// Stock aduanero (depósito fiscal) — drill-down por contenedor (PR 5.1)
+// Stock comex / aduanero — pipeline segmentado por fase (PR 5.1 + 5.2)
 // ============================================================
 
 export type StockAduaneroContenedor = {
@@ -166,8 +166,12 @@ export type StockAduaneroContenedor = {
   numeroContenedor: string;
   estado: ContenedorEstado;
   depositoFiscalNombre: string | null;
-  cantidadDisponible: number;
-  cantidadEnDespacho: number;
+  /** Cantidad viva repartida en la fase que corresponde al estado del contenedor. */
+  enTransito: number;
+  enZpa: number;
+  enDf: number;
+  enDespacho: number;
+  /** Referencia: lo ya nacionalizado en este contenedor. */
   cantidadDespachada: number;
 };
 
@@ -175,18 +179,39 @@ export type StockAduaneroFila = {
   productoId: string;
   codigo: string;
   nombre: string;
-  totalDisponible: number;
-  totalEnDespacho: number;
-  totalDespachada: number;
+  enTransito: number;
+  enZpa: number;
+  enDf: number;
+  enDespacho: number;
   contenedores: StockAduaneroContenedor[];
 };
 
 /**
- * Drill-down del stock que está en depósito fiscal (bonded): por producto →
- * contenedor → estado aduanero. Se basa en los counters de ItemContenedor
- * (disponible/enDespacho) + Contenedor.estado. Sólo incluye líneas con saldo
- * vivo (disponible o enDespacho > 0); la cantidad despachada se muestra como
- * referencia por contenedor. Detrás de la flag de desconsolidación (PR 5.1).
+ * Mapea cada estado del contenedor a su fase del pipeline aduanero. Sólo se
+ * incluyen estados con saldo "vivo" posible; BORRADOR (packing list en edición),
+ * NACIONALIZADO_DIRECTO y TOTALMENTE_DESPACHADO / CANCELADO quedan fuera.
+ */
+const FASE_POR_ESTADO: Partial<Record<ContenedorEstado, "EN_TRANSITO" | "EN_ZPA" | "EN_DF">> = {
+  EN_TRANSITO: "EN_TRANSITO",
+  ARRIBADO_PUERTO: "EN_TRANSITO",
+  EN_ZONA_PRIMARIA: "EN_ZPA",
+  TRASLADO_DEPOSITO_FISCAL: "EN_ZPA",
+  EN_DEPOSITO_FISCAL: "EN_DF",
+  AGUARDANDO_INVESTIGACAO: "EN_DF",
+  DESCONSOLIDADO: "EN_DF",
+  PARCIALMENTE_DESPACHADO: "EN_DF",
+};
+
+const ESTADOS_PIPELINE_ADUANERO = Object.keys(FASE_POR_ESTADO) as ContenedorEstado[];
+
+/**
+ * Pipeline comex/aduanero por producto → contenedor, segmentado por fase
+ * (EN_TRANSITO / EN_ZPA / EN_DF / EN_DESPACHO). Antes del depósito fiscal el
+ * saldo vivo es la cantidad declarada del packing list; en DF pasa a ser el
+ * counter `cantidadDisponible`. `cantidadEnDespacho` (trabado por un borrador
+ * o despacho cruzado) se reporta siempre como columna propia. Sólo se incluyen
+ * líneas con saldo vivo en alguna fase; la cantidad despachada se muestra como
+ * referencia por contenedor. Detrás de la flag de desconsolidación (PR 5.2).
  */
 export async function listarStockAduanero(opts?: {
   search?: string;
@@ -195,7 +220,12 @@ export async function listarStockAduanero(opts?: {
 
   const items = await db.itemContenedor.findMany({
     where: {
-      OR: [{ cantidadDisponible: { gt: 0 } }, { cantidadEnDespacho: { gt: 0 } }],
+      contenedor: { estado: { in: ESTADOS_PIPELINE_ADUANERO } },
+      OR: [
+        { cantidadDeclarada: { gt: 0 } },
+        { cantidadDisponible: { gt: 0 } },
+        { cantidadEnDespacho: { gt: 0 } },
+      ],
       ...(search
         ? {
             producto: {
@@ -209,6 +239,7 @@ export async function listarStockAduanero(opts?: {
     },
     select: {
       productoId: true,
+      cantidadDeclarada: true,
       cantidadDisponible: true,
       cantidadEnDespacho: true,
       cantidadDespachada: true,
@@ -226,25 +257,40 @@ export async function listarStockAduanero(opts?: {
 
   const porProducto = new Map<string, StockAduaneroFila>();
   for (const it of items) {
+    const fase = FASE_POR_ESTADO[it.contenedor.estado];
+    if (!fase) continue;
+
+    // Antes del DF el saldo vivo es lo declarado; en DF es lo disponible.
+    const enTransito = fase === "EN_TRANSITO" ? it.cantidadDeclarada : 0;
+    const enZpa = fase === "EN_ZPA" ? it.cantidadDeclarada : 0;
+    const enDf = fase === "EN_DF" ? it.cantidadDisponible : 0;
+    const enDespacho = it.cantidadEnDespacho;
+
+    if (enTransito + enZpa + enDf + enDespacho <= 0) continue;
+
     const fila = porProducto.get(it.productoId) ?? {
       productoId: it.productoId,
       codigo: it.producto.codigo,
       nombre: it.producto.nombre,
-      totalDisponible: 0,
-      totalEnDespacho: 0,
-      totalDespachada: 0,
+      enTransito: 0,
+      enZpa: 0,
+      enDf: 0,
+      enDespacho: 0,
       contenedores: [],
     };
-    fila.totalDisponible += it.cantidadDisponible;
-    fila.totalEnDespacho += it.cantidadEnDespacho;
-    fila.totalDespachada += it.cantidadDespachada;
+    fila.enTransito += enTransito;
+    fila.enZpa += enZpa;
+    fila.enDf += enDf;
+    fila.enDespacho += enDespacho;
     fila.contenedores.push({
       contenedorId: it.contenedor.id,
       numeroContenedor: it.contenedor.numeroContenedor,
       estado: it.contenedor.estado,
       depositoFiscalNombre: it.contenedor.depositoFiscal?.nombre ?? null,
-      cantidadDisponible: it.cantidadDisponible,
-      cantidadEnDespacho: it.cantidadEnDespacho,
+      enTransito,
+      enZpa,
+      enDf,
+      enDespacho,
       cantidadDespachada: it.cantidadDespachada,
     });
     porProducto.set(it.productoId, fila);
