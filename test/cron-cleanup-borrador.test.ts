@@ -103,7 +103,7 @@ describe("cron cleanup borradores expirados (PR 4.6)", () => {
     });
     const borrador = await db.prisma.despachoBorrador.create({
       data: {
-        userId: 1,
+        userId: "user-uuid",
         embarqueId: embarque.id,
         estadoActual: "CONFIRMADO_TRABA_COUNTS",
         payloadDiff: { lineas: [{ itemContenedorId: ic.id, cantidad: 30 }] },

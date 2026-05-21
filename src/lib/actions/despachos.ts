@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { money, toDecimal } from "@/lib/decimal";
 import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
@@ -22,7 +23,10 @@ import {
 } from "@/lib/services/stock";
 import { resolverDepositoZpa } from "@/lib/services/embarque-zpa";
 import {
+  contabilizarBorrador,
+  crearBorrador,
   DespachoParcialError,
+  expirarBorrador,
   materializarDespachoCruzado,
   revertirCountersDespacho,
 } from "@/lib/services/despacho-parcial";
@@ -901,4 +905,147 @@ async function crearOActualizarVepDespacho(
       montoTotal: money(montoTotal),
     },
   });
+}
+
+// ============================================================
+// Borrador de despacho cruzado (Fase 4, flag ON) — actions (PR 4.4)
+// ============================================================
+//
+// Exponen el contrato del borrador server-side (PR 4.2/4.3) a la UI: gate
+// (flag + auth) → safeParse → service → mapError(DespachoParcialError) →
+// revalidatePath. El "retomar" es un READ servido por la página vía
+// `obtenerMatrizDespachoCruzado` (devuelve `borradorVigente`), por eso acá no
+// hay action de retomar. La contabilización del asiento sigue siendo el paso
+// `contabilizarDespachoAction` (PR 4.5) sobre el Despacho ya materializado.
+
+type BorradorGate = { ok: false; error: string } | { ok: true; userId: string };
+
+async function gateBorrador(): Promise<BorradorGate> {
+  if (!isContenedorDesconsolidacionEnabled()) {
+    return { ok: false, error: "La función de desconsolidación no está habilitada." };
+  }
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { ok: false, error: "No autorizado." };
+  }
+  return { ok: true, userId: session.user.id };
+}
+
+function mapBorradorError(err: DespachoParcialError): string {
+  switch (err.code) {
+    case "BORRADOR_INEXISTENTE":
+      return "El borrador no existe.";
+    case "BORRADOR_EXPIRADO":
+      return "El borrador expiró; creá uno nuevo.";
+    case "BORRADOR_ESTADO_INVALIDO":
+      return "El borrador no está en un estado válido para esta operación.";
+    case "LINEAS_VACIAS":
+      return "El despacho no tiene líneas.";
+    case "CANTIDAD_INVALIDA":
+      return "Hay una cantidad inválida (debe ser entero mayor que 0).";
+    case "ITEM_CONTENEDOR_INEXISTENTE":
+      return "Una línea referencia un ítem de contenedor inexistente.";
+    case "ITEM_CONTENEDOR_AJENO":
+      return "Una línea no pertenece a este embarque.";
+    case "ITEM_SIN_ITEM_EMBARQUE":
+      return "Una línea de contenedor no está vinculada a un ítem del embarque.";
+    case "SALDO_INSUFICIENTE":
+      return "Saldo insuficiente: otro despacho ya consumió esas unidades.";
+    case "EMBARQUE_INEXISTENTE":
+      return "El embarque no existe.";
+    default:
+      return "Error al procesar el borrador.";
+  }
+}
+
+const lineaBorradorSchema = z.object({
+  itemContenedorId: z.number().int().positive(),
+  cantidad: z.number().int().positive(),
+});
+
+const crearBorradorSchema = z.object({
+  embarqueId: z.string().min(1),
+  lineas: z.array(lineaBorradorSchema).min(1),
+});
+
+export type CrearBorradorResult = { ok: true; borradorId: string } | { ok: false; error: string };
+
+export async function crearBorradorAction(
+  input: z.input<typeof crearBorradorSchema>,
+): Promise<CrearBorradorResult> {
+  const gate = await gateBorrador();
+  if (!gate.ok) return gate;
+  const parsed = crearBorradorSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+  }
+  try {
+    const borrador = await crearBorrador({
+      userId: gate.userId,
+      embarqueId: parsed.data.embarqueId,
+      lineas: parsed.data.lineas,
+    });
+    revalidatePath(`/comex/embarques/${parsed.data.embarqueId}/despachos`);
+    return { ok: true, borradorId: borrador.id };
+  } catch (err) {
+    if (err instanceof DespachoParcialError) return { ok: false, error: mapBorradorError(err) };
+    console.error("crearBorradorAction failed", err);
+    return { ok: false, error: "Error inesperado al crear el borrador." };
+  }
+}
+
+const contabilizarBorradorSchema = z.object({
+  borradorId: z.string().min(1),
+  embarqueId: z.string().min(1),
+  fecha: z.coerce.date(),
+});
+
+export type ContabilizarBorradorResult =
+  | { ok: true; despachoId: string; codigo: string }
+  | { ok: false; error: string };
+
+export async function contabilizarBorradorAction(
+  input: z.input<typeof contabilizarBorradorSchema>,
+): Promise<ContabilizarBorradorResult> {
+  const gate = await gateBorrador();
+  if (!gate.ok) return gate;
+  const parsed = contabilizarBorradorSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Datos inválidos." };
+  try {
+    const res = await contabilizarBorrador({
+      borradorId: parsed.data.borradorId,
+      fecha: parsed.data.fecha,
+    });
+    revalidatePath(`/comex/embarques/${parsed.data.embarqueId}/despachos`);
+    return { ok: true, despachoId: res.despachoId, codigo: res.codigo };
+  } catch (err) {
+    if (err instanceof DespachoParcialError) return { ok: false, error: mapBorradorError(err) };
+    console.error("contabilizarBorradorAction failed", err);
+    return { ok: false, error: "Error inesperado al confirmar el borrador." };
+  }
+}
+
+const expirarBorradorSchema = z.object({
+  borradorId: z.string().min(1),
+  embarqueId: z.string().min(1),
+});
+
+export type ExpirarBorradorResult = { ok: true } | { ok: false; error: string };
+
+export async function expirarBorradorAction(
+  input: z.input<typeof expirarBorradorSchema>,
+): Promise<ExpirarBorradorResult> {
+  const gate = await gateBorrador();
+  if (!gate.ok) return gate;
+  const parsed = expirarBorradorSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Datos inválidos." };
+  try {
+    await expirarBorrador(parsed.data.borradorId);
+    revalidatePath(`/comex/embarques/${parsed.data.embarqueId}/despachos`);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof DespachoParcialError) return { ok: false, error: mapBorradorError(err) };
+    console.error("expirarBorradorAction failed", err);
+    return { ok: false, error: "Error inesperado al cancelar el borrador." };
+  }
 }

@@ -1,7 +1,12 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { type DespachoBorrador, type ItemContenedor, Prisma } from "@/generated/prisma/client";
+import {
+  ContenedorEstado,
+  type DespachoBorrador,
+  type ItemContenedor,
+  Prisma,
+} from "@/generated/prisma/client";
 
 // ============================================================
 // PR 4.2 — Despacho parcial cruzado: service + contrato del borrador
@@ -65,7 +70,7 @@ export interface LineaBorrador {
 }
 
 export interface CrearBorradorInput {
-  userId: number;
+  userId: string;
   embarqueId: string;
   lineas: LineaBorrador[];
 }
@@ -309,7 +314,67 @@ export async function materializarDespachoCruzado(
     }
   }
 
+  // A0 (PR 4.4): transiciona el estado de cada contenedor tocado según sus
+  // counters (PARCIALMENTE/TOTALMENTE_DESPACHADO).
+  const contenedoresTocados = new Set(
+    lineas.map((l) => items.get(l.itemContenedorId)!.contenedorId),
+  );
+  for (const contenedorId of contenedoresTocados) {
+    await recomputarEstadoContenedor(t, contenedorId);
+  }
+
   return { despachoId: despacho.id, codigo: despacho.codigo };
+}
+
+// Estados del ciclo de despacho del Contenedor: sólo entre estos transiciona
+// `recomputarEstadoContenedor`, para no pisar AGUARDANDO_INVESTIGACAO,
+// EN_DEPOSITO_FISCAL, CANCELADO, etc.
+const ESTADOS_CICLO_DESPACHO: ReadonlySet<ContenedorEstado> = new Set([
+  ContenedorEstado.DESCONSOLIDADO,
+  ContenedorEstado.PARCIALMENTE_DESPACHADO,
+  ContenedorEstado.TOTALMENTE_DESPACHADO,
+]);
+
+/**
+ * Recalcula el estado de despacho de un contenedor a partir de los counters de
+ * sus ItemContenedor: sin despachar → DESCONSOLIDADO; algo despachado con saldo
+ * → PARCIALMENTE_DESPACHADO; todo despachado (disponible+enDespacho = 0) →
+ * TOTALMENTE_DESPACHADO. Idempotente; sólo escribe si el estado cambia y sólo
+ * desde estados del ciclo de despacho (A0, PR 4.4).
+ */
+export async function recomputarEstadoContenedor(t: TxClient, contenedorId: string): Promise<void> {
+  const contenedor = await t.contenedor.findUnique({
+    where: { id: contenedorId },
+    select: {
+      estado: true,
+      items: {
+        select: {
+          cantidadDisponible: true,
+          cantidadEnDespacho: true,
+          cantidadDespachada: true,
+        },
+      },
+    },
+  });
+  if (!contenedor || !ESTADOS_CICLO_DESPACHO.has(contenedor.estado)) return;
+
+  let despachada = 0;
+  let restante = 0;
+  for (const ic of contenedor.items) {
+    despachada += ic.cantidadDespachada;
+    restante += ic.cantidadDisponible + ic.cantidadEnDespacho;
+  }
+
+  const nuevo: ContenedorEstado =
+    despachada === 0
+      ? ContenedorEstado.DESCONSOLIDADO
+      : restante === 0
+        ? ContenedorEstado.TOTALMENTE_DESPACHADO
+        : ContenedorEstado.PARCIALMENTE_DESPACHADO;
+
+  if (nuevo !== contenedor.estado) {
+    await t.contenedor.update({ where: { id: contenedorId }, data: { estado: nuevo } });
+  }
 }
 
 // ------------------------------------------------------------
@@ -441,12 +506,14 @@ async function moverEnDespachoADespachadaSingleShot(
 export async function revertirCountersDespacho(t: TxClient, despachoId: string): Promise<void> {
   const items = await t.itemDespacho.findMany({
     where: { despachoId, itemContenedorId: { not: null } },
-    select: { itemContenedorId: true, cantidad: true },
+    select: { itemContenedorId: true, contenedorId: true, cantidad: true },
   });
   const acc = new Map<number, number>();
+  const contenedoresTocados = new Set<string>();
   for (const i of items) {
     if (i.itemContenedorId == null) continue;
     acc.set(i.itemContenedorId, (acc.get(i.itemContenedorId) ?? 0) + i.cantidad);
+    if (i.contenedorId) contenedoresTocados.add(i.contenedorId);
   }
   const ordered = [...acc].sort((a, b) => a[0] - b[0]);
   for (const [itemContenedorId, cantidad] of ordered) {
@@ -463,6 +530,11 @@ export async function revertirCountersDespacho(t: TxClient, despachoId: string):
         `ItemContenedor ${itemContenedorId}: despachada insuficiente para revertir ${cantidad}.`,
       );
     }
+  }
+  // A0 (PR 4.4): al revertir, el contenedor puede volver de
+  // TOTALMENTE/PARCIALMENTE_DESPACHADO a un estado con saldo.
+  for (const contenedorId of contenedoresTocados) {
+    await recomputarEstadoContenedor(t, contenedorId);
   }
 }
 
@@ -498,6 +570,152 @@ async function siguienteCodigoDespacho(t: TxClient, embarqueCodigo: string): Pro
     where: { codigo: { startsWith: `${embarqueCodigo}-D` } },
   });
   return `${embarqueCodigo}-D${existentes + 1}`;
+}
+
+// ------------------------------------------------------------
+// READ — matriz de despacho cruzado (consumida por la UI, PR 4.4)
+// ------------------------------------------------------------
+
+/** Una celda SKU × contenedor: saldo disponible para despachar de esa línea. */
+export interface MatrizCeldaDTO {
+  itemContenedorId: number;
+  contenedorId: string;
+  numeroContenedor: string;
+  cantidadDisponible: number;
+  costoFCUnitario: string | null;
+}
+
+/** Una fila de la matriz, agrupada por itemEmbarque (SKU del embarque). */
+export interface MatrizSkuDTO {
+  itemEmbarqueId: number;
+  productoId: string;
+  productoLabel: string;
+  celdas: MatrizCeldaDTO[];
+}
+
+export interface MatrizContenedorDTO {
+  id: string;
+  numeroContenedor: string;
+  estado: ContenedorEstado;
+}
+
+export interface BorradorVigenteDTO {
+  id: string;
+  expiresAt: string;
+  lineas: LineaBorrador[];
+}
+
+export interface MatrizDespachoCruzadoDTO {
+  embarqueId: string;
+  embarqueCodigo: string;
+  tipoCambio: string;
+  contenedores: MatrizContenedorDTO[];
+  skus: MatrizSkuDTO[];
+  /** Borrador CONFIRMADO no vencido del usuario para este embarque (P0-4). */
+  borradorVigente: BorradorVigenteDTO | null;
+}
+
+/**
+ * READ serializable (Decimal→string) para la matriz de despacho cruzado:
+ * contenedores con saldo disponible del embarque, líneas agrupadas por SKU
+ * (itemEmbarque) y el borrador vigente del usuario si existe. Sólo considera
+ * contenedores en el ciclo de despacho con saldo (`cantidadDisponible > 0`).
+ */
+export async function obtenerMatrizDespachoCruzado(
+  embarqueId: string,
+  userId: string,
+  tx?: TxClient,
+): Promise<MatrizDespachoCruzadoDTO | null> {
+  const t = tx ?? db;
+  const embarque = await t.embarque.findUnique({
+    where: { id: embarqueId },
+    select: { id: true, codigo: true, tipoCambio: true },
+  });
+  if (!embarque) return null;
+
+  const contenedores = await t.contenedor.findMany({
+    where: {
+      embarqueId,
+      estado: {
+        in: [ContenedorEstado.DESCONSOLIDADO, ContenedorEstado.PARCIALMENTE_DESPACHADO],
+      },
+    },
+    select: {
+      id: true,
+      numeroContenedor: true,
+      estado: true,
+      items: {
+        where: { cantidadDisponible: { gt: 0 }, itemEmbarqueId: { not: null } },
+        select: {
+          id: true,
+          itemEmbarqueId: true,
+          productoId: true,
+          cantidadDisponible: true,
+          costoFCUnitario: true,
+        },
+        orderBy: { id: "asc" },
+      },
+    },
+    orderBy: { numeroContenedor: "asc" },
+  });
+
+  const productoIds = [...new Set(contenedores.flatMap((c) => c.items.map((i) => i.productoId)))];
+  const productos = await t.producto.findMany({
+    where: { id: { in: productoIds } },
+    select: { id: true, codigo: true, nombre: true },
+  });
+  const prodLabel = new Map(productos.map((p) => [p.id, `${p.codigo} — ${p.nombre}`]));
+
+  const skuMap = new Map<number, MatrizSkuDTO>();
+  const contenedorDTOs: MatrizContenedorDTO[] = [];
+  for (const c of contenedores) {
+    contenedorDTOs.push({ id: c.id, numeroContenedor: c.numeroContenedor, estado: c.estado });
+    for (const it of c.items) {
+      if (it.itemEmbarqueId == null) continue;
+      let sku = skuMap.get(it.itemEmbarqueId);
+      if (!sku) {
+        sku = {
+          itemEmbarqueId: it.itemEmbarqueId,
+          productoId: it.productoId,
+          productoLabel: prodLabel.get(it.productoId) ?? it.productoId,
+          celdas: [],
+        };
+        skuMap.set(it.itemEmbarqueId, sku);
+      }
+      sku.celdas.push({
+        itemContenedorId: it.id,
+        contenedorId: c.id,
+        numeroContenedor: c.numeroContenedor,
+        cantidadDisponible: it.cantidadDisponible,
+        costoFCUnitario: it.costoFCUnitario?.toString() ?? null,
+      });
+    }
+  }
+
+  const borrador = await t.despachoBorrador.findFirst({
+    where: {
+      embarqueId,
+      userId,
+      estadoActual: ESTADO_CONFIRMADO,
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return {
+    embarqueId: embarque.id,
+    embarqueCodigo: embarque.codigo,
+    tipoCambio: embarque.tipoCambio.toString(),
+    contenedores: contenedorDTOs,
+    skus: [...skuMap.values()],
+    borradorVigente: borrador
+      ? {
+          id: borrador.id,
+          expiresAt: borrador.expiresAt.toISOString(),
+          lineas: parsePayloadLineas(borrador.payloadDiff),
+        }
+      : null,
+  };
 }
 
 interface CountTrabado {
