@@ -11,9 +11,11 @@ import {
   AsientoError,
   contabilizarAsiento,
   crearAsientoDespacho,
+  crearAsientoDespachoCruzado,
 } from "@/lib/services/asiento-automatico";
 import {
   aplicarIngresoDespacho,
+  aplicarNacionalizacionDF,
   aplicarTransferenciaDespacho,
   revertirIngresoDespacho,
   revertirTransferenciaDespacho,
@@ -465,6 +467,7 @@ export async function contabilizarDespachoAction(
         select: {
           id: true,
           codigo: true,
+          tipoCambio: true,
           depositoDestinoId: true,
           asientoZonaPrimariaId: true,
           depositoZonaPrimariaId: true,
@@ -475,6 +478,76 @@ export async function contabilizarDespachoAction(
           "DOMINIO_INVALIDO",
           `Embarque ${embarque?.codigo}: definí depósito destino antes de contabilizar.`,
         );
+      }
+
+      // Fork por contenido: si alguna línea tiene itemContenedorId, es un
+      // despacho CRUZADO (Fase 4) → asiento NACIONALIZACION_VIA_DF + stock
+      // DF→destino. La detección es por datos (no por flag) porque la flag
+      // pudo cambiar entre crear y contabilizar.
+      const itemsFork = await tx.itemDespacho.findMany({
+        where: { despachoId },
+        select: { itemContenedorId: true },
+      });
+      const esCruzado = itemsFork.some((i) => i.itemContenedorId != null);
+
+      if (esCruzado) {
+        const asientoCruz = await crearAsientoDespachoCruzado(despachoId, tx);
+        const contabilizadoCruz = await contabilizarAsiento(asientoCruz.id, tx);
+
+        const despCruz = await tx.despacho.findUniqueOrThrow({
+          where: { id: despachoId },
+          select: {
+            codigo: true,
+            fecha: true,
+            items: {
+              select: {
+                cantidad: true,
+                itemContenedor: {
+                  select: {
+                    productoId: true,
+                    costoFCUnitario: true,
+                    contenedor: { select: { depositoFiscalId: true } },
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        const tcEmb = toDecimal(embarque.tipoCambio);
+        const itemsDF = despCruz.items.map((i) => {
+          const ic = i.itemContenedor;
+          if (!ic?.contenedor.depositoFiscalId) {
+            throw new AsientoError(
+              "DOMINIO_INVALIDO",
+              "Una línea cruzada no tiene depósito fiscal de origen asignado.",
+            );
+          }
+          if (ic.costoFCUnitario == null) {
+            throw new AsientoError(
+              "DOMINIO_INVALIDO",
+              "Una línea cruzada no tiene costo FC (cerrá costos antes de nacionalizar).",
+            );
+          }
+          return {
+            productoId: ic.productoId,
+            cantidad: i.cantidad,
+            costoUnitario: toDecimal(ic.costoFCUnitario).times(tcEmb),
+            depositoFiscalId: ic.contenedor.depositoFiscalId,
+          };
+        });
+
+        await aplicarNacionalizacionDF(tx, {
+          despachoId,
+          despachoCodigo: despCruz.codigo,
+          depositoDestinoId: embarque.depositoDestinoId,
+          fecha: despCruz.fecha,
+          items: itemsDF,
+        });
+
+        await tx.despacho.update({ where: { id: despachoId }, data: { estado: "CONTABILIZADO" } });
+        await crearOActualizarVepDespacho(tx, despachoId);
+        return { asientoNumero: contabilizadoCruz.numero };
       }
 
       const asiento = await crearAsientoDespacho(despachoId, tx);
