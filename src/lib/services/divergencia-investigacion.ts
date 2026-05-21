@@ -437,3 +437,129 @@ async function assertEnAnalisis(t: TxClient, investigacionId: string) {
   }
   return inv;
 }
+
+// ---- read DTO (UI PR 3.5) --------------------------------------------
+
+export interface DivergenciaItemDTO {
+  itemContenedorId: number;
+  productoLabel: string;
+  cantidadDeclarada: number;
+  cantidadFisica: number;
+  /** física − declarada (negativo = falta). */
+  diferenciaUnidades: number;
+  valorImpactadoUSD: string;
+}
+
+export interface InvestigacionDTO {
+  id: string;
+  estado: DivergenciaEstado;
+  pesoContenedorKg: string | null;
+  pesoEsperadoKg: string | null;
+  lacreOrigemOk: boolean | null;
+  lacreOrigemObs: string | null;
+  lacrePemaOk: boolean | null;
+  lacreCustomsOk: boolean | null;
+  gravacaoDescargaUrl: string | null;
+  fotosUrls: string[];
+  documentosUrls: string[];
+  causaIdentificada: DivergenciaCausa | null;
+  responsavelTipo: DivergenciaResp | null;
+  responsavelId: string | null;
+  polizaSeguro: string | null;
+  items: DivergenciaItemDTO[];
+}
+
+export interface ContenedorInvestigacionDTO {
+  contenedorId: string;
+  numeroContenedor: string;
+  estado: ContenedorEstado;
+  embarqueId: string;
+  embarqueCodigo: string;
+  /** null si el contenedor aún no fue desconsolidado. */
+  desconsolidacionId: string | null;
+  /** true si algún ItemContenedor tiene físico ≠ declarado (hay qué investigar). */
+  tieneDivergencia: boolean;
+  /** null si todavía no se abrió la investigación. */
+  investigacion: InvestigacionDTO | null;
+}
+
+/**
+ * READ serializable (Decimal→string) para la UI de investigación (PR 3.5).
+ * Devuelve el estado del contenedor + su desconsolidación + la investigación
+ * (si ya fue abierta) con sus ítems divergentes y evidencias. `null` si el
+ * contenedor no existe.
+ */
+export async function obtenerInvestigacionParaContenedor(
+  contenedorId: string,
+  tx?: TxClient,
+): Promise<ContenedorInvestigacionDTO | null> {
+  const t = tx ?? db;
+  const contenedor = await t.contenedor.findUnique({
+    where: { id: contenedorId },
+    include: {
+      embarque: { select: { id: true, codigo: true } },
+      items: { select: { id: true, cantidadDeclarada: true, cantidadFisica: true } },
+      desconsolidacion: {
+        include: {
+          divergencia: { include: { items: { orderBy: { id: "asc" } } } },
+        },
+      },
+    },
+  });
+  if (!contenedor) return null;
+
+  const tieneDivergencia = contenedor.items.some(
+    (it) => it.cantidadFisica != null && it.cantidadFisica !== it.cantidadDeclarada,
+  );
+
+  const inv = contenedor.desconsolidacion?.divergencia ?? null;
+
+  let investigacion: InvestigacionDTO | null = null;
+  if (inv) {
+    // Labels de producto para los ítems divergentes.
+    const itemContenedorIds = inv.items.map((i) => i.itemContenedorId);
+    const itemsContenedor = await t.itemContenedor.findMany({
+      where: { id: { in: itemContenedorIds } },
+      select: { id: true, producto: { select: { codigo: true, nombre: true } } },
+    });
+    const labelPorItem = new Map(
+      itemsContenedor.map((ic) => [ic.id, `${ic.producto.codigo} — ${ic.producto.nombre}`]),
+    );
+    investigacion = {
+      id: inv.id,
+      estado: inv.estado,
+      pesoContenedorKg: inv.pesoContenedorKg?.toString() ?? null,
+      pesoEsperadoKg: inv.pesoEsperadoKg?.toString() ?? null,
+      lacreOrigemOk: inv.lacreOrigemOk,
+      lacreOrigemObs: inv.lacreOrigemObs,
+      lacrePemaOk: inv.lacrePemaOk,
+      lacreCustomsOk: inv.lacreCustomsOk,
+      gravacaoDescargaUrl: inv.gravacaoDescargaUrl,
+      fotosUrls: inv.fotosUrls,
+      documentosUrls: inv.documentosUrls,
+      causaIdentificada: inv.causaIdentificada,
+      responsavelTipo: inv.responsavelTipo,
+      responsavelId: inv.responsavelId,
+      polizaSeguro: inv.polizaSeguro,
+      items: inv.items.map((it) => ({
+        itemContenedorId: it.itemContenedorId,
+        productoLabel: labelPorItem.get(it.itemContenedorId) ?? `Item ${it.itemContenedorId}`,
+        cantidadDeclarada: it.cantidadDeclarada,
+        cantidadFisica: it.cantidadFisica,
+        diferenciaUnidades: it.diferenciaUnidades,
+        valorImpactadoUSD: it.valorImpactadoUSD.toString(),
+      })),
+    };
+  }
+
+  return {
+    contenedorId: contenedor.id,
+    numeroContenedor: contenedor.numeroContenedor,
+    estado: contenedor.estado,
+    embarqueId: contenedor.embarque.id,
+    embarqueCodigo: contenedor.embarque.codigo,
+    desconsolidacionId: contenedor.desconsolidacion?.id ?? null,
+    tieneDivergencia,
+    investigacion,
+  };
+}
