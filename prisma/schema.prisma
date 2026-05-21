@@ -792,22 +792,37 @@ model Despacho {
 }
 
 model ItemDespacho {
-  id             Int     @id @default(autoincrement())
-  despachoId     String
-  itemEmbarqueId Int
-  cantidad       Int
+  id               Int     @id @default(autoincrement())
+  despachoId       String
+  itemEmbarqueId   Int
+  // Origen del despacho parcial cruzado (Fase 4, flag CONTENEDOR_DESCONSOLIDACION_ENABLED).
+  // null = línea LEGACY (1 por (despacho, itemEmbarque)). Setadas = línea CRUZADA
+  // (N por itemEmbarque, una por itemContenedor de origen). El grano de unicidad
+  // cruzada es itemContenedorId (split por lote). Coherencia legacy⟺cruzado se
+  // garantiza con un CHECK ((contenedorId IS NULL) = (itemContenedorId IS NULL)).
+  contenedorId     String? // FK Contenedor.id (uuid)
+  itemContenedorId Int? // FK ItemContenedor.id
+  cantidad         Int
   // Costo unitario calculado al contabilizar: porción rateada del costo
   // en tránsito del embarque (FOB+origen+ZP) por unidad. Se setea en el
   // contabilizar y queda como referencia.
-  costoUnitario  Decimal @default(0) @db.Decimal(18, 2)
+  costoUnitario    Decimal @default(0) @db.Decimal(18, 2)
 
   despacho           Despacho           @relation(fields: [despachoId], references: [id], onDelete: Cascade)
   itemEmbarque       ItemEmbarque       @relation(fields: [itemEmbarqueId], references: [id])
+  contenedor         Contenedor?        @relation(fields: [contenedorId], references: [id], onDelete: Restrict)
+  itemContenedor     ItemContenedor?    @relation(fields: [itemContenedorId], references: [id], onDelete: Restrict)
   movimientosStock   MovimientoStock[]
   unidadesInventario UnidadInventario[]
 
-  @@unique([despachoId, itemEmbarqueId])
+  // El UNIQUE se materializa como dos índices PARCIALES en raw SQL
+  // (prisma/add-partial-indexes-despacho.ts), porque @@unique de Prisma no
+  // soporta WHERE: legacy (despachoId, itemEmbarqueId) WHERE contenedorId IS NULL
+  // + cruzado (despachoId, itemContenedorId) WHERE contenedorId IS NOT NULL.
+  // NO declarar @@unique acá.
   @@index([itemEmbarqueId])
+  @@index([contenedorId])
+  @@index([itemContenedorId])
 }
 
 // ============================================================
@@ -855,6 +870,7 @@ model Contenedor {
   desconsolidacion     Desconsolidacion?
   movimientosStock     MovimientoStock[]
   unidadesInventario   UnidadInventario[]
+  itemsDespacho        ItemDespacho[]
 
   @@index([embarqueId])
   @@index([estado])
@@ -895,6 +911,7 @@ model ItemContenedor {
   movimientosStock   MovimientoStock[]
   unidadesInventario UnidadInventario[]
   divergenciaItems   DivergenciaItem[]
+  itemsDespacho      ItemDespacho[]
 
   // El UNIQUE por (contenedor, producto, lote) se crea como PARTIAL INDEX
   // en raw SQL (PR 1.5), porque @@unique de Prisma no soporta WHERE y

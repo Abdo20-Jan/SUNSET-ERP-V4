@@ -21,6 +21,8 @@
     "db:backfill-stock": "tsx prisma/backfill-stock-por-deposito.ts",
     "db:validar-stock": "tsx prisma/validar-invariantes-stock.ts",
     "db:partial-indexes-contenedor": "tsx prisma/add-partial-indexes-contenedor.ts",
+    "db:partial-indexes-despacho": "tsx prisma/add-partial-indexes-despacho.ts",
+    "db:sync": "prisma db push && tsx prisma/add-partial-indexes-contenedor.ts --apply && tsx prisma/add-partial-indexes-despacho.ts --apply",
     "test": "vitest run",
     "test:watch": "vitest"
   },

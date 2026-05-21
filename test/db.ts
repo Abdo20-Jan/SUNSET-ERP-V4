@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { PrismaClient } from "@/generated/prisma/client";
+import { ITEM_DESPACHO_PARTIAL_DDL } from "../prisma/partial-indexes-despacho";
 
 /**
  * Banco de prueba efímero respaldado por Testcontainers.
@@ -44,6 +45,14 @@ export async function createTestDb(): Promise<TestDb> {
   const prisma = new PrismaClient({
     adapter: new PrismaPg({ connectionString: url }),
   });
+
+  // `db push` no materializa los índices PARCIALES ni el CHECK de ItemDespacho
+  // (el PSL de Prisma no los representa). Reaplicarlos acá es OBLIGATORIO para
+  // que la BD de prueba tenga la MISMA unicidad que producción; si no, los
+  // tests de unicidad del despacho cruzado darían falso-positivo.
+  for (const { sql } of ITEM_DESPACHO_PARTIAL_DDL) {
+    await prisma.$executeRawUnsafe(sql);
+  }
 
   const reset = async (tables: readonly string[]): Promise<void> => {
     if (tables.length === 0) return;
