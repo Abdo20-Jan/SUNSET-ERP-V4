@@ -430,6 +430,69 @@ async function moverEnDespachoADespachadaSingleShot(
   }
 }
 
+/**
+ * Revierte los counters de un despacho cruzado: por cada línea con
+ * itemContenedorId, mueve `cantidadDespachada → cantidadDisponible` con un
+ * UPDATE condicional (guard `cantidadDespachada >= ?`). Usado al anular
+ * (PR 4.6) un despacho cruzado (BORRADOR o CONTABILIZADO) y al eliminar un
+ * borrador cruzado, para no dejar `cantidadDespachada` inflada. Líneas con el
+ * mismo itemContenedorId se consolidan; el orden por id evita deadlocks.
+ */
+export async function revertirCountersDespacho(t: TxClient, despachoId: string): Promise<void> {
+  const items = await t.itemDespacho.findMany({
+    where: { despachoId, itemContenedorId: { not: null } },
+    select: { itemContenedorId: true, cantidad: true },
+  });
+  const acc = new Map<number, number>();
+  for (const i of items) {
+    if (i.itemContenedorId == null) continue;
+    acc.set(i.itemContenedorId, (acc.get(i.itemContenedorId) ?? 0) + i.cantidad);
+  }
+  const ordered = [...acc].sort((a, b) => a[0] - b[0]);
+  for (const [itemContenedorId, cantidad] of ordered) {
+    const { count } = await t.itemContenedor.updateMany({
+      where: { id: itemContenedorId, cantidadDespachada: { gte: cantidad } },
+      data: {
+        cantidadDespachada: { decrement: cantidad },
+        cantidadDisponible: { increment: cantidad },
+      },
+    });
+    if (count === 0) {
+      throw new DespachoParcialError(
+        "SALDO_INSUFICIENTE",
+        `ItemContenedor ${itemContenedorId}: despachada insuficiente para revertir ${cantidad}.`,
+      );
+    }
+  }
+}
+
+/**
+ * Expira en lote los borradores vencidos (estado CONFIRMADO_TRABA_COUNTS,
+ * expiresAt < now). Cada uno se expira en su propia transacción vía
+ * `expirarBorrador` (single-shot, idempotente, libera counters): un fallo
+ * aislado no impide limpiar el resto. Lo invoca el cron de cleanup (PR 4.6).
+ */
+export async function expirarBorradoresVencidos(
+  now: Date = new Date(),
+): Promise<{ cleaned: number; fallidos: string[] }> {
+  const vencidos = await db.despachoBorrador.findMany({
+    where: { estadoActual: ESTADO_CONFIRMADO, expiresAt: { lt: now } },
+    select: { id: true },
+  });
+  let cleaned = 0;
+  const fallidos: string[] = [];
+  for (const b of vencidos) {
+    try {
+      await expirarBorrador(b.id);
+      cleaned += 1;
+    } catch (err) {
+      fallidos.push(b.id);
+      console.error("expirarBorradoresVencidos: fallo al expirar", b.id, err);
+    }
+  }
+  return { cleaned, fallidos };
+}
+
 async function siguienteCodigoDespacho(t: TxClient, embarqueCodigo: string): Promise<string> {
   const existentes = await t.despacho.count({
     where: { codigo: { startsWith: `${embarqueCodigo}-D` } },
