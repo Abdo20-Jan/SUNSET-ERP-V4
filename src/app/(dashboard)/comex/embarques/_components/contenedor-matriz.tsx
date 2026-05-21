@@ -10,6 +10,7 @@ import {
   crearContenedorAction,
   actualizarPackingListAction,
   avanzarEstadoContenedorAction,
+  cerrarCostosContenedorAction,
   eliminarContenedorAction,
 } from "@/lib/actions/contenedores";
 import type { ContenedorPackingDTO } from "@/lib/services/contenedor";
@@ -268,6 +269,7 @@ function ContenedorCard({
   const [pending, startTransition] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAvanzar, setShowAvanzar] = useState(false);
+  const [showCostos, setShowCostos] = useState(false);
   const [filas, setFilas] = useState<FilaItem[]>(() =>
     contenedor.items.map((it) => ({
       key: nuevaFilaKey(),
@@ -386,6 +388,16 @@ function ContenedorCard({
           </Button>
         )}
         {editable && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setShowCostos((v) => !v)}
+          >
+            Cerrar costos
+          </Button>
+        )}
+        {editable && (
           <div className="flex items-center gap-2">
             {confirmDelete ? (
               <>
@@ -431,6 +443,14 @@ function ContenedorCard({
           depositos={depositos}
           faseIdx={faseIdx}
           onClose={() => setShowAvanzar(false)}
+        />
+      )}
+
+      {showCostos && editable && (
+        <CerrarCostosPanel
+          contenedor={contenedor}
+          opcionesProducto={opcionesProducto}
+          onClose={() => setShowCostos(false)}
         />
       )}
 
@@ -623,6 +643,112 @@ function AvanzarEstadoPanel({ contenedor, depositos, faseIdx, onClose }: Avanzar
       <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
         Cancelar
       </Button>
+    </div>
+  );
+}
+
+interface CerrarCostosPanelProps {
+  contenedor: ContenedorPackingDTO;
+  opcionesProducto: Array<{ productoId: string; label: string; esperado: number }>;
+  onClose: () => void;
+}
+
+/**
+ * Panel para cerrar los costos del contenedor (Ponte PR B). Lista los SKU del
+ * packing list con su costoFCUnitario (USD). El valor en blanco se deriva del
+ * rateo del embarque (FOB + flete/seguro origen + facturas ZP) ÷ TC; un valor
+ * cargado pisa esa derivación como override manual.
+ */
+function CerrarCostosPanel({ contenedor, opcionesProducto, onClose }: CerrarCostosPanelProps) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const labelMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const op of opcionesProducto) m.set(op.productoId, op.label);
+    return m;
+  }, [opcionesProducto]);
+
+  // SKU distintos del packing list, con su costoFCUnitario persistido (si ya
+  // fue cerrado antes) precargado en el input.
+  const skus = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const it of contenedor.items) {
+      if (!m.has(it.productoId)) m.set(it.productoId, it.costoFCUnitario ?? "");
+    }
+    return Array.from(m, ([productoId, costo]) => ({ productoId, costo }));
+  }, [contenedor.items]);
+
+  const [valores, setValores] = useState<Record<string, string>>(() =>
+    Object.fromEntries(skus.map((s) => [s.productoId, s.costo])),
+  );
+
+  const onConfirmar = () => {
+    // Sólo los valores cargados explícitamente viajan como override; los
+    // vacíos los deriva el service desde el rateo.
+    const overrides = Object.entries(valores)
+      .filter(([, v]) => v.trim() !== "")
+      .map(([productoId, v]) => ({ productoId, costoFCUnitario: v.trim() }));
+    startTransition(async () => {
+      const r = await cerrarCostosContenedorAction({
+        contenedorId: contenedor.id,
+        expectedUpdatedAt: contenedor.updatedAt,
+        overrides: overrides.length > 0 ? overrides : undefined,
+      });
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(`Costos de ${contenedor.numeroContenedor} cerrados.`);
+      onClose();
+      router.refresh();
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-2 border-b bg-muted/20 px-3 py-2">
+      <p className="text-xs text-muted-foreground">
+        Dejá el costo en blanco para derivarlo del rateo del embarque, o cargá un valor para
+        sobrescribirlo (USD).
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-xs text-muted-foreground">
+            <tr>
+              <th className="py-1 text-left font-medium">Producto</th>
+              <th className="py-1 text-right font-medium">Costo FC unitario (USD)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {skus.map((s) => (
+              <tr key={s.productoId} className="border-t">
+                <td className="py-1.5 pr-2">{labelMap.get(s.productoId) ?? s.productoId}</td>
+                <td className="py-1.5 text-right">
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.0001"
+                    inputMode="decimal"
+                    value={valores[s.productoId] ?? ""}
+                    placeholder="(del rateo)"
+                    onChange={(e) =>
+                      setValores((prev) => ({ ...prev, [s.productoId]: e.target.value }))
+                    }
+                    className="ml-auto w-36 text-right tabular-nums"
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" onClick={onConfirmar} disabled={pending}>
+          Cerrar costos
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
+          Cancelar
+        </Button>
+      </div>
     </div>
   );
 }

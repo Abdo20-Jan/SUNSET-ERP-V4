@@ -8,6 +8,7 @@ import {
   Prisma,
 } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
+import { calcularRateioZonaPrimaria } from "@/lib/services/comex";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -33,7 +34,8 @@ export type ContenedorErrorCode =
   | "ESTADO_NO_EDITABLE"
   | "CONCURRENCIA"
   | "ESTADO_TRANSICION_INVALIDA"
-  | "DEPOSITO_REQUERIDO";
+  | "DEPOSITO_REQUERIDO"
+  | "COSTOS_INCOMPLETOS";
 
 export class ContenedorError extends Error {
   readonly code: ContenedorErrorCode;
@@ -401,6 +403,140 @@ export async function avanzarEstadoContenedor(
     }
 
     return inner.contenedor.update({ where: { id: input.contenedorId }, data });
+  };
+
+  if (tx) return run(tx);
+  return db.$transaction(run);
+}
+
+export interface CerrarCostosOverride {
+  productoId: string;
+  /** Costo FC unitario (USD) que pisa el valor derivado del rateio. */
+  costoFCUnitario: MoneyInput;
+}
+
+export interface CerrarCostosInput {
+  contenedorId: string;
+  /** Token de bloqueo optimista (Contenedor.updatedAt). */
+  expectedUpdatedAt: Date;
+  /** Overrides manuales por producto; pisan el valor derivado del rateio. */
+  overrides?: CerrarCostosOverride[];
+}
+
+/**
+ * Cierra los costos del contenedor poblando `ItemContenedor.costoFCUnitario`
+ * (USD, 4 decimales) — el gate D3 que habilita la desconsolidación.
+ *
+ * Deriva el costo por SKU reusando `calcularRateioZonaPrimaria` (la misma base
+ * que `confirmarZonaPrimariaAction`: FOB + flete/seguro origen + facturas ZP,
+ * en ARS) y lo convierte a FC dividiéndolo por el `tipoCambio` del embarque.
+ * El rateio se mapea ItemEmbarque→ItemContenedor por `productoId`. Un override
+ * manual pisa el valor derivado de ese producto.
+ *
+ * Corre sólo mientras el contenedor sea editable (rank < EN_DEPOSITO_FISCAL),
+ * con bloqueo optimista por `updatedAt`. Si algún item queda sin costo
+ * derivable ni override, falla con COSTOS_INCOMPLETOS (no se debe llegar a la
+ * desconsolidación con un costoFCUnitario nulo).
+ */
+export async function cerrarCostosContenedor(
+  input: CerrarCostosInput,
+  tx?: TxClient,
+): Promise<Contenedor> {
+  const run = async (inner: TxClient): Promise<Contenedor> => {
+    const contenedor = await inner.contenedor.findUnique({
+      where: { id: input.contenedorId },
+      select: { id: true, estado: true, embarqueId: true },
+    });
+    if (!contenedor) {
+      throw new ContenedorError(
+        "CONTENEDOR_INEXISTENTE",
+        `El contenedor ${input.contenedorId} no existe.`,
+      );
+    }
+    if (!esEditable(contenedor.estado)) {
+      throw new ContenedorError(
+        "ESTADO_NO_EDITABLE",
+        `El contenedor ${input.contenedorId} está en ${contenedor.estado}: los costos ya no son editables.`,
+      );
+    }
+
+    const embarque = await inner.embarque.findUnique({
+      where: { id: contenedor.embarqueId },
+      include: {
+        items: { orderBy: { id: "asc" } },
+        costos: { orderBy: { id: "asc" }, include: { lineas: { orderBy: { id: "asc" } } } },
+      },
+    });
+    if (!embarque) {
+      throw new ContenedorError(
+        "EMBARQUE_INEXISTENTE",
+        `El embarque ${contenedor.embarqueId} no existe.`,
+      );
+    }
+
+    // Base de costo idéntica a confirmarZonaPrimariaAction: sólo FOB +
+    // flete/seguro origen + facturas con momento=ZONA_PRIMARIA (sin tributos).
+    const facturasZpActivas = embarque.costos.filter(
+      (f) => f.momento === "ZONA_PRIMARIA" && f.estado !== "ANULADA",
+    );
+    const rateio = calcularRateioZonaPrimaria(
+      {
+        fobTotal: embarque.fobTotal,
+        embarqueTipoCambio: embarque.tipoCambio,
+        costosZp: facturasZpActivas.flatMap((f) =>
+          f.lineas.map((l) => ({ subtotal: l.subtotal, tipoCambio: f.tipoCambio })),
+        ),
+        valorFleteOrigen: embarque.valorFleteOrigen,
+        valorSeguroOrigen: embarque.valorSeguroOrigen,
+      },
+      embarque.items.map((it) => ({
+        productoId: it.productoId,
+        cantidad: it.cantidad,
+        precioUnitarioFob: it.precioUnitarioFob,
+      })),
+    );
+
+    // costoUnitario está en ARS; el FC unitario (USD) = costoUnitario ÷ TC.
+    const tc = toDecimal(embarque.tipoCambio);
+    const fcPorProducto = new Map<string, Prisma.Decimal>();
+    if (tc.gt(0)) {
+      for (const r of rateio) {
+        fcPorProducto.set(r.productoId, precioUnitario(toDecimal(r.costoUnitario).dividedBy(tc)));
+      }
+    }
+    const overridePorProducto = new Map<string, Prisma.Decimal>();
+    for (const o of input.overrides ?? []) {
+      overridePorProducto.set(o.productoId, precioUnitario(o.costoFCUnitario));
+    }
+
+    // Bloqueo optimista (mismo patrón que actualizarPackingList).
+    const locked = await inner.contenedor.updateMany({
+      where: { id: input.contenedorId, updatedAt: input.expectedUpdatedAt },
+      data: { updatedAt: new Date() },
+    });
+    if (locked.count !== 1) {
+      throw new ContenedorError(
+        "CONCURRENCIA",
+        `El contenedor ${input.contenedorId} fue modificado por otro proceso (token de concurrencia desactualizado).`,
+      );
+    }
+
+    const items = await inner.itemContenedor.findMany({
+      where: { contenedorId: input.contenedorId },
+      select: { id: true, productoId: true },
+    });
+    for (const it of items) {
+      const fc = overridePorProducto.get(it.productoId) ?? fcPorProducto.get(it.productoId);
+      if (fc == null) {
+        throw new ContenedorError(
+          "COSTOS_INCOMPLETOS",
+          `No se pudo derivar costoFCUnitario para el producto ${it.productoId} (no figura en el embarque y no hay override manual).`,
+        );
+      }
+      await inner.itemContenedor.update({ where: { id: it.id }, data: { costoFCUnitario: fc } });
+    }
+
+    return inner.contenedor.findUniqueOrThrow({ where: { id: input.contenedorId } });
   };
 
   if (tx) return run(tx);
