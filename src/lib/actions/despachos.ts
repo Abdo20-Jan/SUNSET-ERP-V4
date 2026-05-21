@@ -21,7 +21,11 @@ import {
   revertirTransferenciaDespacho,
 } from "@/lib/services/stock";
 import { resolverDepositoZpa } from "@/lib/services/embarque-zpa";
-import { DespachoParcialError, materializarDespachoCruzado } from "@/lib/services/despacho-parcial";
+import {
+  DespachoParcialError,
+  materializarDespachoCruzado,
+  revertirCountersDespacho,
+} from "@/lib/services/despacho-parcial";
 import { validarDisponible } from "@/lib/services/stock-helpers";
 import { Prisma } from "@/generated/prisma/client";
 
@@ -673,6 +677,7 @@ export async function anularDespachoAction(despachoId: string): Promise<AnularDe
           items: {
             select: {
               cantidad: true,
+              itemContenedorId: true,
               itemEmbarque: { select: { productoId: true } },
             },
           },
@@ -685,7 +690,35 @@ export async function anularDespachoAction(despachoId: string): Promise<AnularDe
         throw new AsientoError("ESTADO_INVALIDO", "Despacho ya está anulado.");
       }
 
-      if (d.asientoId) {
+      // Fork por contenido: si alguna línea tiene itemContenedorId es un
+      // despacho CRUZADO (Fase 4) → la reversión de stock es la transferencia
+      // DF→destino y además hay que devolver los counters de ItemContenedor
+      // (cantidadDespachada → cantidadDisponible), incluso en BORRADOR (los
+      // counters se consumieron al materializar, antes de contabilizar).
+      const esCruzado = d.items.some((it) => it.itemContenedorId != null);
+
+      if (esCruzado) {
+        if (d.asientoId) {
+          // Contabilizado: revertir stock DF→destino + anular asiento.
+          if (d.embarque.depositoDestinoId) {
+            for (const it of d.items) {
+              await validarDisponible(
+                tx,
+                it.itemEmbarque.productoId,
+                d.embarque.depositoDestinoId,
+                it.cantidad,
+              );
+            }
+          }
+          // revertirTransferenciaDespacho borra las Transferencia +
+          // MovimientoStock ligadas al despacho (sirve igual para la
+          // nacionalización DF→destino del flujo cruzado).
+          await revertirTransferenciaDespacho(tx, despachoId);
+          await anularAsiento(d.asientoId, tx);
+        }
+        // Counters: siempre (BORRADOR o CONTABILIZADO).
+        await revertirCountersDespacho(tx, despachoId);
+      } else if (d.asientoId) {
         const usoFlujoZpa = !!d.embarque.asientoZonaPrimariaId;
 
         if (usoFlujoZpa && d.embarque.depositoDestinoId) {
@@ -743,7 +776,7 @@ export async function anularDespachoAction(despachoId: string): Promise<AnularDe
     revalidatePath("/contabilidad/asientos");
     return { ok: true };
   } catch (err) {
-    if (err instanceof AsientoError) {
+    if (err instanceof AsientoError || err instanceof DespachoParcialError) {
       return { ok: false, error: err.message };
     }
     console.error("anularDespachoAction failed", err);
@@ -766,7 +799,16 @@ export async function eliminarDespachoAction(despachoId: string): Promise<Elimin
     await db.$transaction(async (tx) => {
       const d = await tx.despacho.findUnique({
         where: { id: despachoId },
-        select: { id: true, estado: true, embarqueId: true },
+        select: {
+          id: true,
+          estado: true,
+          embarqueId: true,
+          items: {
+            select: { itemContenedorId: true },
+            take: 1,
+            where: { itemContenedorId: { not: null } },
+          },
+        },
       });
       if (!d) {
         throw new AsientoError("DOMINIO_INVALIDO", "Despacho no existe.");
@@ -776,6 +818,13 @@ export async function eliminarDespachoAction(despachoId: string): Promise<Elimin
           "ESTADO_INVALIDO",
           "Sólo se eliminan despachos en BORRADOR. Para uno contabilizado, anulá.",
         );
+      }
+      // Borrador cruzado: devolver los counters (cantidadDespachada →
+      // cantidadDisponible) antes de borrar, o quedarían inflados (la
+      // materialización ya los había consumido). El delete en cascada
+      // borra los ItemDespacho — por eso revertimos primero.
+      if (d.items.length > 0) {
+        await revertirCountersDespacho(tx, despachoId);
       }
       await tx.embarqueCosto.updateMany({
         where: { despachoId },
@@ -787,7 +836,7 @@ export async function eliminarDespachoAction(despachoId: string): Promise<Elimin
     revalidatePath("/comex/embarques");
     return { ok: true };
   } catch (err) {
-    if (err instanceof AsientoError) {
+    if (err instanceof AsientoError || err instanceof DespachoParcialError) {
       return { ok: false, error: err.message };
     }
     console.error("eliminarDespachoAction failed", err);

@@ -732,12 +732,27 @@ export async function revertirTransferenciaDespacho(
 ): Promise<void> {
   const transferencias = await tx.transferencia.findMany({
     where: { despachoId },
-    select: { id: true, productoId: true },
+    select: { id: true, productoId: true, depositoOrigenId: true, depositoDestinoId: true },
   });
   if (transferencias.length === 0) return;
 
   const transferenciaIds = transferencias.map((t) => t.id);
   const productoIds = Array.from(new Set(transferencias.map((t) => t.productoId)));
+
+  // Depósitos (producto→depósitos) tocados por las transferencias a borrar.
+  // Tras el recalc, los que queden sin ningún movimiento deben caer a 0:
+  // `recalcularSPDPorProducto` sólo actualiza depósitos presentes en algún
+  // MovimientoStock, así que un depósito que recibió SÓLO esta transferencia
+  // (típico del destino del despacho) quedaría con stock fantasma si no se
+  // limpia explícitamente. Acotado a los depósitos de esta reversión para no
+  // tocar saldos mantenidos incrementalmente por otros flujos.
+  const afectados = new Map<string, Set<string>>();
+  for (const t of transferencias) {
+    const set = afectados.get(t.productoId) ?? new Set<string>();
+    set.add(t.depositoOrigenId);
+    set.add(t.depositoDestinoId);
+    afectados.set(t.productoId, set);
+  }
 
   // Borrar movimientos antes de las transferencias (FK).
   await tx.movimientoStock.deleteMany({
@@ -749,6 +764,17 @@ export async function revertirTransferenciaDespacho(
 
   for (const productoId of productoIds) {
     await recalcularSPDPorProducto(tx, productoId);
+    const depositos = afectados.get(productoId);
+    if (!depositos) continue;
+    for (const depositoId of depositos) {
+      const movs = await tx.movimientoStock.count({ where: { productoId, depositoId } });
+      if (movs === 0) {
+        await tx.stockPorDeposito.updateMany({
+          where: { productoId, depositoId },
+          data: { cantidadFisica: 0, costoPromedio: 0 },
+        });
+      }
+    }
   }
 }
 
