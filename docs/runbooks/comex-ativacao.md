@@ -38,6 +38,45 @@ existem mas ficam órfãs; os counters não são usados. **Zero regressão.**
 
 ---
 
+## 1-bis. A ponte operacional (estado + custos + arribo) e o Modelo Y
+
+Os 3 PRs da **ponte** (#140, #142, #143) fecham o fluxo **100% pela UI** — sem
+SQL manual — e definem como a contabilidade coexiste com o legacy:
+
+- **#140 — avançar estado do contêiner** (`avanzarEstadoContenedor`): botão
+  "Avanzar estado" no card da matriz move `Contenedor.estado` ao longo do ciclo
+  (`BORRADOR → EN_TRANSITO → ARRIBADO_PUERTO → EN_ZONA_PRIMARIA →
+  TRASLADO_DEPOSITO_FISCAL → EN_DEPOSITO_FISCAL`), setando a data da fase e o
+  depósito. `EN_DEPOSITO_FISCAL` exige depósito fiscal. Transição mecânica.
+- **#142 — cerrar costos** (`cerrarCostosContenedor`): botão "Cerrar costos"
+  popula `ItemContenedor.costoFCUnitario` (gate D3) derivando do
+  `calcularRateioZonaPrimaria` ÷ TC do embarque, com override manual.
+- **#143 — asiento de arribo comex** (`crearAsientoArriboComex`): ver Modelo Y.
+
+### Modelo Y — coexistência contábil legacy ↔ comex
+
+Embarques **com contêineres** (flag ON) **NÃO** usam o fluxo legacy de zona
+primária. `confirmarZonaPrimariaAction` **bifurca**:
+
+| Caminho | Condição | Asiento | Stock |
+|---------|----------|---------|-------|
+| **Comex (Modelo Y)** | embarque tem contêineres + flag ON | DEBE **1.1.5.04** (total rateável: FOB + flete/seguro origem + Σ subtotais facturas ZP) / HABER proveedores | **NÃO move stock** |
+| **Legacy** | sem contêineres | DEBE **1.1.5.02** EN TRÁNSITO / HABER proveedores | ingressa stock no depósito ZPA |
+
+No Modelo Y o **primeiro ingreso de stock é a desconsolidación** (no depósito
+fiscal, asiento `1.1.5.05 / 1.1.5.04` + `MovimientoStock` INGRESO). Isso evita a
+**dupla contagem** de estoque (ZPA + DF) que o Modelo X (transfer) teria.
+`desconsolidar()` **não foi alterado**. A base capitalizada em 1.1.5.04 coincide
+com a derivação do `costoFCUnitario` ⇒ reconciliação **`Σ costoFCUnitario × cant
+× TC == débito 1.1.5.04`**; depois desconsolidar (→05) e despachar (→01) deixam
+1.1.5.04 zerado — a cadeia fecha.
+
+> **Ordem operacional no piloto comex:** confirmar arribo (04) → cerrar costos →
+> avançar estado até `EN_DEPOSITO_FISCAL` → desconsolidar (04→05 + stock DF) →
+> despacho parcial cruzado (05→01 + VEP).
+
+---
+
 ## 2. Pré-requisitos (antes de ligar a flag em QUALQUER ambiente)
 
 | # | Item | Como verificar | Onde |
@@ -97,6 +136,12 @@ Passos:
    redeploy.
 2. No embarque piloto, exercer o ciclo:
    - [ ] Carregar packing list por contêiner (Σ por SKU = `ItemEmbarque.cantidad`).
+   - [ ] **Confirmar arribo comex** (Modelo Y, #143) → asiento DEBE **1.1.5.04**
+         balanceado, **sem `MovimientoStock`**; embarque → `EN_ZONA_PRIMARIA`.
+   - [ ] **Cerrar costos** (#142) → `ItemContenedor.costoFCUnitario` populado
+         (derivado do rateio ÷ TC ou override); gate D3 (`fcCerrado`) verde.
+   - [ ] **Avançar estado** (#140) do contêiner até `EN_DEPOSITO_FISCAL`
+         (escolhendo o depósito fiscal na transição final).
    - [ ] Desconsolidar contêiner **sem divergência** → estado `DESCONSOLIDADO`,
          asiento `1.1.5.05 / 1.1.5.04` balanceado, `MovimientoStock` INGRESO no DF.
    - [ ] (opcional) Forçar **divergência** num 2º contêiner → `AGUARDANDO_INVESTIGACAO`,
@@ -175,8 +220,10 @@ A flag é reversível e o desenho é defensivo:
   de propósito (sem testes, ativo em prod). Unificar quando o legacy ganhar testes.
 - **Int×uuid restante** — alinhar `Desconsolidacion.usuarioId` e
   `DivergenciaInvestigacion.closedBy` (hoje omitidos nas actions por mismatch).
-- **Gatilhos não cabeados** — `ARRIBO_ZONA_PRIMARIA` e `NACIONALIZACION_DIRECTA`
-  têm asiento no helper mas ainda sem action que os dispare (ver #136).
+- **Gatilhos não cabeados** — o arribo comex (DEBE 1.1.5.04) já está cabeado via
+  `crearAsientoArriboComex` + bifurcação de `confirmarZonaPrimariaAction` (#143,
+  Modelo Y). `NACIONALIZACION_DIRECTA` (ZPA→nacional, sem passar por DF) tem
+  asiento no helper mas ainda sem action que o dispare.
 - **e2e browser-driven** — os e2e atuais (6.1) exercem os services; um nível
   browser-driven (Next + NextAuth) fica como follow-up.
 - **D1-bis** — `UNIDAD_INVENTARIO_TRACKING_ENABLED` segue dormente até o módulo de

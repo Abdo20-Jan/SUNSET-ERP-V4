@@ -1376,6 +1376,216 @@ export async function crearAsientoZonaPrimaria(
 }
 
 // ============================================================
+// Embarque — Arribo a Zona Primaria (Modelo Y, Ponte PR C)
+// ============================================================
+//
+// Variante de `crearAsientoZonaPrimaria` para embarques CON contenedores
+// (flag CONTENEDOR_DESCONSOLIDACION_ENABLED). A diferencia del flujo legacy
+// (que DEBE 1.1.5.02 EN TRÁNSITO + ingresa stock al depósito ZPA), acá el
+// costo total rateable se capitaliza directamente en **1.1.5.04 MERCADERÍAS
+// EN ZONA PRIMARIA** y NO se mueve stock. El primer ingreso de stock recién
+// ocurre en la desconsolidación (depósito fiscal), evitando la doble
+// contabilización de inventario (ZPA + DF) — ver runbook comex-ativacao.md.
+//
+// La base capitalizada = la misma que `calcularRateioZonaPrimaria`: FOB +
+// flete/seguro origen + Σ subtotales de facturas momento=ZONA_PRIMARIA (todo
+// en ARS). Esto garantiza la reconciliación Σ costoFCUnitario×cant×TC ==
+// débito 1.1.5.04. IVA/IIBB son créditos fiscales (no se capitalizan).
+
+export async function crearAsientoArriboComex(
+  embarqueId: string,
+  tx?: TxClient,
+  fecha?: Date,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const embarque = await inner.embarque.findUnique({
+      where: { id: embarqueId },
+      include: {
+        proveedor: { select: { id: true, nombre: true, cuentaContableId: true } },
+        costos: {
+          include: {
+            proveedor: { select: { id: true, nombre: true, cuentaContableId: true } },
+            lineas: { orderBy: { id: "asc" } },
+          },
+          orderBy: { id: "asc" },
+        },
+      },
+    });
+
+    if (!embarque) {
+      throw new AsientoError("DOMINIO_INVALIDO", `Embarque ${embarqueId} no existe.`);
+    }
+    if (embarque.asientoZonaPrimariaId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarque.codigo} ya tiene un asiento de Zona Primaria (${embarque.asientoZonaPrimariaId}).`,
+      );
+    }
+    if (embarque.asientoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarque.codigo} ya está cerrado/despachado — no se puede registrar arribo después.`,
+      );
+    }
+
+    const porCodigo = await ensureCuentasMap(inner, EMBARQUE_CODIGOS);
+    const cuentaZpaId = await getOrCreateCuenta(
+      inner,
+      COMEX_ZPA_CODIGOS.MERCADERIAS_EN_ZONA_PRIMARIA,
+    );
+
+    const tcEmb = toDecimal(embarque.tipoCambio);
+    const fobArs = toDecimal(embarque.fobTotal).times(tcEmb).toDecimalPlaces(2);
+    const fleteOrigenArs = embarque.valorFleteOrigen
+      ? toDecimal(embarque.valorFleteOrigen).times(tcEmb).toDecimalPlaces(2)
+      : toDecimal(0);
+    const seguroOrigenArs = embarque.valorSeguroOrigen
+      ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
+      : toDecimal(0);
+    const totalProveedorExteriorArs = fobArs.plus(fleteOrigenArs).plus(seguroOrigenArs);
+
+    type Linea = {
+      cuentaId: number;
+      debe: import("decimal.js").Decimal;
+      haber: import("decimal.js").Decimal;
+      descripcion: string;
+    };
+    const lineas: Linea[] = [];
+    const pushDebe = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: valor, haber: toDecimal(0), descripcion });
+    };
+    const pushHaber = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: toDecimal(0), haber: valor, descripcion });
+    };
+
+    // Costo rateable capitalizado en 1.1.5.04. Arranca con FOB+flete+seguro;
+    // los subtotales de facturas ZP se suman abajo.
+    let costoRateableArs = totalProveedorExteriorArs;
+    const detalleOrigen =
+      fleteOrigenArs.gt(0) || seguroOrigenArs.gt(0)
+        ? ` (FOB + flete${seguroOrigenArs.gt(0) ? " + seguro" : ""} origen)`
+        : "";
+
+    // HABER: proveedor exterior por FOB + flete/seguro origen.
+    const proveedorExteriorCuentaId =
+      embarque.proveedor.cuentaContableId ??
+      porCodigo.get(EMBARQUE_CODIGOS.PROVEEDOR_EXTERIOR_FALLBACK.codigo)!;
+    pushHaber(
+      proveedorExteriorCuentaId,
+      totalProveedorExteriorArs,
+      `Proveedor exterior (${embarque.proveedor.nombre})${detalleOrigen}`,
+    );
+
+    // Facturas momento=ZONA_PRIMARIA (BORRADOR/LEGACY_BUNDLED): el subtotal se
+    // capitaliza en 1.1.5.04; IVA/IIBB van a créditos fiscales; el total se
+    // acredita al proveedor local. Espeja el manejo de crearAsientoZonaPrimaria.
+    const facturasZP = embarque.costos.filter(
+      (f) =>
+        f.momento === "ZONA_PRIMARIA" && (f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED"),
+    );
+    for (const factura of facturasZP) {
+      if (factura.lineas.length === 0) continue;
+      if (!factura.proveedor.cuentaContableId) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `El proveedor ${factura.proveedor.nombre} no tiene cuenta contable asociada.`,
+        );
+      }
+      const tc = toDecimal(factura.tipoCambio);
+      const facturaLabel = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""}`;
+
+      let subtotalFacturaArs = toDecimal(0);
+      for (const linea of factura.lineas) {
+        const subtotalArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
+        if (!subtotalArs.gt(0)) continue;
+        costoRateableArs = costoRateableArs.plus(subtotalArs);
+        subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
+      }
+
+      const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
+      const iibbArs = toDecimal(factura.iibb).times(tc).toDecimalPlaces(2);
+      const otrosArs = toDecimal(factura.otros).times(tc).toDecimalPlaces(2);
+
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS.codigo)!,
+        ivaArs,
+        `${facturaLabel} — IVA crédito (arribo ZP)`,
+      );
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS.codigo)!,
+        iibbArs,
+        `${facturaLabel} — IIBB crédito (arribo ZP)`,
+      );
+      // `otros` se mantiene como gasto (no capitalizable) para balancear.
+      if (otrosArs.gt(0)) {
+        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros (ZP)`);
+      }
+
+      const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+      pushHaber(
+        factura.proveedor.cuentaContableId,
+        totalFacturaArs,
+        `${facturaLabel} — total a pagar (arribo ZP)`,
+      );
+    }
+
+    // DEBE 1.1.5.04 con el costo total rateable capitalizado.
+    pushDebe(
+      cuentaZpaId,
+      costoRateableArs,
+      `Arribo a zona primaria — embarque ${embarque.codigo} (${embarque.proveedor.nombre})${detalleOrigen}`,
+    );
+
+    if (lineas.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarque.codigo}: no hay FOB ni facturas de Zona Primaria para contabilizar.`,
+      );
+    }
+
+    const lineasInput: LineaInput[] = lineas.map((l) => ({
+      cuentaId: l.cuentaId,
+      debe: money(l.debe).toString(),
+      haber: money(l.haber).toString(),
+      descripcion: l.descripcion,
+    }));
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: fecha ?? new Date(),
+      descripcion: `Arribo zona primaria embarque ${embarque.codigo}`,
+      origen: AsientoOrigen.COMEX,
+      lineas: lineasInput,
+    });
+
+    const updEmbZP = await inner.embarque.updateMany({
+      where: { id: embarqueId, asientoZonaPrimariaId: null },
+      data: { asientoZonaPrimariaId: asiento.id, estado: "EN_ZONA_PRIMARIA" },
+    });
+    if (updEmbZP.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Embarque ${embarqueId}: arribo fue confirmado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
+
+    return asiento;
+  };
+
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
 // Comex ZPA — transferencias entre subcuentas de bienes de cambio (PR 3.1)
 // ============================================================
 //
