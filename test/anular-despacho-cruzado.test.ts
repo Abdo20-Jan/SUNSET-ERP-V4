@@ -30,6 +30,7 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/db", () => ({ db: h.dbProxy }));
+vi.mock("@/lib/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "user-uuid" } })) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import {

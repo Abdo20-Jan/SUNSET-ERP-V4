@@ -143,7 +143,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
     it("crea el borrador, traba counters y graba countsTrabados", async () => {
       const s = await seed();
       const borrador = await crear({
-        userId: 1,
+        userId: "user-uuid",
         embarqueId: s.embarqueId,
         lineas: [{ itemContenedorId: s.itemContenedorA, cantidad: 25 }],
       });
@@ -163,7 +163,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
     it("rechaza líneas vacías", async () => {
       const s = await seed();
       await expect(
-        crear({ userId: 1, embarqueId: s.embarqueId, lineas: [] }),
+        crear({ userId: "user-uuid", embarqueId: s.embarqueId, lineas: [] }),
       ).rejects.toMatchObject({ code: "LINEAS_VACIAS" });
     });
 
@@ -171,7 +171,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
       const s = await seed();
       await expect(
         crear({
-          userId: 1,
+          userId: "user-uuid",
           embarqueId: s.embarqueId,
           lineas: [{ itemContenedorId: s.itemContenedorA, cantidad: 0 }],
         }),
@@ -182,7 +182,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
       const s = await seed();
       await expect(
         crear({
-          userId: 1,
+          userId: "user-uuid",
           embarqueId: s.embarqueId,
           lineas: [{ itemContenedorId: 999999, cantidad: 1 }],
         }),
@@ -193,7 +193,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
       const s = await seed();
       await expect(
         crear({
-          userId: 1,
+          userId: "user-uuid",
           embarqueId: s.embarqueId,
           lineas: [{ itemContenedorId: s.itemContenedorAjeno, cantidad: 1 }],
         }),
@@ -204,7 +204,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
       const s = await seed();
       await expect(
         crear({
-          userId: 1,
+          userId: "user-uuid",
           embarqueId: s.embarqueId,
           lineas: [{ itemContenedorId: s.itemContenedorA, cantidad: 61 }],
         }),
@@ -222,7 +222,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
     it("retoma un borrador vigente y devuelve el payloadDiff", async () => {
       const s = await seed();
       const creado = await crear({
-        userId: 1,
+        userId: "user-uuid",
         embarqueId: s.embarqueId,
         lineas: [{ itemContenedorId: s.itemContenedorA, cantidad: 10 }],
       });
@@ -241,7 +241,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
     it("rechaza retomar un borrador EXPIRADO (P0-4)", async () => {
       const s = await seed();
       const creado = await crear({
-        userId: 1,
+        userId: "user-uuid",
         embarqueId: s.embarqueId,
         lineas: [{ itemContenedorId: s.itemContenedorA, cantidad: 10 }],
       });
@@ -254,7 +254,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
     it("marca EXPIRADO y revierte los counters trabados", async () => {
       const s = await seed();
       const creado = await crear({
-        userId: 1,
+        userId: "user-uuid",
         embarqueId: s.embarqueId,
         lineas: [{ itemContenedorId: s.itemContenedorA, cantidad: 25 }],
       });
@@ -271,7 +271,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
     it("es idempotente: expirar dos veces no infla los counters", async () => {
       const s = await seed();
       const creado = await crear({
-        userId: 1,
+        userId: "user-uuid",
         embarqueId: s.embarqueId,
         lineas: [{ itemContenedorId: s.itemContenedorA, cantidad: 25 }],
       });
@@ -289,7 +289,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
     it("crea Despacho BORRADOR + ItemDespacho cruzado y mueve enDespacho→despachada, sin asiento", async () => {
       const s = await seed();
       const creado = await crear({
-        userId: 1,
+        userId: "user-uuid",
         embarqueId: s.embarqueId,
         lineas: [{ itemContenedorId: s.itemContenedorA, cantidad: 25 }],
       });
@@ -326,7 +326,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
     it("permite N líneas del mismo itemEmbarque desde itemContenedores distintos (índice cruzado #125)", async () => {
       const s = await seed();
       const creado = await crear({
-        userId: 1,
+        userId: "user-uuid",
         embarqueId: s.embarqueId,
         lineas: [
           { itemContenedorId: s.itemContenedorA, cantidad: 30 },
@@ -347,7 +347,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
     it("rechaza contabilizar un borrador EXPIRADO", async () => {
       const s = await seed();
       const creado = await crear({
-        userId: 1,
+        userId: "user-uuid",
         embarqueId: s.embarqueId,
         lineas: [{ itemContenedorId: s.itemContenedorA, cantidad: 10 }],
       });
@@ -387,7 +387,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
         db.prisma.$transaction((t) =>
           crearBorrador(
             {
-              userId: 1,
+              userId: "user-uuid",
               embarqueId: s.embarqueId,
               lineas: [{ itemContenedorId: s.itemContenedorA, cantidad }],
             },
@@ -410,7 +410,7 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
       const s = await seed();
       await expect(
         crear({
-          userId: 1,
+          userId: "user-uuid",
           embarqueId: s.embarqueId,
           lineas: [{ itemContenedorId: s.itemContenedorA, cantidad: 61 }],
         }),

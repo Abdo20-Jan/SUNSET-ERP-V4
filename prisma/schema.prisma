@@ -1003,7 +1003,7 @@ model IdempotencyKey {
 // para optimistic locking.
 model DespachoBorrador {
   id             String   @id @default(cuid())
-  userId         Int // ref. soft a User (sin FK en Fase 1)
+  userId         String // ref. soft a User.id (uuid); alineado al patrón del proyecto (PR 4.4)
   embarqueId     String? // ref. soft al embarque en edición
   estadoActual   String   @default("EN_EDICION") // EN_EDICION | CONFIRMADO_TRABA_COUNTS | EXPIRADO
   payloadDiff    Json

@@ -17,9 +17,7 @@ const h = vi.hoisted(() => {
       {
         get(_t, prop) {
           // Forwarding genérico al client: tipamos como record para evitar `any`.
-          const target = client as unknown as
-            | Record<string | symbol, unknown>
-            | undefined;
+          const target = client as unknown as Record<string | symbol, unknown> | undefined;
           const value = target?.[prop];
           return typeof value === "function"
             ? (value as (...args: unknown[]) => unknown).bind(client)
@@ -31,6 +29,7 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/db", () => ({ db: h.dbProxy }));
+vi.mock("@/lib/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "user-uuid" } })) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { crearDespachoAction } from "@/lib/actions/despachos";
