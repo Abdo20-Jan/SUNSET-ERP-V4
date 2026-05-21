@@ -1275,6 +1275,10 @@ model Producto {
   stockActual   Int      @default(0)
   stockMinimo   Int      @default(0)
   activo        Boolean  @default(true)
+  // Datos técnicos provenientes de la lista FOB de fábrica (importación masiva).
+  categoria              String? // PCR / TBR / SUV / LTR / UHP
+  pesoNetoKg             Decimal? @db.Decimal(10, 3)
+  unidadesContenedor40hc Int? // unidades que entran en un contenedor 40 HC
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
