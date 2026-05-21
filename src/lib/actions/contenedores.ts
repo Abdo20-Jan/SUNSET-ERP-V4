@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
 import {
   actualizarPackingList,
+  avanzarEstadoContenedor,
   ContenedorError,
   crearContenedor,
   eliminarContenedor,
@@ -52,8 +53,23 @@ const actualizarSchema = z.object({
   items: z.array(itemSchema).min(1),
 });
 
+const avanzarEstadoSchema = z.object({
+  contenedorId: z.string().min(1),
+  targetEstado: z.enum([
+    "EN_TRANSITO",
+    "ARRIBADO_PUERTO",
+    "EN_ZONA_PRIMARIA",
+    "TRASLADO_DEPOSITO_FISCAL",
+    "EN_DEPOSITO_FISCAL",
+  ]),
+  fecha: z.coerce.date().optional(),
+  depositoZonaPrimariaId: z.string().optional(),
+  depositoFiscalId: z.string().optional(),
+});
+
 export type CrearContenedorActionInput = z.input<typeof crearSchema>;
 export type ActualizarPackingListActionInput = z.input<typeof actualizarSchema>;
+export type AvanzarEstadoActionInput = z.input<typeof avanzarEstadoSchema>;
 
 function mapContenedorError(err: ContenedorError): string {
   switch (err.code) {
@@ -71,6 +87,10 @@ function mapContenedorError(err: ContenedorError): string {
       return "El contenedor ya no es editable en su estado actual.";
     case "CONCURRENCIA":
       return "El contenedor fue modificado por otro usuario. Recargá y reintentá.";
+    case "ESTADO_TRANSICION_INVALIDA":
+      return "No se puede retroceder ni saltar etapas: el estado sólo avanza en el ciclo.";
+    case "DEPOSITO_REQUERIDO":
+      return "Indicá el depósito fiscal para mover el contenedor a depósito fiscal.";
     default:
       return "No se pudo completar la operación sobre el contenedor.";
   }
@@ -137,6 +157,30 @@ export async function actualizarPackingListAction(
     }
     console.error("actualizarPackingListAction failed", err);
     return { ok: false, error: "Error inesperado al actualizar el packing list." };
+  }
+}
+
+export async function avanzarEstadoContenedorAction(
+  raw: AvanzarEstadoActionInput,
+): Promise<ContenedorActionResult> {
+  const blocked = await gate();
+  if (blocked) return blocked;
+
+  const parsed = avanzarEstadoSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, error: "Datos inválidos." };
+  }
+
+  try {
+    const contenedor = await avanzarEstadoContenedor(parsed.data);
+    revalidatePath(`/comex/embarques/${contenedor.embarqueId}`);
+    return { ok: true, contenedorId: contenedor.id };
+  } catch (err) {
+    if (err instanceof ContenedorError) {
+      return { ok: false, error: mapContenedorError(err) };
+    }
+    console.error("avanzarEstadoContenedorAction failed", err);
+    return { ok: false, error: "Error inesperado al avanzar el estado del contenedor." };
   }
 }
 

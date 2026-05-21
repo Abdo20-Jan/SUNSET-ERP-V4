@@ -1254,6 +1254,7 @@ export function EmbarqueForm(props: Props) {
             cantidad: it.cantidad,
           }))}
           contenedores={props.contenedores}
+          depositos={props.depositos}
           readonly={readonly}
         />
       )}
