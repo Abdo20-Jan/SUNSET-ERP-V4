@@ -3,7 +3,10 @@ import { notFound } from "next/navigation";
 
 import { obtenerEmbarquePorId } from "@/lib/actions/embarques";
 import { listarDespachosDeEmbarque } from "@/lib/actions/despachos";
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
+import { obtenerMatrizDespachoCruzado } from "@/lib/services/despacho-parcial";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +16,7 @@ import { fmtMoney } from "@/lib/format";
 
 import { DespachoActions } from "./_components/despacho-actions";
 import { CrearDespachoForm } from "./_components/crear-despacho-form";
+import { DespachoCruzadoMatriz } from "./_components/despacho-cruzado-matriz";
 
 type PageParams = Promise<{ id: string }>;
 
@@ -98,6 +102,13 @@ export default async function DespachosEmbarquePage({ params }: { params: PagePa
   const tieneZP = !!embarque.asientoZonaPrimaria;
   const tieneCierre = !!embarque.asiento;
   const puedeCrear = tieneZP && !tieneCierre;
+
+  // Fase 4 cruzada (flag ON): la matriz por contenedor reemplaza al form legacy.
+  const flagCruzado = isContenedorDesconsolidacionEnabled();
+  const session = flagCruzado ? await auth() : null;
+  const userId = session?.user?.id ?? null;
+  const matrizCruzado =
+    flagCruzado && userId ? await obtenerMatrizDespachoCruzado(id, userId) : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -191,42 +202,79 @@ export default async function DespachosEmbarquePage({ params }: { params: PagePa
         </CardContent>
       </Card>
 
-      {puedeCrear && itemsDisponibles.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-[14px]">Nuevo despacho parcial</CardTitle>
-            <CardDescription>
-              Seleccioná los ítems a nacionalizar + tributos del despacho + facturas DESPACHO
-              linkadas. Al contabilizar genera asiento + ingreso de stock.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <CrearDespachoForm
-              embarqueId={id}
-              embarqueCodigo={embarque.codigo}
-              embarqueMoneda={embarque.moneda}
-              embarqueTipoCambio={embarque.tipoCambio}
-              depositoDestinoId={embarque.depositoDestinoId}
-              depositos={depositos}
-              items={itemsDisponibles}
-              facturas={facturasOptions}
-              defaultFecha={defaultFecha}
-            />
-            {!embarque.depositoDestinoId && (
-              <p className="mt-3 rounded-md border border-amber-300/60 bg-amber-50/60 p-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
-                Definí el depósito destino del embarque antes de contabilizar.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {flagCruzado ? (
+        // Flujo cruzado (por contenedor): el componente decide internamente
+        // entre el editor de la matriz y el panel del borrador reservado.
+        matrizCruzado &&
+        (matrizCruzado.borradorVigente != null || matrizCruzado.skus.length > 0) ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-[14px]">
+                {matrizCruzado.borradorVigente != null
+                  ? "Despacho cruzado — borrador reservado"
+                  : "Nuevo despacho cruzado (por contenedor)"}
+              </CardTitle>
+              <CardDescription>
+                {matrizCruzado.borradorVigente != null
+                  ? "Confirmá el borrador para materializar el despacho, o descartalo para liberar las unidades."
+                  : "Indicá cantidades por SKU y contenedor. Reservar traba las unidades; confirmar materializa el despacho (después contabilizalo para el asiento + stock)."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <DespachoCruzadoMatriz matriz={matrizCruzado} defaultFecha={defaultFecha} />
+            </CardContent>
+          </Card>
+        ) : (
+          despachos.length === 0 && (
+            <Card>
+              <CardContent className="text-[13px] text-muted-foreground">
+                No hay contenedores desconsolidados con saldo disponible para despachar.
+                Desconsolidá un contenedor del embarque primero.
+              </CardContent>
+            </Card>
+          )
+        )
+      ) : (
+        <>
+          {puedeCrear && itemsDisponibles.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-[14px]">Nuevo despacho parcial</CardTitle>
+                <CardDescription>
+                  Seleccioná los ítems a nacionalizar + tributos del despacho + facturas DESPACHO
+                  linkadas. Al contabilizar genera asiento + ingreso de stock.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <CrearDespachoForm
+                  embarqueId={id}
+                  embarqueCodigo={embarque.codigo}
+                  embarqueMoneda={embarque.moneda}
+                  embarqueTipoCambio={embarque.tipoCambio}
+                  depositoDestinoId={embarque.depositoDestinoId}
+                  depositos={depositos}
+                  items={itemsDisponibles}
+                  facturas={facturasOptions}
+                  defaultFecha={defaultFecha}
+                />
+                {!embarque.depositoDestinoId && (
+                  <p className="mt-3 rounded-md border border-amber-300/60 bg-amber-50/60 p-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
+                    Definí el depósito destino del embarque antes de contabilizar.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
-      {puedeCrear && itemsDisponibles.length === 0 && despachos.length > 0 && (
-        <Card>
-          <CardContent className="text-[13px] text-muted-foreground">
-            Toda la mercadería ya fue despachada o asignada a despachos en BORRADOR/CONTABILIZADO.
-          </CardContent>
-        </Card>
+          {puedeCrear && itemsDisponibles.length === 0 && despachos.length > 0 && (
+            <Card>
+              <CardContent className="text-[13px] text-muted-foreground">
+                Toda la mercadería ya fue despachada o asignada a despachos en
+                BORRADOR/CONTABILIZADO.
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
 
       {/* Hint footer (totals etc) */}
