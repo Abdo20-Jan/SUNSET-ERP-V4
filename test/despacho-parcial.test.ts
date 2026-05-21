@@ -8,12 +8,13 @@ import {
 } from "@/lib/services/despacho-parcial";
 import { createTestDb, type TestDb } from "./db";
 
-// PR 4.2 — service de despacho parcial cruzado + contrato del borrador.
-// Cuatro verbos: crearBorrador (traba counters — decisión A1) / retomarBorrador
-// (rechaza EXPIRADO, P0-4) / expirarBorrador (EXPIRADO antes de liberar, P0-4) /
+// PR 4.2 + 4.3 — service de despacho parcial cruzado + contrato del borrador.
+// Cuatro verbos: crearBorrador (traba counters) / retomarBorrador (rechaza
+// EXPIRADO, P0-4) / expirarBorrador (EXPIRADO antes de liberar, P0-4) /
 // contabilizarBorrador (materializa Despacho + ItemDespacho cruzado, mueve
-// counters enDespacho→despachada, SIN asiento — eso es 4.5). El decremento
-// atómico single-shot con 409 es hardening de 4.3, no de acá.
+// counters enDespacho→despachada, SIN asiento — eso es 4.5). El traba de
+// counters es single-shot (UPDATE condicional WHERE disponible >= ?, PR 4.3):
+// el describe "traba single-shot concurrente" prueba que no hay oversell.
 
 const TABLAS = [
   "ItemDespacho",
@@ -376,6 +377,49 @@ describe("despacho-parcial — contrato del borrador (Fase 4 cruzada)", () => {
       expect(icA.cantidadDisponible).toBe(45); // 60 - 15
       expect(icA.cantidadEnDespacho).toBe(0);
       expect(icA.cantidadDespachada).toBe(15);
+    });
+  });
+
+  describe("traba single-shot concurrente (PR 4.3)", () => {
+    it("dos borradores concurrentes no sobrevenden cantidadDisponible", async () => {
+      const s = await seed(); // itemContenedorA: disponible 60
+      const intento = (cantidad: number) =>
+        db.prisma.$transaction((t) =>
+          crearBorrador(
+            {
+              userId: 1,
+              embarqueId: s.embarqueId,
+              lineas: [{ itemContenedorId: s.itemContenedorA, cantidad }],
+            },
+            t,
+          ),
+        );
+      // 40 + 40 = 80 > 60: sólo uno puede ganar.
+      const res = await Promise.allSettled([intento(40), intento(40)]);
+      expect(res.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      expect(res.filter((r) => r.status === "rejected")).toHaveLength(1);
+
+      const icA = await db.prisma.itemContenedor.findUniqueOrThrow({
+        where: { id: s.itemContenedorA },
+      });
+      expect(icA.cantidadDisponible).toBe(20); // 60 - 40 (un solo ganador)
+      expect(icA.cantidadEnDespacho).toBe(40);
+    });
+
+    it("rechaza el sobregiro de saldo en una sola línea (0 filas afectadas)", async () => {
+      const s = await seed();
+      await expect(
+        crear({
+          userId: 1,
+          embarqueId: s.embarqueId,
+          lineas: [{ itemContenedorId: s.itemContenedorA, cantidad: 61 }],
+        }),
+      ).rejects.toMatchObject({ code: "SALDO_INSUFICIENTE" });
+      const icA = await db.prisma.itemContenedor.findUniqueOrThrow({
+        where: { id: s.itemContenedorA },
+      });
+      expect(icA.cantidadDisponible).toBe(60); // intacto
+      expect(icA.cantidadEnDespacho).toBe(0);
     });
   });
 });
