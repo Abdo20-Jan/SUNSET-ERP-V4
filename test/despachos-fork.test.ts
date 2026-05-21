@@ -133,7 +133,7 @@ describe("fork despacho legacy/contenedor (PR 4.1)", () => {
     expect(await db.prisma.despacho.count()).toBe(0);
   });
 
-  it("flag ON: enruta al flujo por contenedor (stub no implementado), sin crear despacho", async () => {
+  it("flag ON sin itemContenedorId: rechaza (requiere origen por contenedor), sin crear despacho", async () => {
     process.env.CONTENEDOR_DESCONSOLIDACION_ENABLED = "true";
     const res = await crearDespachoAction({
       embarqueId,
@@ -142,7 +142,45 @@ describe("fork despacho legacy/contenedor (PR 4.1)", () => {
       items: [{ itemEmbarqueId, cantidad: 30 }],
     });
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toMatch(/no está implementado|Fase 4/i);
+    if (!res.ok) expect(res.error).toMatch(/origen por contenedor|itemContenedorId/i);
     expect(await db.prisma.despacho.count()).toBe(0);
+  });
+
+  it("flag ON con itemContenedorId: enruta al flujo cruzado y consume counters (PR 4.2)", async () => {
+    process.env.CONTENEDOR_DESCONSOLIDACION_ENABLED = "true";
+    const ie = await db.prisma.itemEmbarque.findUniqueOrThrow({ where: { id: itemEmbarqueId } });
+    const contenedor = await db.prisma.contenedor.create({
+      data: { embarqueId, numeroContenedor: "MSCU0000001", estado: "DESCONSOLIDADO" },
+    });
+    const ic = await db.prisma.itemContenedor.create({
+      data: {
+        contenedorId: contenedor.id,
+        itemEmbarqueId,
+        productoId: ie.productoId,
+        cantidadDeclarada: 60,
+        cantidadFisica: 60,
+        cantidadDisponible: 60,
+      },
+    });
+
+    const res = await crearDespachoAction({
+      embarqueId,
+      fecha: FECHA.toISOString(),
+      tipoCambio: "1000",
+      items: [{ itemEmbarqueId, cantidad: 30, itemContenedorId: ic.id }],
+    });
+    expect(res.ok).toBe(true);
+
+    const despachos = await db.prisma.despacho.findMany({ include: { items: true } });
+    expect(despachos).toHaveLength(1);
+    expect(despachos[0]?.items[0]).toMatchObject({
+      itemContenedorId: ic.id,
+      contenedorId: contenedor.id,
+      cantidad: 30,
+    });
+
+    const actualizado = await db.prisma.itemContenedor.findUniqueOrThrow({ where: { id: ic.id } });
+    expect(actualizado.cantidadDisponible).toBe(30); // 60 - 30 (fuente DIRECTO)
+    expect(actualizado.cantidadDespachada).toBe(30);
   });
 });

@@ -19,6 +19,7 @@ import {
   revertirTransferenciaDespacho,
 } from "@/lib/services/stock";
 import { resolverDepositoZpa } from "@/lib/services/embarque-zpa";
+import { DespachoParcialError, materializarDespachoCruzado } from "@/lib/services/despacho-parcial";
 import { validarDisponible } from "@/lib/services/stock-helpers";
 import { Prisma } from "@/generated/prisma/client";
 
@@ -180,6 +181,8 @@ export async function obtenerDespachoPorId(despachoId: string): Promise<Despacho
 const itemSchema = z.object({
   itemEmbarqueId: z.number().int().positive(),
   cantidad: z.number().int().positive(),
+  // Origen del flujo cruzado (Fase 4, flag ON). El legacy lo ignora.
+  itemContenedorId: z.number().int().positive().optional(),
 });
 
 const decimalish = z.union([z.string(), z.number()]).transform((v) => {
@@ -370,19 +373,32 @@ async function crearDespachoLegacy(
 }
 
 /**
- * Flujo nuevo (despacho cruzado por contenedor): consumirá counters de
- * ItemContenedor en lugar de cantidades a nivel ItemEmbarque. Se implementa
- * en Fase 4 (PR 4.2+). Inalcanzable en prod mientras la flag esté apagada.
+ * Flujo nuevo (despacho cruzado por contenedor): consume counters de
+ * ItemContenedor (cantidadDisponible→cantidadDespachada) en lugar de
+ * cantidades a nivel ItemEmbarque. Delega en el service de despacho parcial
+ * (PR 4.2) con fuente DIRECTO. Inalcanzable en prod mientras la flag esté
+ * apagada. El asiento sigue siendo del flujo de contabilización (PR 4.5).
  */
 async function crearDespachoContenedor(
-  _tx: TxClient,
-  _data: CrearDespachoData,
-  _fecha: Date,
+  tx: TxClient,
+  data: CrearDespachoData,
+  fecha: Date,
 ): Promise<{ despachoId: string; codigo: string }> {
-  throw new AsientoError(
-    "DOMINIO_INVALIDO",
-    "El flujo de despacho cruzado por contenedor todavía no está implementado (Fase 4).",
-  );
+  const lineas = data.items.map((i) => {
+    if (i.itemContenedorId == null) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `El ítem (itemEmbarque ${i.itemEmbarqueId}) no tiene itemContenedorId: el flujo cruzado requiere el origen por contenedor.`,
+      );
+    }
+    return { itemContenedorId: i.itemContenedorId, cantidad: i.cantidad };
+  });
+  return materializarDespachoCruzado(tx, {
+    embarqueId: data.embarqueId,
+    fecha,
+    lineas,
+    fuente: "DIRECTO",
+  });
 }
 
 export async function crearDespachoAction(input: CrearDespachoInput): Promise<CrearDespachoResult> {
@@ -406,7 +422,7 @@ export async function crearDespachoAction(input: CrearDespachoInput): Promise<Cr
     revalidatePath(`/comex/embarques/${data.embarqueId}`);
     return { ok: true, ...result };
   } catch (err) {
-    if (err instanceof AsientoError) {
+    if (err instanceof AsientoError || err instanceof DespachoParcialError) {
       return { ok: false, error: err.message };
     }
     console.error("crearDespachoAction failed", err);
