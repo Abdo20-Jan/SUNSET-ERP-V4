@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/cron/cleanup-despachos-borrador",
-      "schedule": "0 * * * *"
+      "schedule": "0 3 * * *"
     }
   ]
 }

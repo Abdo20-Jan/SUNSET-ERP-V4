@@ -4,9 +4,10 @@ import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
 import { expirarBorradoresVencidos } from "@/lib/services/despacho-parcial";
 
 // PR 4.6 — cron de limpieza de borradores de despacho cruzado vencidos.
-// Vercel Cron invoca este endpoint (ver vercel.json) con el header
-// `Authorization: Bearer ${CRON_SECRET}`. Expira los borradores cuyo TTL
-// venció liberando los counters trabados (cantidadEnDespacho →
+// Vercel Cron invoca este endpoint a diario (ver vercel.json — cadencia
+// diaria por el límite del plan Hobby; suficiente con un TTL de 24h) con el
+// header `Authorization: Bearer ${CRON_SECRET}`. Expira los borradores cuyo
+// TTL venció liberando los counters trabados (cantidadEnDespacho →
 // cantidadDisponible), para que el stock no quede bloqueado indefinidamente.
 
 export const dynamic = "force-dynamic";
