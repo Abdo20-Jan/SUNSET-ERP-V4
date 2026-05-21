@@ -31,7 +31,9 @@ export type ContenedorErrorCode =
   | "CANTIDAD_INVALIDA"
   | "PACKING_LIST_VACIO"
   | "ESTADO_NO_EDITABLE"
-  | "CONCURRENCIA";
+  | "CONCURRENCIA"
+  | "ESTADO_TRANSICION_INVALIDA"
+  | "DEPOSITO_REQUERIDO";
 
 export class ContenedorError extends Error {
   readonly code: ContenedorErrorCode;
@@ -45,7 +47,7 @@ export class ContenedorError extends Error {
 
 // Orden del ciclo físico/aduanero. La edición del packing list sólo se
 // permite mientras el contenedor no haya llegado a depósito fiscal.
-const ESTADO_RANK: Record<ContenedorEstado, number> = {
+export const ESTADO_RANK: Record<ContenedorEstado, number> = {
   BORRADOR: 0,
   EN_TRANSITO: 1,
   ARRIBADO_PUERTO: 2,
@@ -313,6 +315,92 @@ export async function eliminarContenedor(contenedorId: string, tx?: TxClient): P
       );
     }
     await inner.contenedor.delete({ where: { id: contenedorId } });
+  };
+
+  if (tx) return run(tx);
+  return db.$transaction(run);
+}
+
+// Estados del ciclo físico/aduanero que se pueden alcanzar avanzando
+// manualmente (las fases de despacho las maneja recomputarEstadoContenedor).
+export type EstadoFisicoTarget =
+  | "EN_TRANSITO"
+  | "ARRIBADO_PUERTO"
+  | "EN_ZONA_PRIMARIA"
+  | "TRASLADO_DEPOSITO_FISCAL"
+  | "EN_DEPOSITO_FISCAL";
+
+export interface AvanzarEstadoInput {
+  contenedorId: string;
+  targetEstado: EstadoFisicoTarget;
+  fecha?: Date;
+  /** Requerido (recomendado) al entrar a EN_ZONA_PRIMARIA. */
+  depositoZonaPrimariaId?: string;
+  /** Obligatorio al entrar a EN_DEPOSITO_FISCAL. */
+  depositoFiscalId?: string;
+}
+
+// Mapea cada estado-target a la columna de fecha que documenta la fase.
+const FECHA_POR_ESTADO: Record<EstadoFisicoTarget, keyof Prisma.ContenedorUpdateInput | null> = {
+  EN_TRANSITO: "fechaSalidaOrigen",
+  ARRIBADO_PUERTO: "fechaLlegadaPuerto",
+  EN_ZONA_PRIMARIA: "fechaIngresoZpa",
+  TRASLADO_DEPOSITO_FISCAL: "fechaTrasladoDF",
+  EN_DEPOSITO_FISCAL: null,
+};
+
+/**
+ * Avanza el estado físico/aduanero del contenedor a lo largo del ciclo
+ * (BORRADOR → EN_TRANSITO → ARRIBADO_PUERTO → EN_ZONA_PRIMARIA →
+ * TRASLADO_DEPOSITO_FISCAL → EN_DEPOSITO_FISCAL). Sólo avanza (rank estricto);
+ * setea la fecha de la fase y el depósito cuando corresponde. Transición
+ * puramente mecánica — el asiento de arribo (1.1.5.04) vive a nivel embarque
+ * (ver confirmarZonaPrimariaAction, Modelo Y) y el de traslado lo genera la
+ * desconsolidación. EN_DEPOSITO_FISCAL exige depositoFiscalId.
+ */
+export async function avanzarEstadoContenedor(
+  input: AvanzarEstadoInput,
+  tx?: TxClient,
+): Promise<Contenedor> {
+  const run = async (inner: TxClient): Promise<Contenedor> => {
+    const contenedor = await inner.contenedor.findUnique({
+      where: { id: input.contenedorId },
+      select: { id: true, estado: true },
+    });
+    if (!contenedor) {
+      throw new ContenedorError(
+        "CONTENEDOR_INEXISTENTE",
+        `El contenedor ${input.contenedorId} no existe.`,
+      );
+    }
+
+    if (ESTADO_RANK[input.targetEstado] <= ESTADO_RANK[contenedor.estado]) {
+      throw new ContenedorError(
+        "ESTADO_TRANSICION_INVALIDA",
+        `No se puede pasar de ${contenedor.estado} a ${input.targetEstado} (sólo se avanza en el ciclo).`,
+      );
+    }
+
+    if (input.targetEstado === ContenedorEstado.EN_DEPOSITO_FISCAL && !input.depositoFiscalId) {
+      throw new ContenedorError(
+        "DEPOSITO_REQUERIDO",
+        "El depósito fiscal es obligatorio para pasar a EN_DEPOSITO_FISCAL.",
+      );
+    }
+
+    const data: Prisma.ContenedorUpdateInput = { estado: input.targetEstado };
+    const fechaKey = FECHA_POR_ESTADO[input.targetEstado];
+    if (fechaKey && input.fecha) {
+      (data as Record<string, unknown>)[fechaKey] = input.fecha;
+    }
+    if (input.depositoZonaPrimariaId) {
+      data.depositoZonaPrimaria = { connect: { id: input.depositoZonaPrimariaId } };
+    }
+    if (input.depositoFiscalId) {
+      data.depositoFiscal = { connect: { id: input.depositoFiscalId } };
+    }
+
+    return inner.contenedor.update({ where: { id: input.contenedorId }, data });
   };
 
   if (tx) return run(tx);

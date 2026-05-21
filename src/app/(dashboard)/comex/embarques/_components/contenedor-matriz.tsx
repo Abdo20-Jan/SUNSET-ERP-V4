@@ -9,6 +9,7 @@ import { Add01Icon, Delete02Icon, LockIcon } from "@hugeicons/core-free-icons";
 import {
   crearContenedorAction,
   actualizarPackingListAction,
+  avanzarEstadoContenedorAction,
   eliminarContenedorAction,
 } from "@/lib/actions/contenedores";
 import type { ContenedorPackingDTO } from "@/lib/services/contenedor";
@@ -35,13 +36,44 @@ interface ProductoEmbarque {
   cantidad: number;
 }
 
+interface DepositoOpt {
+  id: string;
+  nombre: string;
+}
+
 interface Props {
   embarqueId: string;
   productos: ProductoOption[];
   itemsEmbarque: ProductoEmbarque[];
   contenedores: ContenedorPackingDTO[];
+  depositos: DepositoOpt[];
   readonly: boolean;
 }
+
+// Orden de las fases físicas/aduaneras que se avanzan manualmente. (No se
+// importa ESTADO_RANK del service porque es server-only.) Las fases de
+// despacho (DESCONSOLIDADO+) las maneja la desconsolidación/despacho.
+const FASES_FISICAS = [
+  "BORRADOR",
+  "EN_TRANSITO",
+  "ARRIBADO_PUERTO",
+  "EN_ZONA_PRIMARIA",
+  "TRASLADO_DEPOSITO_FISCAL",
+  "EN_DEPOSITO_FISCAL",
+] as const;
+type FaseFisica = (typeof FASES_FISICAS)[number];
+// Estados-destino válidos para avanzar (excluye BORRADOR, el origen del ciclo).
+// Coincide con el enum targetEstado de avanzarEstadoContenedorAction.
+type EstadoAvanzable = Exclude<FaseFisica, "BORRADOR">;
+
+const FASE_LABEL: Record<FaseFisica, string> = {
+  BORRADOR: "Borrador",
+  EN_TRANSITO: "En tránsito",
+  ARRIBADO_PUERTO: "Arribado a puerto",
+  EN_ZONA_PRIMARIA: "En zona primaria",
+  TRASLADO_DEPOSITO_FISCAL: "Traslado a depósito fiscal",
+  EN_DEPOSITO_FISCAL: "En depósito fiscal",
+};
 
 interface FilaItem {
   key: string;
@@ -53,7 +85,7 @@ let filaSeq = 0;
 const nuevaFilaKey = () => `fila-${filaSeq++}`;
 
 export function ContenedorMatriz(props: Props) {
-  const { embarqueId, productos, itemsEmbarque, contenedores, readonly } = props;
+  const { embarqueId, productos, itemsEmbarque, contenedores, depositos, readonly } = props;
   const router = useRouter();
   const [creating, startCreate] = useTransition();
   const [numero, setNumero] = useState("");
@@ -175,6 +207,7 @@ export function ContenedorMatriz(props: Props) {
               key={`${c.id}-${c.updatedAt}`}
               contenedor={c}
               opcionesProducto={opcionesProducto}
+              depositos={depositos}
               readonly={readonly}
             />
           ))}
@@ -221,13 +254,20 @@ export function ContenedorMatriz(props: Props) {
 interface ContenedorCardProps {
   contenedor: ContenedorPackingDTO;
   opcionesProducto: Array<{ productoId: string; label: string; esperado: number }>;
+  depositos: DepositoOpt[];
   readonly: boolean;
 }
 
-function ContenedorCard({ contenedor, opcionesProducto, readonly }: ContenedorCardProps) {
+function ContenedorCard({
+  contenedor,
+  opcionesProducto,
+  depositos,
+  readonly,
+}: ContenedorCardProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showAvanzar, setShowAvanzar] = useState(false);
   const [filas, setFilas] = useState<FilaItem[]>(() =>
     contenedor.items.map((it) => ({
       key: nuevaFilaKey(),
@@ -237,6 +277,10 @@ function ContenedorCard({ contenedor, opcionesProducto, readonly }: ContenedorCa
   );
 
   const editable = contenedor.editable && !readonly;
+
+  const faseIdx = FASES_FISICAS.indexOf(contenedor.estado as FaseFisica);
+  const puedeAvanzar =
+    !readonly && faseIdx >= 0 && faseIdx < FASES_FISICAS.indexOf("EN_DEPOSITO_FISCAL");
 
   const addFila = () =>
     setFilas((prev) => [
@@ -331,6 +375,16 @@ function ContenedorCard({ contenedor, opcionesProducto, readonly }: ContenedorCa
             Investigar divergencia
           </Button>
         )}
+        {puedeAvanzar && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setShowAvanzar((v) => !v)}
+          >
+            Avanzar estado
+          </Button>
+        )}
         {editable && (
           <div className="flex items-center gap-2">
             {confirmDelete ? (
@@ -370,6 +424,15 @@ function ContenedorCard({ contenedor, opcionesProducto, readonly }: ContenedorCa
           </div>
         )}
       </div>
+
+      {showAvanzar && puedeAvanzar && (
+        <AvanzarEstadoPanel
+          contenedor={contenedor}
+          depositos={depositos}
+          faseIdx={faseIdx}
+          onClose={() => setShowAvanzar(false)}
+        />
+      )}
 
       <div className="overflow-x-auto p-3">
         <table className="w-full text-sm">
@@ -449,6 +512,117 @@ function ContenedorCard({ contenedor, opcionesProducto, readonly }: ContenedorCa
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+interface AvanzarEstadoPanelProps {
+  contenedor: ContenedorPackingDTO;
+  depositos: DepositoOpt[];
+  faseIdx: number;
+  onClose: () => void;
+}
+
+/** Panel para avanzar el estado físico/aduanero del contenedor (Ponte PR A). */
+function AvanzarEstadoPanel({ contenedor, depositos, faseIdx, onClose }: AvanzarEstadoPanelProps) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  // El avance nunca tiene como destino BORRADOR (es el origen del ciclo).
+  const opciones = FASES_FISICAS.slice(faseIdx + 1) as EstadoAvanzable[];
+  const [target, setTarget] = useState<EstadoAvanzable>(opciones[0] ?? "EN_DEPOSITO_FISCAL");
+  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [depositoId, setDepositoId] = useState("");
+
+  const pideDeposito = target === "EN_ZONA_PRIMARIA" || target === "EN_DEPOSITO_FISCAL";
+  const labelDeposito =
+    target === "EN_DEPOSITO_FISCAL" ? "Depósito fiscal" : "Depósito zona primaria";
+
+  const onConfirmar = () => {
+    if (pideDeposito && !depositoId) {
+      toast.error(`Seleccioná el ${labelDeposito.toLowerCase()}.`);
+      return;
+    }
+    startTransition(async () => {
+      const r = await avanzarEstadoContenedorAction({
+        contenedorId: contenedor.id,
+        targetEstado: target,
+        fecha: fecha ? new Date(`${fecha}T12:00:00.000Z`) : undefined,
+        depositoZonaPrimariaId: target === "EN_ZONA_PRIMARIA" ? depositoId : undefined,
+        depositoFiscalId: target === "EN_DEPOSITO_FISCAL" ? depositoId : undefined,
+      });
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(`${contenedor.numeroContenedor} → ${FASE_LABEL[target]}.`);
+      onClose();
+      router.refresh();
+    });
+  };
+
+  return (
+    <div className="flex flex-wrap items-end gap-2 border-b bg-muted/20 px-3 py-2">
+      <div className="flex flex-col gap-1">
+        <label
+          className="text-xs text-muted-foreground"
+          htmlFor={`avanzar-target-${contenedor.id}`}
+        >
+          Nuevo estado
+        </label>
+        <select
+          id={`avanzar-target-${contenedor.id}`}
+          value={target}
+          onChange={(e) => setTarget(e.target.value as EstadoAvanzable)}
+          className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+        >
+          {opciones.map((op) => (
+            <option key={op} value={op}>
+              {FASE_LABEL[op]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-xs text-muted-foreground" htmlFor={`avanzar-fecha-${contenedor.id}`}>
+          Fecha
+        </label>
+        <Input
+          id={`avanzar-fecha-${contenedor.id}`}
+          type="date"
+          value={fecha}
+          onChange={(e) => setFecha(e.target.value)}
+          className="w-40"
+        />
+      </div>
+      {pideDeposito && (
+        <div className="flex flex-col gap-1">
+          <label
+            className="text-xs text-muted-foreground"
+            htmlFor={`avanzar-deposito-${contenedor.id}`}
+          >
+            {labelDeposito}
+          </label>
+          <select
+            id={`avanzar-deposito-${contenedor.id}`}
+            value={depositoId}
+            onChange={(e) => setDepositoId(e.target.value)}
+            className="h-9 w-56 rounded-md border border-input bg-transparent px-2 text-sm"
+          >
+            <option value="">— seleccionar —</option>
+            {depositos.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.nombre}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <Button type="button" size="sm" onClick={onConfirmar} disabled={pending}>
+        Confirmar
+      </Button>
+      <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
+        Cancelar
+      </Button>
     </div>
   );
 }
