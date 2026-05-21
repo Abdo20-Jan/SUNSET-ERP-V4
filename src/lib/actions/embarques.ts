@@ -12,10 +12,12 @@ import {
   anularAsientoEmbarqueCosto,
   AsientoError,
   contabilizarAsiento,
+  crearAsientoArriboComex,
   crearAsientoEmbarque,
   crearAsientoEmbarqueCosto,
   crearAsientoZonaPrimaria,
 } from "@/lib/services/asiento-automatico";
+import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
 import {
   aplicarIngresoEmbarque,
   aplicarIngresoEmbarqueZpa,
@@ -940,6 +942,25 @@ export async function confirmarZonaPrimariaAction(
           "DOMINIO_INVALIDO",
           `El embarque ${embarque.codigo}: no hay FOB ni facturas marcadas como Zona Primaria.`,
         );
+      }
+
+      // Modelo Y (Ponte PR C): embarques CON contenedores (flag on) NO usan el
+      // flujo legacy. El arribo capitaliza el costo en 1.1.5.04 (sin mover
+      // stock); el primer ingreso de stock ocurre en la desconsolidación (DF).
+      const tieneContenedores =
+        isContenedorDesconsolidacionEnabled() &&
+        (await tx.contenedor.count({ where: { embarqueId } })) > 0;
+      if (tieneContenedores) {
+        const asientoComex = await crearAsientoArriboComex(embarqueId, tx, fecha);
+        const contabilizadoComex = await contabilizarAsiento(asientoComex.id, tx);
+        await tx.embarque.update({
+          where: { id: embarqueId },
+          data: { fechaZonaPrimaria: fecha ?? new Date() },
+        });
+        return {
+          asientoId: contabilizadoComex.id,
+          asientoNumero: contabilizadoComex.numero,
+        };
       }
 
       // Resolver el depósito ZPA antes que nada para fallar cedo si no hay.
