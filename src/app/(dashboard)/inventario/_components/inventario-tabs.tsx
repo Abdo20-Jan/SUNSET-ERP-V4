@@ -4,11 +4,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { EnProduccionFila, EnTransitoFila } from "@/lib/actions/inventario";
+import type { EnProduccionFila, EnTransitoFila, StockAduaneroFila } from "@/lib/actions/inventario";
 
 import { EnProduccionTable } from "./en-produccion-table";
 import { EnTransitoTable } from "./en-transito-table";
 import { InventarioMatrix } from "./inventario-matrix";
+import { StockAduaneroTable } from "./stock-aduanero-table";
 
 type Deposito = { id: string; nombre: string };
 
@@ -31,12 +32,15 @@ export function InventarioTabs({
   depositos,
   enTransito,
   enProduccion,
+  stockAduanero,
   initialTab,
 }: {
   productos: Producto[];
   depositos: Deposito[];
   enTransito: EnTransitoFila[];
   enProduccion: EnProduccionFila[];
+  /** null cuando la flag de desconsolidación está apagada (no se muestra la pestaña). */
+  stockAduanero: StockAduaneroFila[] | null;
   initialTab: string;
 }) {
   const router = useRouter();
@@ -54,6 +58,10 @@ export function InventarioTabs({
 
   const countTransito = enTransito.reduce((a, f) => a + f.cantidad, 0);
   const countProduccion = enProduccion.reduce((a, f) => a + f.cantidadEnProduccion, 0);
+  const countAduana = (stockAduanero ?? []).reduce(
+    (a, f) => a + f.totalDisponible + f.totalEnDespacho,
+    0,
+  );
 
   function setTab(value: string) {
     const params = new URLSearchParams(searchParams);
@@ -84,6 +92,14 @@ export function InventarioTabs({
             {countProduccion}
           </Badge>
         </TabsTrigger>
+        {stockAduanero && (
+          <TabsTrigger value="aduana">
+            Depósito fiscal
+            <Badge variant="outline" className="ml-1">
+              {countAduana}
+            </Badge>
+          </TabsTrigger>
+        )}
       </TabsList>
 
       {depositos.map((d) => (
@@ -97,6 +113,11 @@ export function InventarioTabs({
       <TabsContent value="produccion">
         <EnProduccionTable filas={enProduccion} />
       </TabsContent>
+      {stockAduanero && (
+        <TabsContent value="aduana">
+          <StockAduaneroTable filas={stockAduanero} />
+        </TabsContent>
+      )}
     </Tabs>
   );
 }

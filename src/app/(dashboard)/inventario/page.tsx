@@ -4,8 +4,9 @@ import {
   listarEnProduccion,
   listarEnTransito,
   listarMatrizInventario,
+  listarStockAduanero,
 } from "@/lib/actions/inventario";
-import { isStockDualEnabled } from "@/lib/features";
+import { isContenedorDesconsolidacionEnabled, isStockDualEnabled } from "@/lib/features";
 
 import { InventarioTabs } from "./_components/inventario-tabs";
 
@@ -16,15 +17,23 @@ export const dynamic = "force-dynamic";
 export default async function InventarioPage({ searchParams }: { searchParams: SearchParams }) {
   const { q, tab } = await searchParams;
 
-  const [{ productos, depositos }, transito, produccion] = await Promise.all([
+  const flagAduana = isContenedorDesconsolidacionEnabled();
+
+  const [{ productos, depositos }, transito, produccion, aduana] = await Promise.all([
     listarMatrizInventario({ search: q }),
     listarEnTransito({ search: q }),
     listarEnProduccion({ search: q }),
+    flagAduana ? listarStockAduanero({ search: q }) : Promise.resolve(null),
   ]);
 
   const flagSuffix = isStockDualEnabled() ? "" : " · stock dual: OFF";
 
-  const tabsValidas = new Set<string>([...depositos.map((d) => d.id), "transito", "produccion"]);
+  const tabsValidas = new Set<string>([
+    ...depositos.map((d) => d.id),
+    "transito",
+    "produccion",
+    ...(flagAduana ? ["aduana"] : []),
+  ]);
   const initialTab = tab && tabsValidas.has(tab) ? tab : (depositos[0]?.id ?? "transito");
 
   return (
@@ -64,6 +73,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: S
         depositos={depositos}
         enTransito={transito.filas}
         enProduccion={produccion.filas}
+        stockAduanero={aduana?.filas ?? null}
         initialTab={initialTab}
       />
     </main>

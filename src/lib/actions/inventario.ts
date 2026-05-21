@@ -1,6 +1,6 @@
 "use server";
 
-import { EmbarqueEstado, PedidoEstado } from "@/generated/prisma/client";
+import { type ContenedorEstado, EmbarqueEstado, PedidoEstado } from "@/generated/prisma/client";
 
 import { db } from "@/lib/db";
 
@@ -150,6 +150,108 @@ export async function listarEnTransito(opts?: {
       proveedorNombre: item.embarque.proveedor.nombre,
     });
     porProducto.set(item.productoId, fila);
+  }
+
+  return {
+    filas: [...porProducto.values()].sort((a, b) => a.codigo.localeCompare(b.codigo)),
+  };
+}
+
+// ============================================================
+// Stock aduanero (depósito fiscal) — drill-down por contenedor (PR 5.1)
+// ============================================================
+
+export type StockAduaneroContenedor = {
+  contenedorId: string;
+  numeroContenedor: string;
+  estado: ContenedorEstado;
+  depositoFiscalNombre: string | null;
+  cantidadDisponible: number;
+  cantidadEnDespacho: number;
+  cantidadDespachada: number;
+};
+
+export type StockAduaneroFila = {
+  productoId: string;
+  codigo: string;
+  nombre: string;
+  totalDisponible: number;
+  totalEnDespacho: number;
+  totalDespachada: number;
+  contenedores: StockAduaneroContenedor[];
+};
+
+/**
+ * Drill-down del stock que está en depósito fiscal (bonded): por producto →
+ * contenedor → estado aduanero. Se basa en los counters de ItemContenedor
+ * (disponible/enDespacho) + Contenedor.estado. Sólo incluye líneas con saldo
+ * vivo (disponible o enDespacho > 0); la cantidad despachada se muestra como
+ * referencia por contenedor. Detrás de la flag de desconsolidación (PR 5.1).
+ */
+export async function listarStockAduanero(opts?: {
+  search?: string;
+}): Promise<{ filas: StockAduaneroFila[] }> {
+  const search = opts?.search?.trim();
+
+  const items = await db.itemContenedor.findMany({
+    where: {
+      OR: [{ cantidadDisponible: { gt: 0 } }, { cantidadEnDespacho: { gt: 0 } }],
+      ...(search
+        ? {
+            producto: {
+              OR: [
+                { codigo: { contains: search, mode: "insensitive" } },
+                { nombre: { contains: search, mode: "insensitive" } },
+              ],
+            },
+          }
+        : {}),
+    },
+    select: {
+      productoId: true,
+      cantidadDisponible: true,
+      cantidadEnDespacho: true,
+      cantidadDespachada: true,
+      producto: { select: { codigo: true, nombre: true } },
+      contenedor: {
+        select: {
+          id: true,
+          numeroContenedor: true,
+          estado: true,
+          depositoFiscal: { select: { nombre: true } },
+        },
+      },
+    },
+  });
+
+  const porProducto = new Map<string, StockAduaneroFila>();
+  for (const it of items) {
+    const fila = porProducto.get(it.productoId) ?? {
+      productoId: it.productoId,
+      codigo: it.producto.codigo,
+      nombre: it.producto.nombre,
+      totalDisponible: 0,
+      totalEnDespacho: 0,
+      totalDespachada: 0,
+      contenedores: [],
+    };
+    fila.totalDisponible += it.cantidadDisponible;
+    fila.totalEnDespacho += it.cantidadEnDespacho;
+    fila.totalDespachada += it.cantidadDespachada;
+    fila.contenedores.push({
+      contenedorId: it.contenedor.id,
+      numeroContenedor: it.contenedor.numeroContenedor,
+      estado: it.contenedor.estado,
+      depositoFiscalNombre: it.contenedor.depositoFiscal?.nombre ?? null,
+      cantidadDisponible: it.cantidadDisponible,
+      cantidadEnDespacho: it.cantidadEnDespacho,
+      cantidadDespachada: it.cantidadDespachada,
+    });
+    porProducto.set(it.productoId, fila);
+  }
+
+  for (const fila of porProducto.values()) {
+    fila.contenedores.sort((a, b) => a.numeroContenedor.localeCompare(b.numeroContenedor));
   }
 
   return {
