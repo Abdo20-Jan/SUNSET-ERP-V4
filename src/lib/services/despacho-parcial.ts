@@ -16,8 +16,9 @@ import { type DespachoBorrador, type ItemContenedor, Prisma } from "@/generated/
 // Borrador server-side (DespachoBorrador): cuatro verbos.
 //   - crearBorrador     → traba counters (disponible→enDespacho) y graba
 //                          countsTrabados. Estado CONFIRMADO_TRABA_COUNTS.
-//                          (Decisión A1: el 4.2 traba con decremento ingenuo;
-//                          el 4.3 lo endurece a UPDATE single-shot con 409.)
+//                          El traba es SINGLE-SHOT (PR 4.3): UPDATE condicional
+//                          `WHERE cantidadDisponible >= ?` → 0 filas = oversell
+//                          evitado, sin lock pesimista ni TOCTOU (≈409).
 //   - retomarBorrador   → devuelve el borrador vigente; rechaza EXPIRADO (P0-4).
 //   - expirarBorrador   → marca EXPIRADO *antes* de liberar counters (P0-4) y
 //                          revierte countsTrabados. Idempotente.
@@ -100,31 +101,19 @@ export async function crearBorrador(
 async function ejecutarCrear(t: TxClient, input: CrearBorradorInput): Promise<DespachoBorrador> {
   const lineas = consolidarLineas(input.lineas);
 
-  const items = await lockYResolverItems(
+  // Resuelve existencia/pertenencia (sin lock pesimista — el traba es single-shot).
+  await resolverItems(
     t,
     lineas.map((l) => l.itemContenedorId),
     input.embarqueId,
   );
 
-  // Traba counters (decremento ingenuo; el single-shot atómico es 4.3).
+  // Traba counters single-shot (PR 4.3): un UPDATE condicional por línea,
+  // en orden de id (anti-deadlock). El WHERE cantidadDisponible >= ? evita el
+  // oversell concurrente sin TOCTOU; 0 filas → SALDO_INSUFICIENTE (≈409).
   const countsTrabados: Record<number, number> = {};
   for (const l of lineas) {
-    const it = items.get(l.itemContenedorId)!;
-    if (it.cantidadDisponible < l.cantidad) {
-      throw new DespachoParcialError(
-        "SALDO_INSUFICIENTE",
-        `ItemContenedor ${l.itemContenedorId}: disponible ${it.cantidadDisponible} < solicitado ${l.cantidad}.`,
-      );
-    }
-  }
-  for (const l of lineas) {
-    await t.itemContenedor.update({
-      where: { id: l.itemContenedorId },
-      data: {
-        cantidadDisponible: { decrement: l.cantidad },
-        cantidadEnDespacho: { increment: l.cantidad },
-      },
-    });
+    await decrementarDisponibleSingleShot(t, l.itemContenedorId, l.cantidad, "EN_DESPACHO");
     countsTrabados[l.itemContenedorId] = l.cantidad;
   }
 
@@ -180,37 +169,28 @@ async function ejecutarExpirar(t: TxClient, borradorId: string): Promise<Despach
   if (!borrador) {
     throw new DespachoParcialError("BORRADOR_INEXISTENTE", `El borrador ${borradorId} no existe.`);
   }
-  // Idempotente: si ya expiró, los counts ya fueron liberados.
-  if (borrador.estadoActual === ESTADO_EXPIRADO) {
-    return borrador;
-  }
 
-  const counts = parseCountsTrabados(borrador.countsTrabados);
-  if (counts.length > 0) {
-    await lockItemContenedores(
-      t,
-      counts.map((c) => c.itemContenedorId),
-    );
-  }
-
-  // P0-4: marcar EXPIRADO *antes* de liberar, para que una retomada concurrente
-  // vea el estado terminal y se rechace antes de que los counters se liberen.
-  const expirado = await t.despachoBorrador.update({
-    where: { id: borradorId },
+  // P0-4 single-shot: la transición a EXPIRADO es un UPDATE condicional —
+  // sólo una transacción la gana. Marcar EXPIRADO *antes* de liberar counters
+  // hace que una retomada concurrente vea el estado terminal y se rechace.
+  const { count } = await t.despachoBorrador.updateMany({
+    where: { id: borradorId, estadoActual: { not: ESTADO_EXPIRADO } },
     data: { estadoActual: ESTADO_EXPIRADO },
   });
-
-  for (const c of counts) {
-    await t.itemContenedor.update({
-      where: { id: c.itemContenedorId },
-      data: {
-        cantidadEnDespacho: { decrement: c.cantidad },
-        cantidadDisponible: { increment: c.cantidad },
-      },
-    });
+  // count === 0 → otra transacción ya expiró y liberó los counts: idempotente.
+  if (count > 0) {
+    for (const c of parseCountsTrabados(borrador.countsTrabados)) {
+      await t.itemContenedor.update({
+        where: { id: c.itemContenedorId },
+        data: {
+          cantidadEnDespacho: { decrement: c.cantidad },
+          cantidadDisponible: { increment: c.cantidad },
+        },
+      });
+    }
   }
 
-  return expirado;
+  return t.despachoBorrador.findUniqueOrThrow({ where: { id: borradorId } });
 }
 
 // ------------------------------------------------------------
@@ -285,24 +265,11 @@ export async function materializarDespachoCruzado(
     );
   }
 
-  const items = await lockYResolverItems(
+  const items = await resolverItems(
     t,
     lineas.map((l) => l.itemContenedorId),
     input.embarqueId,
   );
-
-  // En el camino directo todavía no se trabó nada: validar saldo acá.
-  if (input.fuente === "DIRECTO") {
-    for (const l of lineas) {
-      const it = items.get(l.itemContenedorId)!;
-      if (it.cantidadDisponible < l.cantidad) {
-        throw new DespachoParcialError(
-          "SALDO_INSUFICIENTE",
-          `ItemContenedor ${l.itemContenedorId}: disponible ${it.cantidadDisponible} < solicitado ${l.cantidad}.`,
-        );
-      }
-    }
-  }
 
   const codigo = await siguienteCodigoDespacho(t, embarque.codigo);
   const despacho = await t.despacho.create({
@@ -333,17 +300,13 @@ export async function materializarDespachoCruzado(
   });
 
   for (const l of lineas) {
-    const data =
-      input.fuente === "BORRADOR"
-        ? {
-            cantidadEnDespacho: { decrement: l.cantidad },
-            cantidadDespachada: { increment: l.cantidad },
-          }
-        : {
-            cantidadDisponible: { decrement: l.cantidad },
-            cantidadDespachada: { increment: l.cantidad },
-          };
-    await t.itemContenedor.update({ where: { id: l.itemContenedorId }, data });
+    if (input.fuente === "BORRADOR") {
+      // Ya trabado: mueve enDespacho→despachada (guard enDespacho >= ?).
+      await moverEnDespachoADespachadaSingleShot(t, l.itemContenedorId, l.cantidad);
+    } else {
+      // Camino directo: traba+despacha en un solo UPDATE condicional.
+      await decrementarDisponibleSingleShot(t, l.itemContenedorId, l.cantidad, "DESPACHADA");
+    }
   }
 
   return { despachoId: despacho.id, codigo: despacho.codigo };
@@ -368,21 +331,23 @@ function consolidarLineas(lineas: readonly LineaBorrador[]): LineaBorrador[] {
     }
     acc.set(l.itemContenedorId, (acc.get(l.itemContenedorId) ?? 0) + l.cantidad);
   }
-  return [...acc].map(([itemContenedorId, cantidad]) => ({ itemContenedorId, cantidad }));
+  // Orden estable por id: los UPDATE single-shot se aplican en este orden para
+  // evitar deadlocks entre transacciones que tocan las mismas líneas.
+  return [...acc]
+    .map(([itemContenedorId, cantidad]) => ({ itemContenedorId, cantidad }))
+    .sort((a, b) => a.itemContenedorId - b.itemContenedorId);
 }
 
 /**
- * Lock pesimista (FOR UPDATE) sobre los ItemContenedor + resolución con su
- * contenedor. Valida existencia y pertenencia al embarque. Devuelve un Map
- * id→ItemContenedor.
+ * Resuelve los ItemContenedor (sin lock pesimista — la defensa de saldo es el
+ * UPDATE condicional single-shot). Valida existencia y pertenencia al embarque.
+ * Devuelve un Map id→ItemContenedor.
  */
-async function lockYResolverItems(
+async function resolverItems(
   t: TxClient,
   itemContenedorIds: readonly number[],
   embarqueId: string,
 ): Promise<Map<number, ItemContenedor>> {
-  await lockItemContenedores(t, itemContenedorIds);
-
   const items = await t.itemContenedor.findMany({
     where: { id: { in: [...itemContenedorIds] } },
     include: { contenedor: { select: { embarqueId: true } } },
@@ -407,14 +372,62 @@ async function lockYResolverItems(
   return byId;
 }
 
-/** SELECT … FOR UPDATE sobre los ItemContenedor (orden estable anti-deadlock). */
-async function lockItemContenedores(
+/**
+ * Decremento single-shot de cantidadDisponible (PR 4.3): un único UPDATE
+ * condicional `WHERE cantidadDisponible >= ?`. 0 filas afectadas → oversell
+ * evitado → SALDO_INSUFICIENTE (≈409). `destino` es el counter que recibe la
+ * cantidad: EN_DESPACHO (traba del borrador) o DESPACHADA (camino directo).
+ */
+async function decrementarDisponibleSingleShot(
   t: TxClient,
-  itemContenedorIds: readonly number[],
+  itemContenedorId: number,
+  cantidad: number,
+  destino: "EN_DESPACHO" | "DESPACHADA",
 ): Promise<void> {
-  if (itemContenedorIds.length === 0) return;
-  const ordenados = [...new Set(itemContenedorIds)].sort((a, b) => a - b);
-  await t.$queryRaw`SELECT id FROM "ItemContenedor" WHERE id IN (${Prisma.join(ordenados)}) FOR UPDATE`;
+  const data =
+    destino === "EN_DESPACHO"
+      ? {
+          cantidadDisponible: { decrement: cantidad },
+          cantidadEnDespacho: { increment: cantidad },
+        }
+      : {
+          cantidadDisponible: { decrement: cantidad },
+          cantidadDespachada: { increment: cantidad },
+        };
+  const { count } = await t.itemContenedor.updateMany({
+    where: { id: itemContenedorId, cantidadDisponible: { gte: cantidad } },
+    data,
+  });
+  if (count === 0) {
+    throw new DespachoParcialError(
+      "SALDO_INSUFICIENTE",
+      `ItemContenedor ${itemContenedorId}: disponible insuficiente para ${cantidad}.`,
+    );
+  }
+}
+
+/**
+ * Movimiento single-shot enDespacho→despachada al contabilizar (counter ya
+ * trabado en el borrador). Guard `cantidadEnDespacho >= ?` por consistencia.
+ */
+async function moverEnDespachoADespachadaSingleShot(
+  t: TxClient,
+  itemContenedorId: number,
+  cantidad: number,
+): Promise<void> {
+  const { count } = await t.itemContenedor.updateMany({
+    where: { id: itemContenedorId, cantidadEnDespacho: { gte: cantidad } },
+    data: {
+      cantidadEnDespacho: { decrement: cantidad },
+      cantidadDespachada: { increment: cantidad },
+    },
+  });
+  if (count === 0) {
+    throw new DespachoParcialError(
+      "SALDO_INSUFICIENTE",
+      `ItemContenedor ${itemContenedorId}: en despacho insuficiente para ${cantidad}.`,
+    );
+  }
 }
 
 async function siguienteCodigoDespacho(t: TxClient, embarqueCodigo: string): Promise<string> {
