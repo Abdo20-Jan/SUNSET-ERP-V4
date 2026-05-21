@@ -2014,6 +2014,310 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
   return withNumeracionRetry(() => db.$transaction(run));
 }
 
+/**
+ * Asiento del despacho parcial CRUZADO (Fase 4, flag CONTENEDOR_DESCONSOLIDACION
+ * _ENABLED). Espeja `crearAsientoDespacho` pero:
+ *  - La transferencia de subcuenta es 1.1.5.05 (DF) → 1.1.5.01 (mercaderías
+ *    nacionalizadas) — flujo NACIONALIZACION_VIA_DF — en vez de 1.1.5.02→01.
+ *  - El costo landed por línea sale del `ItemContenedor.costoFCUnitario`
+ *    (snapshot FC en USD, ya rateado en ZP) × cantidad × TC del embarque, no
+ *    del rateo FOB del ItemEmbarque.
+ *  - Los tributos aduaneros y las facturas DESPACHO son idénticos al legacy
+ *    (duplicados acá a propósito: el legacy NO tiene tests y está activo en
+ *    prod — no se toca. Unificar DRY = follow-up cuando el legacy tenga red).
+ *  - RespSustituta (DF de terceros, cuentas de orden 9.x) se difiere (igual
+ *    que las cuentas de orden de Onda 1).
+ */
+export async function crearAsientoDespachoCruzado(
+  despachoId: string,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const despacho = await inner.despacho.findUnique({
+      where: { id: despachoId },
+      include: {
+        embarque: {
+          include: {
+            costos: {
+              include: {
+                proveedor: { select: { id: true, nombre: true, cuentaContableId: true } },
+                lineas: { orderBy: { id: "asc" } },
+              },
+              orderBy: { id: "asc" },
+            },
+          },
+        },
+        items: {
+          include: {
+            itemContenedor: {
+              select: {
+                id: true,
+                productoId: true,
+                costoFCUnitario: true,
+                contenedor: { select: { depositoFiscalId: true } },
+              },
+            },
+          },
+          orderBy: { id: "asc" },
+        },
+      },
+    });
+
+    if (!despacho) {
+      throw new AsientoError("DOMINIO_INVALIDO", `Despacho ${despachoId} no existe.`);
+    }
+    if (despacho.estado !== "BORRADOR") {
+      throw new AsientoError(
+        "ESTADO_INVALIDO",
+        `Despacho ${despacho.codigo} no está en BORRADOR (${despacho.estado}).`,
+      );
+    }
+    if (despacho.asientoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Despacho ${despacho.codigo} ya tiene un asiento.`,
+      );
+    }
+    if (despacho.items.length === 0) {
+      throw new AsientoError("DOMINIO_INVALIDO", `Despacho ${despacho.codigo}: no tiene ítems.`);
+    }
+    const embarque = despacho.embarque;
+    if (embarque.asientoId) {
+      throw new AsientoError(
+        "ESTADO_INVALIDO",
+        `Embarque ${embarque.codigo}: ya tiene cierre monolítico — no admite despachos parciales.`,
+      );
+    }
+
+    const porCodigo = await ensureCuentasMap(inner, EMBARQUE_CODIGOS);
+    const cuentaDFId = await getOrCreateCuenta(
+      inner,
+      COMEX_ZPA_CODIGOS.MERCADERIAS_EN_DEPOSITO_FISCAL,
+    );
+    const tcEmb = toDecimal(embarque.tipoCambio);
+    const tcDsp = toDecimal(despacho.tipoCambio);
+
+    type Linea = {
+      cuentaId: number;
+      debe: import("decimal.js").Decimal;
+      haber: import("decimal.js").Decimal;
+      descripcion: string;
+    };
+    const lineas: Linea[] = [];
+    const pushDebe = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: valor, haber: toDecimal(0), descripcion });
+    };
+    const pushHaber = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: toDecimal(0), haber: valor, descripcion });
+    };
+
+    // 1) Transferencia 1.1.5.05 (DF) → 1.1.5.01 (mercaderías) por el costo
+    //    landed de las líneas cruzadas (costoFCUnitario × cantidad × TC).
+    let nacionalizadoArs = toDecimal(0);
+    const itemDespachoCostoUnit = new Map<number, import("decimal.js").Decimal>();
+    for (const id of despacho.items) {
+      const ic = id.itemContenedor;
+      if (!ic) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `Despacho ${despacho.codigo}: la línea ${id.id} no tiene itemContenedor (no es un despacho cruzado).`,
+        );
+      }
+      if (ic.costoFCUnitario == null) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `Despacho ${despacho.codigo}: el ItemContenedor ${ic.id} no tiene costo FC (cerrá costos antes de nacionalizar).`,
+        );
+      }
+      const costoUnitArs = toDecimal(ic.costoFCUnitario).times(tcEmb).toDecimalPlaces(2);
+      itemDespachoCostoUnit.set(id.id, costoUnitArs);
+      nacionalizadoArs = nacionalizadoArs.plus(costoUnitArs.times(id.cantidad).toDecimalPlaces(2));
+    }
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS.codigo)!,
+      nacionalizadoArs,
+      `Despacho ${despacho.codigo} — nacionalización vía depósito fiscal (${despacho.items.length} línea${despacho.items.length === 1 ? "" : "s"})`,
+    );
+    pushHaber(
+      cuentaDFId,
+      nacionalizadoArs,
+      `Despacho ${despacho.codigo} — sale de depósito fiscal`,
+    );
+
+    // 2) Tributos aduaneros del despacho (idéntico al legacy crearAsientoDespacho).
+    const die = toDecimal(despacho.die).times(tcDsp).toDecimalPlaces(2);
+    const te = toDecimal(despacho.tasaEstadistica).times(tcDsp).toDecimalPlaces(2);
+    const arancelSim = toDecimal(despacho.arancelSim).times(tcDsp).toDecimalPlaces(2);
+    const ivaAduana = toDecimal(despacho.iva).times(tcDsp).toDecimalPlaces(2);
+    const ivaAdicional = toDecimal(despacho.ivaAdicional).times(tcDsp).toDecimalPlaces(2);
+    const iibbAduana = toDecimal(despacho.iibb).times(tcDsp).toDecimalPlaces(2);
+    const ganancias = toDecimal(despacho.ganancias).times(tcDsp).toDecimalPlaces(2);
+
+    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.DIE_EGRESO.codigo)!, die, "DIE");
+    pushHaber(porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO.codigo)!, die, "DIE por pagar (Aduana)");
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_EGRESO.codigo)!,
+      te,
+      "Tasa estadística",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_PASIVO.codigo)!,
+      te,
+      "Tasa estadística por pagar",
+    );
+    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO.codigo)!, arancelSim, "Arancel SIM");
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO.codigo)!,
+      arancelSim,
+      "Arancel SIM por pagar",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_IMPORTACION.codigo)!,
+      ivaAduana,
+      "IVA crédito fiscal importación",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_ADICIONAL_CREDITO.codigo)!,
+      ivaAdicional,
+      "IVA adicional importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_POR_PAGAR.codigo)!,
+      ivaAduana.plus(ivaAdicional),
+      "IVA importación por pagar (IVA + adicional)",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_IMPORTACION.codigo)!,
+      iibbAduana,
+      "Percepción IIBB importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.IIBB_POR_PAGAR.codigo)!,
+      iibbAduana,
+      "IIBB importación por pagar",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_CREDITO.codigo)!,
+      ganancias,
+      "Percepción Ganancias importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_POR_PAGAR.codigo)!,
+      ganancias,
+      "Ganancias importación por pagar",
+    );
+
+    // 3) Facturas linkadas a este despacho (DESPACHO). Mismo filtro que legacy.
+    const facturasDespacho = embarque.costos.filter(
+      (f) =>
+        f.despachoId === despacho.id &&
+        f.momento !== "ZONA_PRIMARIA" &&
+        (f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED"),
+    );
+    for (const factura of facturasDespacho) {
+      if (factura.lineas.length === 0) continue;
+      if (!factura.proveedor.cuentaContableId) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `El proveedor ${factura.proveedor.nombre} no tiene cuenta contable asociada.`,
+        );
+      }
+      const tc = toDecimal(factura.tipoCambio);
+      const facturaLabel = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""}`;
+
+      let subtotalFacturaArs = toDecimal(0);
+      for (const linea of factura.lineas) {
+        const subtotalArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
+        if (!subtotalArs.gt(0)) continue;
+        const lineaLabel = linea.descripcion?.trim() || linea.tipo.replace(/_/g, " ").toLowerCase();
+        pushDebe(linea.cuentaContableGastoId, subtotalArs, `${facturaLabel} — ${lineaLabel}`);
+        subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
+      }
+      const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
+      const iibbArs = toDecimal(factura.iibb).times(tc).toDecimalPlaces(2);
+      const otrosArs = toDecimal(factura.otros).times(tc).toDecimalPlaces(2);
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS.codigo)!,
+        ivaArs,
+        `${facturaLabel} — IVA crédito`,
+      );
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS.codigo)!,
+        iibbArs,
+        `${facturaLabel} — IIBB crédito`,
+      );
+      if (otrosArs.gt(0) && factura.lineas.length > 0) {
+        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros`);
+      }
+      const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+      if (totalFacturaArs.gt(0)) {
+        pushHaber(
+          factura.proveedor.cuentaContableId,
+          totalFacturaArs,
+          `${facturaLabel} — total a pagar`,
+        );
+      }
+    }
+
+    if (lineas.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Despacho ${despacho.codigo}: no hay montos para contabilizar.`,
+      );
+    }
+
+    const lineasInput: LineaInput[] = lineas.map((l) => ({
+      cuentaId: l.cuentaId,
+      debe: money(l.debe).toString(),
+      haber: money(l.haber).toString(),
+      descripcion: l.descripcion,
+    }));
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: despacho.fecha,
+      descripcion: `Despacho ${despacho.codigo} (cruzado) — embarque ${embarque.codigo}`,
+      origen: AsientoOrigen.COMEX,
+      lineas: lineasInput,
+    });
+
+    for (const id of despacho.items) {
+      const cu = itemDespachoCostoUnit.get(id.id);
+      if (cu) {
+        await inner.itemDespacho.update({
+          where: { id: id.id },
+          data: { costoUnitario: money(cu) },
+        });
+      }
+    }
+
+    const updDesp = await inner.despacho.updateMany({
+      where: { id: despacho.id, asientoId: null },
+      data: { asientoId: asiento.id },
+    });
+    if (updDesp.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Despacho ${despacho.id} fue contabilizado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
+
+    return asiento;
+  };
+
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
 // ============================================================
 // Ventas — asiento automático
 // ============================================================

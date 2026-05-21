@@ -641,6 +641,72 @@ export async function aplicarTransferenciaDespacho(
   }
 }
 
+type NacionalizacionDFItem = {
+  productoId: string;
+  cantidad: number;
+  /** Costo unitario ARS = costoFCUnitario (snapshot FC) × TC del embarque. */
+  costoUnitario: Decimal;
+  /** Depósito fiscal de origen — puede diferir por línea (un despacho cruzado
+   *  consume de N contenedores, potencialmente en DF distintos). */
+  depositoFiscalId: string;
+};
+
+/**
+ * Aplica el movimiento físico de stock al nacionalizar un despacho parcial
+ * CRUZADO (Fase 4): por cada línea, transfiere la cantidad desde el depósito
+ * fiscal del contenedor de origen al depósito destino del embarque. Espeja a
+ * `aplicarTransferenciaDespacho` (1 `Transferencia` + 2 MovimientoStock vía
+ * `aplicarTransferenciaSPD`), pero el origen es el DF (no la ZPA) y el costo
+ * es el `costoFCUnitario` del ItemContenedor (no el del ItemEmbarque).
+ *
+ * Contablemente acompaña al asiento NACIONALIZACION_VIA_DF (DEBE 1.1.5.01 /
+ * HABER 1.1.5.05). El stock en el DF fue ingresado al desconsolidar (PR 3.2).
+ */
+export async function aplicarNacionalizacionDF(
+  tx: TxClient,
+  params: {
+    despachoId: string;
+    despachoCodigo: string;
+    depositoDestinoId: string;
+    fecha: Date;
+    items: readonly NacionalizacionDFItem[];
+  },
+): Promise<void> {
+  for (const item of params.items) {
+    if (item.depositoFiscalId === params.depositoDestinoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        "El depósito fiscal de origen y el destino del despacho no pueden ser el mismo.",
+      );
+    }
+    const numero = await siguienteNumeroTransferenciaDespacho(tx, params.despachoCodigo);
+    const transferencia = await tx.transferencia.create({
+      data: {
+        numero,
+        productoId: item.productoId,
+        depositoOrigenId: item.depositoFiscalId,
+        depositoDestinoId: params.depositoDestinoId,
+        cantidad: item.cantidad,
+        fecha: params.fecha,
+        despachoId: params.despachoId,
+        observacion: `Despacho ${params.despachoCodigo} — nacionalización depósito fiscal → destino`,
+        // estado default = CONFIRMADA
+      },
+      select: { id: true },
+    });
+
+    await aplicarTransferenciaSPD(tx, {
+      productoId: item.productoId,
+      depositoOrigenId: item.depositoFiscalId,
+      depositoDestinoId: params.depositoDestinoId,
+      cantidad: item.cantidad,
+      fecha: params.fecha,
+      transferenciaId: transferencia.id,
+      costoUnitarioOverride: item.costoUnitario,
+    });
+  }
+}
+
 async function siguienteNumeroTransferenciaDespacho(
   tx: TxClient,
   despachoCodigo: string,
