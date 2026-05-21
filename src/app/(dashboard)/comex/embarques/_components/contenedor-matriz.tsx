@@ -321,6 +321,16 @@ function ContenedorCard({ contenedor, opcionesProducto, readonly }: ContenedorCa
             Desconsolidar
           </Button>
         )}
+        {contenedor.estado === "AGUARDANDO_INVESTIGACAO" && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => router.push(`/comex/contenedores/${contenedor.id}/investigacion`)}
+          >
+            Investigar divergencia
+          </Button>
+        )}
         {editable && (
           <div className="flex items-center gap-2">
             {confirmDelete ? (
