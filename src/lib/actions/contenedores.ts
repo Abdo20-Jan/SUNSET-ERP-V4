@@ -8,6 +8,7 @@ import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
 import {
   actualizarPackingList,
   avanzarEstadoContenedor,
+  cerrarCostosContenedor,
   ContenedorError,
   crearContenedor,
   eliminarContenedor,
@@ -67,9 +68,23 @@ const avanzarEstadoSchema = z.object({
   depositoFiscalId: z.string().optional(),
 });
 
+const cerrarCostosSchema = z.object({
+  contenedorId: z.string().min(1),
+  expectedUpdatedAt: z.coerce.date(),
+  overrides: z
+    .array(
+      z.object({
+        productoId: z.string().min(1),
+        costoFCUnitario: z.union([z.string(), z.number()]),
+      }),
+    )
+    .optional(),
+});
+
 export type CrearContenedorActionInput = z.input<typeof crearSchema>;
 export type ActualizarPackingListActionInput = z.input<typeof actualizarSchema>;
 export type AvanzarEstadoActionInput = z.input<typeof avanzarEstadoSchema>;
+export type CerrarCostosActionInput = z.input<typeof cerrarCostosSchema>;
 
 function mapContenedorError(err: ContenedorError): string {
   switch (err.code) {
@@ -91,6 +106,8 @@ function mapContenedorError(err: ContenedorError): string {
       return "No se puede retroceder ni saltar etapas: el estado sólo avanza en el ciclo.";
     case "DEPOSITO_REQUERIDO":
       return "Indicá el depósito fiscal para mover el contenedor a depósito fiscal.";
+    case "COSTOS_INCOMPLETOS":
+      return "Hay productos sin costo FC: revisá el rateo del embarque o cargá un valor manual.";
     default:
       return "No se pudo completar la operación sobre el contenedor.";
   }
@@ -181,6 +198,30 @@ export async function avanzarEstadoContenedorAction(
     }
     console.error("avanzarEstadoContenedorAction failed", err);
     return { ok: false, error: "Error inesperado al avanzar el estado del contenedor." };
+  }
+}
+
+export async function cerrarCostosContenedorAction(
+  raw: CerrarCostosActionInput,
+): Promise<ContenedorActionResult> {
+  const blocked = await gate();
+  if (blocked) return blocked;
+
+  const parsed = cerrarCostosSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, error: "Datos inválidos." };
+  }
+
+  try {
+    const contenedor = await cerrarCostosContenedor(parsed.data);
+    revalidatePath(`/comex/embarques/${contenedor.embarqueId}`);
+    return { ok: true, contenedorId: contenedor.id };
+  } catch (err) {
+    if (err instanceof ContenedorError) {
+      return { ok: false, error: mapContenedorError(err) };
+    }
+    console.error("cerrarCostosContenedorAction failed", err);
+    return { ok: false, error: "Error inesperado al cerrar los costos del contenedor." };
   }
 }
 
