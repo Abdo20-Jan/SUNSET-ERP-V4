@@ -1013,7 +1013,10 @@ export async function getAnalisisBonded(): Promise<AnalisisBonded | null> {
     string,
     { codigo: string; producto: string; disponible: number; enDespacho: number; valor: Decimal }
   >();
-  const despachos = new Map<string, { codigo: string; producto: string; unidades: number; valor: Decimal }>();
+  const despachos = new Map<
+    string,
+    { codigo: string; producto: string; unidades: number; valor: Decimal }
+  >();
 
   for (const it of items) {
     const fc = toDecimal(it.costoFCUnitario ?? 0);
