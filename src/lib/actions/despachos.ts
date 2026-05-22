@@ -1025,6 +1025,150 @@ export async function contabilizarBorradorAction(
   }
 }
 
+// ------------------------------------------------------------
+// Editor de tributos/VEP del despacho cruzado (gap #4)
+// ------------------------------------------------------------
+//
+// El borrador (DespachoBorrador) se materializa en un Despacho CRUZADO con
+// tributos=0 (defaults). Antes de contabilizar, el operador digita los 7
+// tributos + TC + (opcional) facturas DESPACHO con esta action. Reutiliza la
+// misma validación (`decimalish`/`decimalishPositive`) y el patrón de link de
+// facturas del flujo legacy. El asiento/VEP los consume `contabilizarDespachoAction`.
+
+const actualizarTributosCruzadoSchema = z.object({
+  despachoId: z.string().min(1),
+  tipoCambio: decimalishPositive,
+  die: decimalish.default("0"),
+  tasaEstadistica: decimalish.default("0"),
+  arancelSim: decimalish.default("0"),
+  iva: decimalish.default("0"),
+  ivaAdicional: decimalish.default("0"),
+  iibb: decimalish.default("0"),
+  ganancias: decimalish.default("0"),
+  facturasIds: z.array(z.number().int().positive()).optional(),
+  numeroOM: z.string().trim().optional().nullable(),
+  notas: z.string().trim().optional().nullable(),
+});
+
+export type ActualizarTributosCruzadoResult = { ok: true } | { ok: false; error: string };
+
+export async function actualizarTributosDespachoCruzadoAction(
+  input: z.input<typeof actualizarTributosCruzadoSchema>,
+): Promise<ActualizarTributosCruzadoResult> {
+  const gate = await gateBorrador();
+  if (!gate.ok) return gate;
+  const parsed = actualizarTributosCruzadoSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+  }
+  const data = parsed.data;
+
+  try {
+    const embarqueId = await db.$transaction(async (tx) => {
+      const despacho = await tx.despacho.findUnique({
+        where: { id: data.despachoId },
+        select: {
+          embarqueId: true,
+          estado: true,
+          items: { select: { itemContenedorId: true } },
+        },
+      });
+      if (!despacho) {
+        throw new AsientoError("DOMINIO_INVALIDO", "Despacho no existe.");
+      }
+      if (despacho.estado !== "BORRADOR") {
+        throw new AsientoError("ESTADO_INVALIDO", "El despacho ya fue contabilizado.");
+      }
+      const esCruzado = despacho.items.some((i) => i.itemContenedorId != null);
+      if (!esCruzado) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          "Este despacho no es cruzado — usá el formulario legacy para editar sus tributos.",
+        );
+      }
+
+      // Validar/relinkar facturas DESPACHO del embarque (espejo del flujo legacy).
+      if (data.facturasIds != null) {
+        const ids = data.facturasIds;
+        if (ids.length > 0) {
+          const facturas = await tx.embarqueCosto.findMany({
+            where: { id: { in: ids } },
+            select: { id: true, embarqueId: true, momento: true, despachoId: true },
+          });
+          for (const fid of ids) {
+            const f = facturas.find((x) => x.id === fid);
+            if (!f) {
+              throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no existe.`);
+            }
+            if (f.embarqueId !== despacho.embarqueId) {
+              throw new AsientoError(
+                "DOMINIO_INVALIDO",
+                `Factura ${fid} no pertenece al embarque.`,
+              );
+            }
+            if (f.momento !== "DESPACHO") {
+              throw new AsientoError(
+                "DOMINIO_INVALIDO",
+                `Factura ${fid}: sólo facturas con momento DESPACHO se pueden linkar.`,
+              );
+            }
+            if (f.despachoId && f.despachoId !== data.despachoId) {
+              throw new AsientoError(
+                "ESTADO_INVALIDO",
+                `Factura ${fid} ya está linkada a otro despacho.`,
+              );
+            }
+          }
+        }
+        // Desvincular las que estaban en este despacho y ya no figuran.
+        await tx.embarqueCosto.updateMany({
+          where: { despachoId: data.despachoId, id: { notIn: ids } },
+          data: { despachoId: null },
+        });
+        // Vincular las nuevas.
+        if (ids.length > 0) {
+          await tx.embarqueCosto.updateMany({
+            where: {
+              id: { in: ids },
+              embarqueId: despacho.embarqueId,
+              momento: "DESPACHO",
+            },
+            data: { despachoId: data.despachoId },
+          });
+        }
+      }
+
+      await tx.despacho.update({
+        where: { id: data.despachoId },
+        data: {
+          tipoCambio: money(toDecimal(data.tipoCambio)),
+          die: money(toDecimal(data.die)),
+          tasaEstadistica: money(toDecimal(data.tasaEstadistica)),
+          arancelSim: money(toDecimal(data.arancelSim)),
+          iva: money(toDecimal(data.iva)),
+          ivaAdicional: money(toDecimal(data.ivaAdicional)),
+          iibb: money(toDecimal(data.iibb)),
+          ganancias: money(toDecimal(data.ganancias)),
+          ...(data.numeroOM !== undefined ? { numeroOM: data.numeroOM?.trim() || null } : {}),
+          ...(data.notas !== undefined ? { notas: data.notas?.trim() || null } : {}),
+        },
+      });
+
+      return despacho.embarqueId;
+    });
+
+    revalidatePath(`/comex/embarques/${embarqueId}/despachos`);
+    revalidatePath(`/comex/embarques/${embarqueId}`);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof AsientoError) {
+      return { ok: false, error: err.message };
+    }
+    console.error("actualizarTributosDespachoCruzadoAction failed", err);
+    return { ok: false, error: "Error inesperado al guardar los tributos." };
+  }
+}
+
 const expirarBorradorSchema = z.object({
   borradorId: z.string().min(1),
   embarqueId: z.string().min(1),
