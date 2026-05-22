@@ -1152,12 +1152,19 @@ model Gasto {
   total            Decimal       @db.Decimal(18, 2)
   estado           GastoEstado   @default(BORRADOR)
   asientoId        String?       @unique
+  // Vínculo opcional a una Venta cuando este Gasto es la factura de
+  // flete de esa venta (transportista + IVA crédito + CxP real). @unique:
+  // una venta tiene a lo sumo un gasto de flete. El flete inline de la
+  // venta (Venta.flete) NO se contabiliza en el asiento de venta cuando
+  // existe este gasto vinculado — lo contabiliza el asiento del Gasto.
+  ventaId          String?       @unique
   notas            String?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
   proveedor Proveedor    @relation(fields: [proveedorId], references: [id])
   asiento   Asiento?     @relation(fields: [asientoId], references: [id])
+  venta     Venta?       @relation("VentaFleteGasto", fields: [ventaId], references: [id])
   lineas    LineaGasto[]
 
   aplicacionesPago AplicacionPagoGasto[]
@@ -1435,6 +1442,10 @@ model Venta {
   chequesRecibidos           ChequeRecibido[]
   entregas                   EntregaVenta[]
   percepcionIIBBJurisdiccion JurisdiccionIIBB? @relation("VentaPercepcionIIBB", fields: [percepcionIIBBJurisdiccionId], references: [id])
+  // Factura de flete de la venta (transportista). Opcional: cuando existe,
+  // el flete se contabiliza vía el asiento del Gasto (CxP real + IVA crédito)
+  // y NO inline en el asiento de venta. Ver Gasto.ventaId.
+  fleteGasto                 Gasto?            @relation("VentaFleteGasto")
 
   @@index([fechaVencimiento])
   @@index([clienteId])

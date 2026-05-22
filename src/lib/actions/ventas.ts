@@ -10,8 +10,11 @@ import {
   AsientoError,
   anularAsiento,
   contabilizarAsiento,
+  crearAsientoGasto,
   crearAsientoVenta,
 } from "@/lib/services/asiento-automatico";
+import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
+import { VENTA_CODIGOS } from "@/lib/services/cuenta-registry";
 import { calcularPercepcionIIBB } from "@/lib/services/percepcion-iibb";
 import { aplicarReservaSPD, liberarReservaSPD } from "@/lib/services/stock";
 import {
@@ -22,6 +25,7 @@ import {
 import {
   ChequeRecibidoEstado,
   CondicionPago,
+  GastoEstado,
   Moneda,
   Prisma,
   TipoDeposito,
@@ -208,6 +212,18 @@ export type VentaDetalle = {
     fechaPago: string;
     estado: string;
   }>;
+  // Factura de flete vinculada (Gasto). null cuando la venta no la tiene.
+  fleteFactura: {
+    proveedorId: string;
+    facturaNumero: string | null;
+    fechaFactura: string;
+    moneda: Moneda;
+    tipoCambio: string;
+    subtotal: string;
+    iva: string;
+    iibb: string;
+    otros: string;
+  } | null;
 };
 
 export async function obtenerVentaPorId(id: string): Promise<VentaDetalle | null> {
@@ -216,6 +232,7 @@ export async function obtenerVentaPorId(id: string): Promise<VentaDetalle | null
     include: {
       items: { orderBy: { id: "asc" } },
       chequesRecibidos: { orderBy: { fechaPago: "asc" } },
+      fleteGasto: true,
     },
   });
   if (!v) return null;
@@ -260,6 +277,19 @@ export async function obtenerVentaPorId(id: string): Promise<VentaDetalle | null
       fechaPago: c.fechaPago.toISOString(),
       estado: c.estado,
     })),
+    fleteFactura: v.fleteGasto
+      ? {
+          proveedorId: v.fleteGasto.proveedorId,
+          facturaNumero: v.fleteGasto.facturaNumero,
+          fechaFactura: v.fleteGasto.fecha.toISOString(),
+          moneda: v.fleteGasto.moneda,
+          tipoCambio: v.fleteGasto.tipoCambio.toString(),
+          subtotal: v.fleteGasto.subtotal.toString(),
+          iva: v.fleteGasto.iva.toString(),
+          iibb: v.fleteGasto.iibb.toString(),
+          otros: v.fleteGasto.otros.toString(),
+        }
+      : null,
   };
 }
 
@@ -339,6 +369,30 @@ const chequeRecibidoSchema = z.object({
   fechaPago: z.string().min(1, "Fecha pago requerida"),
 });
 
+// Factura de flete opcional: el flete de la venta capturado como factura
+// de gasto (transportista) → CxP real + IVA crédito. Cuando viene presente,
+// se crea/actualiza un Gasto vinculado (Gasto.ventaId) y el flete NO se
+// contabiliza inline en el asiento de venta (lo hace el asiento del Gasto).
+// `subtotal` = flete neto (base de rentabilidad → Venta.flete).
+const fleteFacturaSchema = z.object({
+  proveedorId: z.string().uuid("Seleccione transportista"),
+  facturaNumero: z
+    .string()
+    .max(64)
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
+  fechaFactura: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim().length > 0 ? v : null)),
+  moneda: z.nativeEnum(Moneda),
+  tipoCambio: z.string().regex(rateRegex, "TC inválido"),
+  subtotal: z.string().regex(moneyRegex, "Subtotal flete inválido"),
+  iva: z.string().regex(moneyRegex, "IVA inválido").default("0"),
+  iibb: z.string().regex(moneyRegex, "IIBB inválido").default("0"),
+  otros: z.string().regex(moneyRegex, "Otros inválido").default("0"),
+});
+
 const ventaInputSchema = z
   .object({
     id: z.string().uuid().optional(),
@@ -362,12 +416,25 @@ const ventaInputSchema = z
       .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
     items: z.array(itemSchema).min(1, "Al menos un ítem"),
     cheques: z.array(chequeRecibidoSchema).optional().default([]),
+    // Cuando viene null/ausente → comportamiento legado (flete número suelto).
+    fleteFactura: fleteFacturaSchema.nullish(),
   })
   .superRefine((data, ctx) => {
     if (data.moneda === Moneda.ARS && data.tipoCambio !== "1") {
       ctx.addIssue({
         code: "custom",
         path: ["tipoCambio"],
+        message: "Para ARS, TC=1",
+      });
+    }
+    if (
+      data.fleteFactura &&
+      data.fleteFactura.moneda === Moneda.ARS &&
+      data.fleteFactura.tipoCambio !== "1"
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["fleteFactura", "tipoCambio"],
         message: "Para ARS, TC=1",
       });
     }
@@ -407,6 +474,103 @@ function calcItem(item: { cantidad: number; precioUnitario: string; ivaPorcentaj
     iva: ivaRaw.toDecimalPlaces(2),
     total: totalRaw.toDecimalPlaces(2),
   };
+}
+
+// Genera el próximo número de Gasto (G-AAAA-NNNN) dentro de una tx.
+// Mismo formato que generarNumeroGasto (gastos.ts) — la unicidad real la
+// garantiza Gasto.numero @unique + reintento de la transacción.
+async function generarNumeroGastoEnTx(tx: Prisma.TransactionClient): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `G-${year}-`;
+  const ultimo = await tx.gasto.findFirst({
+    where: { numero: { startsWith: prefix } },
+    orderBy: { numero: "desc" },
+    select: { numero: true },
+  });
+  let next = 1;
+  if (ultimo) {
+    const parsed = Number.parseInt(ultimo.numero.slice(prefix.length), 10);
+    if (!Number.isNaN(parsed)) next = parsed + 1;
+  }
+  return `${prefix}${String(next).padStart(4, "0")}`;
+}
+
+// Crea o actualiza el Gasto de flete vinculado a la venta (Gasto.ventaId).
+// Una sola línea en la cuenta FLETE SOBRE VENTAS (5.5.1.60), misma cuenta
+// que usaba el lanzamiento inline de crearAsientoVenta. Solo se permite
+// mientras el gasto siga en BORRADOR (sin asiento). Devuelve el subtotal
+// neto en la moneda de la venta para guardarlo en Venta.flete (rentabilidad).
+async function upsertFleteGasto(
+  tx: Prisma.TransactionClient,
+  ventaId: string,
+  ff: NonNullable<z.infer<typeof ventaInputSchema>["fleteFactura"]>,
+): Promise<void> {
+  const cuentaFleteId = await getOrCreateCuenta(tx, VENTA_CODIGOS.FLETE_GASTO);
+  const subtotal = money(ff.subtotal);
+  const total = money(toDecimal(ff.subtotal).plus(ff.iva).plus(ff.iibb).plus(ff.otros));
+  const fecha = ff.fechaFactura ? new Date(ff.fechaFactura) : new Date();
+
+  const existente = await tx.gasto.findUnique({
+    where: { ventaId },
+    select: { id: true, asientoId: true, estado: true },
+  });
+
+  if (existente) {
+    if (existente.asientoId || existente.estado !== "BORRADOR") {
+      throw new Error("Gasto de flete ya contabilizado; anule para editar.");
+    }
+    await tx.gasto.update({
+      where: { id: existente.id },
+      data: {
+        proveedorId: ff.proveedorId,
+        fecha,
+        moneda: ff.moneda,
+        tipoCambio: new Prisma.Decimal(ff.tipoCambio),
+        facturaNumero: ff.facturaNumero,
+        subtotal,
+        iva: money(ff.iva),
+        iibb: money(ff.iibb),
+        otros: money(ff.otros),
+        total,
+      },
+    });
+    await tx.lineaGasto.deleteMany({ where: { gastoId: existente.id } });
+    await tx.lineaGasto.create({
+      data: {
+        gastoId: existente.id,
+        cuentaContableGastoId: cuentaFleteId,
+        descripcion: "Flete sobre venta",
+        subtotal,
+      },
+    });
+    return;
+  }
+
+  const numero = await generarNumeroGastoEnTx(tx);
+  const gasto = await tx.gasto.create({
+    data: {
+      numero,
+      proveedorId: ff.proveedorId,
+      ventaId,
+      fecha,
+      moneda: ff.moneda,
+      tipoCambio: new Prisma.Decimal(ff.tipoCambio),
+      facturaNumero: ff.facturaNumero,
+      subtotal,
+      iva: money(ff.iva),
+      iibb: money(ff.iibb),
+      otros: money(ff.otros),
+      total,
+    },
+  });
+  await tx.lineaGasto.create({
+    data: {
+      gastoId: gasto.id,
+      cuentaContableGastoId: cuentaFleteId,
+      descripcion: "Flete sobre venta",
+      subtotal,
+    },
+  });
 }
 
 export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionResult> {
@@ -490,7 +654,9 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
           : null,
         percepcionIIBBJurisdiccionId: percepcion.jurisdiccionId,
         otros: money(input.otros),
-        flete: money(input.flete),
+        // Con factura de flete, Venta.flete = subtotal neto (base de
+        // rentabilidad); sin ella, el flete suelto legado. No afecta `total`.
+        flete: input.fleteFactura ? money(input.fleteFactura.subtotal) : money(input.flete),
         total: money(total),
         notas: input.notas,
       };
@@ -551,6 +717,24 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
         });
       }
 
+      // Factura de flete vinculada (Gasto). Presente → crear/actualizar el
+      // Gasto. Ausente en edición → eliminar el gasto BORRADOR previo (si lo
+      // hay) para volver al flete suelto/sin flete.
+      if (input.fleteFactura) {
+        await upsertFleteGasto(tx, id, input.fleteFactura);
+      } else {
+        const previo = await tx.gasto.findUnique({
+          where: { ventaId: id },
+          select: { id: true, asientoId: true, estado: true },
+        });
+        if (previo) {
+          if (previo.asientoId || previo.estado !== "BORRADOR") {
+            throw new Error("Gasto de flete ya contabilizado; anule para quitar el flete.");
+          }
+          await tx.gasto.delete({ where: { id: previo.id } });
+        }
+      }
+
       return tx.venta.findUniqueOrThrow({
         where: { id },
         select: { id: true, numero: true },
@@ -559,6 +743,7 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
 
     revalidatePath("/ventas");
     revalidatePath(`/ventas/${saved.id}`);
+    revalidatePath("/tesoreria/cuentas-a-pagar");
     return { ok: true, id: saved.id, numero: saved.numero };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
@@ -617,6 +802,8 @@ export async function emitirVentaAction(
           items: {
             select: { productoId: true, cantidad: true, depositoId: true },
           },
+          // Gasto de flete vinculado: se contabiliza junto con la venta.
+          fleteGasto: { select: { id: true, asientoId: true, estado: true } },
         },
       });
       if (!v) throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
@@ -626,6 +813,12 @@ export async function emitirVentaAction(
       await reservarStockEmision(tx, v.items);
       const asiento = await crearAsientoVenta(ventaId, tx);
       const cont = await contabilizarAsiento(asiento.id, tx);
+      // Contabilizar la factura de flete vinculada (DEBE flete + IVA crédito /
+      // HABER proveedor → CxP real). Solo si está en BORRADOR sin asiento.
+      if (v.fleteGasto && !v.fleteGasto.asientoId && v.fleteGasto.estado === "BORRADOR") {
+        const asientoGasto = await crearAsientoGasto(v.fleteGasto.id, tx);
+        await contabilizarAsiento(asientoGasto.id, tx);
+      }
       await tx.venta.update({
         where: { id: ventaId },
         data: { estado: VentaEstado.EMITIDA },
@@ -674,12 +867,26 @@ export async function anularVentaAction(
             where: { estado: { not: ChequeRecibidoEstado.ANULADO } },
             select: { id: true, asientoCobroId: true },
           },
+          // Gasto de flete vinculado: se anula junto con la venta.
+          fleteGasto: { select: { id: true, asientoId: true, estado: true } },
         },
       });
       if (!v) {
         throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
       }
       ensureSinEntregasConfirmadas(v.entregas);
+
+      // Anular la factura de flete vinculada: reversa su asiento (CxP + IVA
+      // crédito) y marca el gasto ANULADO. Espeja anularGastoAction.
+      if (v.fleteGasto && v.fleteGasto.estado !== "ANULADO") {
+        if (v.fleteGasto.asientoId) {
+          await anularAsiento(v.fleteGasto.asientoId, tx);
+        }
+        await tx.gasto.update({
+          where: { id: v.fleteGasto.id },
+          data: { estado: GastoEstado.ANULADO },
+        });
+      }
 
       // Anular cheques ativos antes de reverter o asiento da venda.
       // Se o cheque já foi acreditado (ACREDITADO/DEPOSITADO), o

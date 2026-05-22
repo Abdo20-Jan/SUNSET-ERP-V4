@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { db } from "@/lib/db";
+import { listarProveedoresParaGasto } from "@/lib/actions/gastos";
 import {
   listarClientesParaVenta,
   listarDepositosParaVenta,
@@ -22,10 +23,11 @@ export default async function VentaDetailPage({ params }: { params: PageParams }
   if (!venta) notFound();
 
   if (venta.estado === "BORRADOR") {
-    const [clientes, productos, depositos] = await Promise.all([
+    const [clientes, productos, depositos, proveedores] = await Promise.all([
       listarClientesParaVenta(),
       listarProductosParaVenta(),
       listarDepositosParaVenta(),
+      listarProveedoresParaGasto(),
     ]);
     return (
       <VentaForm
@@ -34,6 +36,7 @@ export default async function VentaDetailPage({ params }: { params: PageParams }
         clientes={clientes}
         productos={productos}
         depositos={depositos}
+        proveedores={proveedores}
       />
     );
   }
