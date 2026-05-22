@@ -2597,6 +2597,10 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
         otros: true,
         flete: true,
         asientoId: true,
+        // Cuando la venta tiene factura de flete vinculada (Gasto), el flete
+        // se contabiliza por el asiento del Gasto (DEBE flete + IVA crédito /
+        // HABER proveedor) — NO inline acá. Evita doble contabilización.
+        fleteGasto: { select: { id: true } },
         cliente: { select: { id: true, nombre: true, cuentaContableId: true } },
         items: {
           select: {
@@ -2771,7 +2775,12 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
     // Flete sobre ventas — gasto pagado por nosotros (no facturado al
     // cliente). Genera DEBE gasto / HABER cta a pagar; el pago efectivo
     // se registra después por tesorería.
-    if (flete.gt(0)) {
+    //
+    // Si la venta tiene factura de flete vinculada (Gasto.ventaId), el flete
+    // ya se contabiliza por el asiento de ese Gasto (CxP real + IVA crédito)
+    // → NO lo lanzamos inline acá para evitar doble contabilización. El flete
+    // SÍ sigue restando de la utilidad bruta (gasto deducible) más arriba.
+    if (flete.gt(0) && !venta.fleteGasto) {
       lineas.push({
         cuentaId: porCodigo.get(VENTA_CODIGOS.FLETE_GASTO.codigo)!,
         debe: money(flete).toString(),

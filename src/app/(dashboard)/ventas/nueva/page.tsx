@@ -1,3 +1,4 @@
+import { listarProveedoresParaGasto } from "@/lib/actions/gastos";
 import {
   generarNumeroVenta,
   listarClientesParaVenta,
@@ -11,13 +12,15 @@ import { VentaForm } from "../_components/venta-form";
 export const dynamic = "force-dynamic";
 
 export default async function NuevaVentaPage() {
-  const [clientes, productos, depositos, numeroSugerido, defaultFecha] = await Promise.all([
-    listarClientesParaVenta(),
-    listarProductosParaVenta(),
-    listarDepositosParaVenta(),
-    generarNumeroVenta(),
-    getDefaultFecha(),
-  ]);
+  const [clientes, productos, depositos, proveedores, numeroSugerido, defaultFecha] =
+    await Promise.all([
+      listarClientesParaVenta(),
+      listarProductosParaVenta(),
+      listarDepositosParaVenta(),
+      listarProveedoresParaGasto(),
+      generarNumeroVenta(),
+      getDefaultFecha(),
+    ]);
 
   return (
     <VentaForm
@@ -26,6 +29,7 @@ export default async function NuevaVentaPage() {
       clientes={clientes}
       productos={productos}
       depositos={depositos}
+      proveedores={proveedores}
       defaultFecha={defaultFecha}
     />
   );
