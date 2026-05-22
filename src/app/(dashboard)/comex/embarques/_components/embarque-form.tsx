@@ -239,11 +239,11 @@ const formSchema = z
     }
     if (data.moneda === "USD") {
       const tc = Number(data.tipoCambio);
-      if (!Number.isFinite(tc) || tc <= 0) {
+      if (!(tc > 1)) {
         ctx.addIssue({
           code: "custom",
           path: ["tipoCambio"],
-          message: "TC debe ser > 0",
+          message: "Para USD, TC debe ser > 1",
         });
       }
     }
@@ -253,6 +253,13 @@ const formSchema = z
           code: "custom",
           path: ["costos", idx, "tipoCambio"],
           message: "Para ARS, TC=1",
+        });
+      }
+      if (c.moneda === "USD" && !(Number(c.tipoCambio) > 1)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["costos", idx, "tipoCambio"],
+          message: "Para USD, TC debe ser > 1",
         });
       }
     });
@@ -393,7 +400,6 @@ export function EmbarqueForm(props: Props) {
     register,
     handleSubmit,
     setValue,
-    getValues,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -1097,7 +1103,6 @@ export function EmbarqueForm(props: Props) {
                       control={control}
                       register={register}
                       setValue={setValue}
-                      getValues={getValues}
                       proveedores={props.proveedores}
                       cuentasGasto={props.cuentasGasto}
                       disabled={readonly || meta?.estado === "EMITIDA"}
@@ -1609,7 +1614,6 @@ const FacturaCard = memo(function FacturaCard({
   control,
   register,
   setValue,
-  getValues,
   proveedores,
   cuentasGasto,
   disabled,
@@ -1620,7 +1624,6 @@ const FacturaCard = memo(function FacturaCard({
   control: Control<FormValues>;
   register: ReturnType<typeof useForm<FormValues>>["register"];
   setValue: ReturnType<typeof useForm<FormValues>>["setValue"];
-  getValues: ReturnType<typeof useForm<FormValues>>["getValues"];
   proveedores: ProveedorOption[];
   cuentasGasto: CuentaOption[];
   disabled: boolean;
@@ -1671,22 +1674,18 @@ const FacturaCard = memo(function FacturaCard({
     }
   }, [moneda, index, setValue]);
 
-  // Auto-fill cuenta gasto + tipo de cada linea al SELECCIONAR el proveedor.
-  //
-  // Se dispara desde el onChange del combobox (la ACCIÓN del usuario), NO desde
-  // un useEffect: el FacturaCard se desmonta/remonta cada vez que se hace
-  // setValue en cualquiera de sus campos (useFieldArray del padre regenera los
-  // field.id → key → remontaje), y un useEffect[proveedorId] volvía a correr en
-  // cada remontaje, pisando el tipo elegido a mano y forzándolo a FLETE_NACIONAL.
-  // Atado a la acción, corre exactamente una vez por selección de proveedor.
-  //
-  // Solo sobreescribe lineas que siguen en su default (cuentaContableGastoId=0 /
-  // tipo GASTOS_PORTUARIOS) — no toca lineas ya configuradas manualmente.
-  const aplicarDefaultsProveedor = (provId: string) => {
-    const prov = proveedores.find((p) => p.id === provId);
+  // Auto-fill cuenta gasto + tipo de cada linea cuando se selecciona el
+  // proveedor. Solo sobreescribe lineas con cuentaContableGastoId=0
+  // (no toca lineas ya configuradas manualmente).
+  useEffect(() => {
+    if (!proveedorId) return;
+    const prov = proveedores.find((p) => p.id === proveedorId);
     if (!prov) return;
     const tipoDefault = mapTipoProveedorACostoEmbarque(prov.tipoProveedor ?? null);
-    const lineasActuales = getValues(`costos.${index}.lineas` as const) ?? [];
+    const lineasActuales = (lineas ?? []) as Array<{
+      cuentaContableGastoId?: number;
+      tipo?: string;
+    }>;
     lineasActuales.forEach((l, i) => {
       if (!l) return;
       if (
@@ -1699,15 +1698,15 @@ const FacturaCard = memo(function FacturaCard({
           { shouldValidate: false },
         );
       }
-      // Solo auto-completa el tipo si la linea sigue en su default de creación;
-      // si el usuario ya eligió otro tipo, se respeta.
-      if (tipoDefault && (!l.tipo || l.tipo === "GASTOS_PORTUARIOS")) {
+      if (tipoDefault) {
         setValue(`costos.${index}.lineas.${i}.tipo` as const, tipoDefault, {
           shouldValidate: false,
         });
       }
     });
-  };
+    // Solo dispara cuando cambia el proveedorId — no en cada keystroke de lineas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proveedorId]);
 
   const totales = useMemo(() => {
     const subtotalSum = (lineas ?? []).reduce(
@@ -1773,10 +1772,7 @@ const FacturaCard = memo(function FacturaCard({
               render={({ field }) => (
                 <ProveedorCombobox
                   value={field.value || null}
-                  onChange={(provId) => {
-                    field.onChange(provId);
-                    if (provId) aplicarDefaultsProveedor(provId);
-                  }}
+                  onChange={field.onChange}
                   proveedores={proveedores}
                   disabled={disabled}
                 />
