@@ -1391,6 +1391,12 @@ export async function crearAsientoZonaPrimaria(
 // flete/seguro origen + Σ subtotales de facturas momento=ZONA_PRIMARIA (todo
 // en ARS). Esto garantiza la reconciliación Σ costoFCUnitario×cant×TC ==
 // débito 1.1.5.04. IVA/IIBB son créditos fiscales (no se capitalizan).
+//
+// Las facturas ZP pueden llegar ya EMITIDAS (la edición del embarque las
+// auto-emite a gasto 5.x en su fecha). Para no perder ni duplicar el costo,
+// este asiento RECLASIFICA las EMITIDA (DEBE 1.1.5.04 / HABER su cuenta 5.x,
+// neteándola) y hace el booking completo de las BORRADOR. Así el costo de ZP
+// siempre termina capitalizado, sea cual sea el estado de la factura.
 
 export async function crearAsientoArriboComex(
   embarqueId: string,
@@ -1486,23 +1492,25 @@ export async function crearAsientoArriboComex(
       `Proveedor exterior (${embarque.proveedor.nombre})${detalleOrigen}`,
     );
 
-    // Facturas momento=ZONA_PRIMARIA (BORRADOR/LEGACY_BUNDLED): el subtotal se
-    // capitaliza en 1.1.5.04; IVA/IIBB van a créditos fiscales; el total se
-    // acredita al proveedor local. Espeja el manejo de crearAsientoZonaPrimaria.
+    // Facturas momento=ZONA_PRIMARIA (treatment A: el subtotal capitaliza en
+    // 1.1.5.04). Dos caminos según el estado, para que el costo SIEMPRE termine
+    // en inventario sin doble contabilizar:
+    //   - BORRADOR/LEGACY_BUNDLED: no tienen asiento propio → booking completo
+    //     acá (subtotal vía 1.1.5.04 + IVA/IIBB crédito / HABER proveedor).
+    //   - EMITIDA: ya tienen asiento standalone (DEBE gasto 5.x + IVA/IIBB /
+    //     HABER proveedor) en la fecha de la factura. Acá sólo RECLASIFICAMOS
+    //     el costo de gasto → inventario: DEBE 1.1.5.04 / HABER la cuenta 5.x
+    //     que debitó la emisión (neteándola a cero). El IVA crédito y el CxP del
+    //     proveedor quedan como los dejó la emisión (timing fiscal correcto).
+    // Las ANULADA se ignoran (no aportan costo).
     const facturasZP = embarque.costos.filter(
-      (f) =>
-        f.momento === "ZONA_PRIMARIA" && (f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED"),
+      (f) => f.momento === "ZONA_PRIMARIA" && f.estado !== "ANULADA",
     );
     for (const factura of facturasZP) {
       if (factura.lineas.length === 0) continue;
-      if (!factura.proveedor.cuentaContableId) {
-        throw new AsientoError(
-          "CUENTA_INVALIDA",
-          `El proveedor ${factura.proveedor.nombre} no tiene cuenta contable asociada.`,
-        );
-      }
       const tc = toDecimal(factura.tipoCambio);
       const facturaLabel = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""}`;
+      const yaEmitida = factura.estado === "EMITIDA";
 
       let subtotalFacturaArs = toDecimal(0);
       for (const linea of factura.lineas) {
@@ -1510,8 +1518,26 @@ export async function crearAsientoArriboComex(
         if (!subtotalArs.gt(0)) continue;
         costoRateableArs = costoRateableArs.plus(subtotalArs);
         subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
+        if (yaEmitida) {
+          // Reclasificación: revierte el gasto que la emisión debitó en 5.x.
+          pushHaber(
+            linea.cuentaContableGastoId,
+            subtotalArs,
+            `${facturaLabel} — reclasificación gasto → 1.1.5.04 (arribo ZP)`,
+          );
+        }
       }
 
+      // Las EMITIDA ya asentaron IVA/IIBB crédito y CxP: nada más que reclasificar.
+      if (yaEmitida) continue;
+
+      // BORRADOR/LEGACY: booking completo (proveedor + créditos fiscales).
+      if (!factura.proveedor.cuentaContableId) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `El proveedor ${factura.proveedor.nombre} no tiene cuenta contable asociada.`,
+        );
+      }
       const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
       const iibbArs = toDecimal(factura.iibb).times(tc).toDecimalPlaces(2);
       const otrosArs = toDecimal(factura.otros).times(tc).toDecimalPlaces(2);

@@ -35,6 +35,7 @@ vi.mock("@/lib/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "user-uuid
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { confirmarZonaPrimariaAction } from "@/lib/actions/embarques";
+import { crearAsientoEmbarqueCosto } from "@/lib/services/asiento-automatico";
 
 const FECHA_ISO = "2026-05-21T12:00:00.000Z";
 
@@ -89,7 +90,8 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
     let totalDebe = 0;
     let totalHaber = 0;
     for (const l of lineas) {
-      if (l.debe.gt(0)) debe.set(l.cuenta.codigo, (debe.get(l.cuenta.codigo) ?? 0) + Number(l.debe));
+      if (l.debe.gt(0))
+        debe.set(l.cuenta.codigo, (debe.get(l.cuenta.codigo) ?? 0) + Number(l.debe));
       if (l.haber.gt(0))
         haber.set(l.cuenta.codigo, (haber.get(l.cuenta.codigo) ?? 0) + Number(l.haber));
       totalDebe += Number(l.debe);
@@ -114,10 +116,20 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
       },
     });
     const ieA = await db.prisma.itemEmbarque.create({
-      data: { embarqueId: embarque.id, productoId: prodA.id, cantidad: 60, precioUnitarioFob: "10.00" },
+      data: {
+        embarqueId: embarque.id,
+        productoId: prodA.id,
+        cantidad: 60,
+        precioUnitarioFob: "10.00",
+      },
     });
     const ieB = await db.prisma.itemEmbarque.create({
-      data: { embarqueId: embarque.id, productoId: prodB.id, cantidad: 40, precioUnitarioFob: "10.00" },
+      data: {
+        embarqueId: embarque.id,
+        productoId: prodB.id,
+        cantidad: 40,
+        precioUnitarioFob: "10.00",
+      },
     });
     const cont = await db.prisma.contenedor.create({
       data: { embarqueId: embarque.id, numeroContenedor: "MSCU-1", estado: "EN_TRANSITO" },
@@ -168,7 +180,10 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
     const items = await db.prisma.itemContenedor.findMany({
       where: { contenedor: { embarqueId: s.embarqueId } },
     });
-    const reconc = items.reduce((acc, it) => acc + Number(it.costoFCUnitario) * it.cantidadDeclarada * 1000, 0);
+    const reconc = items.reduce(
+      (acc, it) => acc + Number(it.costoFCUnitario) * it.cantidadDeclarada * 1000,
+      0,
+    );
     expect(reconc).toBeCloseTo(debe.get("1.1.5.04") ?? 0, 2);
 
     // Modelo Y: el arribo NO mueve stock (eso ocurre en la desconsolidación).
@@ -178,9 +193,111 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
     expect(spd).toBe(0);
   });
 
+  it("factura ZP ya EMITIDA → el arribo reclasifica el gasto 5.x a 1.1.5.04 (neteándolo)", async () => {
+    const provExt = await db.prisma.proveedor.create({ data: { nombre: "Exterior SA" } });
+    const ctaPasivo = await db.prisma.cuentaContable.create({
+      data: {
+        codigo: "2.1.1.99",
+        nombre: "Proveedor Local",
+        tipo: "ANALITICA",
+        categoria: "PASIVO",
+        nivel: 4,
+      },
+    });
+    const ctaGasto = await db.prisma.cuentaContable.create({
+      data: {
+        codigo: "5.4.1.11",
+        nombre: "Gastos Portuarios",
+        tipo: "ANALITICA",
+        categoria: "EGRESO",
+        nivel: 4,
+      },
+    });
+    const provLocal = await db.prisma.proveedor.create({
+      data: { nombre: "TRP SA", cuentaContableId: ctaPasivo.id },
+    });
+    const prod = await db.prisma.producto.create({ data: { codigo: "Z-1", nombre: "Prod Z" } });
+    const embarque = await db.prisma.embarque.create({
+      data: {
+        codigo: "EMB-EMIT",
+        proveedorId: provExt.id,
+        moneda: "USD",
+        tipoCambio: "1000.000000",
+        fobTotal: "1000.00",
+      },
+    });
+    const ie = await db.prisma.itemEmbarque.create({
+      data: {
+        embarqueId: embarque.id,
+        productoId: prod.id,
+        cantidad: 100,
+        precioUnitarioFob: "10.00",
+      },
+    });
+    const cont = await db.prisma.contenedor.create({
+      data: { embarqueId: embarque.id, numeroContenedor: "MSCU-Z", estado: "EN_TRANSITO" },
+    });
+    await db.prisma.itemContenedor.create({
+      data: {
+        contenedorId: cont.id,
+        itemEmbarqueId: ie.id,
+        productoId: prod.id,
+        cantidadDeclarada: 100,
+      },
+    });
+    // Factura ZP con un gasto de 500 USD @ TC 1000 = 500.000 ARS.
+    const costo = await db.prisma.embarqueCosto.create({
+      data: {
+        embarqueId: embarque.id,
+        proveedorId: provLocal.id,
+        moneda: "USD",
+        tipoCambio: "1000.000000",
+        momento: "ZONA_PRIMARIA",
+        estado: "BORRADOR",
+        fechaFactura: new Date("2026-05-10T12:00:00.000Z"),
+        lineas: {
+          create: [
+            { tipo: "GASTOS_PORTUARIOS", cuentaContableGastoId: ctaGasto.id, subtotal: "500.00" },
+          ],
+        },
+      },
+    });
+    // Emitir la factura standalone (DEBE 5.4.1.11 / HABER proveedor local).
+    await crearAsientoEmbarqueCosto(costo.id, db.prisma);
+    const costoEmitido = await db.prisma.embarqueCosto.findUniqueOrThrow({
+      where: { id: costo.id },
+    });
+    expect(costoEmitido.estado).toBe("EMITIDA");
+
+    const res = await confirmarZonaPrimariaAction(embarque.id, FECHA_ISO);
+    expect(res.ok).toBe(true);
+
+    const fresh = await db.prisma.embarque.findUniqueOrThrow({ where: { id: embarque.id } });
+    const { debe, haber, totalDebe, totalHaber } = await lineasPorCuenta(
+      fresh.asientoZonaPrimariaId!,
+    );
+    // 1.1.5.04 = FOB (1.000.000) + subtotal factura (500.000).
+    expect(debe.get("1.1.5.04")).toBeCloseTo(1_500_000, 2);
+    // El arribo ACREDITA 5.4.1.11 (reclasificación), neteando el gasto.
+    expect(haber.get("5.4.1.11")).toBeCloseTo(500_000, 2);
+    expect(totalDebe).toBeCloseTo(totalHaber, 2);
+
+    // El gasto 5.4.1.11 neteado a CERO entre emisión (DEBE) y arribo (HABER).
+    const lineasGasto = await db.prisma.lineaAsiento.findMany({
+      where: { cuenta: { codigo: "5.4.1.11" } },
+    });
+    const netoGasto = lineasGasto.reduce((acc, l) => acc + Number(l.debe) - Number(l.haber), 0);
+    expect(netoGasto).toBeCloseTo(0, 2);
+
+    // Modelo Y: sigue sin mover stock en el arribo.
+    expect(await db.prisma.movimientoStock.count()).toBe(0);
+  });
+
   it("embarque sin contenedores → flujo legacy intacto (1.1.5.02 + ingreso de stock)", async () => {
     const prov = await db.prisma.proveedor.create({ data: { nombre: "Exterior SA" } });
-    const prod = await db.prisma.producto.create({ data: { codigo: "L-1", nombre: "Prod Legacy" } });
+    const prod = await db.prisma.producto.create({
+      data: { codigo: "L-1", nombre: "Prod Legacy" },
+    });
     const depZpa = await db.prisma.deposito.create({
       data: { nombre: "ZPA", tipo: "ZONA_PRIMARIA" },
     });
@@ -195,7 +312,12 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
       },
     });
     await db.prisma.itemEmbarque.create({
-      data: { embarqueId: embarque.id, productoId: prod.id, cantidad: 100, precioUnitarioFob: "10.00" },
+      data: {
+        embarqueId: embarque.id,
+        productoId: prod.id,
+        cantidad: 100,
+        precioUnitarioFob: "10.00",
+      },
     });
 
     const res = await confirmarZonaPrimariaAction(embarque.id, FECHA_ISO);
