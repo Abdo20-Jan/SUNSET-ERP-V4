@@ -10,6 +10,7 @@ import {
   crearContenedorAction,
   actualizarPackingListAction,
   avanzarEstadoContenedorAction,
+  revertirEstadoContenedorAction,
   cerrarCostosContenedorAction,
   eliminarContenedorAction,
 } from "@/lib/actions/contenedores";
@@ -66,6 +67,9 @@ type FaseFisica = (typeof FASES_FISICAS)[number];
 // Estados-destino válidos para avanzar (excluye BORRADOR, el origen del ciclo).
 // Coincide con el enum targetEstado de avanzarEstadoContenedorAction.
 type EstadoAvanzable = Exclude<FaseFisica, "BORRADOR">;
+// Estados-destino válidos para revertir (excluye EN_DEPOSITO_FISCAL, el último
+// del ciclo físico). Coincide con el enum de revertirEstadoContenedorAction.
+type EstadoRevertible = Exclude<FaseFisica, "EN_DEPOSITO_FISCAL">;
 
 const FASE_LABEL: Record<FaseFisica, string> = {
   BORRADOR: "Borrador",
@@ -269,6 +273,7 @@ function ContenedorCard({
   const [pending, startTransition] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAvanzar, setShowAvanzar] = useState(false);
+  const [showRevertir, setShowRevertir] = useState(false);
   const [showCostos, setShowCostos] = useState(false);
   const [filas, setFilas] = useState<FilaItem[]>(() =>
     contenedor.items.map((it) => ({
@@ -283,6 +288,10 @@ function ContenedorCard({
   const faseIdx = FASES_FISICAS.indexOf(contenedor.estado as FaseFisica);
   const puedeAvanzar =
     !readonly && faseIdx >= 0 && faseIdx < FASES_FISICAS.indexOf("EN_DEPOSITO_FISCAL");
+  // Revertir: el contenedor está en alguna fase física posterior a BORRADOR y
+  // aún no se desconsolidó (DESCONSOLIDADO+ no figura en FASES_FISICAS, así que
+  // faseIdx > 0 ya lo restringe al ciclo físico). El service revalida igual.
+  const puedeRevertir = !readonly && faseIdx > 0;
 
   const addFila = () =>
     setFilas((prev) => [
@@ -387,6 +396,16 @@ function ContenedorCard({
             Avanzar estado
           </Button>
         )}
+        {puedeRevertir && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setShowRevertir((v) => !v)}
+          >
+            Revertir estado
+          </Button>
+        )}
         {editable && (
           <Button
             type="button"
@@ -443,6 +462,14 @@ function ContenedorCard({
           depositos={depositos}
           faseIdx={faseIdx}
           onClose={() => setShowAvanzar(false)}
+        />
+      )}
+
+      {showRevertir && puedeRevertir && (
+        <RevertirEstadoPanel
+          contenedor={contenedor}
+          faseIdx={faseIdx}
+          onClose={() => setShowRevertir(false)}
         />
       )}
 
@@ -643,6 +670,59 @@ function AvanzarEstadoPanel({ contenedor, depositos, faseIdx, onClose }: Avanzar
       <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
         Cancelar
       </Button>
+    </div>
+  );
+}
+
+interface RevertirEstadoPanelProps {
+  contenedor: ContenedorPackingDTO;
+  faseIdx: number;
+  onClose: () => void;
+}
+
+/**
+ * Panel para revertir el estado físico/aduanero del contenedor a la fase
+ * inmediatamente anterior (gap #6). Deshace una fase mal avanzada (ej.: pasar a
+ * EN_DEPOSITO_FISCAL antes de cerrar costos) — el service prohíbe revertir un
+ * contenedor ya desconsolidado o con stock generado.
+ */
+function RevertirEstadoPanel({ contenedor, faseIdx, onClose }: RevertirEstadoPanelProps) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  // El estado anterior es el de rank-1 dentro del ciclo físico.
+  const anterior = FASES_FISICAS[faseIdx - 1] as EstadoRevertible;
+
+  const onConfirmar = () => {
+    startTransition(async () => {
+      const r = await revertirEstadoContenedorAction({
+        contenedorId: contenedor.id,
+        targetEstado: anterior,
+        expectedUpdatedAt: contenedor.updatedAt,
+      });
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(`${contenedor.numeroContenedor} → ${FASE_LABEL[anterior]}.`);
+      onClose();
+      router.refresh();
+    });
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-3 py-2">
+      <p className="text-xs text-muted-foreground">
+        Revertir <strong>{FASE_LABEL[contenedor.estado as FaseFisica]}</strong> →{" "}
+        <strong>{FASE_LABEL[anterior]}</strong>. Se limpia la fecha de la fase que se deshace.
+      </p>
+      <div className="ml-auto flex items-center gap-2">
+        <Button type="button" size="sm" onClick={onConfirmar} disabled={pending}>
+          Confirmar reversión
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
+          Cancelar
+        </Button>
+      </div>
     </div>
   );
 }

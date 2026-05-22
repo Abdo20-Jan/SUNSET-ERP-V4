@@ -6,6 +6,7 @@ import { VEP_ADUANA_CODIGOS } from "@/lib/services/cuenta-registry";
 import {
   AsientoEstado,
   CompraEstado,
+  EmbarqueCostoEstado,
   EmbarqueEstado,
   GastoEstado,
   Moneda,
@@ -449,9 +450,16 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
     },
   });
 
-  // EmbarqueCostos cuyo embarque está CERRADO (asientos contabilizados)
+  // EmbarqueCostos contabilizados (con asiento): EMITIDA (asiento standalone,
+  // en cualquier estado de embarque — cubre el flujo bonded EN_ZONA_PRIMARIA)
+  // o LEGACY_BUNDLED (contabilizada en el cierre del embarque, flujo antiguo).
+  // Excluye BORRADOR (sin asiento) y ANULADA (cancelada).
   const costos = await db.embarqueCosto.findMany({
-    where: { embarque: { estado: EmbarqueEstado.CERRADO } },
+    where: {
+      estado: {
+        in: [EmbarqueCostoEstado.EMITIDA, EmbarqueCostoEstado.LEGACY_BUNDLED],
+      },
+    },
     select: {
       id: true,
       facturaNumero: true,
@@ -851,9 +859,16 @@ export type CuentaAPagarPorEmbarque = {
 };
 
 export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmbarque[]> {
-  // EmbarqueCostos cuyo embarque está CERRADO (asientos contabilizados)
+  // EmbarqueCostos contabilizados (con asiento): EMITIDA (asiento standalone,
+  // en cualquier estado de embarque — cubre el flujo bonded EN_ZONA_PRIMARIA)
+  // o LEGACY_BUNDLED (contabilizada en el cierre del embarque, flujo antiguo).
+  // Excluye BORRADOR (sin asiento) y ANULADA (cancelada).
   const costos = await db.embarqueCosto.findMany({
-    where: { embarque: { estado: EmbarqueEstado.CERRADO } },
+    where: {
+      estado: {
+        in: [EmbarqueCostoEstado.EMITIDA, EmbarqueCostoEstado.LEGACY_BUNDLED],
+      },
+    },
     select: {
       id: true,
       facturaNumero: true,
