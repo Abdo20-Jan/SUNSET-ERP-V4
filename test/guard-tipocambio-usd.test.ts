@@ -34,7 +34,7 @@ vi.mock("@/lib/db", () => ({ db: h.dbProxy }));
 vi.mock("@/lib/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "user-uuid" } })) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { embarqueInputSchema } from "@/lib/actions/embarques";
+import { embarqueInputSchema } from "@/lib/actions/embarque-schema";
 import { AsientoError, crearAsientoArriboComex } from "@/lib/services/asiento-automatico";
 
 const FECHA_ISO = "2026-05-21T12:00:00.000Z";
