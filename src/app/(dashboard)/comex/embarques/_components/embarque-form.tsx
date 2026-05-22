@@ -569,10 +569,24 @@ export function EmbarqueForm(props: Props) {
   };
 
   const onSubmit = handleSubmit((values) => {
+    // Gap #3 — el server reconcilia ItemEmbarque por productoId y sólo borra
+    // las EmbarqueCosto BORRADOR. Las facturas EMITIDA/LEGACY_BUNDLED/ANULADA
+    // se muestran read-only y NO se pueden remover (la card oculta el botón),
+    // así que mantienen su posición como prefijo estable del array. Las
+    // filtramos del payload para que el server no las re-cree (duplicaría el
+    // asiento). Así el form de edición sólo gestiona las BORRADOR.
+    const costosParaGuardar = isEdit
+      ? values.costos.filter((_c, index) => {
+          const meta = props.initialData.costos[index];
+          return !meta || meta.estado === "BORRADOR";
+        })
+      : values.costos;
+
     startTransition(async () => {
       const result = await guardarEmbarqueAction({
         id: isEdit ? props.initialData.id : undefined,
         ...values,
+        costos: costosParaGuardar,
       });
       if (result.ok) {
         toast.success(
