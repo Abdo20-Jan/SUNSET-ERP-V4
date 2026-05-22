@@ -12,6 +12,7 @@ import {
   ContenedorError,
   crearContenedor,
   eliminarContenedor,
+  revertirEstadoContenedor,
 } from "@/lib/services/contenedor";
 
 // ============================================================
@@ -68,6 +69,19 @@ const avanzarEstadoSchema = z.object({
   depositoFiscalId: z.string().optional(),
 });
 
+const revertirEstadoSchema = z.object({
+  contenedorId: z.string().min(1),
+  targetEstado: z.enum([
+    "BORRADOR",
+    "EN_TRANSITO",
+    "ARRIBADO_PUERTO",
+    "EN_ZONA_PRIMARIA",
+    "TRASLADO_DEPOSITO_FISCAL",
+    "EN_DEPOSITO_FISCAL",
+  ]),
+  expectedUpdatedAt: z.coerce.date().optional(),
+});
+
 const cerrarCostosSchema = z.object({
   contenedorId: z.string().min(1),
   expectedUpdatedAt: z.coerce.date(),
@@ -84,6 +98,7 @@ const cerrarCostosSchema = z.object({
 export type CrearContenedorActionInput = z.input<typeof crearSchema>;
 export type ActualizarPackingListActionInput = z.input<typeof actualizarSchema>;
 export type AvanzarEstadoActionInput = z.input<typeof avanzarEstadoSchema>;
+export type RevertirEstadoActionInput = z.input<typeof revertirEstadoSchema>;
 export type CerrarCostosActionInput = z.input<typeof cerrarCostosSchema>;
 
 function mapContenedorError(err: ContenedorError): string {
@@ -108,6 +123,8 @@ function mapContenedorError(err: ContenedorError): string {
       return "Indicá el depósito fiscal para mover el contenedor a depósito fiscal.";
     case "COSTOS_INCOMPLETOS":
       return "Hay productos sin costo FC: revisá el rateo del embarque o cargá un valor manual.";
+    case "REVERSION_INVALIDA":
+      return "No se puede revertir un contenedor con desconsolidación/stock: anulá la desconsolidación primero.";
     default:
       return "No se pudo completar la operación sobre el contenedor.";
   }
@@ -198,6 +215,30 @@ export async function avanzarEstadoContenedorAction(
     }
     console.error("avanzarEstadoContenedorAction failed", err);
     return { ok: false, error: "Error inesperado al avanzar el estado del contenedor." };
+  }
+}
+
+export async function revertirEstadoContenedorAction(
+  raw: RevertirEstadoActionInput,
+): Promise<ContenedorActionResult> {
+  const blocked = await gate();
+  if (blocked) return blocked;
+
+  const parsed = revertirEstadoSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, error: "Datos inválidos." };
+  }
+
+  try {
+    const contenedor = await revertirEstadoContenedor(parsed.data);
+    revalidatePath(`/comex/embarques/${contenedor.embarqueId}`);
+    return { ok: true, contenedorId: contenedor.id };
+  } catch (err) {
+    if (err instanceof ContenedorError) {
+      return { ok: false, error: mapContenedorError(err) };
+    }
+    console.error("revertirEstadoContenedorAction failed", err);
+    return { ok: false, error: "Error inesperado al revertir el estado del contenedor." };
   }
 }
 
