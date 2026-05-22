@@ -42,6 +42,9 @@ import {
 
 describe("CxP por factura — facturas EMITIDA en embarques no cerrados (gap #5)", () => {
   let db: TestDb;
+  // Secuencia determinística para códigos únicos (evita Math.random — Codacy lo
+  // marca como RNG criptográficamente débil, aunque acá sea sólo data de prueba).
+  let embSeq = 0;
 
   beforeAll(async () => {
     db = await createTestDb();
@@ -104,7 +107,7 @@ describe("CxP por factura — facturas EMITIDA en embarques no cerrados (gap #5)
   async function seedEmbarque(proveedorId: string, estado: "EN_ZONA_PRIMARIA" | "CERRADO") {
     return db.prisma.embarque.create({
       data: {
-        codigo: `EMB-${estado}-${Math.random().toString(36).slice(2, 7)}`,
+        codigo: `EMB-${estado}-${(++embSeq).toString().padStart(5, "0")}`,
         proveedorId,
         moneda: "ARS",
         tipoCambio: "1.000000",
