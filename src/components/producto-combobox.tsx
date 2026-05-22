@@ -21,6 +21,9 @@ export type ProductoOption = {
   nombre: string;
   marca: string | null;
   medida: string | null;
+  // Cantidad disponible a mostrar junto al ítem. Opcional: solo se exhibe
+  // cuando viene definida (p.ej. en el selector de venta).
+  disponible?: number;
 };
 
 type Props = {
@@ -70,7 +73,7 @@ export function ProductoCombobox({
           className="size-4 shrink-0 text-muted-foreground"
         />
       </PopoverTrigger>
-      <PopoverContent className="w-(--anchor-width) min-w-96 p-0">
+      <PopoverContent className="w-(--anchor-width) min-w-96 p-0 sm:min-w-160">
         <Command>
           <CommandInput placeholder="Buscar por código, marca o medida…" />
           <CommandList>
@@ -83,11 +86,17 @@ export function ProductoCombobox({
                   onChange(p.id);
                   setOpen(false);
                 }}
+                className="items-start gap-2"
               >
                 <span className="font-mono text-xs text-muted-foreground">{p.codigo}</span>
-                <span className="truncate">
+                <span className="whitespace-normal wrap-break-word">
                   {[p.marca, p.medida].filter((v): v is string => Boolean(v)).join(" ") || p.nombre}
                 </span>
+                {p.disponible !== undefined && (
+                  <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
+                    Disp: {p.disponible}
+                  </span>
+                )}
               </CommandItem>
             ))}
           </CommandList>
