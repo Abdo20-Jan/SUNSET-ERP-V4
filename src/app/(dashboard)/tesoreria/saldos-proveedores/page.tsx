@@ -2,7 +2,10 @@ import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Alert02Icon, Calendar03Icon, CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 
-import { getSaldosPorProveedorConAging } from "@/lib/services/cuentas-a-pagar";
+import {
+  getSaldosPorProveedorConAging,
+  listarProveedoresParaIntermediario,
+} from "@/lib/services/cuentas-a-pagar";
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
 import { fmtMoney } from "@/lib/format";
@@ -22,9 +25,10 @@ export default async function SaldosProveedoresPage({
   searchParams: SearchParams;
 }) {
   const { filtro } = await searchParams;
-  const [todos, cuentasBancarias, defaultFecha] = await Promise.all([
+  const [todos, cuentasBancarias, intermediarios, defaultFecha] = await Promise.all([
     getSaldosPorProveedorConAging(),
     listarCuentasBancariasParaMovimiento(),
+    listarProveedoresParaIntermediario(),
     getDefaultFecha(),
   ]);
 
@@ -104,6 +108,7 @@ export default async function SaldosProveedoresPage({
 
       <SaldosBatchPago
         proveedores={list}
+        intermediarios={intermediarios}
         cuentasBancarias={cuentasBancarias}
         defaultFecha={defaultFecha}
       />

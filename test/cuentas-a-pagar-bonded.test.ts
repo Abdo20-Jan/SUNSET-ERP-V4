@@ -38,6 +38,7 @@ vi.mock("@/lib/db", () => ({ db: h.dbProxy }));
 import {
   getCuentasAPagarPorEmbarque,
   getSaldosPorProveedorConAging,
+  listarProveedoresParaIntermediario,
 } from "@/lib/services/cuentas-a-pagar";
 
 describe("CxP por factura — facturas EMITIDA en embarques no cerrados (gap #5)", () => {
@@ -298,5 +299,43 @@ describe("CxP por factura — facturas EMITIDA en embarques no cerrados (gap #5)
     const porProveedor = await getSaldosPorProveedorConAging();
     const pv = porProveedor.find((p) => p.proveedorId === prov.id);
     expect(pv?.facturas.map((f) => f.numero)).toContain("FC-L-0001");
+  });
+
+  // El picker de "beneficiário intermediário" (despachante) debe listar a un
+  // proveedor activo con cuenta contable AUNQUE no tenga ninguna factura ni
+  // saldo en el sistema — ej: un despachante tipo CYSAR al que se le
+  // transfiere para que pague facturas de terceros en nuestro nombre.
+  it("listarProveedoresParaIntermediario incluye proveedor activo sin factura/saldo (CYSAR)", async () => {
+    const ctaPasivo = await seedCuenta("2.1.1.02", "PASIVO");
+    const despachante = await db.prisma.proveedor.create({
+      data: {
+        nombre: "CYSAR",
+        tipoProveedor: "DESPACHANTE",
+        cuentaContableId: ctaPasivo.id,
+        estado: "activo",
+      },
+    });
+
+    // No se crea ninguna factura ni asiento para CYSAR → no tiene saldo.
+    const saldos = await getSaldosPorProveedorConAging();
+    expect(saldos.find((p) => p.proveedorId === despachante.id)).toBeUndefined();
+
+    // Pero el picker de intermediário sí debe listarlo.
+    const intermediarios = await listarProveedoresParaIntermediario();
+    const cysar = intermediarios.find((p) => p.proveedorId === despachante.id);
+    expect(cysar).toBeDefined();
+    expect(cysar?.proveedorNombre).toBe("CYSAR");
+    expect(cysar?.cuentaContableId).toBe(ctaPasivo.id);
+  });
+
+  // Proveedor sin cuenta contable NO puede ser intermediário (no hay dónde
+  // imputar el anticipo / saldo pendiente).
+  it("listarProveedoresParaIntermediario excluye proveedor sin cuenta contable", async () => {
+    const sinCuenta = await db.prisma.proveedor.create({
+      data: { nombre: "Sin Cuenta SA", tipoProveedor: "DESPACHANTE", estado: "activo" },
+    });
+
+    const intermediarios = await listarProveedoresParaIntermediario();
+    expect(intermediarios.find((p) => p.proveedorId === sinCuenta.id)).toBeUndefined();
   });
 });
