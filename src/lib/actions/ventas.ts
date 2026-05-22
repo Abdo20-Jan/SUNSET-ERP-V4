@@ -59,6 +59,8 @@ export type ProductoParaVenta = {
   nombre: string;
   precioVenta: string;
   costoPromedio: string;
+  // Disponible (físico − reservado) sumado en depósitos NACIONALES.
+  disponible: number;
 };
 
 export type DepositoParaVenta = {
@@ -148,6 +150,11 @@ export async function listarProductosParaVenta(): Promise<ProductoParaVenta[]> {
       nombre: true,
       precioVenta: true,
       costoPromedio: true,
+      // Stock solo de depósitos NACIONALES (zona primaria/aduanera no es vendible).
+      stockPorDeposito: {
+        where: { deposito: { tipo: TipoDeposito.NACIONAL } },
+        select: { cantidadFisica: true, cantidadReservada: true },
+      },
     },
   });
   return rows.map((p) => ({
@@ -156,6 +163,10 @@ export async function listarProductosParaVenta(): Promise<ProductoParaVenta[]> {
     nombre: p.nombre,
     precioVenta: p.precioVenta.toString(),
     costoPromedio: p.costoPromedio.toString(),
+    disponible: p.stockPorDeposito.reduce(
+      (acc, s) => acc + (s.cantidadFisica - s.cantidadReservada),
+      0,
+    ),
   }));
 }
 

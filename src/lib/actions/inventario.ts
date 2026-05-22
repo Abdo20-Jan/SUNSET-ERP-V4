@@ -15,6 +15,8 @@ export async function listarMatrizInventario(opts?: { search?: string; take?: nu
   const productos = await db.producto.findMany({
     where: {
       activo: true,
+      // Solo SKUs con stock físico > 0 en al menos un depósito.
+      stockPorDeposito: { some: { cantidadFisica: { gt: 0 } } },
       ...(search
         ? {
             OR: [
