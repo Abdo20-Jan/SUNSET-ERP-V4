@@ -35,7 +35,8 @@ export type ContenedorErrorCode =
   | "CONCURRENCIA"
   | "ESTADO_TRANSICION_INVALIDA"
   | "DEPOSITO_REQUERIDO"
-  | "COSTOS_INCOMPLETOS";
+  | "COSTOS_INCOMPLETOS"
+  | "REVERSION_INVALIDA";
 
 export class ContenedorError extends Error {
   readonly code: ContenedorErrorCode;
@@ -390,6 +391,24 @@ export async function avanzarEstadoContenedor(
       );
     }
 
+    // Gate D3 espejado: una vez en EN_DEPOSITO_FISCAL ya no se puede editar el
+    // packing list (rank > TRASLADO_DEPOSITO_FISCAL) ni cerrar costos, y la
+    // desconsolidación exige costoFCUnitario en todos los items. Validamos acá
+    // para no dejar el contenedor trabado (gap #6): si falta algún costoFC,
+    // hay que cerrar costos antes de pasar a depósito fiscal.
+    if (input.targetEstado === ContenedorEstado.EN_DEPOSITO_FISCAL) {
+      const sinCosto = await inner.itemContenedor.findFirst({
+        where: { contenedorId: input.contenedorId, costoFCUnitario: null },
+        select: { id: true },
+      });
+      if (sinCosto) {
+        throw new ContenedorError(
+          "COSTOS_INCOMPLETOS",
+          "Cerrá los costos (costoFCUnitario) antes de pasar a EN_DEPOSITO_FISCAL.",
+        );
+      }
+    }
+
     const data: Prisma.ContenedorUpdateInput = { estado: input.targetEstado };
     const fechaKey = FECHA_POR_ESTADO[input.targetEstado];
     if (fechaKey && input.fecha) {
@@ -400,6 +419,105 @@ export async function avanzarEstadoContenedor(
     }
     if (input.depositoFiscalId) {
       data.depositoFiscal = { connect: { id: input.depositoFiscalId } };
+    }
+
+    return inner.contenedor.update({ where: { id: input.contenedorId }, data });
+  };
+
+  if (tx) return run(tx);
+  return db.$transaction(run);
+}
+
+// Estados-destino válidos para revertir (deshacer una fase): el origen del
+// ciclo (BORRADOR) más las fases físicas previas a EN_DEPOSITO_FISCAL.
+export type EstadoRevertTarget =
+  | "BORRADOR"
+  | "EN_TRANSITO"
+  | "ARRIBADO_PUERTO"
+  | "EN_ZONA_PRIMARIA"
+  | "TRASLADO_DEPOSITO_FISCAL"
+  | "EN_DEPOSITO_FISCAL";
+
+export interface RevertirEstadoInput {
+  contenedorId: string;
+  targetEstado: EstadoRevertTarget;
+  /** Token de bloqueo optimista (Contenedor.updatedAt). Opcional. */
+  expectedUpdatedAt?: Date;
+}
+
+/**
+ * Revierte el estado físico/aduanero del contenedor a una fase anterior
+ * (gap #6). Lo inverso de `avanzarEstadoContenedor`: sólo retrocede (rank
+ * estricto) y limpia la fecha de la fase abandonada (la del estado actual).
+ *
+ * Prohibido revertir si el contenedor ya está DESCONSOLIDADO o más allá, o si
+ * tiene una Desconsolidacion / MovimientoStock ligado: en ese caso primero hay
+ * que anular la desconsolidación (REVERSION_INVALIDA). Acepta bloqueo optimista
+ * opcional por `updatedAt` (mismo patrón que cerrarCostosContenedor).
+ */
+export async function revertirEstadoContenedor(
+  input: RevertirEstadoInput,
+  tx?: TxClient,
+): Promise<Contenedor> {
+  const run = async (inner: TxClient): Promise<Contenedor> => {
+    const contenedor = await inner.contenedor.findUnique({
+      where: { id: input.contenedorId },
+      select: {
+        id: true,
+        estado: true,
+        desconsolidacion: { select: { id: true } },
+        _count: { select: { movimientosStock: true } },
+      },
+    });
+    if (!contenedor) {
+      throw new ContenedorError(
+        "CONTENEDOR_INEXISTENTE",
+        `El contenedor ${input.contenedorId} no existe.`,
+      );
+    }
+
+    if (ESTADO_RANK[input.targetEstado] >= ESTADO_RANK[contenedor.estado]) {
+      throw new ContenedorError(
+        "ESTADO_TRANSICION_INVALIDA",
+        `No se puede revertir de ${contenedor.estado} a ${input.targetEstado} (revertir exige un estado anterior).`,
+      );
+    }
+
+    // No se revierte un contenedor ya desconsolidado / con stock generado: eso
+    // mueve inventario y asientos. Hay que anular la desconsolidación primero.
+    if (
+      ESTADO_RANK[contenedor.estado] >= ESTADO_RANK.DESCONSOLIDADO ||
+      contenedor.desconsolidacion != null ||
+      contenedor._count.movimientosStock > 0
+    ) {
+      throw new ContenedorError(
+        "REVERSION_INVALIDA",
+        "No se puede revertir un contenedor con desconsolidación/stock — anule la desconsolidación primero.",
+      );
+    }
+
+    // Bloqueo optimista opcional (mismo patrón que cerrarCostosContenedor).
+    if (input.expectedUpdatedAt) {
+      const locked = await inner.contenedor.updateMany({
+        where: { id: input.contenedorId, updatedAt: input.expectedUpdatedAt },
+        data: { updatedAt: new Date() },
+      });
+      if (locked.count !== 1) {
+        throw new ContenedorError(
+          "CONCURRENCIA",
+          `El contenedor ${input.contenedorId} fue modificado por otro proceso (token de concurrencia desactualizado).`,
+        );
+      }
+    }
+
+    const data: Prisma.ContenedorUpdateInput = { estado: input.targetEstado };
+    // Limpia la fecha de la fase que se está deshaciendo (la del estado actual).
+    const fechaKey =
+      contenedor.estado in FECHA_POR_ESTADO
+        ? FECHA_POR_ESTADO[contenedor.estado as EstadoFisicoTarget]
+        : null;
+    if (fechaKey) {
+      (data as Record<string, unknown>)[fechaKey] = null;
     }
 
     return inner.contenedor.update({ where: { id: input.contenedorId }, data });
