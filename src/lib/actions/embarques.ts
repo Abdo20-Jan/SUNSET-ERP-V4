@@ -695,22 +695,70 @@ export async function guardarEmbarqueAction(
           data,
         });
         embarqueId = embarque.id;
-        await tx.itemEmbarque.deleteMany({ where: { embarqueId } });
-        await tx.embarqueCosto.deleteMany({ where: { embarqueId } });
+
+        // Gap #3 — edición NO destructiva del packing list. En vez de
+        // deleteMany+createMany (que regeneraba ids y orfanaba
+        // ItemContenedor.itemEmbarqueId vía onDelete:SetNull), reconciliamos
+        // por productoId (1 ItemEmbarque por producto por embarque). Así los
+        // ids sobreviven y el link del packing list se mantiene.
+        const itemsActuales = await tx.itemEmbarque.findMany({
+          where: { embarqueId },
+          select: { id: true, productoId: true },
+        });
+        const actualPorProducto = new Map(itemsActuales.map((i) => [i.productoId, i.id]));
+        const productosInput = new Set(input.items.map((it) => it.productoId));
+
+        for (const it of input.items) {
+          const existenteId = actualPorProducto.get(it.productoId);
+          if (existenteId !== undefined) {
+            await tx.itemEmbarque.update({
+              where: { id: existenteId },
+              data: {
+                cantidad: it.cantidad,
+                precioUnitarioFob: money(it.precioUnitarioFob),
+              },
+            });
+          } else {
+            await tx.itemEmbarque.create({
+              data: {
+                embarqueId,
+                productoId: it.productoId,
+                cantidad: it.cantidad,
+                precioUnitarioFob: money(it.precioUnitarioFob),
+              },
+            });
+          }
+        }
+        // Borrar sólo los ItemEmbarque cuyo producto desapareció del input.
+        const idsABorrar = itemsActuales
+          .filter((i) => !productosInput.has(i.productoId))
+          .map((i) => i.id);
+        if (idsABorrar.length > 0) {
+          await tx.itemEmbarque.deleteMany({ where: { id: { in: idsABorrar } } });
+        }
+
+        // Gap #3 — NUNCA borrar facturas EMITIDA/LEGACY_BUNDLED/ANULADA: tienen
+        // (o consumieron) un asiento. Borrarlas orfanaba el asiento y la
+        // re-creación saltaba números. El form de edición sólo gestiona las
+        // BORRADOR (las demás van read-only y se filtran del payload), así que
+        // reconciliamos borrando+recreando únicamente las BORRADOR.
+        await tx.embarqueCosto.deleteMany({
+          where: { embarqueId, estado: "BORRADOR" },
+        });
       } else {
         const embarque = await tx.embarque.create({ data });
         embarqueId = embarque.id;
-      }
 
-      if (input.items.length > 0) {
-        await tx.itemEmbarque.createMany({
-          data: input.items.map((it) => ({
-            embarqueId,
-            productoId: it.productoId,
-            cantidad: it.cantidad,
-            precioUnitarioFob: money(it.precioUnitarioFob),
-          })),
-        });
+        if (input.items.length > 0) {
+          await tx.itemEmbarque.createMany({
+            data: input.items.map((it) => ({
+              embarqueId,
+              productoId: it.productoId,
+              cantidad: it.cantidad,
+              precioUnitarioFob: money(it.precioUnitarioFob),
+            })),
+          });
+        }
       }
 
       // IDs de costos recién creados que tengan fechaFactura — candidatos
