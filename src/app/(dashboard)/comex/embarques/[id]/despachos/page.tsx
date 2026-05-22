@@ -2,7 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Fragment } from "react";
 
-import { obtenerEmbarquePorId } from "@/lib/actions/embarques";
+import {
+  listarCuentasParaCostoLogistico,
+  listarProveedoresParaEmbarque,
+  obtenerEmbarquePorId,
+} from "@/lib/actions/embarques";
 import { listarDespachosDeEmbarque } from "@/lib/actions/despachos";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -32,33 +36,41 @@ export default async function DespachosEmbarquePage({ params }: { params: PagePa
   const embarque = await obtenerEmbarquePorId(id);
   if (!embarque) notFound();
 
-  const [despachos, productos, facturasDespachoLibres, depositos, defaultFecha] = await Promise.all(
-    [
-      listarDespachosDeEmbarque(id),
-      db.producto.findMany({
-        where: { id: { in: embarque.items.map((i) => i.productoId) } },
-        select: { id: true, codigo: true, nombre: true },
-      }),
-      db.embarqueCosto.findMany({
-        where: {
-          embarqueId: id,
-          momento: "DESPACHO",
-          despachoId: null,
-        },
-        include: {
-          proveedor: { select: { nombre: true } },
-          lineas: { select: { subtotal: true } },
-        },
-        orderBy: { id: "asc" },
-      }),
-      db.deposito.findMany({
-        where: { activo: true },
-        select: { id: true, nombre: true },
-        orderBy: { nombre: "asc" },
-      }),
-      getDefaultFecha(),
-    ],
-  );
+  const [
+    despachos,
+    productos,
+    facturasDespachoLibres,
+    depositos,
+    defaultFecha,
+    proveedores,
+    cuentasGasto,
+  ] = await Promise.all([
+    listarDespachosDeEmbarque(id),
+    db.producto.findMany({
+      where: { id: { in: embarque.items.map((i) => i.productoId) } },
+      select: { id: true, codigo: true, nombre: true },
+    }),
+    db.embarqueCosto.findMany({
+      where: {
+        embarqueId: id,
+        momento: "DESPACHO",
+        despachoId: null,
+      },
+      include: {
+        proveedor: { select: { nombre: true } },
+        lineas: { select: { subtotal: true } },
+      },
+      orderBy: { id: "asc" },
+    }),
+    db.deposito.findMany({
+      where: { activo: true },
+      select: { id: true, nombre: true },
+      orderBy: { nombre: "asc" },
+    }),
+    getDefaultFecha(),
+    listarProveedoresParaEmbarque(),
+    listarCuentasParaCostoLogistico(),
+  ]);
 
   const productosMap = new Map(productos.map((p) => [p.id, p]));
 
@@ -287,8 +299,11 @@ export default async function DespachosEmbarquePage({ params }: { params: PagePa
                                 despachoId={d.id}
                                 codigo={d.codigo}
                                 embarqueMoneda={embarque.moneda}
+                                embarqueTipoCambio={embarque.tipoCambio}
                                 valores={cruzado.valores}
                                 facturas={cruzado.facturas}
+                                proveedores={proveedores}
+                                cuentasGasto={cuentasGasto}
                               />
                             </td>
                           </tr>
