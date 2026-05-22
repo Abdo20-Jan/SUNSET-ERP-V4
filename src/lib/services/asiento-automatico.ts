@@ -1433,6 +1433,15 @@ export async function crearAsientoArriboComex(
         `Embarque ${embarque.codigo} ya está cerrado/despachado — no se puede registrar arribo después.`,
       );
     }
+    // Gap #7: defensa en profundidad. Un embarque USD con TC <= 1 corrompe la
+    // base capitalizada (FOB×TC) y el costeo unitario. El zod del form lo
+    // bloquea, pero acá lo cortamos antes de calcular por si llega por otra vía.
+    if (embarque.moneda === "USD" && Number(embarque.tipoCambio) <= 1) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarque.codigo}: tipo de cambio USD inválido (<= 1) — corrija el TC antes de confirmar arribo.`,
+      );
+    }
 
     const porCodigo = await ensureCuentasMap(inner, EMBARQUE_CODIGOS);
     const cuentaZpaId = await getOrCreateCuenta(
