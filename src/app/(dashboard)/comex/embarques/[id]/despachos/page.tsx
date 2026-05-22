@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Fragment } from "react";
 
 import { obtenerEmbarquePorId } from "@/lib/actions/embarques";
 import { listarDespachosDeEmbarque } from "@/lib/actions/despachos";
@@ -17,6 +18,10 @@ import { fmtMoney } from "@/lib/format";
 import { DespachoActions } from "./_components/despacho-actions";
 import { CrearDespachoForm } from "./_components/crear-despacho-form";
 import { DespachoCruzadoMatriz } from "./_components/despacho-cruzado-matriz";
+import {
+  DespachoCruzadoTributosEditor,
+  type TributosCruzadoValores,
+} from "./_components/despacho-cruzado-tributos";
 
 type PageParams = Promise<{ id: string }>;
 
@@ -88,16 +93,88 @@ export default async function DespachosEmbarquePage({ params }: { params: PagePa
     })
     .filter((it) => it.remanente > 0);
 
-  const facturasOptions = facturasDespachoLibres.map((f) => {
+  const totalFacturaArs = (f: {
+    tipoCambio: unknown;
+    lineas: Array<{ subtotal: unknown }>;
+    iva: unknown;
+    iibb: unknown;
+    otros: unknown;
+  }) => {
     const tc = Number(f.tipoCambio);
     const subtotal = f.lineas.reduce((s, l) => s + Number(l.subtotal) * tc, 0);
-    const total = subtotal + Number(f.iva) * tc + Number(f.iibb) * tc + Number(f.otros) * tc;
-    return {
+    return subtotal + Number(f.iva) * tc + Number(f.iibb) * tc + Number(f.otros) * tc;
+  };
+
+  const facturasOptions = facturasDespachoLibres.map((f) => ({
+    id: f.id,
+    label: `${f.proveedor.nombre}${f.facturaNumero ? ` Fact.${f.facturaNumero}` : ""}`,
+    totalArs: totalFacturaArs(f),
+  }));
+
+  // Despachos CRUZADOS en BORRADOR: editor de tributos/VEP inline (gap #4).
+  // El despacho cruzado se materializa con tributos=0; antes de contabilizar
+  // el operador los digita. Facturas elegibles = DESPACHO libres + las ya
+  // linkadas a ESE despacho (pre-marcadas).
+  const despachosCruzadoBorrador = await db.despacho.findMany({
+    where: {
+      embarqueId: id,
+      estado: "BORRADOR",
+      items: { some: { itemContenedorId: { not: null } } },
+    },
+    select: {
+      id: true,
+      tipoCambio: true,
+      die: true,
+      tasaEstadistica: true,
+      arancelSim: true,
+      iva: true,
+      ivaAdicional: true,
+      iibb: true,
+      ganancias: true,
+      numeroOM: true,
+      costos: {
+        where: { momento: "DESPACHO" },
+        select: {
+          id: true,
+          facturaNumero: true,
+          tipoCambio: true,
+          iva: true,
+          iibb: true,
+          otros: true,
+          proveedor: { select: { nombre: true } },
+          lineas: { select: { subtotal: true } },
+        },
+      },
+    },
+  });
+
+  const cruzadoTributosMap = new Map<
+    string,
+    { valores: TributosCruzadoValores; facturas: typeof facturasOptions }
+  >();
+  for (const d of despachosCruzadoBorrador) {
+    const linkadas = d.costos.map((f) => ({
       id: f.id,
       label: `${f.proveedor.nombre}${f.facturaNumero ? ` Fact.${f.facturaNumero}` : ""}`,
-      totalArs: total,
-    };
-  });
+      totalArs: totalFacturaArs(f),
+    }));
+    cruzadoTributosMap.set(d.id, {
+      valores: {
+        tipoCambio: d.tipoCambio.toString(),
+        die: d.die.toString(),
+        tasaEstadistica: d.tasaEstadistica.toString(),
+        arancelSim: d.arancelSim.toString(),
+        iva: d.iva.toString(),
+        ivaAdicional: d.ivaAdicional.toString(),
+        iibb: d.iibb.toString(),
+        ganancias: d.ganancias.toString(),
+        numeroOM: d.numeroOM,
+        facturasIds: linkadas.map((f) => f.id),
+      },
+      // Opciones = libres del embarque + las ya linkadas a este despacho.
+      facturas: [...facturasOptions, ...linkadas],
+    });
+  }
 
   const tieneZP = !!embarque.asientoZonaPrimaria;
   const tieneCierre = !!embarque.asiento;
@@ -156,45 +233,69 @@ export default async function DespachosEmbarquePage({ params }: { params: PagePa
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {despachos.map((d) => (
-                    <tr key={d.id}>
-                      <td className="px-2.5 py-1.5 font-mono">{d.codigo}</td>
-                      <td className="px-2.5 py-1.5">
-                        {new Date(d.fecha).toLocaleDateString("es-AR")}
-                      </td>
-                      <td className="px-2.5 py-1.5 font-mono text-[12px]">{d.numeroOM ?? "—"}</td>
-                      <td className="px-2.5 py-1.5 text-right">{d.itemsCount}</td>
-                      <td className="px-2.5 py-1.5 text-right">{d.facturasCount}</td>
-                      <td className="px-2.5 py-1.5">
-                        <Badge
-                          variant={
-                            d.estado === "CONTABILIZADO"
-                              ? "default"
-                              : d.estado === "ANULADO"
-                                ? "destructive"
-                                : "secondary"
-                          }
-                        >
-                          {d.estado}
-                        </Badge>
-                      </td>
-                      <td className="px-2.5 py-1.5">
-                        {d.asiento ? (
-                          <Link
-                            href={`/contabilidad/asientos/${d.asiento.id}`}
-                            className="text-[12px] underline-offset-2 hover:underline"
-                          >
-                            #{d.asiento.numero}
-                          </Link>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
+                  {despachos.map((d) => {
+                    const cruzado = cruzadoTributosMap.get(d.id);
+                    return (
+                      <Fragment key={d.id}>
+                        <tr>
+                          <td className="px-2.5 py-1.5 font-mono">{d.codigo}</td>
+                          <td className="px-2.5 py-1.5">
+                            {new Date(d.fecha).toLocaleDateString("es-AR")}
+                          </td>
+                          <td className="px-2.5 py-1.5 font-mono text-[12px]">
+                            {d.numeroOM ?? "—"}
+                          </td>
+                          <td className="px-2.5 py-1.5 text-right">{d.itemsCount}</td>
+                          <td className="px-2.5 py-1.5 text-right">{d.facturasCount}</td>
+                          <td className="px-2.5 py-1.5">
+                            <Badge
+                              variant={
+                                d.estado === "CONTABILIZADO"
+                                  ? "default"
+                                  : d.estado === "ANULADO"
+                                    ? "destructive"
+                                    : "secondary"
+                              }
+                            >
+                              {d.estado}
+                            </Badge>
+                          </td>
+                          <td className="px-2.5 py-1.5">
+                            {d.asiento ? (
+                              <Link
+                                href={`/contabilidad/asientos/${d.asiento.id}`}
+                                className="text-[12px] underline-offset-2 hover:underline"
+                              >
+                                #{d.asiento.numero}
+                              </Link>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+                          <td className="px-2.5 py-1.5 text-right">
+                            <DespachoActions
+                              despachoId={d.id}
+                              estado={d.estado}
+                              codigo={d.codigo}
+                            />
+                          </td>
+                        </tr>
+                        {cruzado && (
+                          <tr>
+                            <td colSpan={8} className="bg-muted/20 px-2.5 py-3">
+                              <DespachoCruzadoTributosEditor
+                                despachoId={d.id}
+                                codigo={d.codigo}
+                                embarqueMoneda={embarque.moneda}
+                                valores={cruzado.valores}
+                                facturas={cruzado.facturas}
+                              />
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td className="px-2.5 py-1.5 text-right">
-                        <DespachoActions despachoId={d.id} estado={d.estado} codigo={d.codigo} />
-                      </td>
-                    </tr>
-                  ))}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
