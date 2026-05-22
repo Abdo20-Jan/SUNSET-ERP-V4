@@ -48,7 +48,11 @@ type ProveedorOption = {
 type Props = {
   rows: CuentaAPagarPorEmbarque[];
   cuentasBancarias: CuentaBancariaOption[];
-  proveedores: ProveedorOption[];
+  // Lista de proveedores elegibles como beneficiário intermediário
+  // (despachante). Incluye TODOS los proveedores activos con cuenta
+  // contable — no sólo los que tienen factura/saldo abierto — para que un
+  // despachante sin facturas en el sistema (ej: CYSAR) pueda seleccionarse.
+  intermediarios: ProveedorOption[];
   defaultFecha?: string;
 };
 
@@ -56,7 +60,7 @@ function rowKey(r: CuentaAPagarPorEmbarque): string {
   return `${r.embarqueId}::${r.proveedorId}`;
 }
 
-export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, defaultFecha }: Props) {
+export function EmbarqueBatchPago({ rows, cuentasBancarias, intermediarios, defaultFecha }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -452,13 +456,13 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, default
                           {(value) => {
                             if (!value) return "Seleccione proveedor intermediário";
                             const id = Number(value);
-                            const p = proveedores.find((x) => x.cuentaContableId === id);
+                            const p = intermediarios.find((x) => x.cuentaContableId === id);
                             return p ? p.proveedorNombre : `Cuenta #${id}`;
                           }}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        {proveedores
+                        {intermediarios
                           .filter(
                             (p): p is typeof p & { cuentaContableId: number } =>
                               p.cuentaContableId !== null,
@@ -654,7 +658,7 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, default
                     }
                   >
                     {diferencia > 0 ? "DEBE" : "HABER"} {(() => {
-                      const p = proveedores.find(
+                      const p = intermediarios.find(
                         (x) => x.cuentaContableId === intermediarioCuentaId,
                       );
                       return p?.proveedorNombre ?? `Cuenta #${intermediarioCuentaId}`;

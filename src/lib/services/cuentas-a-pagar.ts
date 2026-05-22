@@ -203,6 +203,42 @@ export async function getSaldosPorProveedor(): Promise<SaldoProveedor[]> {
 }
 
 // ============================================================
+// Proveedores elegibles como intermediário (despachante) en el multi-pago.
+// ============================================================
+// El picker de "beneficiário intermediário" debe listar TODOS los
+// proveedores activos con cuenta contable — no sólo los que tienen factura
+// o saldo en abierto. Un despachante (ej: CYSAR) puede no tener ninguna
+// factura cargada en el sistema y aun así ser el beneficiário al que se le
+// transfiere para que pague las facturas de TRP/EXOLGAN/etc en nuestro
+// nombre. El shape es compatible con ProveedorOption del EmbarqueBatchPago.
+export type ProveedorIntermediario = {
+  proveedorId: string;
+  proveedorNombre: string;
+  cuentaContableId: number;
+};
+
+export async function listarProveedoresParaIntermediario(): Promise<ProveedorIntermediario[]> {
+  const proveedores = await db.proveedor.findMany({
+    where: {
+      estado: "activo",
+      cuentaContableId: { not: null },
+    },
+    select: {
+      id: true,
+      nombre: true,
+      cuentaContableId: true,
+    },
+    orderBy: { nombre: "asc" },
+  });
+
+  return proveedores.map((p) => ({
+    proveedorId: p.id,
+    proveedorNombre: p.nombre,
+    cuentaContableId: p.cuentaContableId!,
+  }));
+}
+
+// ============================================================
 // Saldos con aging (por proveedor, mostrando vencimientos)
 // ============================================================
 

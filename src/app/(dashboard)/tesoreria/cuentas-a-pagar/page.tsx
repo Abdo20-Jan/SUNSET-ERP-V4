@@ -17,6 +17,7 @@ import {
   getSaldoCreditoAduana,
   getSaldosPorProveedorConAging,
   getVepEmbarques,
+  listarProveedoresParaIntermediario,
   type CxPRow,
 } from "@/lib/services/cuentas-a-pagar";
 import { listarCuentasBancariasParaVep } from "@/lib/actions/vep-embarque";
@@ -39,6 +40,7 @@ export default async function CuentasAPagarPage() {
     cuentasBancariasArs,
     cuentasBancariasMov,
     saldoCreditoAduana,
+    intermediarios,
     defaultFecha,
   ] = await Promise.all([
     getCuentasAPagar(),
@@ -49,6 +51,7 @@ export default async function CuentasAPagarPage() {
     listarCuentasBancariasParaVep(),
     listarCuentasBancariasParaMovimiento(),
     getSaldoCreditoAduana(),
+    listarProveedoresParaIntermediario(),
     getDefaultFecha(),
   ]);
 
@@ -91,7 +94,7 @@ export default async function CuentasAPagarPage() {
       <EmbarqueBatchPago
         rows={porEmbarque}
         cuentasBancarias={cuentasBancariasMov}
-        proveedores={saldosProveedores}
+        intermediarios={intermediarios}
         defaultFecha={defaultFecha}
       />
 
