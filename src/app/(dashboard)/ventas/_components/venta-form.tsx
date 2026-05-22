@@ -209,13 +209,19 @@ export function VentaForm({
     nombre: c.nombre,
     diasPagoDefault: c.diasPagoDefault,
   }));
-  const productoOptions: ProductoOption[] = productos.map((p) => ({
-    id: p.id,
-    codigo: p.codigo,
-    nombre: p.nombre,
-    marca: null,
-    medida: null,
-  }));
+  // Solo SKUs con disponible nacional > 0; pero siempre incluir los productos
+  // ya presentes en la venta editada (para no romper el combobox/rentabilidad).
+  const idsIniciales = new Set(initialData?.items?.map((i) => i.productoId) ?? []);
+  const productoOptions: ProductoOption[] = productos
+    .filter((p) => p.disponible > 0 || idsIniciales.has(p.id))
+    .map((p) => ({
+      id: p.id,
+      codigo: p.codigo,
+      nombre: p.nombre,
+      marca: null,
+      medida: null,
+      disponible: p.disponible,
+    }));
 
   const defaultValues: FormValues = isEdit
     ? {
@@ -1311,9 +1317,7 @@ function ItemRow({
           onChange={(id) => onProductoChange(index, id)}
           productos={productos}
         />
-        {productoSel && (
-          <p className="mt-1 truncate text-xs text-muted-foreground">{productoSel.nombre}</p>
-        )}
+        {productoSel && <p className="mt-1 text-xs text-muted-foreground">{productoSel.nombre}</p>}
         {errorProducto && <p className="mt-1 text-xs text-destructive">{errorProducto}</p>}
       </div>
 

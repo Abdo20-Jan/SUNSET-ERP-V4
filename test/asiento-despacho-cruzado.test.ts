@@ -195,18 +195,23 @@ describe("contabilización despacho cruzado (PR 4.5)", () => {
       if (l.debe.gt(0)) debePorCuenta.set(l.cuenta.codigo, l.debe.toFixed(2));
       if (l.haber.gt(0)) haberPorCuenta.set(l.cuenta.codigo, l.haber.toFixed(2));
     }
-    // Nacionalización: DEBE 1.1.5.01 / HABER 1.1.5.05 = costo landed.
-    expect(debePorCuenta.get("1.1.5.01")).toBe("375000.00");
+    // Nacionalización CON CAPITALIZACIÓN del DIE en el costo de la mercadería:
+    //   DEBE 1.1.5.01 = nacionalizado 375000 + DIE capitalizado 100000 = 475000.
+    //   HABER 1.1.5.05 = sólo el costo FC nacionalizado (sin tributos) = 375000.
+    expect(debePorCuenta.get("1.1.5.01")).toBe("475000.00");
     expect(haberPorCuenta.get("1.1.5.05")).toBe("375000.00");
-    // Tributo DIE presente (100 × 1000).
+    // El DIE YA NO va a egreso 5.7.1.01 (capitalizado en 1.1.5.01); el HABER
+    // del pasivo aduanero (2.1.5.01) permanece como obligación a pagar.
+    expect(debePorCuenta.has("5.7.1.01")).toBe(false);
+    expect(haberPorCuenta.get("2.1.5.01")).toBe("100000.00");
     const totalDebe = lineas.reduce((s2, l) => s2 + Number(l.debe), 0);
     const totalHaber = lineas.reduce((s2, l) => s2 + Number(l.haber), 0);
     expect(totalDebe).toBeCloseTo(totalHaber, 2); // asiento balanceado
     expect(totalDebe).toBeCloseTo(475000, 2); // 375000 nacionalización + 100000 DIE
 
-    // ItemDespacho.costoUnitario = costoFC × TC.
+    // ItemDespacho.costoUnitario = costo landed = (375000 + 100000) / 30.
     const items = await db.prisma.itemDespacho.findMany({ where: { despachoId: s.despachoId } });
-    expect(items[0]?.costoUnitario.toFixed(2)).toBe("12500.00");
+    expect(items[0]?.costoUnitario.toFixed(2)).toBe("15833.33");
 
     // Stock movido DF → destino.
     const spdDF = await db.prisma.stockPorDeposito.findUniqueOrThrow({

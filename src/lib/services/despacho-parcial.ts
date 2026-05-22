@@ -1,5 +1,7 @@
 import "server-only";
 
+import Decimal from "decimal.js";
+
 import { db } from "@/lib/db";
 import {
   ContenedorEstado,
@@ -7,6 +9,7 @@ import {
   type ItemContenedor,
   Prisma,
 } from "@/generated/prisma/client";
+import { toDecimal } from "@/lib/decimal";
 
 // ============================================================
 // PR 4.2 — Despacho parcial cruzado: service + contrato del borrador
@@ -754,4 +757,175 @@ function parsePayloadLineas(value: Prisma.JsonValue | null): LineaBorrador[] {
     const rec = l as { itemContenedorId?: unknown; cantidad?: unknown };
     return { itemContenedorId: Number(rec.itemContenedorId), cantidad: Number(rec.cantidad) };
   });
+}
+
+// ============================================================
+// Costo landed del despacho cruzado (fuente única)
+// ============================================================
+//
+// Decisión (Modelo Y / despacho parcial cruzado): los tributos aduaneros
+// CAPITALIZABLES (DIE + Tasa Estadística + Arancel SIM) y el subtotal de
+// las facturas DESPACHO linkadas integran el COSTO de la mercadería
+// nacionalizada (DEBE 1.1.5.01), no un egreso 5.7.1.x. IVA / IVA adicional
+// / IIBB / Ganancias siguen como crédito fiscal (NO capitalizan).
+//
+// `calcularCostoLandedDespacho` es la FUENTE ÚNICA de costo: la usa tanto
+// `crearAsientoDespachoCruzado` (para el DEBE 1.1.5.01) como el flujo de
+// stock (costo del ingreso al depósito NACIONAL al nacionalizar). Replica
+// el patrón de rateio de `calcularRateioZonaPrimaria`: prorratea los
+// capitalizables proporcional a la base de costo FOB de cada ítem
+// (cantidad × costoFCUnitario) y deja el residuo al último ítem para
+// reconciliar al centavo con el asiento.
+
+const round2 = (value: Decimal): Decimal => value.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+const round4 = (value: Decimal): Decimal => value.toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+
+export interface ItemLandedInput {
+  /** ItemDespacho.id — clave del resultado. */
+  itemDespachoId: number;
+  productoId: string;
+  cantidad: number;
+  /** Snapshot FC unitario del ItemContenedor (en moneda del embarque). */
+  costoFCUnitario: Decimal.Value;
+}
+
+export interface FacturaDespachoLandedInput {
+  /** Subtotal capitalizable de la factura (Σ líneas, en moneda de la factura). */
+  subtotal: Decimal.Value;
+  /** TC de la factura para convertir el subtotal a ARS. */
+  tipoCambio: Decimal.Value;
+}
+
+export interface CostoLandedInput {
+  /** TC del embarque — convierte el costo FC a ARS. */
+  tipoCambioEmbarque: Decimal.Value;
+  /** TC del despacho — convierte los tributos aduaneros a ARS. */
+  tipoCambioDespacho: Decimal.Value;
+  /** Tributos capitalizables (en moneda del embarque/despacho). */
+  die: Decimal.Value;
+  tasaEstadistica: Decimal.Value;
+  arancelSim: Decimal.Value;
+  /** Facturas DESPACHO linkadas (subtotales capitalizables). */
+  facturasDespacho: readonly FacturaDespachoLandedInput[];
+  items: readonly ItemLandedInput[];
+}
+
+export interface ItemLandedResult {
+  itemDespachoId: number;
+  productoId: string;
+  cantidad: number;
+  /** Costo FC unitario × TC embarque, ARS (sin capitalizables), 2dp. */
+  costoFcUnitarioArs: Decimal;
+  /** Capitalizables prorrateados a este ítem, ARS, 2dp. */
+  capitalizablesItemArs: Decimal;
+  /** Costo total landed del ítem (FC + capitalizables), ARS, 2dp. */
+  costoTotalArs: Decimal;
+  /** Costo landed UNITARIO (costoTotalArs / cantidad), ARS, 4dp. */
+  costoUnitarioLandedArs: Decimal;
+}
+
+export interface CostoLandedResult {
+  /** Σ (costoFC × cantidad × TCembarque) — sale del DF (HABER 1.1.5.05). */
+  nacionalizadoArs: Decimal;
+  /** Tributos capitalizables en ARS (DIE + Tasa + Arancel) × TCdespacho. */
+  tributosCapitalizablesArs: Decimal;
+  /** Σ subtotales de facturas DESPACHO en ARS. */
+  facturasCapitalizablesArs: Decimal;
+  /** Total capitalizable ARS = tributos + facturas. */
+  capitalizablesArs: Decimal;
+  /** DEBE 1.1.5.01 = nacionalizadoArs + capitalizablesArs. */
+  costoTotalArs: Decimal;
+  /** Resultado por ItemDespacho. */
+  porItem: ItemLandedResult[];
+  /** Acceso O(1) por itemDespachoId al costo unitario landed (4dp). */
+  costoUnitarioLandedPorItem: Map<number, Decimal>;
+}
+
+/**
+ * Calcula el costo landed (en ARS) de un despacho cruzado, prorrateando los
+ * capitalizables (DIE + Tasa + Arancel + facturas DESPACHO) entre los ítems
+ * proporcional a su base FOB (cantidad × costoFCUnitario × TCembarque).
+ *
+ * Fallback: si la base FOB total es 0 (muestras), prorratea por cantidad.
+ * El último ítem absorbe el residuo para que Σ porItem.costoTotalArs sea
+ * exactamente costoTotalArs (reconciliación al centavo con el asiento).
+ */
+export function calcularCostoLandedDespacho(input: CostoLandedInput): CostoLandedResult {
+  const tcEmb = toDecimal(input.tipoCambioEmbarque);
+  const tcDsp = toDecimal(input.tipoCambioDespacho);
+
+  // Base FOB por ítem en ARS (cantidad × costoFC × TCembarque) y nacionalizado.
+  let nacionalizadoArs = new Decimal(0);
+  const baseFobArs: Decimal[] = [];
+  const costoFcUnitarioArs: Decimal[] = [];
+  for (const item of input.items) {
+    const fcUnitArs = round2(toDecimal(item.costoFCUnitario).times(tcEmb));
+    const fcTotalArs = round2(fcUnitArs.times(item.cantidad));
+    costoFcUnitarioArs.push(fcUnitArs);
+    baseFobArs.push(fcTotalArs);
+    nacionalizadoArs = nacionalizadoArs.plus(fcTotalArs);
+  }
+
+  const tributosCapitalizablesArs = round2(
+    toDecimal(input.die)
+      .plus(toDecimal(input.tasaEstadistica))
+      .plus(toDecimal(input.arancelSim))
+      .times(tcDsp),
+  );
+  const facturasCapitalizablesArs = input.facturasDespacho.reduce(
+    (acc, f) => acc.plus(round2(toDecimal(f.subtotal).times(toDecimal(f.tipoCambio)))),
+    new Decimal(0),
+  );
+  const capitalizablesArs = round2(tributosCapitalizablesArs.plus(facturasCapitalizablesArs));
+  const costoTotalArs = round2(nacionalizadoArs.plus(capitalizablesArs));
+
+  const baseFobTotal = baseFobArs.reduce((acc, b) => acc.plus(b), new Decimal(0));
+  const cantidadTotal = input.items.reduce((acc, it) => acc + it.cantidad, 0);
+  const usarRateioPorCantidad = !baseFobTotal.gt(0);
+  const lastIdx = input.items.length - 1;
+  let acumulado = new Decimal(0);
+
+  const porItem: ItemLandedResult[] = input.items.map((item, idx) => {
+    let capitalizablesItemArs: Decimal;
+    if (idx === lastIdx) {
+      capitalizablesItemArs = round2(capitalizablesArs.minus(acumulado));
+    } else {
+      const proporcion = usarRateioPorCantidad
+        ? cantidadTotal > 0
+          ? new Decimal(item.cantidad).dividedBy(cantidadTotal)
+          : new Decimal(0)
+        : baseFobArs[idx].dividedBy(baseFobTotal);
+      capitalizablesItemArs = round2(capitalizablesArs.times(proporcion));
+      acumulado = acumulado.plus(capitalizablesItemArs);
+    }
+
+    const costoTotalItemArs = round2(baseFobArs[idx].plus(capitalizablesItemArs));
+    const costoUnitarioLandedArs =
+      item.cantidad > 0 ? round4(costoTotalItemArs.dividedBy(item.cantidad)) : new Decimal(0);
+
+    return {
+      itemDespachoId: item.itemDespachoId,
+      productoId: item.productoId,
+      cantidad: item.cantidad,
+      costoFcUnitarioArs: costoFcUnitarioArs[idx],
+      capitalizablesItemArs,
+      costoTotalArs: costoTotalItemArs,
+      costoUnitarioLandedArs,
+    };
+  });
+
+  const costoUnitarioLandedPorItem = new Map<number, Decimal>();
+  for (const r of porItem) {
+    costoUnitarioLandedPorItem.set(r.itemDespachoId, r.costoUnitarioLandedArs);
+  }
+
+  return {
+    nacionalizadoArs: round2(nacionalizadoArs),
+    tributosCapitalizablesArs,
+    facturasCapitalizablesArs: round2(facturasCapitalizablesArs),
+    capitalizablesArs,
+    costoTotalArs,
+    porItem,
+    costoUnitarioLandedPorItem,
+  };
 }
