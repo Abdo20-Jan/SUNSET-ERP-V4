@@ -23,6 +23,7 @@ import {
 } from "@/lib/services/stock";
 import { resolverDepositoZpa } from "@/lib/services/embarque-zpa";
 import {
+  calcularCostoLandedDespacho,
   contabilizarBorrador,
   crearBorrador,
   DespachoParcialError,
@@ -507,8 +508,14 @@ export async function contabilizarDespachoAction(
           select: {
             codigo: true,
             fecha: true,
+            tipoCambio: true,
+            die: true,
+            tasaEstadistica: true,
+            arancelSim: true,
             items: {
+              orderBy: { id: "asc" },
               select: {
+                id: true,
                 cantidad: true,
                 itemContenedor: {
                   select: {
@@ -519,10 +526,52 @@ export async function contabilizarDespachoAction(
                 },
               },
             },
+            // Facturas DESPACHO linkadas — mismo filtro que crearAsientoDespachoCruzado
+            // (BORRADOR/LEGACY_BUNDLED, momento != ZONA_PRIMARIA). Su subtotal
+            // capitaliza al costo landed.
+            costos: {
+              where: {
+                momento: { not: "ZONA_PRIMARIA" },
+                estado: { in: ["BORRADOR", "LEGACY_BUNDLED"] },
+              },
+              select: {
+                tipoCambio: true,
+                lineas: { select: { subtotal: true }, orderBy: { id: "asc" } },
+              },
+              orderBy: { id: "asc" },
+            },
           },
         });
 
         const tcEmb = toDecimal(embarque.tipoCambio);
+        // FUENTE ÚNICA de costo: el costo landed (FC + DIE/Tasa/Arancel +
+        // facturas DESPACHO capitalizadas) es el mismo que usó el asiento.
+        const landedCruz = calcularCostoLandedDespacho({
+          tipoCambioEmbarque: tcEmb,
+          tipoCambioDespacho: despCruz.tipoCambio,
+          die: despCruz.die,
+          tasaEstadistica: despCruz.tasaEstadistica,
+          arancelSim: despCruz.arancelSim,
+          facturasDespacho: despCruz.costos.flatMap((f) =>
+            f.lineas.map((l) => ({ subtotal: l.subtotal, tipoCambio: f.tipoCambio })),
+          ),
+          items: despCruz.items.map((i) => {
+            const ic = i.itemContenedor;
+            if (ic?.costoFCUnitario == null) {
+              throw new AsientoError(
+                "DOMINIO_INVALIDO",
+                "Una línea cruzada no tiene costo FC (cerrá costos antes de nacionalizar).",
+              );
+            }
+            return {
+              itemDespachoId: i.id,
+              productoId: ic.productoId,
+              cantidad: i.cantidad,
+              costoFCUnitario: ic.costoFCUnitario,
+            };
+          }),
+        });
+
         const itemsDF = despCruz.items.map((i) => {
           const ic = i.itemContenedor;
           if (!ic?.contenedor.depositoFiscalId) {
@@ -531,16 +580,20 @@ export async function contabilizarDespachoAction(
               "Una línea cruzada no tiene depósito fiscal de origen asignado.",
             );
           }
-          if (ic.costoFCUnitario == null) {
+          // Costo landed por línea (no el FC puro) → el ingreso de stock
+          // NACIONAL queda con el mismo costo que el DEBE 1.1.5.01. La clave
+          // existe siempre: el helper computó todas las líneas del despacho.
+          const landedUnit = landedCruz.costoUnitarioLandedPorItem.get(i.id);
+          if (landedUnit == null) {
             throw new AsientoError(
               "DOMINIO_INVALIDO",
-              "Una línea cruzada no tiene costo FC (cerrá costos antes de nacionalizar).",
+              "No se pudo determinar el costo landed de una línea cruzada.",
             );
           }
           return {
             productoId: ic.productoId,
             cantidad: i.cantidad,
-            costoUnitario: toDecimal(ic.costoFCUnitario).times(tcEmb),
+            costoUnitario: landedUnit,
             depositoFiscalId: ic.contenedor.depositoFiscalId,
           };
         });
