@@ -170,6 +170,14 @@ enum GastoEstado {
   ANULADO
 }
 
+// Clasificación fiscal del gasto a efectos de Impuesto a las Ganancias.
+// INFORMATIVO: no afecta el asiento contable, sólo cómo deduce el gasto.
+enum DeduccionGanancias {
+  NETO // deduce subtotal sin IVA (RI estándar)
+  TOTAL // deduce total con IVA (Monotributista / sin IVA discriminado)
+  NO_DEDUCIBLE // multas, excedente representación, etc.
+}
+
 enum VentaEstado {
   BORRADOR
   EMITIDA
@@ -1139,6 +1147,8 @@ model Gasto {
   iva              Decimal       @default(0) @db.Decimal(18, 2)
   iibb             Decimal       @default(0) @db.Decimal(18, 2)
   otros            Decimal       @default(0) @db.Decimal(18, 2)
+  // Clasificación fiscal Ganancias (informativa, no afecta el asiento):
+  deducibleGanancias DeduccionGanancias @default(NETO)
   total            Decimal       @db.Decimal(18, 2)
   estado           GastoEstado   @default(BORRADOR)
   asientoId        String?       @unique
