@@ -546,6 +546,14 @@ const inputSchema = z
         message: "Para ARS, tipo de cambio debe ser 1",
       });
     }
+    // Gap #7: USD con TC=1 corrompe el arribo/costeo (costo unitario explota).
+    if (data.moneda === Moneda.USD && !(Number(data.tipoCambio) > 1)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["tipoCambio"],
+        message: "Para USD, el tipo de cambio debe ser mayor a 1",
+      });
+    }
     data.costos.forEach((c, idx) => {
       if (c.moneda === Moneda.ARS && c.tipoCambio !== "1") {
         ctx.addIssue({
@@ -554,8 +562,18 @@ const inputSchema = z
           message: "Para ARS, tipo de cambio debe ser 1",
         });
       }
+      if (c.moneda === Moneda.USD && !(Number(c.tipoCambio) > 1)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["costos", idx, "tipoCambio"],
+          message: "Para USD, el tipo de cambio debe ser mayor a 1",
+        });
+      }
     });
   });
+
+// Exportado para tests del guard de tipoCambio (gap #7).
+export const embarqueInputSchema = inputSchema;
 
 export type GuardarEmbarqueInput = z.input<typeof inputSchema>;
 
