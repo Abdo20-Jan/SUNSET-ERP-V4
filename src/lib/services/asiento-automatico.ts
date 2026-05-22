@@ -7,6 +7,7 @@ import { eqMoney, gtZero, money, type MoneyInput, sumMoney, toDecimal } from "@/
 import { isStockDualEnabled } from "@/lib/features";
 import { secureRandomInt } from "@/lib/secure-random";
 import { type CuentaDef, ensureCuentasMap, getOrCreateCuenta } from "@/lib/services/cuenta-auto";
+import { calcularCostoLandedDespacho } from "@/lib/services/despacho-parcial";
 import { revertirIngresoEmbarque } from "@/lib/services/stock";
 import {
   COMEX_ZPA_CODIGOS,
@@ -2366,10 +2367,18 @@ export async function crearAsientoDespachoCruzado(
       lineas.push({ cuentaId, debe: toDecimal(0), haber: valor, descripcion });
     };
 
-    // 1) Transferencia 1.1.5.05 (DF) → 1.1.5.01 (mercaderías) por el costo
-    //    landed de las líneas cruzadas (costoFCUnitario × cantidad × TC).
-    let nacionalizadoArs = toDecimal(0);
-    const itemDespachoCostoUnit = new Map<number, import("decimal.js").Decimal>();
+    // Facturas DESPACHO linkadas a este despacho. Mismo filtro que legacy:
+    // sólo BORRADOR / LEGACY_BUNDLED (las EMITIDA ya tienen asiento propio,
+    // por eso NO entran acá → sin doble contabilización). Su subtotal
+    // capitaliza al costo de la mercadería (no va a la cuenta de gasto).
+    const facturasDespacho = embarque.costos.filter(
+      (f) =>
+        f.despachoId === despacho.id &&
+        f.momento !== "ZONA_PRIMARIA" &&
+        (f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED"),
+    );
+
+    // Validar costos FC presentes (cerrá costos antes de nacionalizar).
     for (const id of despacho.items) {
       const ic = id.itemContenedor;
       if (!ic) {
@@ -2384,14 +2393,41 @@ export async function crearAsientoDespachoCruzado(
           `Despacho ${despacho.codigo}: el ItemContenedor ${ic.id} no tiene costo FC (cerrá costos antes de nacionalizar).`,
         );
       }
-      const costoUnitArs = toDecimal(ic.costoFCUnitario).times(tcEmb).toDecimalPlaces(2);
-      itemDespachoCostoUnit.set(id.id, costoUnitArs);
-      nacionalizadoArs = nacionalizadoArs.plus(costoUnitArs.times(id.cantidad).toDecimalPlaces(2));
     }
+
+    // FUENTE ÚNICA de costo: capitaliza DIE + Tasa + Arancel + subtotal de
+    // las facturas DESPACHO al costo de la mercadería (DEBE 1.1.5.01). El
+    // mismo helper alimenta el costo landed del ingreso de stock NACIONAL.
+    const landed = calcularCostoLandedDespacho({
+      tipoCambioEmbarque: tcEmb,
+      tipoCambioDespacho: tcDsp,
+      die: despacho.die,
+      tasaEstadistica: despacho.tasaEstadistica,
+      arancelSim: despacho.arancelSim,
+      facturasDespacho: facturasDespacho.flatMap((f) =>
+        f.lineas.map((l) => ({ subtotal: l.subtotal, tipoCambio: f.tipoCambio })),
+      ),
+      items: despacho.items.map((id) => ({
+        itemDespachoId: id.id,
+        productoId: id.itemContenedor!.productoId,
+        cantidad: id.cantidad,
+        costoFCUnitario: id.itemContenedor!.costoFCUnitario!,
+      })),
+    });
+    const nacionalizadoArs = landed.nacionalizadoArs;
+    // costoUnitario por ItemDespacho = costo total landed / cantidad (4dp →
+    // money() 2dp al persistir). Reconciliado al centavo con el asiento.
+    const itemDespachoCostoUnit = new Map<number, import("decimal.js").Decimal>();
+    for (const r of landed.porItem) {
+      itemDespachoCostoUnit.set(r.itemDespachoId, r.costoUnitarioLandedArs);
+    }
+
+    // 1) DEBE 1.1.5.01 (mercaderías) = nacionalizado + capitalizables.
+    //    HABER 1.1.5.05 (DF) = sólo el costo FC nacionalizado (sin tributos).
     pushDebe(
       porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS.codigo)!,
-      nacionalizadoArs,
-      `Despacho ${despacho.codigo} — nacionalización vía depósito fiscal (${despacho.items.length} línea${despacho.items.length === 1 ? "" : "s"})`,
+      landed.costoTotalArs,
+      `Despacho ${despacho.codigo} — nacionalización vía depósito fiscal (costo landed, ${despacho.items.length} línea${despacho.items.length === 1 ? "" : "s"})`,
     );
     pushHaber(
       cuentaDFId,
@@ -2399,7 +2435,11 @@ export async function crearAsientoDespachoCruzado(
       `Despacho ${despacho.codigo} — sale de depósito fiscal`,
     );
 
-    // 2) Tributos aduaneros del despacho (idéntico al legacy crearAsientoDespacho).
+    // 2) Tributos aduaneros del despacho. DIE + Tasa + Arancel SON
+    //    CAPITALIZABLES: su contravalor ya está en el DEBE 1.1.5.01, así que
+    //    NO se debitan a egreso 5.7.1.x. Sólo se mantiene el HABER de los
+    //    pasivos aduaneros (la obligación a pagar a la Aduana).
+    //    IVA / IVA adicional / IIBB / Ganancias siguen como crédito fiscal.
     const die = toDecimal(despacho.die).times(tcDsp).toDecimalPlaces(2);
     const te = toDecimal(despacho.tasaEstadistica).times(tcDsp).toDecimalPlaces(2);
     const arancelSim = toDecimal(despacho.arancelSim).times(tcDsp).toDecimalPlaces(2);
@@ -2408,19 +2448,12 @@ export async function crearAsientoDespachoCruzado(
     const iibbAduana = toDecimal(despacho.iibb).times(tcDsp).toDecimalPlaces(2);
     const ganancias = toDecimal(despacho.ganancias).times(tcDsp).toDecimalPlaces(2);
 
-    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.DIE_EGRESO.codigo)!, die, "DIE");
     pushHaber(porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO.codigo)!, die, "DIE por pagar (Aduana)");
-    pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_EGRESO.codigo)!,
-      te,
-      "Tasa estadística",
-    );
     pushHaber(
       porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_PASIVO.codigo)!,
       te,
       "Tasa estadística por pagar",
     );
-    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO.codigo)!, arancelSim, "Arancel SIM");
     pushHaber(
       porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO.codigo)!,
       arancelSim,
@@ -2462,13 +2495,11 @@ export async function crearAsientoDespachoCruzado(
       "Ganancias importación por pagar",
     );
 
-    // 3) Facturas linkadas a este despacho (DESPACHO). Mismo filtro que legacy.
-    const facturasDespacho = embarque.costos.filter(
-      (f) =>
-        f.despachoId === despacho.id &&
-        f.momento !== "ZONA_PRIMARIA" &&
-        (f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED"),
-    );
+    // 3) Facturas DESPACHO linkadas (filtradas arriba). El SUBTOTAL de cada
+    //    línea YA fue capitalizado en el DEBE 1.1.5.01 (vía el helper de costo
+    //    landed) — por eso NO se debita a la cuenta de gasto. Acá sólo se
+    //    contabilizan IVA/IIBB como crédito fiscal, los `otros` como gasto y el
+    //    HABER total al proveedor (CxP).
     for (const factura of facturasDespacho) {
       if (factura.lineas.length === 0) continue;
       if (!factura.proveedor.cuentaContableId) {
@@ -2480,12 +2511,12 @@ export async function crearAsientoDespachoCruzado(
       const tc = toDecimal(factura.tipoCambio);
       const facturaLabel = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""}`;
 
+      // Subtotal capitalizado (no se debita a gasto), pero suma al total a
+      // pagar al proveedor.
       let subtotalFacturaArs = toDecimal(0);
       for (const linea of factura.lineas) {
         const subtotalArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
         if (!subtotalArs.gt(0)) continue;
-        const lineaLabel = linea.descripcion?.trim() || linea.tipo.replace(/_/g, " ").toLowerCase();
-        pushDebe(linea.cuentaContableGastoId, subtotalArs, `${facturaLabel} — ${lineaLabel}`);
         subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
       }
       const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
