@@ -22,9 +22,11 @@ import {
 } from "@/lib/services/cuentas-a-pagar";
 import { listarCuentasBancariasParaVep } from "@/lib/actions/vep-embarque";
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
+import { listarVepDespachosPendientes } from "@/lib/actions/vep-despacho";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { VepSection } from "./vep-section";
+import { VepDespachoSection } from "./vep-despacho-section";
 import { EmbarqueBatchPago } from "./embarque-batch-pago";
 import { PagoPorFactura } from "./_components/pago-por-factura";
 
@@ -36,6 +38,7 @@ export default async function CuentasAPagarPage() {
     porEmbarque,
     saldosProveedores,
     vepEmbarques,
+    vepDespachosPendientes,
     refuerzos,
     cuentasBancariasArs,
     cuentasBancariasMov,
@@ -47,6 +50,7 @@ export default async function CuentasAPagarPage() {
     getCuentasAPagarPorEmbarque(),
     getSaldosPorProveedorConAging(),
     getVepEmbarques(),
+    listarVepDespachosPendientes(),
     getRefuerzosVepPendientes(),
     listarCuentasBancariasParaVep(),
     listarCuentasBancariasParaMovimiento(),
@@ -103,6 +107,12 @@ export default async function CuentasAPagarPage() {
         refuerzos={refuerzos}
         cuentasBancarias={cuentasBancariasArs}
         saldoCreditoAduana={saldoCreditoAduana.saldo}
+        defaultFecha={defaultFecha}
+      />
+
+      <VepDespachoSection
+        veps={vepDespachosPendientes}
+        cuentasBancarias={cuentasBancariasArs}
         defaultFecha={defaultFecha}
       />
 
