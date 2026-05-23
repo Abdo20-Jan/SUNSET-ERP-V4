@@ -866,12 +866,16 @@ export function calcularCostoLandedDespacho(input: CostoLandedInput): CostoLande
     nacionalizadoArs = nacionalizadoArs.plus(fcTotalArs);
   }
 
-  const tributosCapitalizablesArs = round2(
-    toDecimal(input.die)
-      .plus(toDecimal(input.tasaEstadistica))
-      .plus(toDecimal(input.arancelSim))
-      .times(tcDsp),
-  );
+  // Importante: arredondar cada tributo separadamente em ARS antes de somar,
+  // espelhando exatamente o critério do asiento (`crearAsientoDespachoCruzado`),
+  // que credita 2.1.5.01/02/03 com `toDecimal(x).times(tcDsp).toDecimalPlaces(2)`
+  // por tributo. Se aqui somássemos USD e arredondássemos uma vez só, com TCdsp
+  // decimal (ex.: 1399.5) os meios centavos (half-up) divergiriam e o asiento
+  // ficaria 0,01 fora de balanço (DEBE 1.1.5.01 vs. suma HABERs aduana).
+  const dieArs = round2(toDecimal(input.die).times(tcDsp));
+  const teArs = round2(toDecimal(input.tasaEstadistica).times(tcDsp));
+  const arancelSimArs = round2(toDecimal(input.arancelSim).times(tcDsp));
+  const tributosCapitalizablesArs = dieArs.plus(teArs).plus(arancelSimArs);
   const facturasCapitalizablesArs = input.facturasDespacho.reduce(
     (acc, f) => acc.plus(round2(toDecimal(f.subtotal).times(toDecimal(f.tipoCambio)))),
     new Decimal(0),

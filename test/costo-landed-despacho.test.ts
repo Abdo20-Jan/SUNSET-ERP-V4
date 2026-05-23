@@ -80,6 +80,59 @@ describe("calcularCostoLandedDespacho", () => {
     expect(r.costoTotalArs.toFixed(2)).toBe("600.00"); // 300+200 FOB + 100 DIE
   });
 
+  it("TC despacho decimal: tributosCapitalizables = Σ round2(tributo×TC) por tributo (reconcilia con asiento al centavo)", () => {
+    // Regresión del piloto AR-251223036CN-D4 (TC despacho 1399.5).
+    // El asiento contabiliza DIE/Tasa/Arancel SEPARADAMENTE, cada uno
+    // round2(tributo×TCdsp). Si el helper sumara USD primero y redondeara
+    // una sola vez al final, los medios centavos (half-up) divergirían y
+    // el asiento quedaría 0.01 fuera de balanza con TC decimal.
+    // - DIE     1768.25 × 1399.5 = 2,474,665.875 → 2,474,665.88
+    // - Tasa     331.55 × 1399.5 =   464,004.225 →   464,004.23
+    // - Arancel   10.00 × 1399.5 =    13,995.000 →    13,995.00
+    // Σ HABER aduana = 2,952,665.11  (NO 2,952,665.10 del agregado).
+    const r = calcularCostoLandedDespacho({
+      tipoCambioEmbarque: "1382.000000",
+      tipoCambioDespacho: "1399.500000",
+      die: "1768.25",
+      tasaEstadistica: "331.55",
+      arancelSim: "10.00",
+      facturasDespacho: [],
+      items: [
+        { itemDespachoId: 1, productoId: "p1", cantidad: 100, costoFCUnitario: "123.0709" },
+      ],
+    });
+
+    expect(r.tributosCapitalizablesArs.toFixed(2)).toBe("2952665.11");
+    // Sin facturas DESPACHO: capitalizablesArs == tributosCapitalizablesArs.
+    expect(r.capitalizablesArs.toFixed(2)).toBe("2952665.11");
+    // Nacionalizado FC: round2(123.0709 × 1382) = 170083.9838 → 170083.98
+    //  × 100 = 17008398.00.
+    expect(r.nacionalizadoArs.toFixed(2)).toBe("17008398.00");
+    expect(r.costoTotalArs.toFixed(2)).toBe("19961063.11");
+  });
+
+  it("TC despacho decimal con 3 ítems: Σ porItem.costoTotalArs == costoTotalArs", () => {
+    // Mismo caso del D4 pero con prorrateo: confirma que el residuo se
+    // absorbe en el último ítem y la reconciliación al centavo se preserva
+    // con TC decimal (half-up por tributo).
+    const r = calcularCostoLandedDespacho({
+      tipoCambioEmbarque: "1382.000000",
+      tipoCambioDespacho: "1399.500000",
+      die: "1768.25",
+      tasaEstadistica: "331.55",
+      arancelSim: "10.00",
+      facturasDespacho: [],
+      items: [
+        { itemDespachoId: 1, productoId: "pA", cantidad: 30, costoFCUnitario: "123.0709" },
+        { itemDespachoId: 2, productoId: "pB", cantidad: 50, costoFCUnitario: "123.0709" },
+        { itemDespachoId: 3, productoId: "pC", cantidad: 20, costoFCUnitario: "123.0709" },
+      ],
+    });
+    const sumItems = r.porItem.reduce((acc, x) => acc.plus(x.costoTotalArs), new Decimal(0));
+    expect(sumItems.toFixed(2)).toBe(r.costoTotalArs.toFixed(2));
+    expect(r.tributosCapitalizablesArs.toFixed(2)).toBe("2952665.11");
+  });
+
   it("fallback FOB=0 (muestras): prorratea por cantidad", () => {
     const r = calcularCostoLandedDespacho({
       tipoCambioEmbarque: "1",
