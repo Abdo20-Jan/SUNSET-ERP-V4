@@ -113,6 +113,7 @@ export default async function CuentasAPagarPage() {
       <VepDespachoSection
         veps={vepDespachosPendientes}
         cuentasBancarias={cuentasBancariasArs}
+        saldoCreditoAduana={saldoCreditoAduana.saldo}
         defaultFecha={defaultFecha}
       />
 

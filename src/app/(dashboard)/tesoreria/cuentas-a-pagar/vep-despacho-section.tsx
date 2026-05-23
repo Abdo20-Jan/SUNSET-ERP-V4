@@ -56,15 +56,20 @@ export type VepDespachoPendiente = {
 export function VepDespachoSection({
   veps,
   cuentasBancarias,
+  saldoCreditoAduana,
   defaultFecha,
 }: {
   veps: VepDespachoPendiente[];
   cuentasBancarias: CuentaBancariaArsOption[];
+  saldoCreditoAduana: string;
   defaultFecha?: string;
 }) {
   const [pagar, setPagar] = useState<VepDespachoPendiente | null>(null);
 
   if (veps.length === 0) return null;
+
+  const saldoCreditoNum = Number(saldoCreditoAduana);
+  const tieneCredito = saldoCreditoNum > 0.005;
 
   return (
     <>
@@ -74,9 +79,22 @@ export function VepDespachoSection({
             <h2 className="text-sm font-semibold">VEP / Despacho aduanero (parcial cruzado)</h2>
             <p className="text-xs text-muted-foreground">
               Cada despacho parcial nacionalizado genera su propio VEP con los tributos del
-              despacho. Pagalo desde una cuenta bancaria ARS.
+              despacho. Pagalo desde una cuenta bancaria ARS — podés ajustar el monto y aplicar
+              crédito a favor de Aduana (1.1.4.13) si lo tenés.
             </p>
           </div>
+
+          {tieneCredito && (
+            <div className="flex items-center justify-between rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
+              <span>
+                Crédito a favor Aduana disponible (cuenta 1.1.4.13). Aplicable contra cualquier VEP
+                pendiente al momento de pagar.
+              </span>
+              <span className="font-mono font-semibold tabular-nums">
+                ARS {fmtMoney(saldoCreditoAduana)}
+              </span>
+            </div>
+          )}
 
           <Table>
             <TableHeader>
@@ -123,6 +141,7 @@ export function VepDespachoSection({
       <PagarVepDespachoDialog
         vep={pagar}
         cuentasBancarias={cuentasBancarias}
+        saldoCreditoAduana={saldoCreditoAduana}
         onClose={() => setPagar(null)}
         defaultFecha={defaultFecha}
       />
@@ -133,11 +152,13 @@ export function VepDespachoSection({
 function PagarVepDespachoDialog({
   vep,
   cuentasBancarias,
+  saldoCreditoAduana,
   onClose,
   defaultFecha,
 }: {
   vep: VepDespachoPendiente | null;
   cuentasBancarias: CuentaBancariaArsOption[];
+  saldoCreditoAduana: string;
   onClose: () => void;
   defaultFecha?: string;
 }) {
@@ -148,6 +169,10 @@ function PagarVepDespachoDialog({
   const [numeroVep, setNumeroVep] = useState<string>("");
   const [comprobante, setComprobante] = useState<string>("");
   const [referenciaBanco, setReferenciaBanco] = useState<string>("");
+  const [montoPagado, setMontoPagado] = useState<string>(vep?.montoTotal ?? "");
+  const [creditoAplicado, setCreditoAplicado] = useState<string>("0");
+
+  const saldoCreditoNum = Number(saldoCreditoAduana);
 
   // Reset state cuando cambia el VEP elegido.
   useEffect(() => {
@@ -156,34 +181,76 @@ function PagarVepDespachoDialog({
       setNumeroVep("");
       setComprobante("");
       setReferenciaBanco("");
+      setMontoPagado(vep.montoTotal);
+      setCreditoAplicado("0");
     }
   }, [vep]);
 
   if (!vep) return null;
 
+  const totalNum = Number(vep.montoTotal);
+  const bancoNum = Number(montoPagado || "0");
+  const creditoNum = Number(creditoAplicado || "0");
+  const totalPagoNum =
+    (Number.isFinite(bancoNum) ? bancoNum : 0) + (Number.isFinite(creditoNum) ? creditoNum : 0);
+  const diff = totalPagoNum - totalNum;
+  const tipoDiff: "credito" | "deuda" | "exacto" =
+    Math.abs(diff) < 0.005 ? "exacto" : diff > 0 ? "credito" : "deuda";
+
+  const creditoExcedido = creditoNum > saldoCreditoNum + 0.005;
+
+  function aplicarCreditoCompleto() {
+    if (!vep) return;
+    const usar = Math.min(saldoCreditoNum, totalNum);
+    setCreditoAplicado(usar.toFixed(2));
+    setMontoPagado(Math.max(0, totalNum - usar).toFixed(2));
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!vep) return;
-    if (!cuentaBancariaId) {
+    if (creditoExcedido) {
+      toast.error(
+        `Crédito aplicado excede el saldo disponible (ARS ${fmtMoney(saldoCreditoAduana)}).`,
+      );
+      return;
+    }
+    if (creditoNum < totalNum && !cuentaBancariaId) {
       toast.error("Seleccioná la cuenta bancaria desde la que se paga.");
+      return;
+    }
+    if (!Number.isFinite(totalPagoNum) || totalPagoNum <= 0) {
+      toast.error("El pago debe ser mayor a cero.");
       return;
     }
 
     startTransition(async () => {
       const result = await pagarVepDespachoAction({
         despachoId: vep.despachoId,
-        cuentaBancariaId,
+        cuentaBancariaId: cuentaBancariaId || undefined,
         fecha: new Date(`${fecha}T12:00:00Z`),
         numeroVep: numeroVep.trim() || undefined,
         comprobante: comprobante.trim() || undefined,
         referenciaBanco: referenciaBanco.trim() || undefined,
+        montoPagado: bancoNum.toFixed(2),
+        creditoAplicado: creditoNum > 0 ? creditoNum.toFixed(2) : undefined,
       });
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
+      const partes: string[] = [];
+      if (Number(result.creditoAplicado) > 0) {
+        partes.push(`crédito aplicado ARS ${fmtMoney(result.creditoAplicado)}`);
+      }
+      if (result.tipoDiferencia === "credito") {
+        partes.push(`nueva diferencia a favor ARS ${fmtMoney(result.diferencia)}`);
+      } else if (result.tipoDiferencia === "deuda") {
+        partes.push(`saldo pendiente (refuerzo) ARS ${fmtMoney(result.diferencia)}`);
+      }
+      const msgDiff = partes.length > 0 ? ` · ${partes.join(" · ")}` : "";
       toast.success(
-        `VEP del despacho ${vep.despachoCodigo} pagado — asiento #${result.asientoNumero}`,
+        `VEP del despacho ${vep.despachoCodigo} pagado — asiento #${result.asientoNumero}${msgDiff}`,
       );
       onClose();
       router.refresh();
@@ -218,7 +285,7 @@ function PagarVepDespachoDialog({
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label>Cuenta bancaria ARS</Label>
+            <Label>Cuenta bancaria de débito (opcional si 100% crédito)</Label>
             <Select value={cuentaBancariaId} onValueChange={(v) => setCuentaBancariaId(v ?? "")}>
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar...">
@@ -237,6 +304,82 @@ function PagarVepDespachoDialog({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          {saldoCreditoNum > 0.005 && (
+            <div className="flex flex-col gap-2 rounded-md border border-emerald-300 bg-emerald-50/50 p-3 dark:border-emerald-700 dark:bg-emerald-950/20">
+              <div className="flex items-center justify-between">
+                <Label
+                  htmlFor="vep-despacho-credito"
+                  className="text-emerald-900 dark:text-emerald-200"
+                >
+                  Aplicar crédito a favor (1.1.4.13)
+                </Label>
+                <button
+                  type="button"
+                  className="text-xs underline underline-offset-2 text-emerald-800 dark:text-emerald-300"
+                  onClick={aplicarCreditoCompleto}
+                >
+                  Usar máximo (ARS {fmtMoney(Math.min(saldoCreditoNum, totalNum).toFixed(2))})
+                </button>
+              </div>
+              <Input
+                id="vep-despacho-credito"
+                value={creditoAplicado}
+                onChange={(e) => setCreditoAplicado(e.target.value)}
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <p className="text-[11px] text-emerald-900/80 dark:text-emerald-200/80">
+                Saldo disponible: <strong>ARS {fmtMoney(saldoCreditoAduana)}</strong>. Se descuenta
+                del crédito y reduce lo que tenés que transferir al banco.
+              </p>
+              {creditoExcedido && (
+                <p className="text-[11px] font-semibold text-red-700 dark:text-red-400">
+                  Excede el saldo disponible.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="vep-despacho-monto">Monto efectivamente pagado al banco</Label>
+            <Input
+              id="vep-despacho-monto"
+              value={montoPagado}
+              onChange={(e) => setMontoPagado(e.target.value)}
+              inputMode="decimal"
+              placeholder={vep.montoTotal}
+            />
+            <div className="flex justify-between text-[11px] text-muted-foreground">
+              <span>
+                Total efectivo del pago:{" "}
+                <strong className="font-mono">ARS {fmtMoney(totalPagoNum.toFixed(2))}</strong>{" "}
+                (crédito + banco)
+              </span>
+              <span>
+                Total VEP: <span className="font-mono">ARS {fmtMoney(vep.montoTotal)}</span>
+              </span>
+            </div>
+            {tipoDiff === "credito" && (
+              <p className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
+                Estás pagando <strong>ARS {fmtMoney(diff.toFixed(2))}</strong> de más → genera{" "}
+                <strong>nuevo crédito a favor de Aduana</strong> (cuenta 1.1.4.13). Aplicable contra
+                próximos despachos.
+              </p>
+            )}
+            {tipoDiff === "deuda" && (
+              <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+                Estás pagando <strong>ARS {fmtMoney(Math.abs(diff).toFixed(2))}</strong> de menos →
+                genera <strong>saldo pendiente con Aduana</strong> (cuenta 2.1.5.99). Tendrás que
+                pagar un VEP de refuerzo.
+              </p>
+            )}
+            {tipoDiff === "exacto" && totalPagoNum > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Pago exacto al total VEP — no genera crédito ni deuda adicional.
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
