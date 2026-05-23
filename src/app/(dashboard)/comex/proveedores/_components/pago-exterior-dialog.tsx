@@ -37,7 +37,6 @@ export type PagoExteriorFacturaInfo = {
   embarqueCodigo: string;
   proveedorNombre: string;
   saldoUsd: string;
-  tcFactura: string;
 };
 
 interface Props {
@@ -48,22 +47,37 @@ interface Props {
   defaultFecha: string;
 }
 
-// Parser TC: acepta "1.147,50" (es-AR) o "1147.50" (canonical) y
-// devuelve la forma canonical para enviar a la action.
-function parseTcInput(raw: string): string {
+// Parser de números con coma decimal es-AR ("1.147,50" → "1147.50").
+function parseNumberInput(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed === "") return "";
-  // Si trae coma decimal, asumimos formato es-AR: quitar puntos de
-  // miles y convertir coma → punto.
   const normalized = trimmed.includes(",") ? trimmed.replace(/\./g, "").replace(",", ".") : trimmed;
-  return /^\d+(\.\d{1,6})?$/.test(normalized) ? normalized : "";
+  return /^\d+(\.\d+)?$/.test(normalized) ? normalized : "";
 }
 
-const formSchema = z.object({
-  fecha: z.string().min(1, "Seleccione una fecha."),
-  tipoCambioBancoRaw: z.string().min(1, "Ingrese el tipo de cambio del banco."),
-  cuentaBancariaArsId: z.string().uuid("Seleccione una cuenta bancaria ARS."),
-});
+const formSchema = z
+  .object({
+    fecha: z.string().min(1, "Seleccione una fecha."),
+    cuentaBancariaArsId: z.string().uuid("Seleccione una cuenta bancaria ARS."),
+    comprobante: z.string().max(100).optional(),
+    referenciaBanco: z.string().max(100).optional(),
+    montoUsdAPagar: z.string().min(1, "Ingrese el monto USD a pagar."),
+    // El usuario llena UNO de los dos — sincronizamos visualmente y validamos
+    // que al menos uno tenga valor numérico válido.
+    tipoCambioBancoRaw: z.string().optional(),
+    montoArsRaw: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const tc = parseNumberInput(data.tipoCambioBancoRaw ?? "");
+    const ars = parseNumberInput(data.montoArsRaw ?? "");
+    if (tc === "" && ars === "") {
+      ctx.addIssue({
+        path: ["tipoCambioBancoRaw"],
+        code: "custom",
+        message: "Ingrese el tipo de cambio del banco O el monto ARS.",
+      });
+    }
+  });
 
 type FormValues = z.input<typeof formSchema>;
 
@@ -84,44 +98,72 @@ export function PagoExteriorDialog({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  const { control, handleSubmit, reset, formState } = useForm<FormValues>({
+  const { control, handleSubmit, reset, setValue, formState } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       fecha: defaultFecha,
-      tipoCambioBancoRaw: "",
       cuentaBancariaArsId: "",
+      comprobante: "",
+      referenciaBanco: "",
+      montoUsdAPagar: "",
+      tipoCambioBancoRaw: "",
+      montoArsRaw: "",
     },
   });
 
-  // Reset al abrir con nueva factura (evita arrastrar valores entre pagos).
+  // Al abrir con nueva factura: pre-fill montoUsd = saldo, seleccionar
+  // cuenta bancaria si hay sólo una.
   useEffect(() => {
     if (open && factura) {
       reset({
         fecha: defaultFecha,
-        tipoCambioBancoRaw: "",
         cuentaBancariaArsId: cuentasBancariasArs.length === 1 ? cuentasBancariasArs[0]!.id : "",
+        comprobante: "",
+        referenciaBanco: "",
+        montoUsdAPagar: factura.saldoUsd,
+        tipoCambioBancoRaw: "",
+        montoArsRaw: "",
       });
     }
   }, [open, factura, defaultFecha, cuentasBancariasArs, reset]);
 
   const tcRaw = useWatch({ control, name: "tipoCambioBancoRaw" });
+  const arsRaw = useWatch({ control, name: "montoArsRaw" });
+  const montoUsdRaw = useWatch({ control, name: "montoUsdAPagar" });
 
-  const saldoUsdNum = factura ? Number(factura.saldoUsd) : 0;
-  const tcFacturaNum = factura ? Number(factura.tcFactura) : 0;
-  const tcBancoCanonical = parseTcInput(tcRaw ?? "");
-  const tcBancoNum = tcBancoCanonical ? Number(tcBancoCanonical) : 0;
+  const montoUsdNum = Number(parseNumberInput(montoUsdRaw ?? "")) || 0;
+  const tcParsed = parseNumberInput(tcRaw ?? "");
+  const arsParsed = parseNumberInput(arsRaw ?? "");
 
-  const montoArsProveedor = saldoUsdNum * tcFacturaNum;
-  const montoArsBanco = saldoUsdNum * tcBancoNum;
-  const diff = montoArsProveedor - montoArsBanco;
-  const tipoDiff: "ganancia" | "perdida" | "exacto" =
-    tcBancoNum <= 0 || Math.abs(diff) < 0.005 ? "exacto" : diff > 0 ? "ganancia" : "perdida";
+  // Sync TC → ARS y ARS → TC. Usa setValue con shouldDirty=false para no
+  // disparar el watch en loop (sólo actualiza si el otro campo está vacío
+  // o si el cálculo difiere del valor mostrado).
+  useEffect(() => {
+    if (montoUsdNum <= 0) return;
+    if (tcParsed !== "" && arsParsed === "") {
+      const ars = (Number(tcParsed) * montoUsdNum).toFixed(2);
+      setValue("montoArsRaw", ars, { shouldDirty: false });
+    } else if (arsParsed !== "" && tcParsed === "") {
+      const tc = (Number(arsParsed) / montoUsdNum).toFixed(6);
+      setValue("tipoCambioBancoRaw", tc, { shouldDirty: false });
+    }
+  }, [tcParsed, arsParsed, montoUsdNum, setValue]);
 
   function onSubmit(values: FormValues) {
     if (!factura) return;
-    const tcCanonical = parseTcInput(values.tipoCambioBancoRaw);
-    if (!tcCanonical) {
-      toast.error("Tipo de cambio inválido. Use formato 1147,50 o 1147.50.");
+    const tcCanonical = parseNumberInput(values.tipoCambioBancoRaw ?? "");
+    const arsCanonical = parseNumberInput(values.montoArsRaw ?? "");
+    if (tcCanonical === "" && arsCanonical === "") {
+      toast.error("Ingrese tipo de cambio o monto ARS.");
+      return;
+    }
+
+    // Enviamos sólo UNO de los dos (el que el usuario llenó primero
+    // tiene prioridad — si llenó ambos pasamos sólo TC por convención).
+    const sendTc = tcCanonical !== "";
+    const usdCanonical = parseNumberInput(values.montoUsdAPagar);
+    if (usdCanonical === "" || Number(usdCanonical) <= 0) {
+      toast.error("Ingrese un monto USD válido.");
       return;
     }
 
@@ -130,8 +172,17 @@ export function PagoExteriorDialog({
         facturaOrigen: factura.facturaOrigen,
         facturaId: factura.facturaId,
         cuentaBancariaArsId: values.cuentaBancariaArsId,
-        tipoCambioBanco: tcCanonical,
         fecha: values.fecha,
+        montoUsdAPagar: usdCanonical,
+        ...(sendTc ? { tipoCambioBanco: tcCanonical } : { montoArs: arsCanonical }),
+        comprobante:
+          values.comprobante && values.comprobante.trim() !== ""
+            ? values.comprobante.trim()
+            : undefined,
+        referenciaBanco:
+          values.referenciaBanco && values.referenciaBanco.trim() !== ""
+            ? values.referenciaBanco.trim()
+            : undefined,
       });
       if (!res.ok) {
         toast.error(res.error);
@@ -158,9 +209,9 @@ export function PagoExteriorDialog({
               <span className="text-muted-foreground">Embarque</span>
               <span className="font-mono">{factura.embarqueCodigo}</span>
               <span className="text-muted-foreground">Saldo USD</span>
-              <span className="font-mono font-medium tabular-nums">{fmtArs(saldoUsdNum)}</span>
-              <span className="text-muted-foreground">TC original</span>
-              <span className="font-mono tabular-nums">{factura.tcFactura}</span>
+              <span className="font-mono font-medium tabular-nums">
+                {fmtArs(Number(factura.saldoUsd))}
+              </span>
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -176,29 +227,7 @@ export function PagoExteriorDialog({
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="tcBanco">Tipo de cambio del banco</Label>
-              <Controller
-                control={control}
-                name="tipoCambioBancoRaw"
-                render={({ field }) => (
-                  <Input
-                    id="tcBanco"
-                    inputMode="decimal"
-                    placeholder="1147,50"
-                    autoComplete="off"
-                    {...field}
-                  />
-                )}
-              />
-              {formState.errors.tipoCambioBancoRaw && (
-                <p className="text-xs text-destructive">
-                  {formState.errors.tipoCambioBancoRaw.message}
-                </p>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="cuentaBanc">Cuenta bancaria ARS</Label>
+              <Label htmlFor="cuentaBanc">Cuenta bancaria (banco)</Label>
               <Controller
                 control={control}
                 name="cuentaBancariaArsId"
@@ -230,28 +259,94 @@ export function PagoExteriorDialog({
               )}
             </div>
 
-            <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-md border p-3 text-xs">
-              <span className="text-muted-foreground">Cancela pasivo (ARS)</span>
-              <span className="text-right font-mono tabular-nums">{fmtArs(montoArsProveedor)}</span>
-              <span className="text-muted-foreground">Sale del banco (ARS)</span>
-              <span className="text-right font-mono tabular-nums">
-                {tcBancoNum > 0 ? fmtArs(montoArsBanco) : "—"}
-              </span>
-              {tcBancoNum > 0 && tipoDiff !== "exacto" && (
-                <>
-                  <span className="text-muted-foreground">
-                    {tipoDiff === "ganancia"
-                      ? "Ganancia cambial (4.3.1.01)"
-                      : "Pérdida cambial (5.8.2.01)"}
-                  </span>
-                  <span
-                    className={`text-right font-mono tabular-nums ${
-                      tipoDiff === "ganancia" ? "text-emerald-600" : "text-destructive"
-                    }`}
-                  >
-                    {fmtArs(Math.abs(diff))}
-                  </span>
-                </>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="comprobante">Comprobante</Label>
+                <Controller
+                  control={control}
+                  name="comprobante"
+                  render={({ field }) => (
+                    <Input id="comprobante" placeholder="OP-12345" {...field} />
+                  )}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="referencia">Ref. banco</Label>
+                <Controller
+                  control={control}
+                  name="referenciaBanco"
+                  render={({ field }) => <Input id="referencia" placeholder="TRF-ABC" {...field} />}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="usd">Pagar USD</Label>
+              <Controller
+                control={control}
+                name="montoUsdAPagar"
+                render={({ field }) => (
+                  <Input id="usd" inputMode="decimal" placeholder={factura.saldoUsd} {...field} />
+                )}
+              />
+              {formState.errors.montoUsdAPagar && (
+                <p className="text-xs text-destructive">
+                  {formState.errors.montoUsdAPagar.message}
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-md border p-3">
+              <p className="mb-2 text-xs text-muted-foreground">
+                Llene <strong>uno</strong> de los dos — el otro se calcula automáticamente:
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="tcBanco">TC del banco</Label>
+                  <Controller
+                    control={control}
+                    name="tipoCambioBancoRaw"
+                    render={({ field }) => (
+                      <Input
+                        id="tcBanco"
+                        inputMode="decimal"
+                        placeholder="1147,50"
+                        autoComplete="off"
+                        {...field}
+                        onChange={(e) => {
+                          field.onChange(e);
+                          // Al editar TC, limpiar ARS para que el sync calcule.
+                          setValue("montoArsRaw", "", { shouldDirty: false });
+                        }}
+                      />
+                    )}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="arsBanco">ARS a debitar del banco</Label>
+                  <Controller
+                    control={control}
+                    name="montoArsRaw"
+                    render={({ field }) => (
+                      <Input
+                        id="arsBanco"
+                        inputMode="decimal"
+                        placeholder="25245000,00"
+                        autoComplete="off"
+                        {...field}
+                        onChange={(e) => {
+                          field.onChange(e);
+                          setValue("tipoCambioBancoRaw", "", { shouldDirty: false });
+                        }}
+                      />
+                    )}
+                  />
+                </div>
+              </div>
+              {formState.errors.tipoCambioBancoRaw && (
+                <p className="mt-1 text-xs text-destructive">
+                  {formState.errors.tipoCambioBancoRaw.message}
+                </p>
               )}
             </div>
 

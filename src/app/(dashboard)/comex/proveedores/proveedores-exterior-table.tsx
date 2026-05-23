@@ -49,7 +49,6 @@ function toFacturaInfo(
     embarqueCodigo,
     proveedorNombre,
     saldoUsd: factura.saldoUsd,
-    tcFactura: factura.tipoCambioOriginal,
   };
 }
 

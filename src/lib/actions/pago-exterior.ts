@@ -28,13 +28,6 @@ type TxClient = Prisma.TransactionClient;
 const MONEY_RE = /^\d+(\.\d{1,2})?$/;
 const FX_RE = /^\d+(\.\d{1,6})?$/;
 
-/** Cuenta contable usada cuando TCbanco < TCfactura (la deuda original
- *  valía más que lo que pagamos hoy → ganancia financiera). */
-const CODIGO_DIFERENCIA_POSITIVA = "4.3.1.01";
-/** Cuenta contable usada cuando TCbanco > TCfactura (pagamos hoy más
- *  ARS que el saldo original → pérdida financiera). */
-const CODIGO_DIFERENCIA_NEGATIVA = "5.8.2.01";
-
 const ESTADOS_EMBARQUE_CON_SALDO: EmbarqueEstado[] = [
   EmbarqueEstado.EN_ZONA_PRIMARIA,
   EmbarqueEstado.EN_ADUANA,
@@ -43,6 +36,13 @@ const ESTADOS_EMBARQUE_CON_SALDO: EmbarqueEstado[] = [
   EmbarqueEstado.CERRADO,
 ];
 
+// El input acepta UNO de los dos: tipoCambioBanco O montoArs. El otro se
+// deriva automáticamente del USD a pagar. No se calcula diferencia cambial
+// en el momento del pago — el asiento siempre es de 2 líneas (DEBE cuenta
+// proveedor / HABER cuenta banco) por el mismo monto ARS. La diferencia
+// con el saldo contable HABER del proveedor (que viene del asiento de
+// ingreso ZP al TC del día) surge naturalmente como saldo residual y se
+// concilia por separado (ajuste manual de fechamento si necesario).
 const pagarFacturaExteriorSchema = z
   .object({
     // "compra"      → Compra USD (id = uuid)
@@ -52,9 +52,16 @@ const pagarFacturaExteriorSchema = z
     /** UUID (compra / embarqueFob) o número entero (embarqueCosto). */
     facturaId: z.union([z.string().uuid(), z.number().int().positive()]),
     cuentaBancariaArsId: z.string().uuid(),
-    tipoCambioBanco: z.string().regex(FX_RE, "Tipo de cambio inválido (máx. 6 decimales)"),
     fecha: z.coerce.date(),
     montoUsdAPagar: z.string().regex(MONEY_RE, "Monto USD inválido (máx. 2 decimales)").optional(),
+    // UNO de los dos (exclusivo) — el otro se calcula automáticamente:
+    tipoCambioBanco: z
+      .string()
+      .regex(FX_RE, "Tipo de cambio inválido (máx. 6 decimales)")
+      .optional(),
+    montoArs: z.string().regex(MONEY_RE, "Monto ARS inválido (máx. 2 decimales)").optional(),
+    comprobante: z.string().trim().max(100).optional(),
+    referenciaBanco: z.string().trim().max(100).optional(),
     descripcionExtra: z.string().trim().max(255).optional(),
   })
   .superRefine((data, ctx) => {
@@ -79,11 +86,27 @@ const pagarFacturaExteriorSchema = z
         message: "Para un Embarque FOB el id debe ser UUID.",
       });
     }
-    if (Number(data.tipoCambioBanco) <= 0) {
+    const tcGiven = data.tipoCambioBanco !== undefined && data.tipoCambioBanco !== "";
+    const arsGiven = data.montoArs !== undefined && data.montoArs !== "";
+    if (tcGiven === arsGiven) {
+      ctx.addIssue({
+        path: ["tipoCambioBanco"],
+        code: "custom",
+        message: "Indique tipo de cambio del banco O monto ARS a debitar (exactamente uno).",
+      });
+    }
+    if (tcGiven && Number(data.tipoCambioBanco) <= 0) {
       ctx.addIssue({
         path: ["tipoCambioBanco"],
         code: "custom",
         message: "El tipo de cambio debe ser mayor a 0.",
+      });
+    }
+    if (arsGiven && Number(data.montoArs) <= 0) {
+      ctx.addIssue({
+        path: ["montoArs"],
+        code: "custom",
+        message: "El monto ARS debe ser mayor a 0.",
       });
     }
     if (data.montoUsdAPagar !== undefined && Number(data.montoUsdAPagar) <= 0) {
@@ -103,13 +126,9 @@ export type PagarFacturaExteriorResult =
       movimientoId: string;
       asientoId: string;
       asientoNumero: number;
-      /** Diferencia ARS = montoArsProveedor − montoArsBanco.
-       *  Positiva = ganancia (4.3.1.01); negativa = pérdida (5.8.2.01). */
-      diferenciaArs: string;
-      tipoDiferencia: "ganancia" | "perdida" | "exacto";
       montoUsd: string;
-      montoArsProveedor: string;
-      montoArsBanco: string;
+      montoArs: string;
+      tipoCambioAplicado: string; // dado o derivado de montoArs/montoUsd
     }
   | { ok: false; error: string };
 
@@ -128,22 +147,28 @@ interface FacturaCargada {
 
 /**
  * Paga una factura USD de un proveedor del exterior debitando una
- * cuenta bancaria ARS con el TC del banco del día. Genera un asiento
- * de 2 o 3 líneas:
+ * cuenta bancaria ARS. El usuário ingresa UNO de los dos: tipo de cambio
+ * del banco O monto ARS efectivamente debitado del banco. El otro se
+ * deriva automáticamente del USD a pagar.
  *
- *   DEBE  cuentaProveedor   ARS = USD × TCfactura      (cancela pasivo)
- *   HABER cuentaBanco ARS   ARS = USD × TCbanco        (salida real)
- *   HABER 4.3.1.01          ARS = diff (si TCbanco < TCfactura → ganancia)
- *   DEBE  5.8.2.01          ARS = |diff| (si TCbanco > TCfactura → pérdida)
+ * Asiento de SÓLO 2 líneas:
  *
- * El MovimientoTesoreria queda en moneda USD con tipoCambio=TCbanco
- * para que `getSaldosExteriorPorProveedor` lo detecte y reduzca el
- * saldo USD del proveedor. El saldo bancario en ARS se actualiza por
- * la línea HABER del asiento (en ARS), no por el monto del movimiento.
+ *   DEBE  cuentaProveedor   ARS = montoArs    (cancela parte del pasivo)
+ *   HABER cuentaBanco ARS   ARS = montoArs    (salida real del banco)
  *
- * Vincula la línea DEBE proveedor con la factura vía
- * AplicacionPagoCompra / AplicacionPagoEmbarqueCosto (montoArs en ARS
- * al TC original de la factura — coincide con el monto debitado).
+ * NO se genera diferencia cambiaria en el momento del pago. La cuenta
+ * del proveedor vive en ARS en el libro; el TC del ingreso ZP (registrado
+ * al cargar el embarque) sólo determinó el HABER original. Al pagar, se
+ * debita el ARS efectivamente desembolsado — sin comparación con el TC
+ * original ni cuentas 4.3.1.01 / 5.8.2.01.
+ *
+ * La diferencia entre el saldo HABER de la cuenta proveedor (al TC del
+ * ingreso) y la suma de pagos DEBE (al TC del banco del día) surge como
+ * saldo residual y se concilia con un ajuste manual de fechamento.
+ *
+ * El MovimientoTesoreria queda en moneda USD (monto=montoUsd, tipoCambio
+ * derivado) para que `getSaldosExteriorPorProveedor` detecte el pago y
+ * reduzca el saldo USD del proveedor por descripción tokenizada.
  */
 export async function pagarFacturaExteriorAction(
   raw: PagarFacturaExteriorInput,
@@ -166,12 +191,14 @@ export async function pagarFacturaExteriorAction(
     facturaId,
     cuentaBancariaArsId,
     tipoCambioBanco,
+    montoArs: montoArsInput,
     fecha,
     montoUsdAPagar,
+    comprobante,
+    referenciaBanco,
     descripcionExtra,
   } = parsed.data;
 
-  // Validaciones fuera de la transacción: cuenta bancaria + cuentas de diff.
   const cuentaBancaria = await db.cuentaBancaria.findUnique({
     where: { id: cuentaBancariaArsId },
     select: {
@@ -191,19 +218,6 @@ export async function pagarFacturaExteriorAction(
       error: "La cuenta bancaria debe ser en ARS — el pago USD se hace con TC del banco.",
     };
   }
-
-  // Pre-cargar ambas cuentas de diferencia cambiaria. Una se usa si
-  // hay ganancia, otra si hay pérdida; si la fxRate coincide con TC
-  // original no se usa ninguna.
-  const cuentasDiff = await db.cuentaContable.findMany({
-    where: {
-      codigo: { in: [CODIGO_DIFERENCIA_POSITIVA, CODIGO_DIFERENCIA_NEGATIVA] },
-      activa: true,
-    },
-    select: { id: true, codigo: true },
-  });
-  const cuentaDiffPositiva = cuentasDiff.find((c) => c.codigo === CODIGO_DIFERENCIA_POSITIVA);
-  const cuentaDiffNegativa = cuentasDiff.find((c) => c.codigo === CODIGO_DIFERENCIA_NEGATIVA);
 
   try {
     const result = await db.$transaction(async (tx) => {
@@ -238,30 +252,15 @@ export async function pagarFacturaExteriorAction(
         );
       }
 
-      const tcBanco = new Decimal(tipoCambioBanco);
-      const montoArsProveedor = montoUsd
-        .times(factura.tipoCambioOriginal)
-        .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-      const montoArsBanco = montoUsd.times(tcBanco).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-      const diff = montoArsProveedor.minus(montoArsBanco);
-
-      const tipoDiferencia: "ganancia" | "perdida" | "exacto" = diff.abs().lt(0.005)
-        ? "exacto"
-        : diff.gt(0)
-          ? "ganancia"
-          : "perdida";
-
-      if (tipoDiferencia === "ganancia" && !cuentaDiffPositiva) {
-        throw new AsientoError(
-          "CUENTA_INVALIDA",
-          `Falta la cuenta ${CODIGO_DIFERENCIA_POSITIVA} (DIFERENCIA DE CAMBIO POSITIVA) activa en el plan de cuentas.`,
-        );
-      }
-      if (tipoDiferencia === "perdida" && !cuentaDiffNegativa) {
-        throw new AsientoError(
-          "CUENTA_INVALIDA",
-          `Falta la cuenta ${CODIGO_DIFERENCIA_NEGATIVA} (DIFERENCIA DE CAMBIO NEGATIVA) activa en el plan de cuentas.`,
-        );
+      // Resolver montoArs y tcAplicado: uno se da, el otro se deriva.
+      let montoArs: Decimal;
+      let tcAplicado: Decimal;
+      if (montoArsInput !== undefined && montoArsInput !== "") {
+        montoArs = new Decimal(montoArsInput);
+        tcAplicado = montoArs.dividedBy(montoUsd).toDecimalPlaces(6, Decimal.ROUND_HALF_UP);
+      } else {
+        tcAplicado = new Decimal(tipoCambioBanco ?? "0");
+        montoArs = montoUsd.times(tcAplicado).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
       }
 
       const refFactura = factura.embarqueCodigo
@@ -272,45 +271,28 @@ export async function pagarFacturaExteriorAction(
         ? `${descripcionBase} — ${descripcionExtra}`
         : descripcionBase;
 
-      // Línea DEBE proveedor: descripción incluye numero+embarqueCodigo
-      // como tokens (mismo formato que tokenizar() de cuentas-a-pagar),
-      // así pagadoUsdParaFactura matchea futuro pago contra esta factura.
+      // Asiento de 2 líneas — sin diferencia cambial. Descripción de la
+      // línea DEBE incluye numero + embarqueCodigo como tokens para que
+      // pagadoUsdParaFactura matchee pagos futuros contra esta factura.
       const lineas: LineaInput[] = [
         {
           cuentaId: factura.cuentaProveedorId,
-          debe: montoArsProveedor.toFixed(2),
+          debe: montoArs.toFixed(2),
           haber: 0,
           descripcion: `Cancelación ${refFactura}`,
         },
         {
           cuentaId: cuentaBancaria.cuentaContableId,
           debe: 0,
-          haber: montoArsBanco.toFixed(2),
+          haber: montoArs.toFixed(2),
           descripcion: `Pago ${cuentaBancaria.banco}${
             cuentaBancaria.numero ? ` ${cuentaBancaria.numero}` : ""
           } — ${refFactura}`,
         },
       ];
 
-      if (tipoDiferencia === "ganancia") {
-        lineas.push({
-          cuentaId: cuentaDiffPositiva!.id,
-          debe: 0,
-          haber: diff.toFixed(2),
-          descripcion: `Diferencia cambiaria favorable — ${refFactura}`,
-        });
-      } else if (tipoDiferencia === "perdida") {
-        lineas.push({
-          cuentaId: cuentaDiffNegativa!.id,
-          debe: diff.abs().toFixed(2),
-          haber: 0,
-          descripcion: `Diferencia cambiaria desfavorable — ${refFactura}`,
-        });
-      }
-
-      // MovimientoTesoreria en USD: registra el pago contra el proveedor
-      // exterior. El saldo bancario ARS se ajusta por la línea HABER del
-      // asiento (en ARS), no por este monto.
+      // MovimientoTesoreria en USD: el saldo bancario ARS se ajusta por
+      // la línea HABER del asiento (en ARS), no por el monto del movimiento.
       const mov = await tx.movimientoTesoreria.create({
         data: {
           tipo: MovimientoTesoreriaTipo.PAGO,
@@ -318,11 +300,11 @@ export async function pagarFacturaExteriorAction(
           fecha,
           monto: montoUsd.toFixed(2),
           moneda: Moneda.USD,
-          tipoCambio: tcBanco.toFixed(6),
+          tipoCambio: tcAplicado.toFixed(6),
           cuentaContableId: factura.cuentaProveedorId,
           descripcion: descripcionAsiento,
-          comprobante: null,
-          referenciaBanco: null,
+          comprobante: comprobante && comprobante.length > 0 ? comprobante : null,
+          referenciaBanco: referenciaBanco && referenciaBanco.length > 0 ? referenciaBanco : null,
         },
         select: { id: true },
       });
@@ -333,14 +315,13 @@ export async function pagarFacturaExteriorAction(
           descripcion: descripcionAsiento,
           origen: AsientoOrigen.TESORERIA,
           moneda: Moneda.USD,
-          tipoCambio: tcBanco.toFixed(6),
+          tipoCambio: tcAplicado.toFixed(6),
           lineas,
         },
         tx,
       );
 
-      // Vincular movimiento ↔ asiento con guard de concurrencia
-      // (mismo patrón de crearMovimientoTesoreriaAction).
+      // Vincular movimiento ↔ asiento con guard de concurrencia.
       const updMov = await tx.movimientoTesoreria.updateMany({
         where: { id: mov.id, asientoId: null },
         data: { asientoId: asiento.id },
@@ -354,8 +335,7 @@ export async function pagarFacturaExteriorAction(
 
       const contabilizado = await contabilizarAsiento(asiento.id, tx);
 
-      // Recuperar id de la línea DEBE proveedor (primera DEBE insertada,
-      // ordenada por id asc) para vincular AplicacionPago*.
+      // Recuperar id de la línea DEBE proveedor (única DEBE — modelo 2 líneas).
       const lineaDebeProv = await tx.lineaAsiento.findFirst({
         where: { asientoId: contabilizado.id, debe: { gt: 0 } },
         orderBy: { id: "asc" },
@@ -370,7 +350,7 @@ export async function pagarFacturaExteriorAction(
 
       const aplicacionData = {
         lineaAsientoId: lineaDebeProv.id,
-        montoArs: montoArsProveedor.toFixed(2),
+        montoArs: montoArs.toFixed(2),
       } as const;
 
       if (facturaOrigen === "compra") {
@@ -382,20 +362,17 @@ export async function pagarFacturaExteriorAction(
           data: { ...aplicacionData, embarqueCostoId: Number(factura.id) },
         });
       }
-      // facturaOrigen === "embarqueFob": no hay tabla de aplicación dedicada
-      // (la deuda no tiene Compra ni EmbarqueCosto). El saldo se descuenta
-      // por match de tokens (embarque.codigo) en la descripción de la línea
-      // DEBE — mismo algoritmo que getSaldosExteriorPorProveedor.
+      // facturaOrigen === "embarqueFob": no hay tabla de aplicación dedicada;
+      // el saldo se descuenta por match de tokens (embarque.codigo) en la
+      // descripción de la línea DEBE — mismo algoritmo que getSaldosExteriorPorProveedor.
 
       return {
         movimientoId: mov.id,
         asientoId: contabilizado.id,
         asientoNumero: contabilizado.numero,
-        diferenciaArs: diff.toFixed(2),
-        tipoDiferencia,
         montoUsd: montoUsd.toFixed(2),
-        montoArsProveedor: montoArsProveedor.toFixed(2),
-        montoArsBanco: montoArsBanco.toFixed(2),
+        montoArs: montoArs.toFixed(2),
+        tipoCambioAplicado: tcAplicado.toFixed(6),
       };
     });
 
