@@ -41,4 +41,5 @@ export type {
   FlujoOrigen,
 } from "./reportes/flujo-caja";
 
+export { pruneCuentasSinSaldo } from "./reportes/shared";
 export type { CuentaTreeNode } from "./reportes/shared";

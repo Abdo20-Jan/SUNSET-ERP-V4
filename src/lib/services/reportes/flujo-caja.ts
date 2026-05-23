@@ -379,13 +379,28 @@ export async function getFlujoCaja(
     saldoAcumuladoPorMes[m] = acum.toDecimalPlaces(2);
   }
 
+  // Poda defensiva: remove nós sem movimento (totalPeriodo 0 e todos os
+  // meses 0), preservando pais com filhos movimentados. Cobre casos como
+  // un banco em `transferencias` sin transferencias en el período. Não
+  // altera os totales (calculados arriba sobre las analíticas).
+  const sinMovimiento = (node: FlujoNode): boolean =>
+    node.totalPeriodo.isZero() && Object.values(node.valoresPorMes).every((c) => c.monto.isZero());
+  const prunearFlujo = (nodes: FlujoNode[]): FlujoNode[] => {
+    const prune = (node: FlujoNode): FlujoNode | null => {
+      const children = node.children.map(prune).filter((n): n is FlujoNode => n !== null);
+      if (children.length === 0 && sinMovimiento(node)) return null;
+      return { ...node, children };
+    };
+    return nodes.map(prune).filter((n): n is FlujoNode => n !== null);
+  };
+
   return {
     moneda,
     desde,
     hasta,
     meses,
-    contrapartidas: contrapartidasRoots,
-    transferencias: transferenciasNodes,
+    contrapartidas: prunearFlujo(contrapartidasRoots),
+    transferencias: prunearFlujo(transferenciasNodes),
     totales: {
       totalIngresosPorMes,
       totalEgresosPorMes,
