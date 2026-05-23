@@ -29,7 +29,9 @@ import { pagarFacturaExteriorAction } from "@/lib/actions/pago-exterior";
 import type { CuentaBancariaOption } from "@/lib/actions/movimientos-tesoreria";
 
 export type PagoExteriorFacturaInfo = {
-  facturaOrigen: "compra" | "embarqueCosto";
+  // "embarqueFob" = factura virtual derivada del Embarque + ItemEmbarque
+  // (sin Compra ni EmbarqueCosto; aplica al flujo Modelo Y bonded).
+  facturaOrigen: "compra" | "embarqueCosto" | "embarqueFob";
   facturaId: string | number;
   facturaNumero: string;
   embarqueCodigo: string;

@@ -1515,7 +1515,12 @@ export async function getSaldoCreditoAduana(): Promise<{
 // el usuario debe X USD; cuando los paga, fecha el TC del día.
 
 export type FacturaSaldoUsd = {
-  origen: "compra" | "embarque";
+  // "compra"      → Compra USD del proveedor exterior (mercadería FOB con flujo Pedido→Compra)
+  // "embarque"    → EmbarqueCosto USD (factura de servicios de importación al proveedor exterior)
+  // "embarqueFob" → factura VIRTUAL derivada del Embarque + ItemEmbarque cuando no hay Compra ni
+  //                 EmbarqueCosto cadastrada del proveedor exterior (flujo Modelo Y bonded típico,
+  //                 donde la deuda FOB existe sólo en los items del embarque)
+  origen: "compra" | "embarque" | "embarqueFob";
   id: string;
   numero: string;
   fecha: string;
@@ -1686,9 +1691,12 @@ export async function getSaldosExteriorPorProveedor(): Promise<ProveedorExterior
   });
 
   // Embarques propios del proveedor exterior (mercadería FOB).
-  // El "saldo" de la mercadería se modela a través de Compras vinculadas al
-  // pedido — no hay un EmbarqueCosto del proveedor exterior. Listamos los
-  // embarques para mostrar agrupados, pero las facturas usadas son Compras.
+  // 3 modelos posibles de "factura USD":
+  //   - Compra USD vinculada via PedidoCompra → embarques[].pedidoCompraId  (flujo Pedido→Compra)
+  //   - EmbarqueCosto USD del proveedor exterior (raro: factura por servicios al exterior)
+  //   - Embarque + ItemEmbarque (FOB virtual): cuando ninguno de los anteriores existe, la
+  //     deuda FOB se deriva de los items del embarque (cantidad × precioUnitarioFob × moneda=USD).
+  //     Aplica al flujo Modelo Y bonded típico, donde la deuda existe sólo en items.
   const embarques = await db.embarque.findMany({
     where: {
       proveedorId: { in: proveedorIds },
@@ -1709,6 +1717,10 @@ export async function getSaldosExteriorPorProveedor(): Promise<ProveedorExterior
       codigo: true,
       proveedorId: true,
       pedidoCompraId: true,
+      moneda: true,
+      tipoCambio: true,
+      createdAt: true,
+      items: { select: { cantidad: true, precioUnitarioFob: true } },
     },
   });
 
@@ -1810,6 +1822,36 @@ export async function getSaldosExteriorPorProveedor(): Promise<ProveedorExterior
       const arr = facturasPorEmbarque.get(c.embarque.id) ?? [];
       arr.push(f);
       facturasPorEmbarque.set(c.embarque.id, arr);
+    }
+
+    // Embarques sin Compra ni EmbarqueCosto USD del proveedor exterior:
+    // derivamos una factura VIRTUAL del propio Embarque + ItemEmbarque.
+    // Match de pago: tokens del embarque.codigo en la descripción de la
+    // línea DEBE (mismo algoritmo que las facturas reales).
+    for (const emb of embarques.filter((e) => e.proveedorId === p.id)) {
+      if (facturasPorEmbarque.has(emb.id)) continue; // ya cubierto por Compra/EmbarqueCosto
+      if (emb.moneda !== Moneda.USD) continue; // FOB no-USD no aplica a la deuda USD del exterior
+      const totalUsd = emb.items.reduce(
+        (acc, i) => acc.plus(toDecimal(i.precioUnitarioFob).times(i.cantidad)),
+        toDecimal(0),
+      );
+      if (totalUsd.lte(0.005)) continue;
+      const pagadoUsd = pagadoUsdParaFactura(cuentaId, emb.codigo, emb.codigo);
+      const saldoUsd = totalUsd.minus(pagadoUsd);
+      if (saldoUsd.lte(0.005)) continue;
+      facturasPorEmbarque.set(emb.id, [
+        {
+          origen: "embarqueFob",
+          id: emb.id,
+          numero: emb.codigo,
+          fecha: emb.createdAt.toISOString(),
+          fechaVencimiento: null,
+          tipoCambioOriginal: toDecimal(emb.tipoCambio).toFixed(6),
+          totalUsd: totalUsd.toFixed(2),
+          pagadoUsd: pagadoUsd.toFixed(2),
+          saldoUsd: saldoUsd.toFixed(2),
+        },
+      ]);
     }
 
     const embarquesOut: EmbarqueSaldoUsd[] = [];

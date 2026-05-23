@@ -49,6 +49,7 @@ interface SeedExterior {
   embarqueCostoExteriorId: number;
   compraExteriorId: string;
   embarqueExteriorCodigo: string;
+  embarqueExteriorId: string;
 }
 
 describe("pagarFacturaExteriorAction — pago USD desde ARS con TC banco", () => {
@@ -281,6 +282,43 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS con TC banco", () =>
       embarqueCostoExteriorId: embarqueCosto.id,
       compraExteriorId: compraExterior.id,
       embarqueExteriorCodigo: embarqueExterior.codigo,
+      embarqueExteriorId: embarqueExterior.id,
+    };
+  }
+
+  // Seed adicional: embarque exterior SIN Compra ni EmbarqueCosto USD del
+  // proveedor — replica el caso real bonded (flujo Modelo Y) donde la
+  // deuda FOB existe solo en items del embarque. Usa producto/depósito
+  // distintos del seed principal para no chocar con seu @unique.
+  async function seedEmbarqueFobOnly(
+    proveedorExteriorId: string,
+  ): Promise<{ embarqueId: string; embarqueCodigo: string; totalFobUsd: string }> {
+    const producto = await db.prisma.producto.create({
+      data: { codigo: "SKU-FOB", nombre: "Neumático FOB only" },
+    });
+    const dep = await db.prisma.deposito.findFirstOrThrow({ where: { nombre: "Nacional" } });
+    const embarque = await db.prisma.embarque.create({
+      data: {
+        codigo: "EMB-FOB-ONLY",
+        proveedorId: proveedorExteriorId,
+        moneda: "USD",
+        tipoCambio: TC_FACTURA,
+        depositoDestinoId: dep.id,
+        estado: "EN_ZONA_PRIMARIA", // estado con saldo
+      },
+    });
+    await db.prisma.itemEmbarque.create({
+      data: {
+        embarqueId: embarque.id,
+        productoId: producto.id,
+        cantidad: 100,
+        precioUnitarioFob: "220.00", // total FOB = 100 × 220 = 22.000 USD
+      },
+    });
+    return {
+      embarqueId: embarque.id,
+      embarqueCodigo: embarque.codigo,
+      totalFobUsd: MONTO_USD,
     };
   }
 
@@ -551,5 +589,100 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS con TC banco", () =>
     });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(/5\.8\.2\.01/);
+  });
+
+  // ============================================================
+  // Paths "embarqueFob" — pago de factura virtual derivada del Embarque
+  // + ItemEmbarque (sin Compra ni EmbarqueCosto USD). Caso real del
+  // flujo Modelo Y bonded en prod: la deuda FOB existe sólo en items.
+  // ============================================================
+
+  it("paga total via Embarque FOB virtual (sin Compra ni EmbarqueCosto)", async () => {
+    const s = await seed();
+    const fob = await seedEmbarqueFobOnly(s.proveedorExteriorId);
+
+    const res = await pagarFacturaExteriorAction({
+      facturaOrigen: "embarqueFob",
+      facturaId: fob.embarqueId,
+      cuentaBancariaArsId: s.cuentaBancariaArsId,
+      tipoCambioBanco: TC_FACTURA, // sin diff
+      fecha: FECHA_PAGO,
+    });
+    if (!res.ok) throw new Error(`pago falló: ${res.error}`);
+    expect(res.tipoDiferencia).toBe("exacto");
+    expect(Number(res.montoUsd)).toBeCloseTo(22000, 2);
+    await expectAsientoBalanceado(res.asientoId);
+
+    // No se grava AplicacionPago* (no hay tabla dedicada para embarqueFob).
+    // El saldo se descuenta por match de descripción.
+    const mov = await db.prisma.movimientoTesoreria.findUniqueOrThrow({
+      where: { id: res.movimientoId },
+    });
+    expect(mov.moneda).toBe("USD");
+    expect(Number(mov.monto)).toBeCloseTo(22000, 2);
+  });
+
+  it("paga parcial via Embarque FOB — segundo pago aplica el saldo restante", async () => {
+    const s = await seed();
+    const fob = await seedEmbarqueFobOnly(s.proveedorExteriorId);
+
+    const r1 = await pagarFacturaExteriorAction({
+      facturaOrigen: "embarqueFob",
+      facturaId: fob.embarqueId,
+      cuentaBancariaArsId: s.cuentaBancariaArsId,
+      tipoCambioBanco: TC_FACTURA,
+      fecha: FECHA_PAGO,
+      montoUsdAPagar: "10000.00",
+    });
+    if (!r1.ok) throw new Error(`primer pago falló: ${r1.error}`);
+
+    const r2 = await pagarFacturaExteriorAction({
+      facturaOrigen: "embarqueFob",
+      facturaId: fob.embarqueId,
+      cuentaBancariaArsId: s.cuentaBancariaArsId,
+      tipoCambioBanco: TC_FACTURA,
+      fecha: FECHA_PAGO,
+      montoUsdAPagar: "12000.00",
+    });
+    if (!r2.ok) throw new Error(`segundo pago falló: ${r2.error}`);
+
+    // 3er intento rechazado (saldo 0).
+    const r3 = await pagarFacturaExteriorAction({
+      facturaOrigen: "embarqueFob",
+      facturaId: fob.embarqueId,
+      cuentaBancariaArsId: s.cuentaBancariaArsId,
+      tipoCambioBanco: TC_FACTURA,
+      fecha: FECHA_PAGO,
+      montoUsdAPagar: "1.00",
+    });
+    expect(r3.ok).toBe(false);
+    if (!r3.ok) expect(r3.error).toMatch(/no tiene saldo|excede/i);
+  });
+
+  it("paga via Embarque FOB con TC banco < TC original — genera ganancia 4.3.1.01", async () => {
+    const s = await seed();
+    const fob = await seedEmbarqueFobOnly(s.proveedorExteriorId);
+
+    const res = await pagarFacturaExteriorAction({
+      facturaOrigen: "embarqueFob",
+      facturaId: fob.embarqueId,
+      cuentaBancariaArsId: s.cuentaBancariaArsId,
+      tipoCambioBanco: "1147.500000",
+      fecha: FECHA_PAGO,
+    });
+    if (!res.ok) throw new Error(`pago falló: ${res.error}`);
+    expect(res.tipoDiferencia).toBe("ganancia");
+    expect(Number(res.diferenciaArs)).toBeCloseTo(5522000, 2);
+    await expectAsientoBalanceado(res.asientoId);
+
+    // Linea HABER 4.3.1.01 = 5.522.000
+    const cuentaGanancia = await db.prisma.cuentaContable.findFirstOrThrow({
+      where: { codigo: "4.3.1.01" },
+    });
+    const aggGanancia = await db.prisma.lineaAsiento.aggregate({
+      where: { asientoId: res.asientoId, cuentaId: cuentaGanancia.id },
+      _sum: { haber: true },
+    });
+    expect(Number(aggGanancia._sum.haber ?? 0)).toBeCloseTo(5522000, 2);
   });
 });

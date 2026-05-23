@@ -34,9 +34,17 @@ function toFacturaInfo(
   proveedorNombre: string,
   embarqueCodigo: string,
 ): PagoExteriorFacturaInfo {
+  // "compra" y "embarqueFob" usan UUID; "embarque" (= EmbarqueCosto) usa entero.
+  const facturaId = factura.origen === "embarque" ? Number(factura.id) : factura.id;
+  const facturaOrigen: "compra" | "embarqueCosto" | "embarqueFob" =
+    factura.origen === "compra"
+      ? "compra"
+      : factura.origen === "embarqueFob"
+        ? "embarqueFob"
+        : "embarqueCosto";
   return {
-    facturaOrigen: factura.origen === "compra" ? "compra" : "embarqueCosto",
-    facturaId: factura.origen === "compra" ? factura.id : Number(factura.id),
+    facturaOrigen,
+    facturaId,
     facturaNumero: factura.numero,
     embarqueCodigo,
     proveedorNombre,

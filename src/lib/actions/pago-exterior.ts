@@ -45,8 +45,11 @@ const ESTADOS_EMBARQUE_CON_SALDO: EmbarqueEstado[] = [
 
 const pagarFacturaExteriorSchema = z
   .object({
-    facturaOrigen: z.enum(["compra", "embarqueCosto"]),
-    /** UUID (compra) o número entero (embarqueCosto). */
+    // "compra"      → Compra USD (id = uuid)
+    // "embarqueCosto" → EmbarqueCosto USD (id = entero)
+    // "embarqueFob" → factura virtual derivada del Embarque + ItemEmbarque (id = uuid del Embarque)
+    facturaOrigen: z.enum(["compra", "embarqueCosto", "embarqueFob"]),
+    /** UUID (compra / embarqueFob) o número entero (embarqueCosto). */
     facturaId: z.union([z.string().uuid(), z.number().int().positive()]),
     cuentaBancariaArsId: z.string().uuid(),
     tipoCambioBanco: z.string().regex(FX_RE, "Tipo de cambio inválido (máx. 6 decimales)"),
@@ -67,6 +70,13 @@ const pagarFacturaExteriorSchema = z
         path: ["facturaId"],
         code: "custom",
         message: "Para un EmbarqueCosto el id debe ser un entero.",
+      });
+    }
+    if (data.facturaOrigen === "embarqueFob" && typeof data.facturaId !== "string") {
+      ctx.addIssue({
+        path: ["facturaId"],
+        code: "custom",
+        message: "Para un Embarque FOB el id debe ser UUID.",
       });
     }
     if (Number(data.tipoCambioBanco) <= 0) {
@@ -367,11 +377,15 @@ export async function pagarFacturaExteriorAction(
         await tx.aplicacionPagoCompra.create({
           data: { ...aplicacionData, compraId: factura.id },
         });
-      } else {
+      } else if (facturaOrigen === "embarqueCosto") {
         await tx.aplicacionPagoEmbarqueCosto.create({
           data: { ...aplicacionData, embarqueCostoId: Number(factura.id) },
         });
       }
+      // facturaOrigen === "embarqueFob": no hay tabla de aplicación dedicada
+      // (la deuda no tiene Compra ni EmbarqueCosto). El saldo se descuenta
+      // por match de tokens (embarque.codigo) en la descripción de la línea
+      // DEBE — mismo algoritmo que getSaldosExteriorPorProveedor.
 
       return {
         movimientoId: mov.id,
@@ -406,9 +420,12 @@ export async function pagarFacturaExteriorAction(
 
 async function cargarFactura(
   tx: TxClient,
-  origen: "compra" | "embarqueCosto",
+  origen: "compra" | "embarqueCosto" | "embarqueFob",
   id: string | number,
 ): Promise<FacturaCargada> {
+  if (origen === "embarqueFob") {
+    return cargarFacturaFobDelEmbarque(tx, String(id));
+  }
   if (origen === "compra") {
     const compra = await tx.compra.findUnique({
       where: { id: String(id) },
@@ -539,6 +556,82 @@ async function cargarFactura(
     proveedorTipo: costo.proveedor.tipoProveedor,
     cuentaProveedorId: costo.proveedor.cuentaContableId,
     embarqueCodigo: costo.embarque.codigo,
+  };
+}
+
+/**
+ * Carga una "factura virtual" derivada del Embarque + ItemEmbarque cuando
+ * no existe Compra ni EmbarqueCosto USD del proveedor exterior (flujo
+ * Modelo Y bonded). El total USD es Σ items.cantidad × precioUnitarioFob.
+ * El TC original es el del propio embarque (registrado al cargarlo).
+ */
+async function cargarFacturaFobDelEmbarque(
+  tx: TxClient,
+  embarqueId: string,
+): Promise<FacturaCargada> {
+  const embarque = await tx.embarque.findUnique({
+    where: { id: embarqueId },
+    select: {
+      id: true,
+      codigo: true,
+      estado: true,
+      moneda: true,
+      tipoCambio: true,
+      proveedor: {
+        select: {
+          id: true,
+          nombre: true,
+          pais: true,
+          tipoProveedor: true,
+          cuentaContableId: true,
+        },
+      },
+      items: { select: { cantidad: true, precioUnitarioFob: true } },
+    },
+  });
+  if (!embarque) {
+    throw new AsientoError("DOMINIO_INVALIDO", `Embarque ${embarqueId} no encontrado.`);
+  }
+  if (embarque.moneda !== Moneda.USD) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Embarque ${embarque.codigo} no es en USD — moneda: ${embarque.moneda}.`,
+    );
+  }
+  if (!ESTADOS_EMBARQUE_CON_SALDO.includes(embarque.estado)) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Embarque ${embarque.codigo} en estado ${embarque.estado} — sin saldo a pagar.`,
+    );
+  }
+  if (embarque.proveedor.cuentaContableId === null) {
+    throw new AsientoError(
+      "CUENTA_INVALIDA",
+      `Proveedor "${embarque.proveedor.nombre}" no tiene cuenta contable asignada.`,
+    );
+  }
+  const totalUsd = embarque.items.reduce(
+    (acc, i) => acc.plus(new Decimal(i.precioUnitarioFob.toString()).times(i.cantidad)),
+    new Decimal(0),
+  );
+  if (totalUsd.lte(0.005)) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Embarque ${embarque.codigo} no tiene valor FOB (sin items o items con precio 0).`,
+    );
+  }
+
+  return {
+    id: embarque.id,
+    numero: embarque.codigo, // tokens del código son la única ancora del match
+    tipoCambioOriginal: new Decimal(embarque.tipoCambio.toString()),
+    totalUsd,
+    proveedorId: embarque.proveedor.id,
+    proveedorNombre: embarque.proveedor.nombre,
+    proveedorPais: embarque.proveedor.pais,
+    proveedorTipo: embarque.proveedor.tipoProveedor,
+    cuentaProveedorId: embarque.proveedor.cuentaContableId,
+    embarqueCodigo: embarque.codigo,
   };
 }
 
