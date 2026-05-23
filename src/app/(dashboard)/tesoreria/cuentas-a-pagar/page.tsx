@@ -15,6 +15,7 @@ import {
   getCuentasAPagarPorEmbarque,
   getRefuerzosVepPendientes,
   getSaldoCreditoAduana,
+  getSaldosExteriorPorProveedor,
   getSaldosPorProveedorConAging,
   getVepEmbarques,
   listarProveedoresParaIntermediario,
@@ -29,6 +30,7 @@ import { VepSection } from "./vep-section";
 import { VepDespachoSection } from "./vep-despacho-section";
 import { EmbarqueBatchPago } from "./embarque-batch-pago";
 import { PagoPorFactura } from "./_components/pago-por-factura";
+import { ProveedoresExteriorSection } from "./_components/proveedores-exterior-section";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +47,7 @@ export default async function CuentasAPagarPage() {
     saldoCreditoAduana,
     intermediarios,
     defaultFecha,
+    saldosExterior,
   ] = await Promise.all([
     getCuentasAPagar(),
     getCuentasAPagarPorEmbarque(),
@@ -57,6 +60,7 @@ export default async function CuentasAPagarPage() {
     getSaldoCreditoAduana(),
     listarProveedoresParaIntermediario(),
     getDefaultFecha(),
+    getSaldosExteriorPorProveedor(),
   ]);
 
   // Filtrar 2.1.5.99 de la sección Aduana genérica — el saldo pendiente
@@ -123,6 +127,8 @@ export default async function CuentasAPagarPage() {
         rows={data.proveedoresComerciales}
         showProveedores
       />
+
+      <ProveedoresExteriorSection proveedores={saldosExterior} />
 
       <Section
         title="Aduana / Nacionalización"
