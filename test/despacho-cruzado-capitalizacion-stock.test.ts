@@ -1,3 +1,4 @@
+import Decimal from "decimal.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { createTestDb, type TestDb } from "./db";
@@ -317,5 +318,221 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
     // Pero el Producto.stockActual sólo cuenta el NACIONAL (30), no 60.
     const prod = await db.prisma.producto.findUniqueOrThrow({ where: { id: s.productoId } });
     expect(prod.stockActual).toBe(30);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Regresión piloto AR-251223036CN-D4 (TC despacho decimal 1399.5).
+  // ──────────────────────────────────────────────────────────────────────
+  // El asiento credita cada tributo aduanero por separado, redondeando
+  // ARS por tributo:
+  //   round2(DIE×TC), round2(Tasa×TC), round2(Arancel×TC).
+  // Si el helper de costo landed suma USD primero y redondea una vez al
+  // final, con TC decimal los medios centavos (half-up) divergen y la
+  // suma de HABERs aduana queda 0.01 arriba del DEBE 1.1.5.01.
+  // Este test fuerza ese half-up y asserta DEBE == HABER al centavo.
+  //
+  // Aritmética exacta (D4):
+  //  - DIE     1768.25 × 1399.5 = 2,474,665.875 → 2,474,665.88
+  //  - Tasa     331.55 × 1399.5 =   464,004.225 →   464,004.23
+  //  - Arancel   10.00 × 1399.5 =    13,995.000 →    13,995.00
+  //  Σ HABERs aduana capitalizables = 2,952,665.11
+  async function seedTcDecimal(): Promise<Seed> {
+    await db.prisma.periodoContable.create({
+      data: {
+        codigo: "2025-12",
+        nombre: "Diciembre 2025",
+        fechaInicio: new Date("2025-12-01T00:00:00.000Z"),
+        fechaFin: new Date("2025-12-31T00:00:00.000Z"),
+        estado: "ABIERTO",
+      },
+    });
+    const cuentaProv = await db.prisma.cuentaContable.create({
+      data: {
+        codigo: "2.1.1.98",
+        nombre: "PROVEEDOR DESPACHANTE D4",
+        tipo: "ANALITICA",
+        categoria: "PASIVO",
+        nivel: 4,
+      },
+    });
+    cuentaProvId = cuentaProv.id;
+    const provExt = await db.prisma.proveedor.create({ data: { nombre: "Fab China SA" } });
+    const prod = await db.prisma.producto.create({
+      data: { codigo: "SKU-D4", nombre: "Neumático 036CN" },
+    });
+    const depFiscal = await db.prisma.deposito.create({
+      data: { nombre: "DF Aduana D4", tipo: "ZONA_PRIMARIA" },
+    });
+    const depDestino = await db.prisma.deposito.create({
+      data: { nombre: "Nacional D4", tipo: "NACIONAL" },
+    });
+    const embarque = await db.prisma.embarque.create({
+      data: {
+        codigo: "EMB-036CN",
+        proveedorId: provExt.id,
+        moneda: "USD",
+        tipoCambio: "1382.000000",
+        depositoDestinoId: depDestino.id,
+      },
+    });
+    const itemEmbarque = await db.prisma.itemEmbarque.create({
+      data: {
+        embarqueId: embarque.id,
+        productoId: prod.id,
+        cantidad: 100,
+        precioUnitarioFob: "123.0709",
+      },
+    });
+    const contenedor = await db.prisma.contenedor.create({
+      data: {
+        embarqueId: embarque.id,
+        numeroContenedor: "MSCU0036CN1",
+        estado: "DESCONSOLIDADO",
+        depositoFiscalId: depFiscal.id,
+      },
+    });
+    const ic = await db.prisma.itemContenedor.create({
+      data: {
+        contenedorId: contenedor.id,
+        itemEmbarqueId: itemEmbarque.id,
+        productoId: prod.id,
+        cantidadDeclarada: 100,
+        cantidadFisica: 100,
+        cantidadEnDespacho: 100,
+        costoFCUnitario: "123.0709",
+      },
+    });
+    await db.prisma.stockPorDeposito.create({
+      data: {
+        productoId: prod.id,
+        depositoId: depFiscal.id,
+        cantidadFisica: 100,
+        costoPromedio: "170083.98",
+      },
+    });
+    const despacho = await db.prisma.despacho.create({
+      data: {
+        codigo: "EMB-036CN-D4",
+        embarqueId: embarque.id,
+        fecha: new Date("2025-12-23T12:00:00.000Z"),
+        estado: "BORRADOR",
+        tipoCambio: "1399.500000",
+        die: "1768.25",
+        tasaEstadistica: "331.55",
+        arancelSim: "10.00",
+        iva: "0",
+        ivaAdicional: "0",
+        iibb: "0",
+        ganancias: "0",
+        items: {
+          create: [
+            {
+              itemEmbarqueId: itemEmbarque.id,
+              contenedorId: contenedor.id,
+              itemContenedorId: ic.id,
+              cantidad: 100,
+            },
+          ],
+        },
+      },
+    });
+    return {
+      despachoId: despacho.id,
+      depFiscalId: depFiscal.id,
+      depDestinoId: depDestino.id,
+      productoId: prod.id,
+    };
+  }
+
+  it("TC decimal (1399.5): asiento balancea al centavo (DEBE == HABER)", async () => {
+    const s = await seedTcDecimal();
+    const res = await contabilizarDespachoAction(s.despachoId);
+    expect(res.ok).toBe(true);
+
+    const despacho = await db.prisma.despacho.findUniqueOrThrow({ where: { id: s.despachoId } });
+    const lineas = await db.prisma.lineaAsiento.findMany({
+      where: { asientoId: despacho.asientoId! },
+      include: { cuenta: { select: { codigo: true } } },
+    });
+
+    // Σ DEBE == Σ HABER exacto al centavo (no toBeCloseTo: queremos cero diferencia).
+    const totalDebe = lineas.reduce((acc, l) => acc.plus(l.debe.toString()), new Decimal(0));
+    const totalHaber = lineas.reduce((acc, l) => acc.plus(l.haber.toString()), new Decimal(0));
+    expect(totalDebe.toFixed(2)).toBe(totalHaber.toFixed(2));
+
+    // DEBE 1.1.5.01 = nacionalizado 17,008,398.00 + tributos capitalizables
+    //   2,952,665.11 = 19,961,063.11 (NO 19,961,063.10 del agregado).
+    const debePorCuenta = new Map<string, string>();
+    const haberPorCuenta = new Map<string, string>();
+    for (const l of lineas) {
+      const debe = new Decimal(l.debe.toString());
+      const haber = new Decimal(l.haber.toString());
+      if (debe.gt(0)) debePorCuenta.set(l.cuenta.codigo, debe.toFixed(2));
+      if (haber.gt(0)) haberPorCuenta.set(l.cuenta.codigo, haber.toFixed(2));
+    }
+    expect(debePorCuenta.get("1.1.5.01")).toBe("19961063.11");
+    expect(haberPorCuenta.get("1.1.5.05")).toBe("17008398.00");
+
+    // Pasivos aduaneros por separado (cada uno round2(tributo×TCdsp)).
+    expect(haberPorCuenta.get("2.1.5.01")).toBe("2474665.88"); // DIE
+    expect(haberPorCuenta.get("2.1.5.02")).toBe("464004.23"); // Tasa
+    expect(haberPorCuenta.get("2.1.5.03")).toBe("13995.00"); // Arancel
+  });
+
+  it("TC decimal + factura DESPACHO en USD con TC ≠ embarque: balancea y capitaliza", async () => {
+    // Previene regresión simétrica del lado facturas (cada factura ya redondea
+    // round2(subtotal×TCfactura) en el reduce — pero confirmamos en integración).
+    const s = await seedTcDecimal();
+    const provDesp = await db.prisma.proveedor.create({
+      data: { nombre: "Despachante D4", cuentaContableId: cuentaProvId },
+    });
+    const cuentaGasto = await db.prisma.cuentaContable.create({
+      data: {
+        codigo: "5.7.2.98",
+        nombre: "GASTO DESPACHO D4",
+        tipo: "ANALITICA",
+        categoria: "EGRESO",
+        nivel: 4,
+      },
+    });
+    // Factura USD con TC factura distinto (1410.75) — fuerza otro half-up.
+    await db.prisma.embarqueCosto.create({
+      data: {
+        embarqueId: (
+          await db.prisma.despacho.findUniqueOrThrow({ where: { id: s.despachoId } })
+        ).embarqueId,
+        proveedorId: provDesp.id,
+        despachoId: s.despachoId,
+        moneda: "USD",
+        tipoCambio: "1410.750000",
+        momento: "DESPACHO",
+        estado: "BORRADOR",
+        facturaNumero: "F-D4-1",
+        iva: "0",
+        iibb: "0",
+        otros: "0",
+        lineas: {
+          create: [
+            {
+              tipo: "HONORARIOS_DESPACHANTE",
+              cuentaContableGastoId: cuentaGasto.id,
+              descripcion: "Honorarios D4",
+              subtotal: "127.35",
+            },
+          ],
+        },
+      },
+    });
+
+    const res = await contabilizarDespachoAction(s.despachoId);
+    expect(res.ok).toBe(true);
+
+    const despacho = await db.prisma.despacho.findUniqueOrThrow({ where: { id: s.despachoId } });
+    const lineas = await db.prisma.lineaAsiento.findMany({
+      where: { asientoId: despacho.asientoId! },
+    });
+    const totalDebe = lineas.reduce((acc, l) => acc.plus(l.debe.toString()), new Decimal(0));
+    const totalHaber = lineas.reduce((acc, l) => acc.plus(l.haber.toString()), new Decimal(0));
+    expect(totalDebe.toFixed(2)).toBe(totalHaber.toFixed(2));
   });
 });
