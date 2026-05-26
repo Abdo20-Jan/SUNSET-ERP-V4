@@ -7,8 +7,11 @@ import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight02Icon } from "@hugeicons/core-free-icons";
 
+import Decimal from "decimal.js";
+
 import { fmtMoney } from "@/lib/format";
 import {
+  type AplicarPagoA,
   crearMovimientoTesoreriaAction,
   pagarConIntermediarioAction,
   type CuentaBancariaOption,
@@ -63,13 +66,29 @@ type SaldoProveedorAging = {
   facturas: FacturaPendiente[];
 };
 
+type ProveedorIntermediario = {
+  proveedorId: string;
+  proveedorNombre: string;
+  cuentaContableId: number | null;
+};
+
 type Props = {
   proveedores: SaldoProveedorAging[];
+  // Lista de proveedores elegibles como beneficiário intermediário
+  // (despachante). Incluye TODOS los proveedores activos con cuenta
+  // contable — no sólo los que tienen saldo pendiente — para que un
+  // despachante sin facturas en el sistema (ej: CYSAR) pueda seleccionarse.
+  intermediarios: ProveedorIntermediario[];
   cuentasBancarias: CuentaBancariaOption[];
   defaultFecha?: string;
 };
 
-export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }: Props) {
+export function SaldosBatchPago({
+  proveedores,
+  intermediarios,
+  cuentasBancarias,
+  defaultFecha,
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -132,10 +151,44 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }:
     const lineas = seleccionados.map((p) => {
       const override = montosOverride[p.proveedorId];
       const monto = override !== undefined ? override : p.saldoTotal;
+      // Sufijo de números (Layer 1 fallback — sigue siendo útil si por algún
+      // motivo AplicacionPago* no se grava).
+      const numerosEspecificos = p.facturas
+        .map((f) => f.numero)
+        .filter((n) => n && !n.startsWith("Factura #"));
+      const sufijoFacts =
+        numerosEspecificos.length > 0
+          ? ` — Facts: ${numerosEspecificos.slice(0, 5).join(", ")}${
+              numerosEspecificos.length > 5 ? "…" : ""
+            }`
+          : "";
+
+      // Layer 0 — distribuir `monto` entre las facturas pendientes FIFO
+      // (más antiguas primero). Cada porción pagada se materializa como
+      // AplicacionPago{EmbarqueCosto|Compra|Gasto} via server action.
+      let remaining = new Decimal(monto);
+      const appliedTo: AplicarPagoA[] = [];
+      const facturasOrdered = [...p.facturas].sort((a, b) => a.fecha.localeCompare(b.fecha));
+      for (const f of facturasOrdered) {
+        if (remaining.lte(0.005)) break;
+        const facturaMonto = new Decimal(f.monto);
+        const tomar = facturaMonto.gt(remaining) ? remaining : facturaMonto;
+        const montoArs = tomar.toFixed(2);
+        if (f.origen === "embarque") {
+          appliedTo.push({ tipo: "embarqueCosto", id: Number(f.id), montoArs });
+        } else if (f.origen === "compra") {
+          appliedTo.push({ tipo: "compra", id: f.id, montoArs });
+        } else {
+          appliedTo.push({ tipo: "gasto", id: f.id, montoArs });
+        }
+        remaining = remaining.minus(tomar);
+      }
+
       return {
         cuentaContableId: p.cuentaContableId!,
         monto,
-        descripcion: p.proveedorNombre,
+        descripcion: `${p.proveedorNombre}${sufijoFacts}`.slice(0, 255),
+        appliedTo: appliedTo.length > 0 ? appliedTo : undefined,
       };
     });
 
@@ -258,7 +311,7 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }:
               <TableHead className="text-right">Al día</TableHead>
               <TableHead className="text-right">Saldo contable</TableHead>
               <TableHead className="text-right">A pagar</TableHead>
-              <TableHead></TableHead>
+              <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -339,13 +392,13 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }:
                           {(value) => {
                             if (!value) return "Seleccione proveedor intermediário";
                             const id = Number(value);
-                            const p = proveedores.find((x) => x.cuentaContableId === id);
+                            const p = intermediarios.find((x) => x.cuentaContableId === id);
                             return p ? p.proveedorNombre : `Cuenta #${id}`;
                           }}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        {proveedores
+                        {intermediarios
                           .filter(
                             (p): p is typeof p & { cuentaContableId: number } =>
                               p.cuentaContableId !== null,
@@ -535,7 +588,7 @@ export function SaldosBatchPago({ proveedores, cuentasBancarias, defaultFecha }:
                     }
                   >
                     {diferencia > 0 ? "DEBE" : "HABER"} {(() => {
-                      const p = proveedores.find(
+                      const p = intermediarios.find(
                         (x) => x.cuentaContableId === intermediarioCuentaId,
                       );
                       return p?.proveedorNombre ?? `Cuenta #${intermediarioCuentaId}`;
@@ -665,7 +718,7 @@ function ProveedorRow({
                     monto: p.saldoTotal,
                     descripcion: `Pago a ${p.proveedorNombre}${p.facturas.length > 0 ? ` — ${p.facturas.length} factura(s)` : ""}`,
                   }).toString()}`
-                : `/tesoreria/movimientos/nuevo?tipo=PAGO`
+                : "/tesoreria/movimientos/nuevo?tipo=PAGO"
             }
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >

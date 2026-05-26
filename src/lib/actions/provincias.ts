@@ -43,7 +43,7 @@ export async function obtenerPercepcionInfoCliente(clienteId: string): Promise<P
     return { factor: "0", alicuota: null, jurisdiccionNombre: null };
   }
   const jur = cliente.provincia?.jurisdiccionIIBB;
-  if (!jur || !jur.esAgentePercepcion) {
+  if (!jur?.esAgentePercepcion) {
     return { factor: "0", alicuota: null, jurisdiccionNombre: null };
   }
   const alicuota = (cliente.alicuotaPercepcionIIBB ?? jur.alicuotaPercepcion).toString();

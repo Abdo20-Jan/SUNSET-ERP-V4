@@ -1,6 +1,8 @@
 import {
   AlertCircleIcon,
+  Calendar03Icon,
   Coins01Icon,
+  ContainerIcon,
   PackageIcon,
   PackageOpenIcon,
 } from "@hugeicons/core-free-icons";
@@ -15,18 +17,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { fmtInt, fmtMoney, convertirAUsd, fmtDateOrDash } from "@/lib/format";
-import { getAnalisisStock } from "@/lib/services/bi";
+import { type AnalisisBonded, getAnalisisBonded, getAnalisisStock } from "@/lib/services/bi";
 
 import { KpiCard } from "../../dashboard/_components/kpi-card";
 import { HorizontalBarRankingLazy } from "../_components/charts/lazy";
 
 export async function StockTab({ tc }: { tc?: string | null }) {
-  const r = await getAnalisisStock();
+  const [r, bonded] = await Promise.all([getAnalisisStock(), getAnalisisBonded()]);
   const money = (n: number) => fmtMoney(convertirAUsd(n.toString(), tc ?? null));
   const symbol = tc ? "USD " : "$ ";
 
   return (
     <div className="flex flex-col gap-3">
+      {bonded ? <BondedSection bonded={bonded} /> : null}
       <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <KpiCard
           label="Stock valorado"
@@ -228,6 +231,124 @@ export async function StockTab({ tc }: { tc?: string | null }) {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// PR 5.3 — sección bonded (depósito fiscal), sólo visible con la flag de
+// desconsolidación encendida. Valor inmovilizado en USD (costoFCUnitario),
+// antigüedad (aging) de los contenedores y despachos abiertos por SKU.
+function BondedSection({ bonded }: { bonded: AnalisisBonded }) {
+  const usd = (n: number) => `USD ${fmtMoney(n.toString())}`;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border/70 p-3">
+      <h2 className="text-sm font-semibold text-muted-foreground">Depósito fiscal · bonded</h2>
+
+      <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+        <KpiCard
+          label="Valor inmovilizado"
+          value={usd(bonded.kpis.valorUsd)}
+          icon={Coins01Icon}
+          accent="info"
+          hint="Σ disponible × costo FC unitario"
+        />
+        <KpiCard
+          label="Unidades en DF"
+          value={fmtInt(bonded.kpis.unidadesDisponibles)}
+          icon={PackageIcon}
+          accent="neutral"
+        />
+        <KpiCard
+          label="Contenedores en DF"
+          value={fmtInt(bonded.kpis.contenedores)}
+          icon={ContainerIcon}
+          accent="neutral"
+        />
+        <KpiCard
+          label="Aging p50 / p90"
+          value={`${fmtInt(bonded.aging.p50)} / ${fmtInt(bonded.aging.p90)} d`}
+          icon={Calendar03Icon}
+          accent={bonded.aging.p90 > 90 ? "warning" : "neutral"}
+          hint={`máx ${fmtInt(bonded.aging.max)} días en depósito fiscal`}
+        />
+      </section>
+
+      <Card size="sm">
+        <CardHeader className="border-b border-border/60 pb-2">
+          <CardTitle>Stock bonded por SKU</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-2">
+          {bonded.porSku.length === 0 ? (
+            <p className="py-3 text-center text-xs text-muted-foreground">
+              Sin stock en depósito fiscal.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Código</TableHead>
+                  <TableHead>Producto</TableHead>
+                  <TableHead className="text-right">Disponible</TableHead>
+                  <TableHead className="text-right">En despacho</TableHead>
+                  <TableHead className="text-right">Valor USD</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bonded.porSku.map((s) => (
+                  <TableRow key={s.codigo}>
+                    <TableCell className="font-mono text-[12px]">{s.codigo}</TableCell>
+                    <TableCell>{s.producto}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {fmtInt(s.disponible)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums text-amber-700 dark:text-amber-400">
+                      {s.enDespacho > 0 ? fmtInt(s.enDespacho) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {usd(s.valorUsd)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {bonded.despachosAbiertos.length > 0 ? (
+        <Card size="sm">
+          <CardHeader className="border-b border-border/60 pb-2">
+            <CardTitle>Despachos abiertos por SKU</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-2">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Código</TableHead>
+                  <TableHead>Producto</TableHead>
+                  <TableHead className="text-right">Unidades</TableHead>
+                  <TableHead className="text-right">Valor USD</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bonded.despachosAbiertos.map((d) => (
+                  <TableRow key={d.codigo}>
+                    <TableCell className="font-mono text-[12px]">{d.codigo}</TableCell>
+                    <TableCell>{d.producto}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums text-amber-700 dark:text-amber-400">
+                      {fmtInt(d.unidades)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {usd(d.valorUsd)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

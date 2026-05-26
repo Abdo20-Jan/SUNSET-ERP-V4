@@ -26,13 +26,13 @@ function parseEstado(value: string | undefined): AsientoEstado | null {
 
 function parseDate(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T00:00:00Z");
+  const d = new Date(`${value}T00:00:00Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 function endOfDay(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T23:59:59.999Z");
+  const d = new Date(`${value}T23:59:59.999Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
@@ -52,11 +52,9 @@ type SearchParams = Promise<{
   q?: string;
 }>;
 
-export default async function AsientosPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function AsientosPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
   const estadoFilter = parseEstado(params.estado);

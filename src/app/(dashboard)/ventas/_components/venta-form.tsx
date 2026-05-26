@@ -23,11 +23,13 @@ import {
   type ProductoParaVenta,
   type VentaDetalle,
 } from "@/lib/actions/ventas";
+import type { ProveedorParaGasto } from "@/lib/actions/gastos";
 import { obtenerPercepcionInfoCliente, type PercepcionInfo } from "@/lib/actions/provincias";
 import { fmtMoney } from "@/lib/format";
 import { useCmdShortcut } from "@/lib/hooks/use-cmd-shortcut";
 import { ClienteCombobox, type ClienteOption } from "@/components/cliente-combobox";
 import { ProductoCombobox, type ProductoOption } from "@/components/producto-combobox";
+import { ProveedorCombobox, type ProveedorOption } from "@/components/proveedor-combobox";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -104,6 +106,21 @@ const formSchema = z
         }),
       )
       .optional(),
+    // Factura de flete (transportista). Activa por checkbox; cuando está
+    // activa se exige proveedor + subtotal y el flete se contabiliza como
+    // Gasto (CxP real + IVA crédito) en vez de inline en el asiento de venta.
+    fleteFacturaActiva: z.boolean(),
+    fleteFactura: z.object({
+      proveedorId: z.string(),
+      facturaNumero: z.string().max(64).optional(),
+      fechaFactura: z.string().optional(),
+      moneda: z.enum(["ARS", "USD"]),
+      tipoCambio: z.string().regex(rateRegex, "TC inválido"),
+      subtotal: z.string().regex(moneyRegex, "Subtotal inválido"),
+      iva: z.string().regex(moneyRegex, "IVA inválido"),
+      iibb: z.string().regex(moneyRegex, "IIBB inválido"),
+      otros: z.string().regex(moneyRegex, "Otros inválido"),
+    }),
   })
   .superRefine((data, ctx) => {
     if (data.moneda === "ARS" && data.tipoCambio !== "1") {
@@ -112,6 +129,22 @@ const formSchema = z
         path: ["tipoCambio"],
         message: "Para ARS, TC debe ser 1",
       });
+    }
+    if (data.fleteFacturaActiva) {
+      if (!data.fleteFactura.proveedorId) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["fleteFactura", "proveedorId"],
+          message: "Seleccione transportista",
+        });
+      }
+      if (data.fleteFactura.moneda === "ARS" && data.fleteFactura.tipoCambio !== "1") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["fleteFactura", "tipoCambio"],
+          message: "Para ARS, TC debe ser 1",
+        });
+      }
     }
     if (
       data.fechaVencimiento &&
@@ -135,6 +168,7 @@ type Props = {
   clientes: ClienteParaVenta[];
   productos: ProductoParaVenta[];
   depositos: DepositoParaVenta[];
+  proveedores: ProveedorParaGasto[];
   defaultFecha?: string;
 };
 
@@ -157,24 +191,37 @@ export function VentaForm({
   clientes,
   productos,
   depositos,
+  proveedores,
   defaultFecha,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const isEdit = mode === "edit";
 
+  const proveedorOptions: ProveedorOption[] = proveedores.map((p) => ({
+    id: p.id,
+    nombre: p.nombre,
+    pais: "AR",
+  }));
+
   const clienteOptions: ClienteOption[] = clientes.map((c) => ({
     id: c.id,
     nombre: c.nombre,
     diasPagoDefault: c.diasPagoDefault,
   }));
-  const productoOptions: ProductoOption[] = productos.map((p) => ({
-    id: p.id,
-    codigo: p.codigo,
-    nombre: p.nombre,
-    marca: null,
-    medida: null,
-  }));
+  // Solo SKUs con disponible nacional > 0; pero siempre incluir los productos
+  // ya presentes en la venta editada (para no romper el combobox/rentabilidad).
+  const idsIniciales = new Set(initialData?.items?.map((i) => i.productoId) ?? []);
+  const productoOptions: ProductoOption[] = productos
+    .filter((p) => p.disponible > 0 || idsIniciales.has(p.id))
+    .map((p) => ({
+      id: p.id,
+      codigo: p.codigo,
+      nombre: p.nombre,
+      marca: null,
+      medida: null,
+      disponible: p.disponible,
+    }));
 
   const defaultValues: FormValues = isEdit
     ? {
@@ -215,6 +262,30 @@ export function VentaForm({
           fechaEmision: c.fechaEmision.slice(0, 10),
           fechaPago: c.fechaPago.slice(0, 10),
         })),
+        fleteFacturaActiva: initialData!.fleteFactura != null,
+        fleteFactura: initialData!.fleteFactura
+          ? {
+              proveedorId: initialData!.fleteFactura.proveedorId,
+              facturaNumero: initialData!.fleteFactura.facturaNumero ?? "",
+              fechaFactura: initialData!.fleteFactura.fechaFactura.slice(0, 10),
+              moneda: initialData!.fleteFactura.moneda,
+              tipoCambio: initialData!.fleteFactura.tipoCambio,
+              subtotal: initialData!.fleteFactura.subtotal,
+              iva: initialData!.fleteFactura.iva,
+              iibb: initialData!.fleteFactura.iibb,
+              otros: initialData!.fleteFactura.otros,
+            }
+          : {
+              proveedorId: "",
+              facturaNumero: "",
+              fechaFactura: "",
+              moneda: "ARS",
+              tipoCambio: "1",
+              subtotal: "0",
+              iva: "0",
+              iibb: "0",
+              otros: "0",
+            },
       }
     : {
         numero: numeroSugerido ?? "",
@@ -238,6 +309,18 @@ export function VentaForm({
           },
         ],
         cheques: [],
+        fleteFacturaActiva: false,
+        fleteFactura: {
+          proveedorId: "",
+          facturaNumero: "",
+          fechaFactura: "",
+          moneda: "ARS",
+          tipoCambio: "1",
+          subtotal: "0",
+          iva: "0",
+          iibb: "0",
+          otros: "0",
+        },
       };
 
   const {
@@ -266,13 +349,25 @@ export function VentaForm({
   const items = useWatch({ control, name: "items" }) ?? [];
   const iibb = useWatch({ control, name: "iibb" }) ?? "0";
   const otros = useWatch({ control, name: "otros" }) ?? "0";
-  const flete = useWatch({ control, name: "flete" }) ?? "0";
+  const fleteSimple = useWatch({ control, name: "flete" }) ?? "0";
+  const fleteFacturaActiva = useWatch({ control, name: "fleteFacturaActiva" });
+  const fleteFacturaMoneda = useWatch({ control, name: "fleteFactura.moneda" });
+  const fleteFacturaSubtotal = useWatch({ control, name: "fleteFactura.subtotal" }) ?? "0";
+  // El flete que descuenta la rentabilidad es el neto (subtotal) de la
+  // factura cuando está activa; si no, el flete suelto legado.
+  const flete = fleteFacturaActiva ? fleteFacturaSubtotal : fleteSimple;
 
   useEffect(() => {
     if (moneda === "ARS") {
       setValue("tipoCambio", "1", { shouldValidate: true });
     }
   }, [moneda, setValue]);
+
+  useEffect(() => {
+    if (fleteFacturaMoneda === "ARS") {
+      setValue("fleteFactura.tipoCambio", "1", { shouldValidate: false });
+    }
+  }, [fleteFacturaMoneda, setValue]);
 
   // Percepción IIBB info: re-fetch cuando cambia el cliente. El factor
   // se usa en el useMemo de totales para calcular percepción × subtotal.
@@ -378,6 +473,22 @@ export function VentaForm({
     };
   }, [items, iibb, otros, flete, productos, percepcionInfo.factor]);
 
+  // Comparación cheques recibidos vs total facturado. El asiento
+  // automático debita 1.1.4.20 por la suma real de los cheques; si
+  // excede el total, el sobrante va a 2.1.7.01 ANTICIPOS DE CLIENTES.
+  // Mostramos un indicador en tiempo real para que el usuario sepa
+  // qué va a pasar antes de emitir.
+  const chequesWatched = useWatch({ control, name: "cheques" }) ?? [];
+  const chequesDiff = useMemo(() => {
+    if (chequesWatched.length === 0) return null;
+    const suma = chequesWatched.reduce(
+      (acc, c) => acc.plus(new Decimal(safe(c?.importe))),
+      new Decimal(0),
+    );
+    const diff = suma.minus(totals.total);
+    return { suma: suma.toDecimalPlaces(2), diff: diff.toDecimalPlaces(2) };
+  }, [chequesWatched, totals.total]);
+
   // Warning si IVA total no coincide con 21% del subtotal
   const ivaWarning = useMemo(() => {
     const sub = totals.subtotal;
@@ -400,6 +511,26 @@ export function VentaForm({
       { shouldFocus: false },
     );
   };
+
+  // Mapea el bloque de factura de flete del form al input de la action.
+  // null cuando el checkbox está apagado → comportamiento legado (flete suelto).
+  const buildFleteFactura = (values: FormValues) =>
+    values.fleteFacturaActiva
+      ? {
+          proveedorId: values.fleteFactura.proveedorId,
+          facturaNumero: values.fleteFactura.facturaNumero || undefined,
+          fechaFactura:
+            values.fleteFactura.fechaFactura && values.fleteFactura.fechaFactura.trim() !== ""
+              ? values.fleteFactura.fechaFactura
+              : undefined,
+          moneda: values.fleteFactura.moneda,
+          tipoCambio: values.fleteFactura.tipoCambio,
+          subtotal: values.fleteFactura.subtotal,
+          iva: values.fleteFactura.iva,
+          iibb: values.fleteFactura.iibb,
+          otros: values.fleteFactura.otros,
+        }
+      : null;
 
   const submitGuardar = handleSubmit((values) => {
     startTransition(async () => {
@@ -436,6 +567,7 @@ export function VentaForm({
           fechaEmision: c.fechaEmision,
           fechaPago: c.fechaPago,
         })),
+        fleteFactura: buildFleteFactura(values),
       });
       if (result.ok) {
         toast.success(`Venta ${result.numero} guardada (BORRADOR).`);
@@ -484,6 +616,7 @@ export function VentaForm({
           fechaEmision: c.fechaEmision,
           fechaPago: c.fechaPago,
         })),
+        fleteFactura: buildFleteFactura(values),
       });
       if (!saved.ok) {
         toast.error(saved.error);
@@ -629,13 +762,125 @@ export function VentaForm({
             <Input {...register("otros")} inputMode="decimal" />
           </Field>
 
-          <Field
-            label="Flete"
-            error={errors.flete?.message}
-            hint="Pagado por nosotros. No se cobra al cliente; reduce el margen neto."
-          >
-            <Input {...register("flete")} inputMode="decimal" />
-          </Field>
+          {!fleteFacturaActiva ? (
+            <Field
+              label="Flete"
+              error={errors.flete?.message}
+              hint="Pagado por nosotros. No se cobra al cliente; reduce el margen neto."
+            >
+              <Input {...register("flete")} inputMode="decimal" />
+            </Field>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {/* Factura de flete (transportista) — opcional. Cuando está activa, el
+          flete se contabiliza como Gasto: CxP real + IVA crédito, en vez de
+          inline en el asiento de venta. El subtotal (neto) descuenta el margen. */}
+      <Card>
+        <CardContent className="flex flex-col gap-4">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              checked={fleteFacturaActiva}
+              onChange={(e) => {
+                setValue("fleteFacturaActiva", e.target.checked, { shouldValidate: true });
+              }}
+            />
+            Factura de flete (transportista) — genera CxP real + IVA crédito
+          </label>
+
+          {fleteFacturaActiva ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <Field label="Transportista" error={errors.fleteFactura?.proveedorId?.message}>
+                <Controller
+                  control={control}
+                  name="fleteFactura.proveedorId"
+                  render={({ field }) => (
+                    <ProveedorCombobox
+                      value={field.value || null}
+                      onChange={(id) =>
+                        setValue("fleteFactura.proveedorId", id ?? "", { shouldValidate: true })
+                      }
+                      proveedores={proveedorOptions}
+                    />
+                  )}
+                />
+              </Field>
+
+              <Field label="Nº factura" error={errors.fleteFactura?.facturaNumero?.message}>
+                <Input {...register("fleteFactura.facturaNumero")} placeholder="A-0001-00000001" />
+              </Field>
+
+              <Field label="Fecha factura" error={errors.fleteFactura?.fechaFactura?.message}>
+                <Controller
+                  control={control}
+                  name="fleteFactura.fechaFactura"
+                  render={({ field }) => (
+                    <DatePicker value={field.value ?? ""} onChange={field.onChange} />
+                  )}
+                />
+              </Field>
+
+              <Field label="Moneda">
+                <Controller
+                  control={control}
+                  name="fleteFactura.moneda"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value}
+                      onValueChange={(v) => field.onChange(v as "ARS" | "USD")}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ARS">ARS</SelectItem>
+                        <SelectItem value="USD">USD</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </Field>
+
+              <Field
+                label="Tipo de cambio"
+                error={errors.fleteFactura?.tipoCambio?.message}
+                hint={fleteFacturaMoneda === "ARS" ? "ARS: TC = 1" : undefined}
+              >
+                <Input
+                  {...register("fleteFactura.tipoCambio")}
+                  disabled={fleteFacturaMoneda === "ARS"}
+                  inputMode="decimal"
+                />
+              </Field>
+
+              <Field
+                label="Subtotal (flete neto)"
+                error={errors.fleteFactura?.subtotal?.message}
+                hint="Base de rentabilidad. Descuenta el margen neto."
+              >
+                <Input {...register("fleteFactura.subtotal")} inputMode="decimal" />
+              </Field>
+
+              <Field label="IVA" error={errors.fleteFactura?.iva?.message}>
+                <Input {...register("fleteFactura.iva")} inputMode="decimal" />
+              </Field>
+
+              <Field label="IIBB" error={errors.fleteFactura?.iibb?.message}>
+                <Input {...register("fleteFactura.iibb")} inputMode="decimal" />
+              </Field>
+
+              <Field label="Otros" error={errors.fleteFactura?.otros?.message}>
+                <Input {...register("fleteFactura.otros")} inputMode="decimal" />
+              </Field>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Active para capturar el flete como factura del transportista (proveedor + IVA + CxP
+              real). Sin activar, el flete es un importe suelto provisional.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -723,6 +968,23 @@ export function VentaForm({
             </p>
           ) : (
             <div className="flex flex-col gap-2">
+              {chequesDiff &&
+                (chequesDiff.diff.abs().lte("0.01") ? (
+                  <p className="text-xs text-emerald-600">
+                    Cheques = total venta ({fmtMoney(chequesDiff.suma.toString())}) ✓
+                  </p>
+                ) : chequesDiff.diff.gt(0) ? (
+                  <p className="text-xs text-amber-600">
+                    Cheques suman {fmtMoney(chequesDiff.suma.toString())} — exceden el total en{" "}
+                    {fmtMoney(chequesDiff.diff.toString())}. El sobrante quedará como{" "}
+                    <strong>anticipo del cliente</strong> (2.1.7.01).
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Cheques suman {fmtMoney(chequesDiff.suma.toString())} — cliente debe{" "}
+                    {fmtMoney(chequesDiff.diff.abs().toString())} (saldo en cuenta corriente).
+                  </p>
+                ))}
               {chequeFields.map((f, idx) => (
                 <div
                   key={f.id}
@@ -943,15 +1205,7 @@ function Field({
   );
 }
 
-function Total({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "negative";
-}) {
+function Total({ label, value, tone }: { label: string; value: string; tone?: "negative" }) {
   return (
     <div className="flex items-baseline gap-1">
       <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
@@ -1063,9 +1317,7 @@ function ItemRow({
           onChange={(id) => onProductoChange(index, id)}
           productos={productos}
         />
-        {productoSel && (
-          <p className="mt-1 truncate text-xs text-muted-foreground">{productoSel.nombre}</p>
-        )}
+        {productoSel && <p className="mt-1 text-xs text-muted-foreground">{productoSel.nombre}</p>}
         {errorProducto && <p className="mt-1 text-xs text-destructive">{errorProducto}</p>}
       </div>
 

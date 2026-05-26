@@ -15,11 +15,9 @@ function parseEstado(v: string | undefined): OportunidadEstado | undefined {
     : undefined;
 }
 
-export default async function OportunidadesPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function OportunidadesPage({ searchParams }: { searchParams: SearchParams }) {
   if (!isCrmEnabled()) {
     return (
       <main className="container mx-auto p-6">

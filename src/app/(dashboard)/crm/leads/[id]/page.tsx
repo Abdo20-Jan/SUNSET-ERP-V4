@@ -9,11 +9,9 @@ import { AiSection } from "./_components/ai-section";
 import { ConvertirClienteButton } from "./_components/convertir-cliente-button";
 import { EliminarLeadButton } from "./_components/eliminar-lead-button";
 
-export default async function LeadDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   if (!isCrmEnabled()) {
     return (
       <main className="container mx-auto p-6">
@@ -160,13 +158,7 @@ export default async function LeadDetailPage({
   );
 }
 
-function Info({
-  label,
-  value,
-}: {
-  label: string;
-  value: React.ReactNode;
-}) {
+function Info({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="text-sm">
       <div className="text-muted-foreground">{label}</div>

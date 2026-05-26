@@ -1,8 +1,9 @@
 import { auth } from "@/lib/auth";
-import { getEstadoResultadosByFecha } from "@/lib/services/reportes";
+import { getEstadoResultadosByFecha, pruneCuentasSinSaldo } from "@/lib/services/reportes";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { DateRangeFilter } from "@/components/date-range-filter";
+import { OcultarSinSaldoToggle } from "@/components/ocultar-sin-saldo-toggle";
 import { convertirAUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -15,19 +16,20 @@ type SearchParams = Promise<{
   desde?: string;
   hasta?: string;
   moneda?: string;
+  todas?: string;
 }>;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseDate(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T00:00:00Z");
+  const d = new Date(`${value}T00:00:00Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 function endOfDay(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T23:59:59.999Z");
+  const d = new Date(`${value}T23:59:59.999Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
@@ -40,6 +42,8 @@ function firstOfMonthIso(): string {
   return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function EstadoResultadosPage({
   searchParams,
 }: {
@@ -51,6 +55,7 @@ export default async function EstadoResultadosPage({
   const hastaStr = params.hasta ?? todayIso();
   const fechaDesde = parseDate(desdeStr);
   const fechaHasta = endOfDay(hastaStr);
+  const mostrarTodas = params.todas === "1";
 
   const er = await getEstadoResultadosByFecha({ fechaDesde, fechaHasta });
 
@@ -90,7 +95,10 @@ export default async function EstadoResultadosPage({
 
       <div className="flex flex-col gap-3">
         <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
-        <MonedaToggle current={moneda} tcInfo={tcInfo} />
+        <div className="flex flex-wrap items-center gap-3">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
+          <OcultarSinSaldoToggle />
+        </div>
       </div>
 
       <Card className="py-0">
@@ -98,7 +106,9 @@ export default async function EstadoResultadosPage({
           <CardTitle className="text-base">Ingresos</CardTitle>
         </CardHeader>
         <CuentaTreeTable
-          data={er.ingresos.map(serializeTreeNode)}
+          data={(mostrarTodas ? er.ingresos : pruneCuentasSinSaldo(er.ingresos)).map(
+            serializeTreeNode,
+          )}
           totalLabel="Total Ingresos"
           totalValue={er.totalIngresos.toFixed(2)}
           tcParaUsd={tcParaUsd}
@@ -110,7 +120,9 @@ export default async function EstadoResultadosPage({
           <CardTitle className="text-base">Egresos</CardTitle>
         </CardHeader>
         <CuentaTreeTable
-          data={er.egresos.map(serializeTreeNode)}
+          data={(mostrarTodas ? er.egresos : pruneCuentasSinSaldo(er.egresos)).map(
+            serializeTreeNode,
+          )}
           totalLabel="Total Egresos"
           totalValue={er.totalEgresos.toFixed(2)}
           tcParaUsd={tcParaUsd}

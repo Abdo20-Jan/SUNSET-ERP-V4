@@ -10,11 +10,9 @@ import { EntregaActions } from "./_components/entrega-actions";
 
 type PageParams = Promise<{ id: string }>;
 
-export default async function EntregasPage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function EntregasPage({ params }: { params: PageParams }) {
   const { id } = await params;
 
   const venta = await db.venta.findUnique({

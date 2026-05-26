@@ -1,27 +1,29 @@
 import Link from "next/link";
 
-import { getBalanceSumasYSaldos } from "@/lib/services/balance-sumas-saldos";
+import { getBalanceSumasYSaldos, pruneBalanceSinSaldo } from "@/lib/services/balance-sumas-saldos";
 import { Card } from "@/components/ui/card";
 import { DateRangeFilter } from "@/components/date-range-filter";
+import { OcultarSinSaldoToggle } from "@/components/ocultar-sin-saldo-toggle";
 
 import { BalanceTreeTable } from "./balance-tree-table";
 
 type SearchParams = Promise<{
   desde?: string;
   hasta?: string;
+  todas?: string;
 }>;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseDate(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T00:00:00Z");
+  const d = new Date(`${value}T00:00:00Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 function endOfDay(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T23:59:59.999Z");
+  const d = new Date(`${value}T23:59:59.999Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
@@ -34,19 +36,19 @@ function firstOfMonthIso(): string {
   return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 }
 
-export default async function BalancePage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function BalancePage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
   const desdeStr = params.desde ?? firstOfMonthIso();
   const hastaStr = params.hasta ?? todayIso();
   const fechaDesde = parseDate(desdeStr);
   const fechaHasta = endOfDay(hastaStr);
+  const mostrarTodas = params.todas === "1";
 
   const balance = await getBalanceSumasYSaldos({ fechaDesde, fechaHasta });
+  const root = mostrarTodas ? balance.root : pruneBalanceSinSaldo(balance.root);
 
   const rangoLabel =
     fechaDesde && fechaHasta
@@ -76,10 +78,13 @@ export default async function BalancePage({
         </p>
       </div>
 
-      <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
+      <div className="flex flex-col gap-3">
+        <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
+        <OcultarSinSaldoToggle />
+      </div>
 
       <Card className="py-0">
-        <BalanceTreeTable root={balance.root} />
+        <BalanceTreeTable root={root} />
       </Card>
     </div>
   );

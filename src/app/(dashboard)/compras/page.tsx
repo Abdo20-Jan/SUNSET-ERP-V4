@@ -12,11 +12,9 @@ import { ComprasTable } from "./_components/compras-table";
 
 type SearchParams = Promise<{ page?: string; perPage?: string }>;
 
-export default async function ComprasPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function ComprasPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const { page, perPage } = parsePaginationParams(params);
 

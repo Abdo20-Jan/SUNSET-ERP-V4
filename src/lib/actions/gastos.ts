@@ -1,10 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { money, sumMoney, toDecimal } from "@/lib/decimal";
+import { money, sumMoney } from "@/lib/decimal";
 import {
   AsientoError,
   anularAsiento,
@@ -12,6 +11,13 @@ import {
   crearAsientoGasto,
 } from "@/lib/services/asiento-automatico";
 import { CondicionPago, GastoEstado, Moneda, Prisma } from "@/generated/prisma/client";
+
+import { gastoInputSchema, type GastoInput } from "./gasto-schema";
+
+// El schema de validación vive en ./gasto-schema (sin "use server") porque este
+// archivo sólo puede exportar funciones async — exportar el schema/tipo rompe el
+// build de Next. Re-exportamos el tipo para los consumidores (form/detalle).
+export type { GastoInput } from "./gasto-schema";
 
 export type GastoRow = {
   id: string;
@@ -121,6 +127,7 @@ export type GastoDetalle = {
   iva: string;
   iibb: string;
   otros: string;
+  deducibleGanancias: "NETO" | "TOTAL" | "NO_DEDUCIBLE";
   total: string;
   estado: GastoEstado;
   asientoId: string | null;
@@ -153,6 +160,7 @@ export async function obtenerGastoPorId(id: string): Promise<GastoDetalle | null
     iva: g.iva.toString(),
     iibb: g.iibb.toString(),
     otros: g.otros.toString(),
+    deducibleGanancias: g.deducibleGanancias,
     total: g.total.toString(),
     estado: g.estado,
     asientoId: g.asientoId,
@@ -181,64 +189,6 @@ export async function generarNumeroGasto(): Promise<string> {
   }
   return `${prefix}${String(next).padStart(4, "0")}`;
 }
-
-const moneyRegex = /^\d+(\.\d{1,2})?$/;
-const rateRegex = /^\d+(\.\d{1,6})?$/;
-
-const lineaSchema = z.object({
-  cuentaContableGastoId: z.number().int().positive("Seleccione cuenta de gasto"),
-  descripcion: z.string().min(1, "Descripción requerida").max(200),
-  subtotal: z.string().regex(moneyRegex, "Subtotal inválido"),
-});
-
-const gastoInputSchema = z
-  .object({
-    id: z.string().uuid().optional(),
-    numero: z.string().min(1).max(32),
-    proveedorId: z.string().uuid("Seleccione proveedor"),
-    fecha: z.string().min(1, "Fecha requerida"),
-    fechaVencimiento: z
-      .string()
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v : null)),
-    condicionPago: z.nativeEnum(CondicionPago),
-    moneda: z.nativeEnum(Moneda),
-    tipoCambio: z.string().regex(rateRegex, "TC inválido"),
-    facturaNumero: z
-      .string()
-      .max(64)
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-    iva: z.string().regex(moneyRegex, "IVA inválido").default("0"),
-    iibb: z.string().regex(moneyRegex, "IIBB inválido").default("0"),
-    otros: z.string().regex(moneyRegex, "Otros inválido").default("0"),
-    notas: z
-      .string()
-      .max(500)
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-    lineas: z.array(lineaSchema).min(1, "Al menos una línea"),
-  })
-  .superRefine((data, ctx) => {
-    if (data.moneda === Moneda.ARS && data.tipoCambio !== "1") {
-      ctx.addIssue({
-        code: "custom",
-        path: ["tipoCambio"],
-        message: "Para ARS, TC=1",
-      });
-    }
-    if (data.fechaVencimiento) {
-      if (new Date(data.fechaVencimiento) < new Date(data.fecha)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["fechaVencimiento"],
-          message: "Fecha de vencimiento no puede ser anterior a la factura",
-        });
-      }
-    }
-  });
-
-export type GastoInput = z.input<typeof gastoInputSchema>;
 
 export type GastoActionResult =
   | { ok: true; id: string; numero: string }
@@ -271,6 +221,7 @@ export async function guardarGastoAction(raw: GastoInput): Promise<GastoActionRe
         iva: money(input.iva),
         iibb: money(input.iibb),
         otros: money(input.otros),
+        deducibleGanancias: input.deducibleGanancias,
         total: money(total),
         notas: input.notas,
       };

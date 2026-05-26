@@ -49,11 +49,9 @@ const ESTADO_SHORT: Record<PrestamoEstadoFiltro, string> = {
   SIN_ASIENTO: "sin asiento",
 };
 
-export default async function PrestamosPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function PrestamosPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
   const clasificacion = parseClasificacion(params.clasificacion);

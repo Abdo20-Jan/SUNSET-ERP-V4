@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 
+import Decimal from "decimal.js";
+
 import {
+  type AplicarPagoA,
   crearMovimientoTesoreriaAction,
   pagarConIntermediarioAction,
   type CuentaBancariaOption,
@@ -45,7 +48,11 @@ type ProveedorOption = {
 type Props = {
   rows: CuentaAPagarPorEmbarque[];
   cuentasBancarias: CuentaBancariaOption[];
-  proveedores: ProveedorOption[];
+  // Lista de proveedores elegibles como beneficiário intermediário
+  // (despachante). Incluye TODOS los proveedores activos con cuenta
+  // contable — no sólo los que tienen factura/saldo abierto — para que un
+  // despachante sin facturas en el sistema (ej: CYSAR) pueda seleccionarse.
+  intermediarios: ProveedorOption[];
   defaultFecha?: string;
 };
 
@@ -53,7 +60,7 @@ function rowKey(r: CuentaAPagarPorEmbarque): string {
   return `${r.embarqueId}::${r.proveedorId}`;
 }
 
-export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, defaultFecha }: Props) {
+export function EmbarqueBatchPago({ rows, cuentasBancarias, intermediarios, defaultFecha }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -130,10 +137,29 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, default
     const lineas = seleccionados.map((r) => {
       const override = montosOverride[rowKey(r)];
       const monto = override !== undefined ? override : r.pendienteArs;
+
+      // Layer 0 — distribuir `monto` FIFO entre las facturas de este
+      // grupo (embarque+proveedor). Todas las facturas son EmbarqueCosto.
+      let remaining = new Decimal(monto);
+      const appliedTo: AplicarPagoA[] = [];
+      const facturasOrdered = [...r.facturas].sort((a, b) => a.fecha.localeCompare(b.fecha));
+      for (const f of facturasOrdered) {
+        if (remaining.lte(0.005)) break;
+        const facturaMonto = new Decimal(f.totalArs);
+        const tomar = facturaMonto.gt(remaining) ? remaining : facturaMonto;
+        appliedTo.push({
+          tipo: "embarqueCosto",
+          id: f.id,
+          montoArs: tomar.toFixed(2),
+        });
+        remaining = remaining.minus(tomar);
+      }
+
       return {
         cuentaContableId: r.proveedorCuentaContableId!,
         monto,
         descripcion: `${r.embarqueCodigo} — ${r.proveedorNombre}`,
+        appliedTo: appliedTo.length > 0 ? appliedTo : undefined,
       };
     });
 
@@ -254,7 +280,7 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, default
               <TableHead className="text-right">Total facturado</TableHead>
               <TableHead className="text-right">Saldo proveedor</TableHead>
               <TableHead className="text-right">A pagar</TableHead>
-              <TableHead className="w-24 text-right"></TableHead>
+              <TableHead className="w-24 text-right" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -430,13 +456,13 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, default
                           {(value) => {
                             if (!value) return "Seleccione proveedor intermediário";
                             const id = Number(value);
-                            const p = proveedores.find((x) => x.cuentaContableId === id);
+                            const p = intermediarios.find((x) => x.cuentaContableId === id);
                             return p ? p.proveedorNombre : `Cuenta #${id}`;
                           }}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        {proveedores
+                        {intermediarios
                           .filter(
                             (p): p is typeof p & { cuentaContableId: number } =>
                               p.cuentaContableId !== null,
@@ -632,7 +658,7 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, proveedores, default
                     }
                   >
                     {diferencia > 0 ? "DEBE" : "HABER"} {(() => {
-                      const p = proveedores.find(
+                      const p = intermediarios.find(
                         (x) => x.cuentaContableId === intermediarioCuentaId,
                       );
                       return p?.proveedorNombre ?? `Cuenta #${intermediarioCuentaId}`;

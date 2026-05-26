@@ -1,9 +1,21 @@
+import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
+import { getDefaultFecha } from "@/lib/server/fecha-default";
 import { getSaldosExteriorPorProveedor } from "@/lib/services/cuentas-a-pagar";
 
 import { ProveedoresExteriorTable } from "./proveedores-exterior-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function ComexProveedoresPage() {
-  const proveedores = await getSaldosExteriorPorProveedor();
+  const [proveedores, cuentasBancariasTodas, defaultFecha] = await Promise.all([
+    getSaldosExteriorPorProveedor(),
+    listarCuentasBancariasParaMovimiento(),
+    getDefaultFecha(),
+  ]);
+
+  // El pago USD se debita siempre de una cuenta ARS con TC del banco —
+  // las cuentas USD no aplican a este flujo (ver pagarFacturaExteriorAction).
+  const cuentasBancariasArs = cuentasBancariasTodas.filter((c) => c.moneda === "ARS");
 
   const totalUsd = proveedores.reduce((acc, p) => acc + Number(p.saldoUsd), 0);
 
@@ -20,7 +32,11 @@ export default async function ComexProveedoresPage() {
         </div>
       </div>
 
-      <ProveedoresExteriorTable proveedores={proveedores} />
+      <ProveedoresExteriorTable
+        proveedores={proveedores}
+        cuentasBancariasArs={cuentasBancariasArs}
+        defaultFecha={defaultFecha}
+      />
     </div>
   );
 }

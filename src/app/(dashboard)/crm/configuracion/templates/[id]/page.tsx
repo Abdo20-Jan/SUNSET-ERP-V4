@@ -5,11 +5,9 @@ import { isCrmEnabled } from "@/lib/features";
 
 import { TemplateForm } from "../_components/template-form";
 
-export default async function EditarTemplatePage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function EditarTemplatePage({ params }: { params: Promise<{ id: string }> }) {
   if (!isCrmEnabled()) {
     return (
       <main className="container mx-auto p-6">

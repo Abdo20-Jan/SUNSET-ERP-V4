@@ -62,6 +62,20 @@ const CONDICION_LABELS: Record<(typeof CONDICION_VALUES)[number], string> = {
   OTRO: "Otro",
 };
 
+const DEDUCIBLE_VALUES = ["NETO", "TOTAL", "NO_DEDUCIBLE"] as const;
+
+const DEDUCIBLE_LABELS: Record<(typeof DEDUCIBLE_VALUES)[number], string> = {
+  NETO: "Neto s/ IVA — RI estándar",
+  TOTAL: "Total c/ IVA — Monotributista",
+  NO_DEDUCIBLE: "No deducible",
+};
+
+const DEDUCIBLE_HINTS: Record<(typeof DEDUCIBLE_VALUES)[number], string> = {
+  NETO: "Deduce el subtotal sin IVA (responsable inscripto estándar).",
+  TOTAL: "Deduce el total con IVA (monotributista o sin IVA discriminado).",
+  NO_DEDUCIBLE: "No deduce en Ganancias (multas, excedente de representación, etc.).",
+};
+
 const formSchema = z
   .object({
     numero: z.string().min(1, "Número requerido").max(32),
@@ -75,6 +89,7 @@ const formSchema = z
     iva: z.string().regex(moneyRegex, "IVA inválido"),
     iibb: z.string().regex(moneyRegex, "IIBB inválido"),
     otros: z.string().regex(moneyRegex, "Otros inválido"),
+    deducibleGanancias: z.enum(DEDUCIBLE_VALUES).default("NETO"),
     notas: z.string().max(500).optional(),
     lineas: z
       .array(
@@ -163,6 +178,7 @@ export function GastoForm({
         iva: initialData!.iva,
         iibb: initialData!.iibb,
         otros: initialData!.otros,
+        deducibleGanancias: initialData!.deducibleGanancias ?? "NETO",
         notas: initialData!.notas ?? "",
         lineas: initialData!.lineas.map((l) => ({
           cuentaContableGastoId: l.cuentaContableGastoId,
@@ -182,6 +198,7 @@ export function GastoForm({
         iva: "0",
         iibb: "0",
         otros: "0",
+        deducibleGanancias: "NETO",
         notas: "",
         lineas: [
           {
@@ -212,6 +229,8 @@ export function GastoForm({
   const iva = useWatch({ control, name: "iva" }) ?? "0";
   const iibb = useWatch({ control, name: "iibb" }) ?? "0";
   const otros = useWatch({ control, name: "otros" }) ?? "0";
+  const deducible = useWatch({ control, name: "deducibleGanancias" }) ?? "NETO";
+  const deducibleHint = DEDUCIBLE_HINTS[deducible];
 
   useEffect(() => {
     if (moneda === "ARS") {
@@ -298,6 +317,7 @@ export function GastoForm({
       iva: values.iva,
       iibb: values.iibb,
       otros: values.otros,
+      deducibleGanancias: values.deducibleGanancias,
       notas: values.notas,
       lineas: values.lineas.map((l) => ({
         cuentaContableGastoId: Number(l.cuentaContableGastoId),
@@ -475,6 +495,34 @@ export function GastoForm({
 
           <Field label="Otros" error={errors.otros?.message}>
             <Input {...register("otros")} inputMode="decimal" />
+          </Field>
+
+          <Field
+            label="Deducción Ganancias"
+            error={errors.deducibleGanancias?.message}
+            hint={deducibleHint}
+          >
+            <Controller
+              control={control}
+              name="deducibleGanancias"
+              render={({ field }) => (
+                <Select
+                  value={field.value ?? "NETO"}
+                  onValueChange={(v) => field.onChange(v as (typeof DEDUCIBLE_VALUES)[number])}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DEDUCIBLE_VALUES.map((v) => (
+                      <SelectItem key={v} value={v}>
+                        {DEDUCIBLE_LABELS[v]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
           </Field>
         </CardContent>
       </Card>

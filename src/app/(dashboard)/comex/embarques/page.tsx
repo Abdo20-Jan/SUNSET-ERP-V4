@@ -48,11 +48,9 @@ function parseMoneda(v: string | undefined): Moneda | null {
   return null;
 }
 
-export default async function EmbarquesPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function EmbarquesPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
   const tab = parseTab(params.tab);

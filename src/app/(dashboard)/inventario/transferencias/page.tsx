@@ -5,6 +5,8 @@ import { isStockDualEnabled } from "@/lib/features";
 
 import { TransferenciaRow } from "./_components/transferencia-row";
 
+export const dynamic = "force-dynamic";
+
 export default async function TransferenciasPage() {
   if (!isStockDualEnabled()) {
     return (
@@ -47,7 +49,7 @@ export default async function TransferenciasPage() {
                 <th className="px-3 py-2 text-right">Cantidad</th>
                 <th className="px-3 py-2">Origen → Destino</th>
                 <th className="px-3 py-2">Estado</th>
-                <th className="px-3 py-2"></th>
+                <th className="px-3 py-2" />
               </tr>
             </thead>
             <tbody>

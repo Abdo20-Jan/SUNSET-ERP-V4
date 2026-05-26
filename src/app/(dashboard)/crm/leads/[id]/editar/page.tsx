@@ -5,11 +5,9 @@ import { isCrmEnabled } from "@/lib/features";
 
 import { LeadForm } from "../../_components/lead-form";
 
-export default async function EditarLeadPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function EditarLeadPage({ params }: { params: Promise<{ id: string }> }) {
   if (!isCrmEnabled()) {
     return (
       <main className="container mx-auto p-6">

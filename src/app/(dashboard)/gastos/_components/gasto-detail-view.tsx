@@ -45,6 +45,20 @@ const CONDICION_LABELS: Record<string, string> = {
   OTRO: "Otro",
 };
 
+const DEDUCIBLE_LABELS: Record<GastoDetalle["deducibleGanancias"], string> = {
+  NETO: "Neto s/ IVA",
+  TOTAL: "Total c/ IVA",
+  NO_DEDUCIBLE: "No deducible",
+};
+
+const DEDUCIBLE_CLASSES: Record<GastoDetalle["deducibleGanancias"], string> = {
+  NETO: "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300",
+  TOTAL:
+    "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300",
+  NO_DEDUCIBLE:
+    "border-red-300 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300",
+};
+
 function estadoVariant(
   estado: GastoDetalle["estado"],
 ): "default" | "outline" | "secondary" | "destructive" {
@@ -132,6 +146,11 @@ export function GastoDetailView({ gasto, proveedorNombre, cuentasMap, asientoNum
               <span className="text-muted-foreground">Sin asiento</span>
             )}
           </Field>
+          <Field label="Deducción Ganancias">
+            <Badge variant="outline" className={DEDUCIBLE_CLASSES[gasto.deducibleGanancias]}>
+              {DEDUCIBLE_LABELS[gasto.deducibleGanancias]}
+            </Badge>
+          </Field>
           {gasto.notas && (
             <Field label="Notas" wide>
               {gasto.notas}
@@ -204,15 +223,7 @@ export function GastoDetailView({ gasto, proveedorNombre, cuentasMap, asientoNum
   );
 }
 
-function Stat({
-  label,
-  value,
-  emphasis,
-}: {
-  label: string;
-  value: string;
-  emphasis?: boolean;
-}) {
+function Stat({ label, value, emphasis }: { label: string; value: string; emphasis?: boolean }) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-1">

@@ -31,6 +31,8 @@ import {
 } from "./cerrar-embarque-dialog";
 import { ProveedorCombobox, type ProveedorOption } from "@/components/proveedor-combobox";
 import { ProductoCombobox, type ProductoOption } from "@/components/producto-combobox";
+import { ContenedorMatriz } from "./contenedor-matriz";
+import type { ContenedorPackingDTO } from "@/lib/services/contenedor";
 import { CuentaCombobox, type CuentaOption } from "@/components/cuenta-combobox";
 import Decimal from "decimal.js";
 
@@ -237,11 +239,11 @@ const formSchema = z
     }
     if (data.moneda === "USD") {
       const tc = Number(data.tipoCambio);
-      if (!Number.isFinite(tc) || tc <= 0) {
+      if (!(tc > 1)) {
         ctx.addIssue({
           code: "custom",
           path: ["tipoCambio"],
-          message: "TC debe ser > 0",
+          message: "Para USD, TC debe ser > 1",
         });
       }
     }
@@ -251,6 +253,13 @@ const formSchema = z
           code: "custom",
           path: ["costos", idx, "tipoCambio"],
           message: "Para ARS, TC=1",
+        });
+      }
+      if (c.moneda === "USD" && !(Number(c.tipoCambio) > 1)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["costos", idx, "tipoCambio"],
+          message: "Para USD, TC debe ser > 1",
         });
       }
     });
@@ -282,6 +291,8 @@ type Props =
       initialData: EmbarqueDetalle;
       readonly: boolean;
       defaultFecha?: string;
+      contenedorEnabled: boolean;
+      contenedores: ContenedorPackingDTO[];
     };
 
 export function EmbarqueForm(props: Props) {
@@ -558,10 +569,24 @@ export function EmbarqueForm(props: Props) {
   };
 
   const onSubmit = handleSubmit((values) => {
+    // Gap #3 — el server reconcilia ItemEmbarque por productoId y sólo borra
+    // las EmbarqueCosto BORRADOR. Las facturas EMITIDA/LEGACY_BUNDLED/ANULADA
+    // se muestran read-only y NO se pueden remover (la card oculta el botón),
+    // así que mantienen su posición como prefijo estable del array. Las
+    // filtramos del payload para que el server no las re-cree (duplicaría el
+    // asiento). Así el form de edición sólo gestiona las BORRADOR.
+    const costosParaGuardar = isEdit
+      ? values.costos.filter((_c, index) => {
+          const meta = props.initialData.costos[index];
+          return !meta || meta.estado === "BORRADOR";
+        })
+      : values.costos;
+
     startTransition(async () => {
       const result = await guardarEmbarqueAction({
         id: isEdit ? props.initialData.id : undefined,
         ...values,
+        costos: costosParaGuardar,
       });
       if (result.ok) {
         toast.success(
@@ -984,7 +1009,7 @@ export function EmbarqueForm(props: Props) {
                     <th className="py-2 pr-3 text-right font-medium">Cantidad</th>
                     <th className="py-2 pr-3 text-right font-medium">Precio FOB</th>
                     <th className="py-2 pr-3 text-right font-medium">Subtotal</th>
-                    {!readonly && <th className="w-12 py-2 pr-3"></th>}
+                    {!readonly && <th className="w-12 py-2 pr-3" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -1009,7 +1034,7 @@ export function EmbarqueForm(props: Props) {
                     <td className="py-2 pr-3 text-right font-mono text-sm tabular-nums">
                       {formatMoney(fobTotal.toString())}
                     </td>
-                    {!readonly && <td></td>}
+                    {!readonly && <td />}
                   </tr>
                 </tfoot>
               </table>
@@ -1240,6 +1265,21 @@ export function EmbarqueForm(props: Props) {
         </CardContent>
       </Card>
 
+      {/* Sección 6: Contenedores (flag CONTENEDOR_DESCONSOLIDACION_ENABLED) */}
+      {props.mode === "edit" && props.contenedorEnabled && (
+        <ContenedorMatriz
+          embarqueId={props.initialData.id}
+          productos={props.productos}
+          itemsEmbarque={props.initialData.items.map((it) => ({
+            productoId: it.productoId,
+            cantidad: it.cantidad,
+          }))}
+          contenedores={props.contenedores}
+          depositos={props.depositos}
+          readonly={readonly}
+        />
+      )}
+
       {/* Spacer pra que el contenido no quede oculto detrás del action bar */}
       <div className="h-16" aria-hidden />
 
@@ -1305,15 +1345,18 @@ export function EmbarqueForm(props: Props) {
                   </Button>
                 </>
               )}
-            {!readonly && props.mode === "edit" && !props.initialData.asiento && (
-              <CerrarEmbarqueDialog
-                embarqueId={props.initialData.id}
-                embarqueCodigo={props.initialData.codigo}
-                previewTotalDebe={formatMoney(costoTotal.toString())}
-                disabled={isSubmitting}
-                defaultFecha={props.defaultFecha}
-              />
-            )}
+            {!readonly &&
+              props.mode === "edit" &&
+              !props.initialData.asiento &&
+              props.initialData.despachosActivosCount === 0 && (
+                <CerrarEmbarqueDialog
+                  embarqueId={props.initialData.id}
+                  embarqueCodigo={props.initialData.codigo}
+                  previewTotalDebe={formatMoney(costoTotal.toString())}
+                  disabled={isSubmitting}
+                  defaultFecha={props.defaultFecha}
+                />
+              )}
           </div>
         </div>
       </div>
@@ -1925,7 +1968,7 @@ const FacturaCard = memo(function FacturaCard({
                   <th className="py-2 px-2 text-left font-medium">Cuenta analítica</th>
                   <th className="py-2 px-2 text-left font-medium">Descripción</th>
                   <th className="w-32 py-2 px-2 text-right font-medium">Subtotal ({moneda})</th>
-                  {!disabled && <th className="w-10"></th>}
+                  {!disabled && <th className="w-10" />}
                 </tr>
               </thead>
               <tbody>

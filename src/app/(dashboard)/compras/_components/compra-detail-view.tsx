@@ -215,15 +215,7 @@ export function CompraDetailView({ compra, proveedorNombre, productosMap, asient
   );
 }
 
-function Stat({
-  label,
-  value,
-  emphasis,
-}: {
-  label: string;
-  value: string;
-  emphasis?: boolean;
-}) {
+function Stat({ label, value, emphasis }: { label: string; value: string; emphasis?: boolean }) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-1">

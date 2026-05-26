@@ -1,6 +1,6 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
-  "organizeImports": { "enabled": false },
+  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "assist": { "actions": { "source": { "organizeImports": "off" } } },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -38,7 +38,10 @@
         "noDelete": "warn"
       },
       "a11y": {
-        "noLabelWithoutControl": "off"
+        "noLabelWithoutControl": "off",
+        "noStaticElementInteractions": "warn",
+        "useKeyWithClickEvents": "warn",
+        "useSemanticElements": "warn"
       }
     }
   },
@@ -57,12 +60,25 @@
     }
   },
   "files": {
-    "ignore": [
-      "src/generated/**",
-      "node_modules/**",
-      ".next/**",
-      "prisma/migrations/**",
-      "**/*.generated.*"
+    "includes": [
+      "**",
+      "!**/src/generated/**",
+      "!**/node_modules/**",
+      "!**/.next/**",
+      "!**/prisma/migrations/**",
+      "!**/*.generated.*",
+      "!**/src/app/globals.css"
     ]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["**/src/components/ui/**"],
+      "linter": {
+        "rules": {
+          "security": { "noDangerouslySetInnerHtml": "off" },
+          "suspicious": { "noArrayIndexKey": "off" }
+        }
+      }
+    }
+  ]
 }

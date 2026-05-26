@@ -108,6 +108,16 @@ export const VENTA_CODIGOS = {
     nombre: "VALORES A COBRAR (CHEQUES DE TERCEROS)",
     categoria: CuentaCategoria.ACTIVO,
   },
+  // Excedente cuando los cheques de terceros recibidos suman MÁS que el
+  // total facturado. El sobrante queda como pasivo (saldo a favor del
+  // cliente) aplicable a facturas futuras. Antes esta diferencia se
+  // descartaba silenciosamente en asiento-automatico (cheques truncados
+  // al total); ahora se contabiliza para reflejar el efectivo recibido.
+  ANTICIPOS_CLIENTES: {
+    codigo: "2.1.7.01",
+    nombre: "ANTICIPOS DE CLIENTES",
+    categoria: CuentaCategoria.PASIVO,
+  },
   // Flete sobre ventas — gasto cuando lo pagamos nosotros (no se cobra
   // al cliente). Reduce el margen neto y la utilidad bruta sobre la que
   // se devenga la provisión Ganancias.
@@ -254,6 +264,51 @@ export const EMBARQUE_CODIGOS = {
   },
 } as const satisfies Record<string, CuentaDef>;
 
+// ----- COMEX ZPA / DESCONSOLIDACIÓN (errata Q6 + D9) ---------
+// Cuentas del flujo de contenedores / zona primaria / depósito fiscal.
+//
+// Q6 (resuelta 2026-05-20): 1.1.5.02 MERCADERÍAS EN TRÁNSITO ya es
+// analítica EN USO (fábrica → puerto) y conserva su historial — NO se
+// toca. Por eso las cuentas nuevas usan códigos vacíos 1.1.5.04 / .05
+// en vez de subcuentas .02.01/.02.02. Mapping de asientos (Fase 3):
+//   - Llegada al puerto (ZPA):      DEBE 1.1.5.04 / HABER 1.1.5.02
+//   - Traslado ZPA → depósito fiscal: DEBE 1.1.5.05 / HABER 1.1.5.04
+//   - Nacionalización (vía DF):      DEBE 1.1.5.01 / HABER 1.1.5.05
+//   - Nacionalización directa puerto: DEBE 1.1.5.01 / HABER 1.1.5.04
+// Pendiente confirmación final del contador sobre disponibilidad de
+// 1.1.5.04 / 1.1.5.05 en el rango.
+//
+// Nota: las cuentas de orden 9.x (Responsabilidad Sustituta Aduanera,
+// Q9) NO viven acá — requieren una categoría ORDEN nueva en el enum
+// CuentaCategoria (cambio de schema) para no contaminar el balance, y
+// sólo se usan en Fase 3. Se agregan en el PR 3.1 junto al helper
+// crearAsientoRespSustituta.
+export const COMEX_ZPA_CODIGOS = {
+  MERCADERIAS_EN_ZONA_PRIMARIA: {
+    codigo: "1.1.5.04",
+    nombre: "MERCADERÍAS EN ZONA PRIMARIA ADUANERA",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+  MERCADERIAS_EN_DEPOSITO_FISCAL: {
+    codigo: "1.1.5.05",
+    nombre: "MERCADERÍAS EN DEPÓSITO FISCAL",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+  // D9 — divergencia formal (físico ≠ declarado). Falta sin responsable
+  // identificado: DEBE acá (pérdida) / HABER 1.1.5.05 (o 1.1.5.04).
+  PERDIDAS_LOGISTICAS: {
+    codigo: "5.9.2.01",
+    nombre: "PÉRDIDAS LOGÍSTICAS Y FALTANTES DE INVENTARIO",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  // D9 — sobra sin responsable: DEBE 1.1.5.05 / HABER acá (ingreso).
+  INGRESO_POR_DIFERENCIA_INVENTARIO: {
+    codigo: "4.9.1.01",
+    nombre: "INGRESOS POR DIFERENCIA DE INVENTARIO",
+    categoria: CuentaCategoria.INGRESO,
+  },
+} as const satisfies Record<string, CuentaDef>;
+
 // ----- TRANSFERENCIAS / DIFERENCIA DE CAMBIO -----------------
 export const TRANSFERENCIA_CODIGOS = {
   DIF_CAMBIO_POSITIVA: {
@@ -264,6 +319,11 @@ export const TRANSFERENCIA_CODIGOS = {
   DIF_CAMBIO_NEGATIVA: {
     codigo: "5.8.2.01",
     nombre: "DIFERENCIA DE CAMBIO NEGATIVA",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  DIFERENCIAS_REDONDEO: {
+    codigo: "5.8.3.01",
+    nombre: "DIFERENCIAS DE REDONDEO",
     categoria: CuentaCategoria.EGRESO,
   },
 } as const satisfies Record<string, CuentaDef>;

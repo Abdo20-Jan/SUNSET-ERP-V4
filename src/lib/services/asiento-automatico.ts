@@ -3,12 +3,14 @@ import "server-only";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { eqMoney, gtZero, money, sumMoney, toDecimal } from "@/lib/decimal";
+import { eqMoney, gtZero, money, type MoneyInput, sumMoney, toDecimal } from "@/lib/decimal";
 import { isStockDualEnabled } from "@/lib/features";
 import { secureRandomInt } from "@/lib/secure-random";
-import { ensureCuentasMap, getOrCreateCuenta } from "@/lib/services/cuenta-auto";
+import { type CuentaDef, ensureCuentasMap, getOrCreateCuenta } from "@/lib/services/cuenta-auto";
+import { calcularCostoLandedDespacho } from "@/lib/services/despacho-parcial";
 import { revertirIngresoEmbarque } from "@/lib/services/stock";
 import {
+  COMEX_ZPA_CODIGOS,
   COMPRA_CODIGOS,
   EMBARQUE_CODIGOS,
   EXTRACTO_BANCARIO_CODIGOS,
@@ -22,6 +24,7 @@ import {
   AsientoEstado,
   AsientoOrigen,
   CuentaTipo,
+  DivergenciaCausa,
   EmbarqueEstado,
   Moneda,
   MovimientoTesoreriaTipo,
@@ -48,7 +51,8 @@ export type AsientoErrorCode =
   | "PERIODO_ORIGEN_CERRADO"
   | "PERIODO_DESTINO_CERRADO"
   | "PERIODO_DESTINO_INEXISTENTE"
-  | "MISMO_PERIODO";
+  | "MISMO_PERIODO"
+  | "CONCURRENCIA";
 
 export class AsientoError extends Error {
   readonly code: AsientoErrorCode;
@@ -600,10 +604,16 @@ export async function crearAsientoPrestamo(
       ],
     });
 
-    await inner.prestamoExterno.update({
-      where: { id: prestamoId },
+    const updPrestamo = await inner.prestamoExterno.updateMany({
+      where: { id: prestamoId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updPrestamo.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Préstamo ${prestamoId} fue contabilizado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
 
     return asiento;
   };
@@ -721,10 +731,16 @@ export async function crearAsientoMovimientoTesoreria(
       lineas,
     });
 
-    await inner.movimientoTesoreria.update({
-      where: { id: movimientoId },
+    const updMov = await inner.movimientoTesoreria.updateMany({
+      where: { id: movimientoId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updMov.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `MovimientoTesoreria ${movimientoId} fue contabilizado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
 
     return asiento;
   };
@@ -1211,10 +1227,16 @@ export async function crearAsientoEmbarque(
       lineas: lineasInput,
     });
 
-    await inner.embarque.update({
-      where: { id: embarqueId },
+    const updEmbCierre = await inner.embarque.updateMany({
+      where: { id: embarqueId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updEmbCierre.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Embarque ${embarqueId} fue cerrado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
 
     return asiento;
   };
@@ -1451,15 +1473,496 @@ export async function crearAsientoZonaPrimaria(
       lineas: lineasInput,
     });
 
-    await inner.embarque.update({
-      where: { id: embarqueId },
+    const updEmbZP = await inner.embarque.updateMany({
+      where: { id: embarqueId, asientoZonaPrimariaId: null },
       data: {
         asientoZonaPrimariaId: asiento.id,
         estado: "EN_ZONA_PRIMARIA",
       },
     });
+    if (updEmbZP.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Embarque ${embarqueId}: zona primaria fue confirmada simultáneamente por otro proceso (race detectado).`,
+      );
+    }
 
     return asiento;
+  };
+
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
+// Embarque — Arribo a Zona Primaria (Modelo Y, Ponte PR C)
+// ============================================================
+//
+// Variante de `crearAsientoZonaPrimaria` para embarques CON contenedores
+// (flag CONTENEDOR_DESCONSOLIDACION_ENABLED). A diferencia del flujo legacy
+// (que DEBE 1.1.5.02 EN TRÁNSITO + ingresa stock al depósito ZPA), acá el
+// costo total rateable se capitaliza directamente en **1.1.5.04 MERCADERÍAS
+// EN ZONA PRIMARIA** y NO se mueve stock. El primer ingreso de stock recién
+// ocurre en la desconsolidación (depósito fiscal), evitando la doble
+// contabilización de inventario (ZPA + DF) — ver runbook comex-ativacao.md.
+//
+// La base capitalizada = la misma que `calcularRateioZonaPrimaria`: FOB +
+// flete/seguro origen + Σ subtotales de facturas momento=ZONA_PRIMARIA (todo
+// en ARS). Esto garantiza la reconciliación Σ costoFCUnitario×cant×TC ==
+// débito 1.1.5.04. IVA/IIBB son créditos fiscales (no se capitalizan).
+//
+// Las facturas ZP pueden llegar ya EMITIDAS (la edición del embarque las
+// auto-emite a gasto 5.x en su fecha). Para no perder ni duplicar el costo,
+// este asiento RECLASIFICA las EMITIDA (DEBE 1.1.5.04 / HABER su cuenta 5.x,
+// neteándola) y hace el booking completo de las BORRADOR. Así el costo de ZP
+// siempre termina capitalizado, sea cual sea el estado de la factura.
+
+export async function crearAsientoArriboComex(
+  embarqueId: string,
+  tx?: TxClient,
+  fecha?: Date,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const embarque = await inner.embarque.findUnique({
+      where: { id: embarqueId },
+      include: {
+        proveedor: { select: { id: true, nombre: true, cuentaContableId: true } },
+        costos: {
+          include: {
+            proveedor: { select: { id: true, nombre: true, cuentaContableId: true } },
+            lineas: { orderBy: { id: "asc" } },
+          },
+          orderBy: { id: "asc" },
+        },
+      },
+    });
+
+    if (!embarque) {
+      throw new AsientoError("DOMINIO_INVALIDO", `Embarque ${embarqueId} no existe.`);
+    }
+    if (embarque.asientoZonaPrimariaId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarque.codigo} ya tiene un asiento de Zona Primaria (${embarque.asientoZonaPrimariaId}).`,
+      );
+    }
+    if (embarque.asientoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarque.codigo} ya está cerrado/despachado — no se puede registrar arribo después.`,
+      );
+    }
+    // Gap #7: defensa en profundidad. Un embarque USD con TC <= 1 corrompe la
+    // base capitalizada (FOB×TC) y el costeo unitario. El zod del form lo
+    // bloquea, pero acá lo cortamos antes de calcular por si llega por otra vía.
+    if (embarque.moneda === "USD" && Number(embarque.tipoCambio) <= 1) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarque.codigo}: tipo de cambio USD inválido (<= 1) — corrija el TC antes de confirmar arribo.`,
+      );
+    }
+
+    const porCodigo = await ensureCuentasMap(inner, EMBARQUE_CODIGOS);
+    const cuentaZpaId = await getOrCreateCuenta(
+      inner,
+      COMEX_ZPA_CODIGOS.MERCADERIAS_EN_ZONA_PRIMARIA,
+    );
+
+    const tcEmb = toDecimal(embarque.tipoCambio);
+    const fobArs = toDecimal(embarque.fobTotal).times(tcEmb).toDecimalPlaces(2);
+    const fleteOrigenArs = embarque.valorFleteOrigen
+      ? toDecimal(embarque.valorFleteOrigen).times(tcEmb).toDecimalPlaces(2)
+      : toDecimal(0);
+    const seguroOrigenArs = embarque.valorSeguroOrigen
+      ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
+      : toDecimal(0);
+    const totalProveedorExteriorArs = fobArs.plus(fleteOrigenArs).plus(seguroOrigenArs);
+
+    type Linea = {
+      cuentaId: number;
+      debe: import("decimal.js").Decimal;
+      haber: import("decimal.js").Decimal;
+      descripcion: string;
+    };
+    const lineas: Linea[] = [];
+    const pushDebe = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: valor, haber: toDecimal(0), descripcion });
+    };
+    const pushHaber = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: toDecimal(0), haber: valor, descripcion });
+    };
+
+    // Costo rateable capitalizado en 1.1.5.04. Arranca con FOB+flete+seguro;
+    // los subtotales de facturas ZP se suman abajo.
+    let costoRateableArs = totalProveedorExteriorArs;
+    const detalleOrigen =
+      fleteOrigenArs.gt(0) || seguroOrigenArs.gt(0)
+        ? ` (FOB + flete${seguroOrigenArs.gt(0) ? " + seguro" : ""} origen)`
+        : "";
+
+    // HABER: proveedor exterior por FOB + flete/seguro origen.
+    const proveedorExteriorCuentaId =
+      embarque.proveedor.cuentaContableId ??
+      porCodigo.get(EMBARQUE_CODIGOS.PROVEEDOR_EXTERIOR_FALLBACK.codigo)!;
+    pushHaber(
+      proveedorExteriorCuentaId,
+      totalProveedorExteriorArs,
+      `Proveedor exterior (${embarque.proveedor.nombre})${detalleOrigen}`,
+    );
+
+    // Facturas momento=ZONA_PRIMARIA (treatment A: el subtotal capitaliza en
+    // 1.1.5.04). Dos caminos según el estado, para que el costo SIEMPRE termine
+    // en inventario sin doble contabilizar:
+    //   - BORRADOR/LEGACY_BUNDLED: no tienen asiento propio → booking completo
+    //     acá (subtotal vía 1.1.5.04 + IVA/IIBB crédito / HABER proveedor).
+    //   - EMITIDA: ya tienen asiento standalone (DEBE gasto 5.x + IVA/IIBB /
+    //     HABER proveedor) en la fecha de la factura. Acá sólo RECLASIFICAMOS
+    //     el costo de gasto → inventario: DEBE 1.1.5.04 / HABER la cuenta 5.x
+    //     que debitó la emisión (neteándola a cero). El IVA crédito y el CxP del
+    //     proveedor quedan como los dejó la emisión (timing fiscal correcto).
+    // Las ANULADA se ignoran (no aportan costo).
+    const facturasZP = embarque.costos.filter(
+      (f) => f.momento === "ZONA_PRIMARIA" && f.estado !== "ANULADA",
+    );
+    for (const factura of facturasZP) {
+      if (factura.lineas.length === 0) continue;
+      const tc = toDecimal(factura.tipoCambio);
+      const facturaLabel = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""}`;
+      const yaEmitida = factura.estado === "EMITIDA";
+
+      let subtotalFacturaArs = toDecimal(0);
+      for (const linea of factura.lineas) {
+        const subtotalArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
+        if (!subtotalArs.gt(0)) continue;
+        costoRateableArs = costoRateableArs.plus(subtotalArs);
+        subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
+        if (yaEmitida) {
+          // Reclasificación: revierte el gasto que la emisión debitó en 5.x.
+          pushHaber(
+            linea.cuentaContableGastoId,
+            subtotalArs,
+            `${facturaLabel} — reclasificación gasto → 1.1.5.04 (arribo ZP)`,
+          );
+        }
+      }
+
+      // Las EMITIDA ya asentaron IVA/IIBB crédito y CxP: nada más que reclasificar.
+      if (yaEmitida) continue;
+
+      // BORRADOR/LEGACY: booking completo (proveedor + créditos fiscales).
+      if (!factura.proveedor.cuentaContableId) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `El proveedor ${factura.proveedor.nombre} no tiene cuenta contable asociada.`,
+        );
+      }
+      const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
+      const iibbArs = toDecimal(factura.iibb).times(tc).toDecimalPlaces(2);
+      const otrosArs = toDecimal(factura.otros).times(tc).toDecimalPlaces(2);
+
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS.codigo)!,
+        ivaArs,
+        `${facturaLabel} — IVA crédito (arribo ZP)`,
+      );
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS.codigo)!,
+        iibbArs,
+        `${facturaLabel} — IIBB crédito (arribo ZP)`,
+      );
+      // `otros` se mantiene como gasto (no capitalizable) para balancear.
+      if (otrosArs.gt(0)) {
+        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros (ZP)`);
+      }
+
+      const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+      pushHaber(
+        factura.proveedor.cuentaContableId,
+        totalFacturaArs,
+        `${facturaLabel} — total a pagar (arribo ZP)`,
+      );
+    }
+
+    // DEBE 1.1.5.04 con el costo total rateable capitalizado.
+    pushDebe(
+      cuentaZpaId,
+      costoRateableArs,
+      `Arribo a zona primaria — embarque ${embarque.codigo} (${embarque.proveedor.nombre})${detalleOrigen}`,
+    );
+
+    if (lineas.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Embarque ${embarque.codigo}: no hay FOB ni facturas de Zona Primaria para contabilizar.`,
+      );
+    }
+
+    const lineasInput: LineaInput[] = lineas.map((l) => ({
+      cuentaId: l.cuentaId,
+      debe: money(l.debe).toString(),
+      haber: money(l.haber).toString(),
+      descripcion: l.descripcion,
+    }));
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: fecha ?? new Date(),
+      descripcion: `Arribo zona primaria embarque ${embarque.codigo}`,
+      origen: AsientoOrigen.COMEX,
+      lineas: lineasInput,
+    });
+
+    const updEmbZP = await inner.embarque.updateMany({
+      where: { id: embarqueId, asientoZonaPrimariaId: null },
+      data: { asientoZonaPrimariaId: asiento.id, estado: "EN_ZONA_PRIMARIA" },
+    });
+    if (updEmbZP.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Embarque ${embarqueId}: arribo fue confirmado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
+
+    return asiento;
+  };
+
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
+// Comex ZPA — transferencias entre subcuentas de bienes de cambio (PR 3.1)
+// ============================================================
+//
+// Helpers de bajo nivel que mueven el costo de la mercadería entre las
+// subcuentas según su estado físico/aduanero. Los consumen los servicios
+// de desconsolidación (Fase 3) y nacionalización; acá NO hay callers aún
+// (flag CONTENEDOR_DESCONSOLIDACION_ENABLED apagada). El asiento de
+// Responsabilidad Sustituta (cuentas de orden 9.x) se difiere a un PR
+// dedicado de Fase 3 — requiere la categoría ORDEN en CuentaCategoria.
+
+/** Flujo de mercadería entre subcuentas de bienes de cambio (1.1.5.x). */
+export type FlujoSubcuentaComex =
+  | "ARRIBO_ZONA_PRIMARIA" // DEBE 1.1.5.04 / HABER 1.1.5.02 (tránsito → ZPA)
+  | "TRASLADO_DEPOSITO_FISCAL" // DEBE 1.1.5.05 / HABER 1.1.5.04 (ZPA → DF)
+  | "NACIONALIZACION_VIA_DF" // DEBE 1.1.5.01 / HABER 1.1.5.05 (DF → nacional)
+  | "NACIONALIZACION_DIRECTA"; // DEBE 1.1.5.01 / HABER 1.1.5.04 (ZPA → nacional)
+
+const FLUJO_SUBCUENTA: Record<
+  FlujoSubcuentaComex,
+  { debe: CuentaDef; haber: CuentaDef; label: string }
+> = {
+  ARRIBO_ZONA_PRIMARIA: {
+    debe: COMEX_ZPA_CODIGOS.MERCADERIAS_EN_ZONA_PRIMARIA,
+    haber: EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO,
+    label: "Arribo a zona primaria aduanera",
+  },
+  TRASLADO_DEPOSITO_FISCAL: {
+    debe: COMEX_ZPA_CODIGOS.MERCADERIAS_EN_DEPOSITO_FISCAL,
+    haber: COMEX_ZPA_CODIGOS.MERCADERIAS_EN_ZONA_PRIMARIA,
+    label: "Traslado a depósito fiscal",
+  },
+  NACIONALIZACION_VIA_DF: {
+    debe: EMBARQUE_CODIGOS.MERCADERIAS,
+    haber: COMEX_ZPA_CODIGOS.MERCADERIAS_EN_DEPOSITO_FISCAL,
+    label: "Nacionalización vía depósito fiscal",
+  },
+  NACIONALIZACION_DIRECTA: {
+    debe: EMBARQUE_CODIGOS.MERCADERIAS,
+    haber: COMEX_ZPA_CODIGOS.MERCADERIAS_EN_ZONA_PRIMARIA,
+    label: "Nacionalización directa en puerto",
+  },
+};
+
+export interface AsientoTransferenciaSubcuentaInput {
+  flujo: FlujoSubcuentaComex;
+  /** Monto en ARS (costo de la mercadería transferida). Debe ser > 0. */
+  monto: MoneyInput;
+  fecha: Date;
+  /** Si no se pasa, se usa el label del flujo. */
+  descripcion?: string;
+}
+
+/**
+ * Asiento de transferencia de costo entre dos subcuentas de bienes de
+ * cambio, según el `flujo` aduanero. Dos líneas balanceadas (DEBE/HABER).
+ * Crea las cuentas lazy vía `getOrCreateCuenta` si aún no existen.
+ */
+export async function crearAsientoTransferenciaSubcuenta(
+  input: AsientoTransferenciaSubcuentaInput,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    if (!gtZero(input.monto)) {
+      throw new AsientoError(
+        "LINEA_INVALIDA",
+        "El monto de la transferencia entre subcuentas debe ser mayor a cero.",
+      );
+    }
+    const mapping = FLUJO_SUBCUENTA[input.flujo];
+    const debeId = await getOrCreateCuenta(inner, mapping.debe);
+    const haberId = await getOrCreateCuenta(inner, mapping.haber);
+    const valor = money(input.monto).toString();
+
+    return crearAsientoEnTx(inner, {
+      fecha: input.fecha,
+      descripcion: input.descripcion?.trim() || mapping.label,
+      origen: AsientoOrigen.COMEX,
+      lineas: [
+        {
+          cuentaId: debeId,
+          debe: valor,
+          haber: 0,
+          descripcion: `${mapping.label} (${mapping.debe.codigo})`,
+        },
+        {
+          cuentaId: haberId,
+          debe: 0,
+          haber: valor,
+          descripcion: `${mapping.label} (${mapping.haber.codigo})`,
+        },
+      ],
+    });
+  };
+
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
+// Comex ZPA — divergencia formal D9 (físico ≠ declarado) (PR 3.1)
+// ============================================================
+
+/** Sentido de la divergencia detectada en la conferencia física. */
+export type TipoDivergencia = "FALTA" | "SOBRA";
+/** Subcuenta donde está contabilizada la mercadería al detectar la divergencia. */
+export type UbicacionMercaderia = "ZONA_PRIMARIA" | "DEPOSITO_FISCAL";
+
+export interface AsientoDivergenciaInput {
+  tipo: TipoDivergencia;
+  causa: DivergenciaCausa;
+  /** Monto en ARS del costo de la diferencia. Debe ser > 0. */
+  monto: MoneyInput;
+  ubicacion: UbicacionMercaderia;
+  /**
+   * Cuenta a cobrar al responsable. Obligatoria en FALTA con causa
+   * distinta de NAO_IDENTIFICADA (proveedor/transportista/depositario/
+   * aseguradora). Ignorada en SOBRA o falta sin responsable.
+   */
+  cuentaPorCobrarId?: number;
+  fecha: Date;
+  descripcion?: string;
+}
+
+/**
+ * Asiento de regularización de una divergencia formal (D9).
+ *
+ *  - SOBRA: DEBE subcuenta stock / HABER 4.9.1.01 (ingreso por diferencia).
+ *  - FALTA sin responsable (NAO_IDENTIFICADA): DEBE 5.9.2.01 (pérdida) /
+ *    HABER subcuenta stock.
+ *  - FALTA con responsable: DEBE `cuentaPorCobrarId` / HABER subcuenta stock.
+ *
+ * `ubicacion` decide la subcuenta de stock (1.1.5.04 ZPA o 1.1.5.05 DF).
+ */
+export async function crearAsientoDivergencia(
+  input: AsientoDivergenciaInput,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    if (!gtZero(input.monto)) {
+      throw new AsientoError("LINEA_INVALIDA", "El monto de la divergencia debe ser mayor a cero.");
+    }
+
+    const subcuentaDef =
+      input.ubicacion === "DEPOSITO_FISCAL"
+        ? COMEX_ZPA_CODIGOS.MERCADERIAS_EN_DEPOSITO_FISCAL
+        : COMEX_ZPA_CODIGOS.MERCADERIAS_EN_ZONA_PRIMARIA;
+    const subcuentaId = await getOrCreateCuenta(inner, subcuentaDef);
+    const valor = money(input.monto).toString();
+    const ubicacionLabel = `${subcuentaDef.codigo}`;
+
+    let lineas: LineaInput[];
+    let descripcion: string;
+
+    if (input.tipo === "SOBRA") {
+      const ingresoId = await getOrCreateCuenta(
+        inner,
+        COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO,
+      );
+      descripcion = input.descripcion?.trim() || `Divergencia D9 — sobra (${ubicacionLabel})`;
+      lineas = [
+        {
+          cuentaId: subcuentaId,
+          debe: valor,
+          haber: 0,
+          descripcion: `Sobra de inventario (${ubicacionLabel})`,
+        },
+        {
+          cuentaId: ingresoId,
+          debe: 0,
+          haber: valor,
+          descripcion: `Ingreso por diferencia de inventario (${COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO.codigo})`,
+        },
+      ];
+    } else if (input.causa === DivergenciaCausa.NAO_IDENTIFICADA) {
+      const perdidaId = await getOrCreateCuenta(inner, COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS);
+      descripcion =
+        input.descripcion?.trim() || `Divergencia D9 — falta sin responsable (${ubicacionLabel})`;
+      lineas = [
+        {
+          cuentaId: perdidaId,
+          debe: valor,
+          haber: 0,
+          descripcion: `Pérdida logística (${COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS.codigo})`,
+        },
+        {
+          cuentaId: subcuentaId,
+          debe: 0,
+          haber: valor,
+          descripcion: `Faltante de inventario (${ubicacionLabel})`,
+        },
+      ];
+    } else {
+      if (input.cuentaPorCobrarId == null) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `Divergencia D9 con responsable (${input.causa}) requiere cuentaPorCobrarId.`,
+        );
+      }
+      descripcion =
+        input.descripcion?.trim() ||
+        `Divergencia D9 — falta a cobrar a ${input.causa} (${ubicacionLabel})`;
+      lineas = [
+        {
+          cuentaId: input.cuentaPorCobrarId,
+          debe: valor,
+          haber: 0,
+          descripcion: `A cobrar al responsable (${input.causa})`,
+        },
+        {
+          cuentaId: subcuentaId,
+          debe: 0,
+          haber: valor,
+          descripcion: `Faltante de inventario (${ubicacionLabel})`,
+        },
+      ];
+    }
+
+    return crearAsientoEnTx(inner, {
+      fecha: input.fecha,
+      descripcion,
+      origen: AsientoOrigen.COMEX,
+      lineas,
+    });
   };
 
   if (tx) return run(tx);
@@ -1624,7 +2127,9 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
     const seguroOrigenArs = embarque.valorSeguroOrigen
       ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
       : toDecimal(0);
-    const facturasZP = embarque.costos.filter((f) => f.momento === "ZONA_PRIMARIA");
+    const facturasZP = embarque.costos.filter(
+      (f) => f.momento === "ZONA_PRIMARIA" && f.estado !== "ANULADA",
+    );
     let zpFacturasArs = toDecimal(0);
     for (const f of facturasZP) {
       const tc = toDecimal(f.tipoCambio);
@@ -1855,10 +2360,350 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
       }
     }
 
-    await inner.despacho.update({
-      where: { id: despacho.id },
+    const updDesp = await inner.despacho.updateMany({
+      where: { id: despacho.id, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updDesp.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Despacho ${despacho.id} fue contabilizado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
+
+    return asiento;
+  };
+
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+/**
+ * Asiento del despacho parcial CRUZADO (Fase 4, flag CONTENEDOR_DESCONSOLIDACION
+ * _ENABLED). Espeja `crearAsientoDespacho` pero:
+ *  - La transferencia de subcuenta es 1.1.5.05 (DF) → 1.1.5.01 (mercaderías
+ *    nacionalizadas) — flujo NACIONALIZACION_VIA_DF — en vez de 1.1.5.02→01.
+ *  - El costo landed por línea sale del `ItemContenedor.costoFCUnitario`
+ *    (snapshot FC en USD, ya rateado en ZP) × cantidad × TC del embarque, no
+ *    del rateo FOB del ItemEmbarque.
+ *  - Los tributos aduaneros y las facturas DESPACHO son idénticos al legacy
+ *    (duplicados acá a propósito: el legacy NO tiene tests y está activo en
+ *    prod — no se toca. Unificar DRY = follow-up cuando el legacy tenga red).
+ *  - RespSustituta (DF de terceros, cuentas de orden 9.x) se difiere (igual
+ *    que las cuentas de orden de Onda 1).
+ */
+export async function crearAsientoDespachoCruzado(
+  despachoId: string,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const despacho = await inner.despacho.findUnique({
+      where: { id: despachoId },
+      include: {
+        embarque: {
+          include: {
+            costos: {
+              include: {
+                proveedor: { select: { id: true, nombre: true, cuentaContableId: true } },
+                lineas: { orderBy: { id: "asc" } },
+              },
+              orderBy: { id: "asc" },
+            },
+          },
+        },
+        items: {
+          include: {
+            itemContenedor: {
+              select: {
+                id: true,
+                productoId: true,
+                costoFCUnitario: true,
+                contenedor: { select: { depositoFiscalId: true } },
+              },
+            },
+          },
+          orderBy: { id: "asc" },
+        },
+      },
+    });
+
+    if (!despacho) {
+      throw new AsientoError("DOMINIO_INVALIDO", `Despacho ${despachoId} no existe.`);
+    }
+    if (despacho.estado !== "BORRADOR") {
+      throw new AsientoError(
+        "ESTADO_INVALIDO",
+        `Despacho ${despacho.codigo} no está en BORRADOR (${despacho.estado}).`,
+      );
+    }
+    if (despacho.asientoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Despacho ${despacho.codigo} ya tiene un asiento.`,
+      );
+    }
+    if (despacho.items.length === 0) {
+      throw new AsientoError("DOMINIO_INVALIDO", `Despacho ${despacho.codigo}: no tiene ítems.`);
+    }
+    const embarque = despacho.embarque;
+    if (embarque.asientoId) {
+      throw new AsientoError(
+        "ESTADO_INVALIDO",
+        `Embarque ${embarque.codigo}: ya tiene cierre monolítico — no admite despachos parciales.`,
+      );
+    }
+
+    const porCodigo = await ensureCuentasMap(inner, EMBARQUE_CODIGOS);
+    const cuentaDFId = await getOrCreateCuenta(
+      inner,
+      COMEX_ZPA_CODIGOS.MERCADERIAS_EN_DEPOSITO_FISCAL,
+    );
+    const tcEmb = toDecimal(embarque.tipoCambio);
+    const tcDsp = toDecimal(despacho.tipoCambio);
+
+    type Linea = {
+      cuentaId: number;
+      debe: import("decimal.js").Decimal;
+      haber: import("decimal.js").Decimal;
+      descripcion: string;
+    };
+    const lineas: Linea[] = [];
+    const pushDebe = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: valor, haber: toDecimal(0), descripcion });
+    };
+    const pushHaber = (
+      cuentaId: number,
+      valor: import("decimal.js").Decimal,
+      descripcion: string,
+    ) => {
+      if (!valor.gt(0)) return;
+      lineas.push({ cuentaId, debe: toDecimal(0), haber: valor, descripcion });
+    };
+
+    // Facturas DESPACHO linkadas a este despacho. Mismo filtro que legacy:
+    // sólo BORRADOR / LEGACY_BUNDLED (las EMITIDA ya tienen asiento propio,
+    // por eso NO entran acá → sin doble contabilización). Su subtotal
+    // capitaliza al costo de la mercadería (no va a la cuenta de gasto).
+    const facturasDespacho = embarque.costos.filter(
+      (f) =>
+        f.despachoId === despacho.id &&
+        f.momento !== "ZONA_PRIMARIA" &&
+        (f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED"),
+    );
+
+    // Validar costos FC presentes (cerrá costos antes de nacionalizar).
+    for (const id of despacho.items) {
+      const ic = id.itemContenedor;
+      if (!ic) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `Despacho ${despacho.codigo}: la línea ${id.id} no tiene itemContenedor (no es un despacho cruzado).`,
+        );
+      }
+      if (ic.costoFCUnitario == null) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `Despacho ${despacho.codigo}: el ItemContenedor ${ic.id} no tiene costo FC (cerrá costos antes de nacionalizar).`,
+        );
+      }
+    }
+
+    // FUENTE ÚNICA de costo: capitaliza DIE + Tasa + Arancel + subtotal de
+    // las facturas DESPACHO al costo de la mercadería (DEBE 1.1.5.01). El
+    // mismo helper alimenta el costo landed del ingreso de stock NACIONAL.
+    const landed = calcularCostoLandedDespacho({
+      tipoCambioEmbarque: tcEmb,
+      tipoCambioDespacho: tcDsp,
+      die: despacho.die,
+      tasaEstadistica: despacho.tasaEstadistica,
+      arancelSim: despacho.arancelSim,
+      facturasDespacho: facturasDespacho.flatMap((f) =>
+        f.lineas.map((l) => ({ subtotal: l.subtotal, tipoCambio: f.tipoCambio })),
+      ),
+      items: despacho.items.map((id) => ({
+        itemDespachoId: id.id,
+        productoId: id.itemContenedor!.productoId,
+        cantidad: id.cantidad,
+        costoFCUnitario: id.itemContenedor!.costoFCUnitario!,
+      })),
+    });
+    const nacionalizadoArs = landed.nacionalizadoArs;
+    // costoUnitario por ItemDespacho = costo total landed / cantidad (4dp →
+    // money() 2dp al persistir). Reconciliado al centavo con el asiento.
+    const itemDespachoCostoUnit = new Map<number, import("decimal.js").Decimal>();
+    for (const r of landed.porItem) {
+      itemDespachoCostoUnit.set(r.itemDespachoId, r.costoUnitarioLandedArs);
+    }
+
+    // 1) DEBE 1.1.5.01 (mercaderías) = nacionalizado + capitalizables.
+    //    HABER 1.1.5.05 (DF) = sólo el costo FC nacionalizado (sin tributos).
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS.codigo)!,
+      landed.costoTotalArs,
+      `Despacho ${despacho.codigo} — nacionalización vía depósito fiscal (costo landed, ${despacho.items.length} línea${despacho.items.length === 1 ? "" : "s"})`,
+    );
+    pushHaber(
+      cuentaDFId,
+      nacionalizadoArs,
+      `Despacho ${despacho.codigo} — sale de depósito fiscal`,
+    );
+
+    // 2) Tributos aduaneros del despacho. DIE + Tasa + Arancel SON
+    //    CAPITALIZABLES: su contravalor ya está en el DEBE 1.1.5.01, así que
+    //    NO se debitan a egreso 5.7.1.x. Sólo se mantiene el HABER de los
+    //    pasivos aduaneros (la obligación a pagar a la Aduana).
+    //    IVA / IVA adicional / IIBB / Ganancias siguen como crédito fiscal.
+    const die = toDecimal(despacho.die).times(tcDsp).toDecimalPlaces(2);
+    const te = toDecimal(despacho.tasaEstadistica).times(tcDsp).toDecimalPlaces(2);
+    const arancelSim = toDecimal(despacho.arancelSim).times(tcDsp).toDecimalPlaces(2);
+    const ivaAduana = toDecimal(despacho.iva).times(tcDsp).toDecimalPlaces(2);
+    const ivaAdicional = toDecimal(despacho.ivaAdicional).times(tcDsp).toDecimalPlaces(2);
+    const iibbAduana = toDecimal(despacho.iibb).times(tcDsp).toDecimalPlaces(2);
+    const ganancias = toDecimal(despacho.ganancias).times(tcDsp).toDecimalPlaces(2);
+
+    pushHaber(porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO.codigo)!, die, "DIE por pagar (Aduana)");
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_PASIVO.codigo)!,
+      te,
+      "Tasa estadística por pagar",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO.codigo)!,
+      arancelSim,
+      "Arancel SIM por pagar",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_IMPORTACION.codigo)!,
+      ivaAduana,
+      "IVA crédito fiscal importación",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_ADICIONAL_CREDITO.codigo)!,
+      ivaAdicional,
+      "IVA adicional importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.IVA_POR_PAGAR.codigo)!,
+      ivaAduana.plus(ivaAdicional),
+      "IVA importación por pagar (IVA + adicional)",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_IMPORTACION.codigo)!,
+      iibbAduana,
+      "Percepción IIBB importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.IIBB_POR_PAGAR.codigo)!,
+      iibbAduana,
+      "IIBB importación por pagar",
+    );
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_CREDITO.codigo)!,
+      ganancias,
+      "Percepción Ganancias importación",
+    );
+    pushHaber(
+      porCodigo.get(EMBARQUE_CODIGOS.GANANCIAS_POR_PAGAR.codigo)!,
+      ganancias,
+      "Ganancias importación por pagar",
+    );
+
+    // 3) Facturas DESPACHO linkadas (filtradas arriba). El SUBTOTAL de cada
+    //    línea YA fue capitalizado en el DEBE 1.1.5.01 (vía el helper de costo
+    //    landed) — por eso NO se debita a la cuenta de gasto. Acá sólo se
+    //    contabilizan IVA/IIBB como crédito fiscal, los `otros` como gasto y el
+    //    HABER total al proveedor (CxP).
+    for (const factura of facturasDespacho) {
+      if (factura.lineas.length === 0) continue;
+      if (!factura.proveedor.cuentaContableId) {
+        throw new AsientoError(
+          "CUENTA_INVALIDA",
+          `El proveedor ${factura.proveedor.nombre} no tiene cuenta contable asociada.`,
+        );
+      }
+      const tc = toDecimal(factura.tipoCambio);
+      const facturaLabel = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""}`;
+
+      // Subtotal capitalizado (no se debita a gasto), pero suma al total a
+      // pagar al proveedor.
+      let subtotalFacturaArs = toDecimal(0);
+      for (const linea of factura.lineas) {
+        const subtotalArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
+        if (!subtotalArs.gt(0)) continue;
+        subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
+      }
+      const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
+      const iibbArs = toDecimal(factura.iibb).times(tc).toDecimalPlaces(2);
+      const otrosArs = toDecimal(factura.otros).times(tc).toDecimalPlaces(2);
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS.codigo)!,
+        ivaArs,
+        `${facturaLabel} — IVA crédito`,
+      );
+      pushDebe(
+        porCodigo.get(EMBARQUE_CODIGOS.IIBB_CREDITO_COMPRAS.codigo)!,
+        iibbArs,
+        `${facturaLabel} — IIBB crédito`,
+      );
+      if (otrosArs.gt(0) && factura.lineas.length > 0) {
+        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros`);
+      }
+      const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+      if (totalFacturaArs.gt(0)) {
+        pushHaber(
+          factura.proveedor.cuentaContableId,
+          totalFacturaArs,
+          `${facturaLabel} — total a pagar`,
+        );
+      }
+    }
+
+    if (lineas.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Despacho ${despacho.codigo}: no hay montos para contabilizar.`,
+      );
+    }
+
+    const lineasInput: LineaInput[] = lineas.map((l) => ({
+      cuentaId: l.cuentaId,
+      debe: money(l.debe).toString(),
+      haber: money(l.haber).toString(),
+      descripcion: l.descripcion,
+    }));
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: despacho.fecha,
+      descripcion: `Despacho ${despacho.codigo} (cruzado) — embarque ${embarque.codigo}`,
+      origen: AsientoOrigen.COMEX,
+      lineas: lineasInput,
+    });
+
+    for (const id of despacho.items) {
+      const cu = itemDespachoCostoUnit.get(id.id);
+      if (cu) {
+        await inner.itemDespacho.update({
+          where: { id: id.id },
+          data: { costoUnitario: money(cu) },
+        });
+      }
+    }
+
+    const updDesp = await inner.despacho.updateMany({
+      where: { id: despacho.id, asientoId: null },
+      data: { asientoId: asiento.id },
+    });
+    if (updDesp.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Despacho ${despacho.id} fue contabilizado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
 
     return asiento;
   };
@@ -1901,6 +2746,10 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
         otros: true,
         flete: true,
         asientoId: true,
+        // Cuando la venta tiene factura de flete vinculada (Gasto), el flete
+        // se contabiliza por el asiento del Gasto (DEBE flete + IVA crédito /
+        // HABER proveedor) — NO inline acá. Evita doble contabilización.
+        fleteGasto: { select: { id: true } },
         cliente: { select: { id: true, nombre: true, cuentaContableId: true } },
         items: {
           select: {
@@ -1958,30 +2807,43 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
     const clienteCuentaId =
       venta.cliente.cuentaContableId ?? porCodigo.get(VENTA_CODIGOS.CLIENTE_FALLBACK.codigo)!;
 
-    // Cheques recibidos como cobro: van a 1.1.4.20 VALORES A COBRAR.
-    // El residual (total - cheques) queda como saldo del cliente.
+    // Cheques recibidos como cobro: DEBE 1.1.4.20 por el valor REAL de
+    // los cheques (no por el total facturado). Si los cheques exceden
+    // el total, el sobrante queda en 2.1.7.01 ANTICIPOS DE CLIENTES
+    // (pasivo) — saldo a favor del cliente aplicable a facturas futuras.
+    // Si los cheques cubren menos que el total, el residual queda como
+    // saldo deudor del cliente (cuenta corriente).
     const totalCheques = venta.chequesRecibidos
       .reduce((acc, c) => acc.plus(toDecimal(c.importe)), toDecimal(0))
       .toDecimalPlaces(2);
     const cuentaChequesId = porCodigo.get(VENTA_CODIGOS.VALORES_A_COBRAR.codigo)!;
-    const totalEnCheques = totalCheques.gt(total) ? total : totalCheques;
-    const totalEnCliente = total.minus(totalEnCheques);
+    const diferenciaCheques = totalCheques.minus(total);
+    const saldoCliente = diferenciaCheques.lt(0) ? diferenciaCheques.abs() : toDecimal(0);
+    const excedenteAnticipo = diferenciaCheques.gt(0) ? diferenciaCheques : toDecimal(0);
 
     const lineas: LineaInput[] = [];
-    if (totalEnCheques.gt(0)) {
+    if (totalCheques.gt(0)) {
       lineas.push({
         cuentaId: cuentaChequesId,
-        debe: money(totalEnCheques).toString(),
+        debe: money(totalCheques).toString(),
         haber: 0,
         descripcion: `Venta ${venta.numero} — cheques de terceros recibidos`,
       });
     }
-    if (totalEnCliente.gt(0)) {
+    if (saldoCliente.gt(0)) {
       lineas.push({
         cuentaId: clienteCuentaId,
-        debe: money(totalEnCliente).toString(),
+        debe: money(saldoCliente).toString(),
         haber: 0,
         descripcion: `Venta ${venta.numero} — ${venta.cliente.nombre}`,
+      });
+    }
+    if (excedenteAnticipo.gt(0)) {
+      lineas.push({
+        cuentaId: porCodigo.get(VENTA_CODIGOS.ANTICIPOS_CLIENTES.codigo)!,
+        debe: 0,
+        haber: money(excedenteAnticipo).toString(),
+        descripcion: `Venta ${venta.numero} — anticipo (cheques exceden total facturado)`,
       });
     }
     lineas.push({
@@ -2062,7 +2924,12 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
     // Flete sobre ventas — gasto pagado por nosotros (no facturado al
     // cliente). Genera DEBE gasto / HABER cta a pagar; el pago efectivo
     // se registra después por tesorería.
-    if (flete.gt(0)) {
+    //
+    // Si la venta tiene factura de flete vinculada (Gasto.ventaId), el flete
+    // ya se contabiliza por el asiento de ese Gasto (CxP real + IVA crédito)
+    // → NO lo lanzamos inline acá para evitar doble contabilización. El flete
+    // SÍ sigue restando de la utilidad bruta (gasto deducible) más arriba.
+    if (flete.gt(0) && !venta.fleteGasto) {
       lineas.push({
         cuentaId: porCodigo.get(VENTA_CODIGOS.FLETE_GASTO.codigo)!,
         debe: money(flete).toString(),
@@ -2101,10 +2968,16 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
       tipoCambio: 1,
       lineas,
     });
-    await inner.venta.update({
-      where: { id: ventaId },
+    const updVenta = await inner.venta.updateMany({
+      where: { id: ventaId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updVenta.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Venta ${ventaId} fue emitida simultáneamente por otro proceso (race detectado).`,
+      );
+    }
     return asiento;
   };
   if (tx) return run(tx);
@@ -2182,10 +3055,16 @@ export async function crearAsientoEntrega(entregaId: string, tx?: TxClient): Pro
       tipoCambio: 1,
       lineas,
     });
-    await inner.entregaVenta.update({
-      where: { id: entregaId },
+    const updEntrega = await inner.entregaVenta.updateMany({
+      where: { id: entregaId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updEntrega.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `EntregaVenta ${entregaId} fue contabilizada simultáneamente por otro proceso (race detectado).`,
+      );
+    }
     return asiento;
   };
   if (tx) return run(tx);
@@ -2320,10 +3199,16 @@ export async function crearAsientoCompra(compraId: string, tx?: TxClient): Promi
       tipoCambio: 1,
       lineas,
     });
-    await inner.compra.update({
-      where: { id: compraId },
+    const updCompra = await inner.compra.updateMany({
+      where: { id: compraId, asientoId: null },
       data: { asientoId: asiento.id },
     });
+    if (updCompra.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Compra ${compraId} fue emitida simultáneamente por otro proceso (race detectado).`,
+      );
+    }
     return asiento;
   };
   if (tx) return run(tx);
@@ -2473,10 +3358,16 @@ export async function crearAsientoGasto(gastoId: string, tx?: TxClient): Promise
       tipoCambio: 1,
       lineas,
     });
-    await inner.gasto.update({
-      where: { id: gastoId },
+    const updGasto = await inner.gasto.updateMany({
+      where: { id: gastoId, asientoId: null },
       data: { asientoId: asiento.id, estado: "CONTABILIZADO" },
     });
+    if (updGasto.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `Gasto ${gastoId} fue contabilizado simultáneamente por otro proceso (race detectado).`,
+      );
+    }
     return asiento;
   };
   if (tx) return run(tx);
@@ -2633,10 +3524,16 @@ export async function crearAsientoEmbarqueCosto(
       lineas,
     });
     await contabilizarEnTx(inner, asiento.id);
-    await inner.embarqueCosto.update({
-      where: { id: costoId },
+    const updCosto = await inner.embarqueCosto.updateMany({
+      where: { id: costoId, asientoId: null },
       data: { asientoId: asiento.id, estado: "EMITIDA" },
     });
+    if (updCosto.count !== 1) {
+      throw new AsientoError(
+        "CONCURRENCIA",
+        `EmbarqueCosto ${costoId} fue emitido simultáneamente por otro proceso (race detectado).`,
+      );
+    }
     return asiento;
   };
   if (tx) return run(tx);

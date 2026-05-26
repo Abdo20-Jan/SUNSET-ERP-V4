@@ -10,19 +10,23 @@ import { parsePaginationParams } from "@/components/ui/pagination-params";
 
 import { VentasTable } from "./_components/ventas-table";
 
-type SearchParams = Promise<{ page?: string; perPage?: string }>;
+type SearchParams = Promise<{
+  page?: string;
+  perPage?: string;
+  incluirCanceladas?: string;
+}>;
 
-export default async function VentasPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function VentasPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const { page, perPage } = parsePaginationParams(params);
+  const incluirCanceladas = params.incluirCanceladas === "1";
 
-  const { rows, total, emitidas, borradores } = await listarVentas({
+  const { rows, total, emitidas, borradores, canceladas } = await listarVentas({
     page,
     perPage,
+    incluirCanceladas,
   });
 
   return (
@@ -37,11 +41,25 @@ export default async function VentasPage({
                 {" "}
                 · {emitidas} emitida{emitidas === 1 ? "" : "s"} · {borradores} borrador
                 {borradores === 1 ? "" : "es"}
+                {incluirCanceladas && canceladas > 0 && (
+                  <>
+                    {" "}
+                    · {canceladas} cancelada{canceladas === 1 ? "" : "s"}
+                  </>
+                )}
               </span>
             )}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {canceladas > 0 && (
+            <Link
+              href={incluirCanceladas ? "/ventas" : "/ventas?incluirCanceladas=1"}
+              className={buttonVariants({ variant: "outline" })}
+            >
+              {incluirCanceladas ? "Ocultar canceladas" : `Mostrar canceladas (${canceladas})`}
+            </Link>
+          )}
           <Link href="/ventas/pedidos" className={buttonVariants({ variant: "outline" })}>
             Pedidos (OV)
           </Link>

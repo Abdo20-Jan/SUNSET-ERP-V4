@@ -71,11 +71,9 @@ function mapValues(
   return out;
 }
 
-export default async function FlujoCajaPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function FlujoCajaPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
   const now = new Date();

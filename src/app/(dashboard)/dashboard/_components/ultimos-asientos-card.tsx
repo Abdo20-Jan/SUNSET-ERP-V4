@@ -19,11 +19,7 @@ import {
 import { fmtDate, fmtMoney } from "@/lib/format";
 import type { UltimoAsiento } from "@/lib/services/dashboard";
 
-export function UltimosAsientosCard({
-  asientos,
-}: {
-  asientos: UltimoAsiento[];
-}) {
+export function UltimosAsientosCard({ asientos }: { asientos: UltimoAsiento[] }) {
   return (
     <Card>
       <CardHeader className="border-b">

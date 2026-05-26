@@ -4,6 +4,7 @@ import {
 } from "@/lib/actions/movimientos-tesoreria";
 import { obtenerContextoAmortizacion } from "@/lib/actions/prestamos";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
+import { getFacturasPendientesPorCuenta } from "@/lib/services/cuentas-a-pagar";
 
 import { MovimientoForm, type MovimientoFormInitial } from "./movimiento-form";
 
@@ -24,16 +25,20 @@ function parseUuid(value: string | undefined): string | null {
   return /^[0-9a-f-]{36}$/i.test(value) ? value : null;
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function NuevoMovimientoPage({
   searchParams,
 }: {
   searchParams: SearchParams;
 }) {
-  const [cuentasBancarias, cuentasContrapartida, defaultFecha] = await Promise.all([
-    listarCuentasBancariasParaMovimiento(),
-    listarCuentasContablesParaContrapartida(),
-    getDefaultFecha(),
-  ]);
+  const [cuentasBancarias, cuentasContrapartida, defaultFecha, facturasPendientesPorCuenta] =
+    await Promise.all([
+      listarCuentasBancariasParaMovimiento(),
+      listarCuentasContablesParaContrapartida(),
+      getDefaultFecha(),
+      getFacturasPendientesPorCuenta(),
+    ]);
 
   const params = await searchParams;
 
@@ -99,6 +104,7 @@ export default async function NuevoMovimientoPage({
       <MovimientoForm
         cuentasBancarias={cuentasBancarias}
         cuentasContrapartida={cuentasContrapartida}
+        facturasPendientesPorCuenta={facturasPendientesPorCuenta}
         initial={initial}
         contextoAmortizacion={contexto}
         modoInicial={modoInicial}

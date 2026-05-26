@@ -38,6 +38,13 @@ const PREFIXES = {
   VALORES: "1.1.4.20",
 } as const;
 
+// Saldos por debajo de este umbral se consideran ruido de redondeo (IVA,
+// tipo de cambio, drift FIFO entre cobros sin imputación específica).
+// Sincronizado con cuentas-a-pagar.ts. Subir a 1.0 ARS también oculta
+// clientes cuyo saldo contable es exactamente 0 pero con ventas
+// huérfanas (cobros no vinculados por número de factura).
+const UMBRAL_RESIDUAL = 1.0;
+
 export async function getCuentasACobrar(): Promise<CuentasACobrar> {
   const cuentas = await db.cuentaContable.findMany({
     where: {
@@ -239,7 +246,7 @@ export async function getSaldosPorClienteConAging(): Promise<SaldoClienteAging[]
     Array<{ tokens: Set<string>; haber: ReturnType<typeof toDecimal> }>
   >();
   for (const [key, info] of porAsientoCuenta) {
-    if (info.netoCobro.lte(0.005)) continue;
+    if (info.netoCobro.lte(UMBRAL_RESIDUAL)) continue;
     const cuentaId = Number(key.split("::")[0]);
     const arr = cobrosPorCuentaTokens.get(cuentaId) ?? [];
     arr.push({ tokens: info.tokens, haber: info.netoCobro });
@@ -343,14 +350,14 @@ export async function getSaldosPorClienteConAging(): Promise<SaldoClienteAging[]
     const totalCobrosCuenta = cobrosTotalesPorCuenta.get(cuentaId) ?? toDecimal(0);
     const sumaImputadaNumero = lista.reduce((acc, v) => acc.plus(v.cobradoNumero), toDecimal(0));
     let resto = totalCobrosCuenta.minus(sumaImputadaNumero);
-    if (resto.lte(0.005)) continue;
+    if (resto.lte(UMBRAL_RESIDUAL)) continue;
 
     // FIFO por fecha de emisión
     const ordenadas = [...lista].sort((a, b) => a.fecha.localeCompare(b.fecha));
     for (const v of ordenadas) {
-      if (resto.lte(0.005)) break;
+      if (resto.lte(UMBRAL_RESIDUAL)) break;
       const pendiente = v.totalArs.minus(v.cobradoNumero).minus(v.cobradoFifo);
-      if (pendiente.lte(0.005)) continue;
+      if (pendiente.lte(UMBRAL_RESIDUAL)) continue;
       const aplicar = resto.gt(pendiente) ? pendiente : resto;
       v.cobradoFifo = v.cobradoFifo.plus(aplicar);
       resto = resto.minus(aplicar);
@@ -368,7 +375,7 @@ export async function getSaldosPorClienteConAging(): Promise<SaldoClienteAging[]
     for (const v of lista) {
       const cobradoTotal = v.cobradoNumero.plus(v.cobradoFifo);
       const pendienteArs = v.totalArs.minus(cobradoTotal);
-      if (pendienteArs.lte(0.005)) continue;
+      if (pendienteArs.lte(UMBRAL_RESIDUAL)) continue;
       const pendienteStr = pendienteArs.toFixed(2);
       pendientes.push({
         id: v.id,
@@ -389,7 +396,10 @@ export async function getSaldosPorClienteConAging(): Promise<SaldoClienteAging[]
       ? toDecimal(saldoPorCuenta.get(c.cuentaContableId) ?? "0")
       : toDecimal(0);
 
-    if (saldoContable.lte(0.005) && pendientes.length === 0) continue;
+    // Umbral elevado a 1.0: oculta clientes con saldo contable despreciable
+    // (≤ 1 ARS) aunque tengan ventas huérfanas en `pendientes` (cobros no
+    // vinculados por número de factura — el ledger es la verdad).
+    if (saldoContable.lte(UMBRAL_RESIDUAL)) continue;
 
     pendientes.sort((a, b) => {
       const aDias = a.diasParaVencer ?? Number.POSITIVE_INFINITY;

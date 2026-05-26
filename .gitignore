@@ -76,3 +76,6 @@ prisma/backup-*.sql.gz
 diag-*.sql
 fix-*.sql
 cleanup-*.sql
+
+# Local AI assistant rules (per-developer Codacy/MCP overrides)
+.github/instructions/codacy.instructions.md

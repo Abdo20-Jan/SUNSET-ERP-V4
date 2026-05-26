@@ -40,13 +40,13 @@ function parseId(value: string | undefined): number | null {
 
 function parseDate(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T00:00:00Z");
+  const d = new Date(`${value}T00:00:00Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 function endOfDay(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T23:59:59.999Z");
+  const d = new Date(`${value}T23:59:59.999Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
@@ -59,11 +59,9 @@ function firstOfMonthIso(): string {
   return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 }
 
-export default async function LibroMayorPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function LibroMayorPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
   const cuentas = await db.cuentaContable.findMany({

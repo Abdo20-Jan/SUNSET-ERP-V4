@@ -53,11 +53,7 @@ function firstDayOfMonth(): string {
 
 export const dynamic = "force-dynamic";
 
-export default async function ExtractoPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export default async function ExtractoPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
   const cuentas = await db.cuentaBancaria.findMany({
@@ -168,7 +164,7 @@ export default async function ExtractoPage({
                       <TableHead className="w-32 text-right">Débito (entrada)</TableHead>
                       <TableHead className="w-32 text-right">Crédito (salida)</TableHead>
                       <TableHead className="w-32 text-right">Saldo final</TableHead>
-                      <TableHead className="w-16"></TableHead>
+                      <TableHead className="w-16" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -184,7 +180,7 @@ export default async function ExtractoPage({
                       <TableCell className="text-right font-mono text-[13px] font-semibold tabular-nums">
                         {fmtMoney(extracto.saldoInicial)}
                       </TableCell>
-                      <TableCell></TableCell>
+                      <TableCell />
                     </TableRow>
 
                     {extracto.lineas.length === 0 && (
@@ -296,7 +292,7 @@ export default async function ExtractoPage({
                               : fmtMoney(extracto.saldoFinal);
                           })()}
                         </TableCell>
-                        <TableCell></TableCell>
+                        <TableCell />
                       </TableRow>
                     )}
                   </TableBody>

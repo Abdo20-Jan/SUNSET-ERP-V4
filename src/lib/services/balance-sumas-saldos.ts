@@ -38,6 +38,30 @@ export type BalanceResult = {
   root: BalanceNode[];
 };
 
+/**
+ * Remove contas totalmente zeradas (saldoInicial, debe, haber e saldoFinal
+ * todos 0), preservando os pais que tenham descendentes movimentados. Uma
+ * conta que movimentou no período mas fecha em 0 (debe=haber) permanece.
+ * Puramente de exibição: não afeta a verificação Debe = Haber.
+ */
+export function pruneBalanceSinSaldo(nodes: BalanceNode[]): BalanceNode[] {
+  const isZero = (n: BalanceNode): boolean =>
+    Number.parseFloat(n.saldoInicial) === 0 &&
+    Number.parseFloat(n.debe) === 0 &&
+    Number.parseFloat(n.haber) === 0 &&
+    Number.parseFloat(n.saldoFinal) === 0;
+
+  const prune = (node: BalanceNode): BalanceNode | null => {
+    if (node.children) {
+      const children = node.children.map(prune).filter((n): n is BalanceNode => n !== null);
+      if (children.length === 0 && isZero(node)) return null;
+      return { ...node, children };
+    }
+    return isZero(node) ? null : node;
+  };
+  return nodes.map(prune).filter((n): n is BalanceNode => n !== null);
+}
+
 // Sinal natural: valor positivo representa o saldo na natureza da conta.
 function naturalSaldo(categoria: CuentaCategoria, debe: Decimal, haber: Decimal): Decimal {
   if (categoria === "ACTIVO" || categoria === "EGRESO") {
@@ -200,7 +224,7 @@ export async function getBalanceSumasYSaldos(filter: {
   // Post-order: rola saldoInicial / debe / haber / saldoFinal das filhas nas SINTÉTICAS.
   const rollUp = (node: BalanceNode) => {
     if (node.tipo !== "SINTETICA" || !node.children || node.children.length === 0) {
-      if (node.children && node.children.length === 0) delete node.children;
+      if (node.children && node.children.length === 0) node.children = undefined;
       return;
     }
     for (const child of node.children) rollUp(child);

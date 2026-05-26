@@ -1,33 +1,41 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { money, sumMoney, toDecimal } from "@/lib/decimal";
-import { calcularRateioEmbarque } from "@/lib/services/comex";
+import { calcularRateioEmbarque, calcularRateioZonaPrimaria } from "@/lib/services/comex";
+import { resolverDepositoZpa } from "@/lib/services/embarque-zpa";
 import {
   anularAsiento,
   anularAsientoEmbarqueCosto,
   AsientoError,
   contabilizarAsiento,
+  crearAsientoArriboComex,
   crearAsientoEmbarque,
   crearAsientoEmbarqueCosto,
   crearAsientoZonaPrimaria,
 } from "@/lib/services/asiento-automatico";
-import { aplicarIngresoEmbarque } from "@/lib/services/stock";
+import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
+import {
+  aplicarIngresoEmbarque,
+  aplicarIngresoEmbarqueZpa,
+  revertirIngresoEmbarque,
+} from "@/lib/services/stock";
 import type { ProveedorOption } from "@/components/proveedor-combobox";
 import type { ProductoOption } from "@/components/producto-combobox";
 import type { CuentaOption } from "@/components/cuenta-combobox";
 import {
   CuentaCategoria,
   CuentaTipo,
+  DespachoEstado,
   EmbarqueEstado,
   Incoterm,
   Moneda,
   Prisma,
   TipoCostoEmbarque,
 } from "@/generated/prisma/client";
+import { embarqueInputSchema, type GuardarEmbarqueInput } from "./embarque-schema";
 
 export type EmbarqueRow = {
   id: string;
@@ -245,6 +253,7 @@ export type EmbarqueDetalle = {
     precioUnitarioFob: string;
   }>;
   costos: EmbarqueCostoDetalle[];
+  despachosActivosCount: number;
 };
 
 export async function obtenerEmbarquePorId(id: string): Promise<EmbarqueDetalle | null> {
@@ -261,6 +270,11 @@ export async function obtenerEmbarquePorId(id: string): Promise<EmbarqueDetalle 
       },
       asiento: { select: { id: true, numero: true, estado: true } },
       asientoZonaPrimaria: { select: { id: true, numero: true, estado: true } },
+      _count: {
+        select: {
+          despachos: { where: { estado: { not: DespachoEstado.ANULADO } } },
+        },
+      },
     },
   });
 
@@ -341,6 +355,7 @@ export async function obtenerEmbarquePorId(id: string): Promise<EmbarqueDetalle 
       asientoId: c.asientoId,
       asientoNumero: c.asiento?.numero ?? null,
     })),
+    despachosActivosCount: embarque._count.despachos,
   };
 }
 
@@ -364,185 +379,14 @@ export async function generarCodigoEmbarque(): Promise<string> {
   return `${prefix}${String(next).padStart(3, "0")}`;
 }
 
-const moneyRegex = /^\d+(\.\d{1,2})?$/;
-const rateRegex = /^\d+(\.\d{1,6})?$/;
-
-const costoLineaSchema = z.object({
-  tipo: z.nativeEnum(TipoCostoEmbarque),
-  cuentaContableGastoId: z.number().int().positive("Seleccione la cuenta"),
-  descripcion: z
-    .string()
-    .max(200)
-    .optional()
-    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-  subtotal: z.string().regex(moneyRegex, "Subtotal inválido"),
-});
-
-const costoSchema = z.object({
-  proveedorId: z.string().uuid("Seleccione un proveedor"),
-  moneda: z.nativeEnum(Moneda),
-  tipoCambio: z.string().regex(rateRegex, "Tipo de cambio inválido"),
-  facturaNumero: z
-    .string()
-    .max(64)
-    .optional()
-    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-  fechaFactura: z
-    .string()
-    .optional()
-    .transform((v) => {
-      if (!v || v.trim().length === 0) return null;
-      const d = new Date(v);
-      return Number.isFinite(d.getTime()) ? d : null;
-    }),
-  momento: z.enum(["ZONA_PRIMARIA", "DESPACHO"]).default("DESPACHO"),
-  // IVA/IIBB/otros a nivel factura (no por línea)
-  iva: z.string().regex(moneyRegex, "IVA inválido").default("0"),
-  iibb: z.string().regex(moneyRegex, "IIBB inválido").default("0"),
-  otros: z.string().regex(moneyRegex, "Otros inválido").default("0"),
-  notas: z
-    .string()
-    .max(500)
-    .optional()
-    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-  lineas: z.array(costoLineaSchema).min(1, "Agregue al menos un gasto"),
-});
-
-export type CostoEmbarqueLineaInput = z.input<typeof costoLineaSchema>;
-export type CostoEmbarqueInput = z.input<typeof costoSchema>;
-
-const inputSchema = z
-  .object({
-    id: z.string().uuid().optional(),
-    codigo: z.string().min(1, "Código requerido").max(32),
-    proveedorId: z.string().uuid("Seleccione un proveedor"),
-    depositoDestinoId: z.string().uuid("Seleccione un depósito de destino"),
-    moneda: z.nativeEnum(Moneda),
-    tipoCambio: z.string().regex(rateRegex, "Tipo de cambio inválido"),
-    incoterm: z
-      .nativeEnum(Incoterm)
-      .nullable()
-      .optional()
-      .transform((v) => v ?? null),
-    lugarIncoterm: z
-      .string()
-      .max(80)
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-    // Valores informativos cuando incoterm = CIF (flete + seguro contratados
-    // por el proveedor) o CFR (sólo flete). Vacíos = null.
-    valorFleteOrigen: z
-      .string()
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
-      .refine((v) => v === null || moneyRegex.test(v), "Valor de flete inválido"),
-    valorSeguroOrigen: z
-      .string()
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
-      .refine((v) => v === null || moneyRegex.test(v), "Valor de seguro inválido"),
-    // Datos de transporte
-    nombreBuque: z
-      .string()
-      .max(120)
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-    lineaMaritima: z
-      .string()
-      .max(120)
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-    lugarTransbordo: z
-      .string()
-      .max(120)
-      .optional()
-      .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
-    fechaEmpaque: z
-      .string()
-      .optional()
-      .transform((v) => {
-        if (!v || v.trim().length === 0) return null;
-        const d = new Date(v);
-        return Number.isFinite(d.getTime()) ? d : null;
-      }),
-    fechaTransbordo: z
-      .string()
-      .optional()
-      .transform((v) => {
-        if (!v || v.trim().length === 0) return null;
-        const d = new Date(v);
-        return Number.isFinite(d.getTime()) ? d : null;
-      }),
-    fechaSalida: z
-      .string()
-      .optional()
-      .transform((v) => {
-        if (!v || v.trim().length === 0) return null;
-        const d = new Date(v);
-        return Number.isFinite(d.getTime()) ? d : null;
-      }),
-    fechaLlegada: z
-      .string()
-      .optional()
-      .transform((v) => {
-        if (!v || v.trim().length === 0) return null;
-        const d = new Date(v);
-        return Number.isFinite(d.getTime()) ? d : null;
-      }),
-    diasPagoDespuesLlegada: z
-      .union([z.number().int().min(0), z.string()])
-      .optional()
-      .transform((v) => {
-        if (v === undefined || v === null || v === "") return null;
-        const n = typeof v === "string" ? Number.parseInt(v, 10) : v;
-        return Number.isFinite(n) && n >= 0 ? n : null;
-      }),
-    estado: z.nativeEnum(EmbarqueEstado),
-    die: z.string().regex(moneyRegex, "Valor inválido"),
-    tasaEstadistica: z.string().regex(moneyRegex, "Valor inválido"),
-    arancelSim: z.string().regex(moneyRegex, "Valor inválido"),
-    iva: z.string().regex(moneyRegex, "Valor inválido"),
-    ivaAdicional: z.string().regex(moneyRegex, "Valor inválido"),
-    ganancias: z.string().regex(moneyRegex, "Valor inválido"),
-    iibb: z.string().regex(moneyRegex, "Valor inválido"),
-    items: z
-      .array(
-        z.object({
-          productoId: z.string().uuid("Seleccione un producto"),
-          cantidad: z.number().int().positive("Cantidad > 0"),
-          precioUnitarioFob: z.string().regex(moneyRegex, "Valor inválido"),
-        }),
-      )
-      .min(1, "Agregue al menos un ítem"),
-    costos: z.array(costoSchema).default([]),
-  })
-  .superRefine((data, ctx) => {
-    if (data.estado === EmbarqueEstado.CERRADO) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["estado"],
-        message: "Para cerrar el embarque utilice la acción 'Cerrar y Contabilizar'.",
-      });
-    }
-    if (data.moneda === Moneda.ARS && data.tipoCambio !== "1") {
-      ctx.addIssue({
-        code: "custom",
-        path: ["tipoCambio"],
-        message: "Para ARS, tipo de cambio debe ser 1",
-      });
-    }
-    data.costos.forEach((c, idx) => {
-      if (c.moneda === Moneda.ARS && c.tipoCambio !== "1") {
-        ctx.addIssue({
-          code: "custom",
-          path: ["costos", idx, "tipoCambio"],
-          message: "Para ARS, tipo de cambio debe ser 1",
-        });
-      }
-    });
-  });
-
-export type GuardarEmbarqueInput = z.input<typeof inputSchema>;
+// El schema de validación vive en ./embarque-schema (sin "use server") porque
+// este archivo sólo puede exportar funciones async. Los tests del guard de
+// tipoCambio (gap #7) importan `embarqueInputSchema` desde ese módulo.
+export type {
+  CostoEmbarqueInput,
+  CostoEmbarqueLineaInput,
+  GuardarEmbarqueInput,
+} from "./embarque-schema";
 
 export type GuardarEmbarqueResult =
   | { ok: true; id: string; codigo: string }
@@ -551,7 +395,7 @@ export type GuardarEmbarqueResult =
 export async function guardarEmbarqueAction(
   raw: GuardarEmbarqueInput,
 ): Promise<GuardarEmbarqueResult> {
-  const parsed = inputSchema.safeParse(raw);
+  const parsed = embarqueInputSchema.safeParse(raw);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
     return {
@@ -658,11 +502,21 @@ export async function guardarEmbarqueAction(
       if (input.id) {
         const actual = await tx.embarque.findUnique({
           where: { id: input.id },
-          select: { estado: true },
+          select: { estado: true, asientoId: true, asientoZonaPrimariaId: true },
         });
         if (actual?.estado === EmbarqueEstado.CERRADO) {
           throw new Error(
             "El embarque está CERRADO y no puede editarse. Anule el asiento primero.",
+          );
+        }
+        if (actual?.asientoZonaPrimariaId) {
+          throw new Error(
+            'El embarque tiene Zona Primaria confirmada y no puede editarse — sus valores y stock ya están contabilizados. Use "Revertir zona primaria" para abrirlo a edición.',
+          );
+        }
+        if (actual?.asientoId) {
+          throw new Error(
+            "El embarque tiene cierre contabilizado y no puede editarse. Anule el asiento de cierre primero.",
           );
         }
         const embarque = await tx.embarque.update({
@@ -670,22 +524,70 @@ export async function guardarEmbarqueAction(
           data,
         });
         embarqueId = embarque.id;
-        await tx.itemEmbarque.deleteMany({ where: { embarqueId } });
-        await tx.embarqueCosto.deleteMany({ where: { embarqueId } });
+
+        // Gap #3 — edición NO destructiva del packing list. En vez de
+        // deleteMany+createMany (que regeneraba ids y orfanaba
+        // ItemContenedor.itemEmbarqueId vía onDelete:SetNull), reconciliamos
+        // por productoId (1 ItemEmbarque por producto por embarque). Así los
+        // ids sobreviven y el link del packing list se mantiene.
+        const itemsActuales = await tx.itemEmbarque.findMany({
+          where: { embarqueId },
+          select: { id: true, productoId: true },
+        });
+        const actualPorProducto = new Map(itemsActuales.map((i) => [i.productoId, i.id]));
+        const productosInput = new Set(input.items.map((it) => it.productoId));
+
+        for (const it of input.items) {
+          const existenteId = actualPorProducto.get(it.productoId);
+          if (existenteId !== undefined) {
+            await tx.itemEmbarque.update({
+              where: { id: existenteId },
+              data: {
+                cantidad: it.cantidad,
+                precioUnitarioFob: money(it.precioUnitarioFob),
+              },
+            });
+          } else {
+            await tx.itemEmbarque.create({
+              data: {
+                embarqueId,
+                productoId: it.productoId,
+                cantidad: it.cantidad,
+                precioUnitarioFob: money(it.precioUnitarioFob),
+              },
+            });
+          }
+        }
+        // Borrar sólo los ItemEmbarque cuyo producto desapareció del input.
+        const idsABorrar = itemsActuales
+          .filter((i) => !productosInput.has(i.productoId))
+          .map((i) => i.id);
+        if (idsABorrar.length > 0) {
+          await tx.itemEmbarque.deleteMany({ where: { id: { in: idsABorrar } } });
+        }
+
+        // Gap #3 — NUNCA borrar facturas EMITIDA/LEGACY_BUNDLED/ANULADA: tienen
+        // (o consumieron) un asiento. Borrarlas orfanaba el asiento y la
+        // re-creación saltaba números. El form de edición sólo gestiona las
+        // BORRADOR (las demás van read-only y se filtran del payload), así que
+        // reconciliamos borrando+recreando únicamente las BORRADOR.
+        await tx.embarqueCosto.deleteMany({
+          where: { embarqueId, estado: "BORRADOR" },
+        });
       } else {
         const embarque = await tx.embarque.create({ data });
         embarqueId = embarque.id;
-      }
 
-      if (input.items.length > 0) {
-        await tx.itemEmbarque.createMany({
-          data: input.items.map((it) => ({
-            embarqueId,
-            productoId: it.productoId,
-            cantidad: it.cantidad,
-            precioUnitarioFob: money(it.precioUnitarioFob),
-          })),
-        });
+        if (input.items.length > 0) {
+          await tx.itemEmbarque.createMany({
+            data: input.items.map((it) => ({
+              embarqueId,
+              productoId: it.productoId,
+              cantidad: it.cantidad,
+              precioUnitarioFob: money(it.precioUnitarioFob),
+            })),
+          });
+        }
       }
 
       // IDs de costos recién creados que tengan fechaFactura — candidatos
@@ -811,6 +713,23 @@ export async function anularEmbarqueCostoFacturaAction(
   costoId: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
+    // Bloquear anulación de factura ZP de embarque con Zona Primaria
+    // ya confirmada — el costo de esta factura ya está incorporado al
+    // stock ZPA. Revertir requiere primero "Revertir zona primaria".
+    const costo = await db.embarqueCosto.findUnique({
+      where: { id: costoId },
+      select: {
+        momento: true,
+        embarque: { select: { codigo: true, asientoZonaPrimariaId: true } },
+      },
+    });
+    if (costo && costo.momento === "ZONA_PRIMARIA" && costo.embarque.asientoZonaPrimariaId) {
+      return {
+        ok: false,
+        error: `El embarque ${costo.embarque.codigo} tiene Zona Primaria confirmada — el costo de esta factura ya está incorporado al stock ZPA. Use "Revertir zona primaria" antes de anular la factura.`,
+      };
+    }
+
     await anularAsientoEmbarqueCosto(costoId);
     revalidatePath("/comex/embarques");
     revalidatePath("/tesoreria/cuentas-a-pagar");
@@ -860,6 +779,7 @@ export async function confirmarZonaPrimariaAction(
       const embarque = await tx.embarque.findUnique({
         where: { id: embarqueId },
         include: {
+          items: { orderBy: { id: "asc" } },
           costos: {
             orderBy: { id: "asc" },
             include: { lineas: { orderBy: { id: "asc" } } },
@@ -882,8 +802,17 @@ export async function confirmarZonaPrimariaAction(
           `El embarque ${embarque.codigo} ya está cerrado/despachado.`,
         );
       }
+      if (embarque.items.length === 0) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `El embarque ${embarque.codigo}: no tiene ítems para ingresar a Zona Primaria.`,
+        );
+      }
 
-      const tieneFacturasZP = embarque.costos.some((f) => f.momento === "ZONA_PRIMARIA");
+      const facturasZpActivas = embarque.costos.filter(
+        (f) => f.momento === "ZONA_PRIMARIA" && f.estado !== "ANULADA",
+      );
+      const tieneFacturasZP = facturasZpActivas.length > 0;
       const tieneFob = Number(embarque.fobTotal) > 0;
       if (!tieneFob && !tieneFacturasZP) {
         throw new AsientoError(
@@ -892,13 +821,76 @@ export async function confirmarZonaPrimariaAction(
         );
       }
 
+      // Modelo Y (Ponte PR C): embarques CON contenedores (flag on) NO usan el
+      // flujo legacy. El arribo capitaliza el costo en 1.1.5.04 (sin mover
+      // stock); el primer ingreso de stock ocurre en la desconsolidación (DF).
+      const tieneContenedores =
+        isContenedorDesconsolidacionEnabled() &&
+        (await tx.contenedor.count({ where: { embarqueId } })) > 0;
+      if (tieneContenedores) {
+        const asientoComex = await crearAsientoArriboComex(embarqueId, tx, fecha);
+        const contabilizadoComex = await contabilizarAsiento(asientoComex.id, tx);
+        await tx.embarque.update({
+          where: { id: embarqueId },
+          data: { fechaZonaPrimaria: fecha ?? new Date() },
+        });
+        return {
+          asientoId: contabilizadoComex.id,
+          asientoNumero: contabilizadoComex.numero,
+        };
+      }
+
+      // Resolver el depósito ZPA antes que nada para fallar cedo si no hay.
+      const depositoZpa = await resolverDepositoZpa(tx, {
+        codigo: embarque.codigo,
+        depositoZonaPrimariaId: embarque.depositoZonaPrimariaId,
+      });
+
+      // Calcular el rateio para el stock ZPA — solo FOB + flete/seguro
+      // origen + facturas ZP (sin tributos aduaneros).
+      const rateioItems = calcularRateioZonaPrimaria(
+        {
+          fobTotal: embarque.fobTotal,
+          embarqueTipoCambio: embarque.tipoCambio,
+          costosZp: facturasZpActivas.flatMap((f) =>
+            f.lineas.map((l) => ({ subtotal: l.subtotal, tipoCambio: f.tipoCambio })),
+          ),
+          valorFleteOrigen: embarque.valorFleteOrigen,
+          valorSeguroOrigen: embarque.valorSeguroOrigen,
+        },
+        embarque.items.map((it) => ({
+          id: it.id,
+          productoId: it.productoId,
+          cantidad: it.cantidad,
+          precioUnitarioFob: it.precioUnitarioFob,
+        })),
+      );
+
+      // 1) Asiento de Zona Primaria (DEBE 1.1.5.02 vs HABER proveedores).
       const asiento = await crearAsientoZonaPrimaria(embarqueId, tx, fecha);
       const contabilizado = await contabilizarAsiento(asiento.id, tx);
 
-      // Persistir fecha del fato contábil en el embarque (no la del clic).
+      // 2) Ingreso de stock físico en el depósito ZPA.
+      const fechaIngreso = fecha ?? new Date();
+      await aplicarIngresoEmbarqueZpa(tx, {
+        depositoZpaId: depositoZpa.id,
+        fecha: fechaIngreso,
+        items: rateioItems.map((r) => ({
+          itemEmbarqueId: r.id,
+          productoId: r.productoId,
+          cantidad: r.cantidad,
+          costoUnitario: r.costoUnitario,
+        })),
+      });
+
+      // 3) Persistir fechaZonaPrimaria y, si fue resuelto via predeterminado,
+      //    persistir depositoZonaPrimariaId para idempotencia futura.
       await tx.embarque.update({
         where: { id: embarqueId },
-        data: { fechaZonaPrimaria: fecha ?? new Date() },
+        data: {
+          fechaZonaPrimaria: fechaIngreso,
+          depositoZonaPrimariaId: depositoZpa.id,
+        },
       });
 
       return {
@@ -921,10 +913,10 @@ export async function confirmarZonaPrimariaAction(
   }
 }
 
-// Revertir zona primaria — anula el asiento ZP y deja el embarque
-// disponible para corregir facturas/FOB y volver a confirmar. NO toca
-// stock (en ZP no se generan MovimientoStock). Sólo permitido si el
-// embarque NO tiene cierre (asientoId) — primero anular el cierre.
+// Revertir zona primaria — anula el asiento ZP, revierte el ingreso de
+// stock en ZPA y deja el embarque disponible para corregir facturas/FOB
+// y volver a confirmar. Sólo permitido si el embarque NO tiene cierre
+// (asientoId) ni despachos activos.
 
 export type RevertirZonaPrimariaResult = { ok: true } | { ok: false; error: string };
 
@@ -962,7 +954,24 @@ export async function revertirZonaPrimariaAction(
           `El embarque ${embarque.codigo} ya tiene cierre — anule primero el asiento de cierre.`,
         );
       }
+      const despachosActivosCount = await tx.despacho.count({
+        where: {
+          embarqueId,
+          estado: { not: DespachoEstado.ANULADO },
+        },
+      });
+      if (despachosActivosCount > 0) {
+        throw new AsientoError(
+          "ESTADO_INVALIDO",
+          `El embarque ${embarque.codigo} tiene ${despachosActivosCount} despacho(s) parcial(es) activo(s) — anule los despachos primero.`,
+        );
+      }
 
+      // 1) Revertir el ingreso de stock en ZPA (deleta MovimientoStock
+      //    ligados a ItemEmbarque + recalcula stockActual y SPD).
+      await revertirIngresoEmbarque(tx, embarqueId);
+
+      // 2) Anular el asiento ZP (DEBE 1.1.5.02 vs HABER proveedores).
       await anularAsiento(embarque.asientoZonaPrimariaId, tx);
 
       await tx.embarque.update({
@@ -1045,10 +1054,35 @@ export async function cerrarYContabilizarEmbarqueAction(
           `El embarque ${embarque.codigo} ya tiene un asiento asociado.`,
         );
       }
+      const despachosActivosCount = await tx.despacho.count({
+        where: {
+          embarqueId,
+          estado: { not: DespachoEstado.ANULADO },
+        },
+      });
+      if (despachosActivosCount > 0) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `El embarque ${embarque.codigo} tiene despachos parciales activos. Use el flujo de despachos para nacionalizar, o anule los despachos primero.`,
+        );
+      }
       if (!embarque.depositoDestinoId) {
         throw new AsientoError(
           "DOMINIO_INVALIDO",
           `El embarque ${embarque.codigo} no tiene depósito de destino asignado.`,
+        );
+      }
+      // Bloquear cierre monolítico con destino ZPA: no tiene sentido
+      // cerrar (que ingresa mercadería en 1.1.5.01) hacia un depósito
+      // aduanero. Use confirmar zona primaria + despachos parciales.
+      const depositoDestino = await tx.deposito.findUnique({
+        where: { id: embarque.depositoDestinoId },
+        select: { nombre: true, tipo: true },
+      });
+      if (depositoDestino?.tipo === "ZONA_PRIMARIA") {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `El depósito destino "${depositoDestino.nombre}" es tipo Zona Primaria. Use "Confirmar zona primaria" y luego despachos parciales en lugar de cierre monolítico.`,
         );
       }
       if (embarque.items.length === 0) {
@@ -1063,12 +1097,15 @@ export async function cerrarYContabilizarEmbarqueAction(
 
       // Para el rateio aplanamos cada línea de cada factura: el TC de la
       // factura aplica a cada línea (todas las líneas comparten moneda y TC).
-      const costosRateio = embarque.costos.flatMap((factura) =>
-        factura.lineas.map((l) => ({
-          subtotal: l.subtotal,
-          tipoCambio: factura.tipoCambio,
-        })),
-      );
+      // Excluimos facturas ANULADA: no contribuyen al costo del inventario.
+      const costosRateio = embarque.costos
+        .filter((factura) => factura.estado !== "ANULADA")
+        .flatMap((factura) =>
+          factura.lineas.map((l) => ({
+            subtotal: l.subtotal,
+            tipoCambio: factura.tipoCambio,
+          })),
+        );
       const rateio = calcularRateioEmbarque(
         {
           fobTotal: embarque.fobTotal,

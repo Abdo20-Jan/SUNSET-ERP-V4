@@ -64,6 +64,15 @@ export function DepositosTable({ depositos }: { depositos: DepositoRow[] }) {
       cell: ({ row }) => <span className="text-sm">{row.original.direccion ?? "—"}</span>,
     },
     {
+      id: "tipo",
+      header: "Tipo",
+      cell: ({ row }) => (
+        <Badge variant={row.original.tipo === "ZONA_PRIMARIA" ? "secondary" : "outline"}>
+          {row.original.tipo === "ZONA_PRIMARIA" ? "Zona Primaria" : "Nacional"}
+        </Badge>
+      ),
+    },
+    {
       id: "estado",
       header: "Estado",
       cell: ({ row }) => (
@@ -178,13 +187,7 @@ export function DepositosTable({ depositos }: { depositos: DepositoRow[] }) {
   );
 }
 
-function RowActions({
-  onEdit,
-  onDelete,
-}: {
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
+function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Acciones" />}>

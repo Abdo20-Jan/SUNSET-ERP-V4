@@ -1,8 +1,9 @@
 import { auth } from "@/lib/auth";
-import { getBalanceGeneralByFecha } from "@/lib/services/reportes";
+import { getBalanceGeneralByFecha, pruneCuentasSinSaldo } from "@/lib/services/reportes";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { OcultarSinSaldoToggle } from "@/components/ocultar-sin-saldo-toggle";
 import { convertirAUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -17,19 +18,20 @@ type SearchParams = Promise<{
   desde?: string;
   hasta?: string;
   moneda?: string;
+  todas?: string;
 }>;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseDate(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T00:00:00Z");
+  const d = new Date(`${value}T00:00:00Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
 function endOfDay(value: string | undefined): Date | undefined {
   if (!value || !DATE_RE.test(value)) return undefined;
-  const d = new Date(value + "T23:59:59.999Z");
+  const d = new Date(`${value}T23:59:59.999Z`);
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
@@ -37,11 +39,9 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default async function BalanceGeneralPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function BalanceGeneralPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
 
   // Default: hasta = hoy, desde = vacío (saldo acumulado al día)
@@ -50,6 +50,7 @@ export default async function BalanceGeneralPage({
 
   const fechaDesde = parseDate(desdeStr);
   const fechaHasta = endOfDay(hastaStr);
+  const mostrarTodas = params.todas === "1";
 
   const session = await auth();
   const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
@@ -100,7 +101,10 @@ export default async function BalanceGeneralPage({
 
       <div className="flex flex-col gap-3">
         <BalanceFechaFilter initialDesde={desdeStr} initialHasta={hastaStr} />
-        <MonedaToggle current={moneda} tcInfo={tcInfo} />
+        <div className="flex flex-wrap items-center gap-3">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
+          <OcultarSinSaldoToggle />
+        </div>
       </div>
 
       <Card className="py-0">
@@ -108,7 +112,7 @@ export default async function BalanceGeneralPage({
           <CardTitle className="text-base">Activo</CardTitle>
         </CardHeader>
         <CuentaTreeTable
-          data={bg.activo.map(serializeTreeNode)}
+          data={(mostrarTodas ? bg.activo : pruneCuentasSinSaldo(bg.activo)).map(serializeTreeNode)}
           showSaldoInicial={showSaldoInicial}
           totalLabel="Total Activo"
           totalValue={bg.totalActivo.toFixed(2)}
@@ -122,7 +126,7 @@ export default async function BalanceGeneralPage({
           <CardTitle className="text-base">Pasivo</CardTitle>
         </CardHeader>
         <CuentaTreeTable
-          data={bg.pasivo.map(serializeTreeNode)}
+          data={(mostrarTodas ? bg.pasivo : pruneCuentasSinSaldo(bg.pasivo)).map(serializeTreeNode)}
           showSaldoInicial={showSaldoInicial}
           totalLabel="Total Pasivo"
           totalValue={bg.totalPasivo.toFixed(2)}
@@ -136,7 +140,9 @@ export default async function BalanceGeneralPage({
           <CardTitle className="text-base">Patrimonio Neto</CardTitle>
         </CardHeader>
         <CuentaTreeTable
-          data={bg.patrimonio.map(serializeTreeNode)}
+          data={(mostrarTodas ? bg.patrimonio : pruneCuentasSinSaldo(bg.patrimonio)).map(
+            serializeTreeNode,
+          )}
           showSaldoInicial={showSaldoInicial}
           totalLabel="Total Patrimonio"
           totalValue={bg.totalPatrimonio.toFixed(2)}

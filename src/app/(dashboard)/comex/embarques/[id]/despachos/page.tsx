@@ -1,9 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Fragment } from "react";
 
-import { obtenerEmbarquePorId } from "@/lib/actions/embarques";
+import {
+  listarCuentasParaCostoLogistico,
+  listarProveedoresParaEmbarque,
+  obtenerEmbarquePorId,
+} from "@/lib/actions/embarques";
 import { listarDespachosDeEmbarque } from "@/lib/actions/despachos";
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
+import { obtenerMatrizDespachoCruzado } from "@/lib/services/despacho-parcial";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,45 +21,56 @@ import { fmtMoney } from "@/lib/format";
 
 import { DespachoActions } from "./_components/despacho-actions";
 import { CrearDespachoForm } from "./_components/crear-despacho-form";
+import { DespachoCruzadoMatriz } from "./_components/despacho-cruzado-matriz";
+import {
+  DespachoCruzadoTributosEditor,
+  type TributosCruzadoValores,
+} from "./_components/despacho-cruzado-tributos";
 
 type PageParams = Promise<{ id: string }>;
 
-export default async function DespachosEmbarquePage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function DespachosEmbarquePage({ params }: { params: PageParams }) {
   const { id } = await params;
   const embarque = await obtenerEmbarquePorId(id);
   if (!embarque) notFound();
 
-  const [despachos, productos, facturasDespachoLibres, depositos, defaultFecha] = await Promise.all(
-    [
-      listarDespachosDeEmbarque(id),
-      db.producto.findMany({
-        where: { id: { in: embarque.items.map((i) => i.productoId) } },
-        select: { id: true, codigo: true, nombre: true },
-      }),
-      db.embarqueCosto.findMany({
-        where: {
-          embarqueId: id,
-          momento: "DESPACHO",
-          despachoId: null,
-        },
-        include: {
-          proveedor: { select: { nombre: true } },
-          lineas: { select: { subtotal: true } },
-        },
-        orderBy: { id: "asc" },
-      }),
-      db.deposito.findMany({
-        where: { activo: true },
-        select: { id: true, nombre: true },
-        orderBy: { nombre: "asc" },
-      }),
-      getDefaultFecha(),
-    ],
-  );
+  const [
+    despachos,
+    productos,
+    facturasDespachoLibres,
+    depositos,
+    defaultFecha,
+    proveedores,
+    cuentasGasto,
+  ] = await Promise.all([
+    listarDespachosDeEmbarque(id),
+    db.producto.findMany({
+      where: { id: { in: embarque.items.map((i) => i.productoId) } },
+      select: { id: true, codigo: true, nombre: true },
+    }),
+    db.embarqueCosto.findMany({
+      where: {
+        embarqueId: id,
+        momento: "DESPACHO",
+        despachoId: null,
+      },
+      include: {
+        proveedor: { select: { nombre: true } },
+        lineas: { select: { subtotal: true } },
+      },
+      orderBy: { id: "asc" },
+    }),
+    db.deposito.findMany({
+      where: { activo: true },
+      select: { id: true, nombre: true },
+      orderBy: { nombre: "asc" },
+    }),
+    getDefaultFecha(),
+    listarProveedoresParaEmbarque(),
+    listarCuentasParaCostoLogistico(),
+  ]);
 
   const productosMap = new Map(productos.map((p) => [p.id, p]));
 
@@ -86,20 +105,99 @@ export default async function DespachosEmbarquePage({
     })
     .filter((it) => it.remanente > 0);
 
-  const facturasOptions = facturasDespachoLibres.map((f) => {
+  const totalFacturaArs = (f: {
+    tipoCambio: unknown;
+    lineas: Array<{ subtotal: unknown }>;
+    iva: unknown;
+    iibb: unknown;
+    otros: unknown;
+  }) => {
     const tc = Number(f.tipoCambio);
     const subtotal = f.lineas.reduce((s, l) => s + Number(l.subtotal) * tc, 0);
-    const total = subtotal + Number(f.iva) * tc + Number(f.iibb) * tc + Number(f.otros) * tc;
-    return {
+    return subtotal + Number(f.iva) * tc + Number(f.iibb) * tc + Number(f.otros) * tc;
+  };
+
+  const facturasOptions = facturasDespachoLibres.map((f) => ({
+    id: f.id,
+    label: `${f.proveedor.nombre}${f.facturaNumero ? ` Fact.${f.facturaNumero}` : ""}`,
+    totalArs: totalFacturaArs(f),
+  }));
+
+  // Despachos CRUZADOS en BORRADOR: editor de tributos/VEP inline (gap #4).
+  // El despacho cruzado se materializa con tributos=0; antes de contabilizar
+  // el operador los digita. Facturas elegibles = DESPACHO libres + las ya
+  // linkadas a ESE despacho (pre-marcadas).
+  const despachosCruzadoBorrador = await db.despacho.findMany({
+    where: {
+      embarqueId: id,
+      estado: "BORRADOR",
+      items: { some: { itemContenedorId: { not: null } } },
+    },
+    select: {
+      id: true,
+      tipoCambio: true,
+      die: true,
+      tasaEstadistica: true,
+      arancelSim: true,
+      iva: true,
+      ivaAdicional: true,
+      iibb: true,
+      ganancias: true,
+      numeroOM: true,
+      costos: {
+        where: { momento: "DESPACHO" },
+        select: {
+          id: true,
+          facturaNumero: true,
+          tipoCambio: true,
+          iva: true,
+          iibb: true,
+          otros: true,
+          proveedor: { select: { nombre: true } },
+          lineas: { select: { subtotal: true } },
+        },
+      },
+    },
+  });
+
+  const cruzadoTributosMap = new Map<
+    string,
+    { valores: TributosCruzadoValores; facturas: typeof facturasOptions }
+  >();
+  for (const d of despachosCruzadoBorrador) {
+    const linkadas = d.costos.map((f) => ({
       id: f.id,
       label: `${f.proveedor.nombre}${f.facturaNumero ? ` Fact.${f.facturaNumero}` : ""}`,
-      totalArs: total,
-    };
-  });
+      totalArs: totalFacturaArs(f),
+    }));
+    cruzadoTributosMap.set(d.id, {
+      valores: {
+        tipoCambio: d.tipoCambio.toString(),
+        die: d.die.toString(),
+        tasaEstadistica: d.tasaEstadistica.toString(),
+        arancelSim: d.arancelSim.toString(),
+        iva: d.iva.toString(),
+        ivaAdicional: d.ivaAdicional.toString(),
+        iibb: d.iibb.toString(),
+        ganancias: d.ganancias.toString(),
+        numeroOM: d.numeroOM,
+        facturasIds: linkadas.map((f) => f.id),
+      },
+      // Opciones = libres del embarque + las ya linkadas a este despacho.
+      facturas: [...facturasOptions, ...linkadas],
+    });
+  }
 
   const tieneZP = !!embarque.asientoZonaPrimaria;
   const tieneCierre = !!embarque.asiento;
   const puedeCrear = tieneZP && !tieneCierre;
+
+  // Fase 4 cruzada (flag ON): la matriz por contenedor reemplaza al form legacy.
+  const flagCruzado = isContenedorDesconsolidacionEnabled();
+  const session = flagCruzado ? await auth() : null;
+  const userId = session?.user?.id ?? null;
+  const matrizCruzado =
+    flagCruzado && userId ? await obtenerMatrizDespachoCruzado(id, userId) : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -110,7 +208,7 @@ export default async function DespachosEmbarquePage({
             ? "Embarque cerrado en flujo monolítico — no admite despachos parciales."
             : !tieneZP
               ? "Confirme zona primaria primero."
-              : `Mercadería en tránsito disponible para despachar parcialmente.`
+              : "Mercadería en tránsito disponible para despachar parcialmente."
         }
         actions={
           <Link href={`/comex/embarques/${id}`}>
@@ -143,49 +241,76 @@ export default async function DespachosEmbarquePage({
                     <th className="px-2.5 py-1.5 text-right">Facturas</th>
                     <th className="px-2.5 py-1.5 text-left">Estado</th>
                     <th className="px-2.5 py-1.5 text-left">Asiento</th>
-                    <th className="px-2.5 py-1.5"></th>
+                    <th className="px-2.5 py-1.5" />
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {despachos.map((d) => (
-                    <tr key={d.id}>
-                      <td className="px-2.5 py-1.5 font-mono">{d.codigo}</td>
-                      <td className="px-2.5 py-1.5">
-                        {new Date(d.fecha).toLocaleDateString("es-AR")}
-                      </td>
-                      <td className="px-2.5 py-1.5 font-mono text-[12px]">{d.numeroOM ?? "—"}</td>
-                      <td className="px-2.5 py-1.5 text-right">{d.itemsCount}</td>
-                      <td className="px-2.5 py-1.5 text-right">{d.facturasCount}</td>
-                      <td className="px-2.5 py-1.5">
-                        <Badge
-                          variant={
-                            d.estado === "CONTABILIZADO"
-                              ? "default"
-                              : d.estado === "ANULADO"
-                                ? "destructive"
-                                : "secondary"
-                          }
-                        >
-                          {d.estado}
-                        </Badge>
-                      </td>
-                      <td className="px-2.5 py-1.5">
-                        {d.asiento ? (
-                          <Link
-                            href={`/contabilidad/asientos/${d.asiento.id}`}
-                            className="text-[12px] underline-offset-2 hover:underline"
-                          >
-                            #{d.asiento.numero}
-                          </Link>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
+                  {despachos.map((d) => {
+                    const cruzado = cruzadoTributosMap.get(d.id);
+                    return (
+                      <Fragment key={d.id}>
+                        <tr>
+                          <td className="px-2.5 py-1.5 font-mono">{d.codigo}</td>
+                          <td className="px-2.5 py-1.5">
+                            {new Date(d.fecha).toLocaleDateString("es-AR")}
+                          </td>
+                          <td className="px-2.5 py-1.5 font-mono text-[12px]">
+                            {d.numeroOM ?? "—"}
+                          </td>
+                          <td className="px-2.5 py-1.5 text-right">{d.itemsCount}</td>
+                          <td className="px-2.5 py-1.5 text-right">{d.facturasCount}</td>
+                          <td className="px-2.5 py-1.5">
+                            <Badge
+                              variant={
+                                d.estado === "CONTABILIZADO"
+                                  ? "default"
+                                  : d.estado === "ANULADO"
+                                    ? "destructive"
+                                    : "secondary"
+                              }
+                            >
+                              {d.estado}
+                            </Badge>
+                          </td>
+                          <td className="px-2.5 py-1.5">
+                            {d.asiento ? (
+                              <Link
+                                href={`/contabilidad/asientos/${d.asiento.id}`}
+                                className="text-[12px] underline-offset-2 hover:underline"
+                              >
+                                #{d.asiento.numero}
+                              </Link>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+                          <td className="px-2.5 py-1.5 text-right">
+                            <DespachoActions
+                              despachoId={d.id}
+                              estado={d.estado}
+                              codigo={d.codigo}
+                            />
+                          </td>
+                        </tr>
+                        {cruzado && (
+                          <tr>
+                            <td colSpan={8} className="bg-muted/20 px-2.5 py-3">
+                              <DespachoCruzadoTributosEditor
+                                despachoId={d.id}
+                                codigo={d.codigo}
+                                embarqueMoneda={embarque.moneda}
+                                embarqueTipoCambio={embarque.tipoCambio}
+                                valores={cruzado.valores}
+                                facturas={cruzado.facturas}
+                                proveedores={proveedores}
+                                cuentasGasto={cuentasGasto}
+                              />
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td className="px-2.5 py-1.5 text-right">
-                        <DespachoActions despachoId={d.id} estado={d.estado} codigo={d.codigo} />
-                      </td>
-                    </tr>
-                  ))}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -193,42 +318,79 @@ export default async function DespachosEmbarquePage({
         </CardContent>
       </Card>
 
-      {puedeCrear && itemsDisponibles.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-[14px]">Nuevo despacho parcial</CardTitle>
-            <CardDescription>
-              Seleccioná los ítems a nacionalizar + tributos del despacho + facturas DESPACHO
-              linkadas. Al contabilizar genera asiento + ingreso de stock.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <CrearDespachoForm
-              embarqueId={id}
-              embarqueCodigo={embarque.codigo}
-              embarqueMoneda={embarque.moneda}
-              embarqueTipoCambio={embarque.tipoCambio}
-              depositoDestinoId={embarque.depositoDestinoId}
-              depositos={depositos}
-              items={itemsDisponibles}
-              facturas={facturasOptions}
-              defaultFecha={defaultFecha}
-            />
-            {!embarque.depositoDestinoId && (
-              <p className="mt-3 rounded-md border border-amber-300/60 bg-amber-50/60 p-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
-                Definí el depósito destino del embarque antes de contabilizar.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {flagCruzado ? (
+        // Flujo cruzado (por contenedor): el componente decide internamente
+        // entre el editor de la matriz y el panel del borrador reservado.
+        matrizCruzado &&
+        (matrizCruzado.borradorVigente != null || matrizCruzado.skus.length > 0) ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-[14px]">
+                {matrizCruzado.borradorVigente != null
+                  ? "Despacho cruzado — borrador reservado"
+                  : "Nuevo despacho cruzado (por contenedor)"}
+              </CardTitle>
+              <CardDescription>
+                {matrizCruzado.borradorVigente != null
+                  ? "Confirmá el borrador para materializar el despacho, o descartalo para liberar las unidades."
+                  : "Indicá cantidades por SKU y contenedor. Reservar traba las unidades; confirmar materializa el despacho (después contabilizalo para el asiento + stock)."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <DespachoCruzadoMatriz matriz={matrizCruzado} defaultFecha={defaultFecha} />
+            </CardContent>
+          </Card>
+        ) : (
+          despachos.length === 0 && (
+            <Card>
+              <CardContent className="text-[13px] text-muted-foreground">
+                No hay contenedores desconsolidados con saldo disponible para despachar.
+                Desconsolidá un contenedor del embarque primero.
+              </CardContent>
+            </Card>
+          )
+        )
+      ) : (
+        <>
+          {puedeCrear && itemsDisponibles.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-[14px]">Nuevo despacho parcial</CardTitle>
+                <CardDescription>
+                  Seleccioná los ítems a nacionalizar + tributos del despacho + facturas DESPACHO
+                  linkadas. Al contabilizar genera asiento + ingreso de stock.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <CrearDespachoForm
+                  embarqueId={id}
+                  embarqueCodigo={embarque.codigo}
+                  embarqueMoneda={embarque.moneda}
+                  embarqueTipoCambio={embarque.tipoCambio}
+                  depositoDestinoId={embarque.depositoDestinoId}
+                  depositos={depositos}
+                  items={itemsDisponibles}
+                  facturas={facturasOptions}
+                  defaultFecha={defaultFecha}
+                />
+                {!embarque.depositoDestinoId && (
+                  <p className="mt-3 rounded-md border border-amber-300/60 bg-amber-50/60 p-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
+                    Definí el depósito destino del embarque antes de contabilizar.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
-      {puedeCrear && itemsDisponibles.length === 0 && despachos.length > 0 && (
-        <Card>
-          <CardContent className="text-[13px] text-muted-foreground">
-            Toda la mercadería ya fue despachada o asignada a despachos en BORRADOR/CONTABILIZADO.
-          </CardContent>
-        </Card>
+          {puedeCrear && itemsDisponibles.length === 0 && despachos.length > 0 && (
+            <Card>
+              <CardContent className="text-[13px] text-muted-foreground">
+                Toda la mercadería ya fue despachada o asignada a despachos en
+                BORRADOR/CONTABILIZADO.
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
 
       {/* Hint footer (totals etc) */}

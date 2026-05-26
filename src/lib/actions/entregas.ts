@@ -113,10 +113,16 @@ async function ensureVentaEmitida(tx: TxClient, ventaId: string): Promise<void> 
 async function ensureDepositoActivo(tx: TxClient, depositoId: string): Promise<void> {
   const dep = await tx.deposito.findUnique({
     where: { id: depositoId },
-    select: { id: true, activo: true },
+    select: { id: true, nombre: true, activo: true, tipo: true },
   });
-  if (!dep || !dep.activo) {
+  if (!dep?.activo) {
     throw new AsientoError("DOMINIO_INVALIDO", "Depósito de entrega no existe o está inactivo.");
+  }
+  if (dep.tipo === "ZONA_PRIMARIA") {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Depósito "${dep.nombre}" es tipo Zona Primaria — mercadería bajo custodia aduanera, no disponible para entrega.`,
+    );
   }
 }
 

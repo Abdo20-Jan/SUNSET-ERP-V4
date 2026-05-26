@@ -1,9 +1,9 @@
 export const PER_PAGE_OPTIONS = [25, 50, 100, 200] as const;
 
-export function parsePaginationParams(params: {
-  page?: string;
-  perPage?: string;
-}): { page: number; perPage: number } {
+export function parsePaginationParams(params: { page?: string; perPage?: string }): {
+  page: number;
+  perPage: number;
+} {
   const rawPage = Number(params.page);
   const page = Number.isFinite(rawPage) && rawPage >= 1 ? Math.floor(rawPage) : 1;
   const rawPerPage = Number(params.perPage);

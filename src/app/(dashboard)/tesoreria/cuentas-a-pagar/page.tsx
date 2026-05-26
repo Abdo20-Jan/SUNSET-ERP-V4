@@ -15,17 +15,22 @@ import {
   getCuentasAPagarPorEmbarque,
   getRefuerzosVepPendientes,
   getSaldoCreditoAduana,
+  getSaldosExteriorPorProveedor,
   getSaldosPorProveedorConAging,
   getVepEmbarques,
+  listarProveedoresParaIntermediario,
   type CxPRow,
 } from "@/lib/services/cuentas-a-pagar";
 import { listarCuentasBancariasParaVep } from "@/lib/actions/vep-embarque";
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
+import { listarVepDespachosPendientes } from "@/lib/actions/vep-despacho";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
 
 import { VepSection } from "./vep-section";
+import { VepDespachoSection } from "./vep-despacho-section";
 import { EmbarqueBatchPago } from "./embarque-batch-pago";
 import { PagoPorFactura } from "./_components/pago-por-factura";
+import { ProveedoresExteriorSection } from "./_components/proveedores-exterior-section";
 
 export const dynamic = "force-dynamic";
 
@@ -35,21 +40,27 @@ export default async function CuentasAPagarPage() {
     porEmbarque,
     saldosProveedores,
     vepEmbarques,
+    vepDespachosPendientes,
     refuerzos,
     cuentasBancariasArs,
     cuentasBancariasMov,
     saldoCreditoAduana,
+    intermediarios,
     defaultFecha,
+    saldosExterior,
   ] = await Promise.all([
     getCuentasAPagar(),
     getCuentasAPagarPorEmbarque(),
     getSaldosPorProveedorConAging(),
     getVepEmbarques(),
+    listarVepDespachosPendientes(),
     getRefuerzosVepPendientes(),
     listarCuentasBancariasParaVep(),
     listarCuentasBancariasParaMovimiento(),
     getSaldoCreditoAduana(),
+    listarProveedoresParaIntermediario(),
     getDefaultFecha(),
+    getSaldosExteriorPorProveedor(),
   ]);
 
   // Filtrar 2.1.5.99 de la sección Aduana genérica — el saldo pendiente
@@ -91,7 +102,7 @@ export default async function CuentasAPagarPage() {
       <EmbarqueBatchPago
         rows={porEmbarque}
         cuentasBancarias={cuentasBancariasMov}
-        proveedores={saldosProveedores}
+        intermediarios={intermediarios}
         defaultFecha={defaultFecha}
       />
 
@@ -103,12 +114,21 @@ export default async function CuentasAPagarPage() {
         defaultFecha={defaultFecha}
       />
 
+      <VepDespachoSection
+        veps={vepDespachosPendientes}
+        cuentasBancarias={cuentasBancariasArs}
+        saldoCreditoAduana={saldoCreditoAduana.saldo}
+        defaultFecha={defaultFecha}
+      />
+
       <Section
         title="Proveedores comerciales"
         subtitle="Saldos pendientes a proveedores locales (cuenta 2.1.1.x). Incluye gastos, compras, gastos fijos y costos de embarque. Pagos se registran en Tesorería."
         rows={data.proveedoresComerciales}
         showProveedores
       />
+
+      <ProveedoresExteriorSection proveedores={saldosExterior} />
 
       <Section
         title="Aduana / Nacionalización"
@@ -165,7 +185,7 @@ function Section({
               {showProveedores && <TableHead>Proveedores</TableHead>}
               <TableHead className="text-right">Saldo (USD)</TableHead>
               <TableHead className="text-right">Saldo (ARS)</TableHead>
-              <TableHead className="w-28 text-right"></TableHead>
+              <TableHead className="w-28 text-right" />
             </TableRow>
           </TableHeader>
           <TableBody>

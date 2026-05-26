@@ -12,11 +12,9 @@ import { GastoDetailView } from "../_components/gasto-detail-view";
 
 type PageParams = Promise<{ id: string }>;
 
-export default async function GastoDetailPage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function GastoDetailPage({ params }: { params: PageParams }) {
   const { id } = await params;
 
   const gasto = await obtenerGastoPorId(id);

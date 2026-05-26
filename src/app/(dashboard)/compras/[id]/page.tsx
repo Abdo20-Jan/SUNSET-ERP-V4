@@ -12,11 +12,9 @@ import { CompraDetailView } from "../_components/compra-detail-view";
 
 type PageParams = Promise<{ id: string }>;
 
-export default async function CompraDetailPage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function CompraDetailPage({ params }: { params: PageParams }) {
   const { id } = await params;
 
   const compra = await obtenerCompraPorId(id);

@@ -164,6 +164,20 @@ export type BuildTreeResult = {
 };
 
 /**
+ * Remove recursivamente contas com saldo final 0, preservando os pais que
+ * tenham algum descendente com saldo. Puramente de exibição: não altera os
+ * totais (contas zeradas somam 0).
+ */
+export function pruneCuentasSinSaldo(nodes: CuentaTreeNode[]): CuentaTreeNode[] {
+  const prune = (node: CuentaTreeNode): CuentaTreeNode | null => {
+    const children = node.children.map(prune).filter((n): n is CuentaTreeNode => n !== null);
+    if (children.length === 0 && node.saldo.isZero()) return null;
+    return { ...node, children };
+  };
+  return nodes.map(prune).filter((n): n is CuentaTreeNode => n !== null);
+}
+
+/**
  * Filtro temporal: por `periodoId` (un mes contable) o por rango de
  * fechas (desde/hasta). Para Balance General típicamente se usa fecha
  * `hasta` sola (saldo acumulado al cierre del día). Para movimientos

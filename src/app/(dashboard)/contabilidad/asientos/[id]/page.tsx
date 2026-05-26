@@ -30,11 +30,9 @@ function estadoVariant(estado: AsientoDetalle["estado"]): "default" | "outline" 
   }
 }
 
-export default async function AsientoDetallePage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function AsientoDetallePage({ params }: { params: PageParams }) {
   const { id } = await params;
   const result = await getAsientoDetalle(id);
   if (!result.ok) notFound();

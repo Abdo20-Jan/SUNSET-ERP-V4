@@ -2,7 +2,7 @@ import "server-only";
 
 import Decimal from "decimal.js";
 
-import { MovimientoStockTipo, type Prisma } from "@/generated/prisma/client";
+import { MovimientoStockTipo, TipoDeposito, type Prisma } from "@/generated/prisma/client";
 import { money, toDecimal } from "@/lib/decimal";
 import { AsientoError } from "@/lib/services/asiento-automatico";
 
@@ -78,7 +78,13 @@ export async function aplicarIngresoEmbarque(
       },
     });
 
-    await aplicarIngresoProducto(tx, item.productoId, item.cantidad, item.costoUnitario);
+    await aplicarIngresoProducto(
+      tx,
+      item.productoId,
+      params.depositoDestinoId,
+      item.cantidad,
+      item.costoUnitario,
+    );
     await aplicarIngresoSPD(
       tx,
       item.productoId,
@@ -89,12 +95,27 @@ export async function aplicarIngresoEmbarque(
   }
 }
 
+/**
+ * Incrementa `Producto.stockActual`/`costoPromedio` por un ingreso, SÓLO si
+ * el depósito destino es `tipo=NACIONAL` (stock vendable). Para depósitos
+ * `ZONA_PRIMARIA` (puerto / depósito fiscal) no toca el agregado del Producto:
+ * ese stock no es vendable hasta nacionalizarse (vive sólo en SPD + cuentas
+ * 1.1.5.04/05). Coherente con `recalcularStockYCostoPromedio`.
+ */
 async function aplicarIngresoProducto(
   tx: TxClient,
   productoId: string,
+  depositoId: string,
   cantidadIngreso: number,
   costoUnitarioIngreso: Decimal,
 ): Promise<void> {
+  const deposito = await tx.deposito.findUnique({
+    where: { id: depositoId },
+    select: { tipo: true },
+  });
+  // Sólo el stock en depósitos NACIONAL alimenta el agregado del Producto.
+  if (deposito?.tipo !== TipoDeposito.NACIONAL) return;
+
   const producto = await tx.producto.findUnique({
     where: { id: productoId },
     select: { stockActual: true, costoPromedio: true },
@@ -118,6 +139,85 @@ async function aplicarIngresoProducto(
       costoPromedio: money(nuevoCostoPromedio),
     },
   });
+}
+
+/**
+ * Aplica el ingreso de stock a un depósito tipo ZONA_PRIMARIA generado
+ * al confirmar la Zona Primaria del embarque. Mismo mecanismo que
+ * aplicarIngresoEmbarque, pero exige que el depósito sea de tipo
+ * ZONA_PRIMARIA — si no, falla con mensaje claro.
+ *
+ * El stock entra físicamente al depósito ZPA. Quedará luego para
+ * transferirse al depósito Nacional al contabilizar el despacho (Fase C).
+ *
+ * Los `MovimientoStock` quedan ligados al `itemEmbarqueId`, idéntico
+ * a aplicarIngresoEmbarque, permitiendo reversión limpia via
+ * revertirIngresoEmbarque al revertir la Zona Primaria.
+ */
+export async function aplicarIngresoEmbarqueZpa(
+  tx: TxClient,
+  params: {
+    depositoZpaId: string;
+    fecha: Date;
+    items: readonly IngresoItem[];
+  },
+): Promise<void> {
+  const deposito = await tx.deposito.findUnique({
+    where: { id: params.depositoZpaId },
+    select: { id: true, nombre: true, activo: true, tipo: true },
+  });
+  if (!deposito) {
+    throw new AsientoError("DOMINIO_INVALIDO", "El depósito ZPA no existe.");
+  }
+  if (!deposito.activo) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `El depósito ZPA "${deposito.nombre}" está inactivo.`,
+    );
+  }
+  if (deposito.tipo !== TipoDeposito.ZONA_PRIMARIA) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `El depósito "${deposito.nombre}" no es tipo Zona Primaria. Marcalo en /maestros/depositos o use otro depósito.`,
+    );
+  }
+
+  for (const item of params.items) {
+    await tx.itemEmbarque.update({
+      where: { id: item.itemEmbarqueId },
+      data: { costoUnitario: money(item.costoUnitario) },
+    });
+
+    await tx.movimientoStock.create({
+      data: {
+        productoId: item.productoId,
+        depositoId: params.depositoZpaId,
+        tipo: MovimientoStockTipo.INGRESO,
+        cantidad: item.cantidad,
+        costoUnitario: money(item.costoUnitario),
+        fecha: params.fecha,
+        itemEmbarqueId: item.itemEmbarqueId,
+      },
+    });
+
+    // ZPA: depósito tipo ZONA_PRIMARIA. aplicarIngresoProducto NO toca el
+    // agregado del Producto (no es stock vendable hasta nacionalizar), pero se
+    // llama por consistencia y para mantener SPD.
+    await aplicarIngresoProducto(
+      tx,
+      item.productoId,
+      params.depositoZpaId,
+      item.cantidad,
+      item.costoUnitario,
+    );
+    await aplicarIngresoSPD(
+      tx,
+      item.productoId,
+      params.depositoZpaId,
+      item.cantidad,
+      item.costoUnitario,
+    );
+  }
 }
 
 type IngresoDespachoItem = {
@@ -170,7 +270,13 @@ export async function aplicarIngresoDespacho(
       },
     });
 
-    await aplicarIngresoProducto(tx, item.productoId, item.cantidad, item.costoUnitario);
+    await aplicarIngresoProducto(
+      tx,
+      item.productoId,
+      params.depositoDestinoId,
+      item.cantidad,
+      item.costoUnitario,
+    );
     await aplicarIngresoSPD(
       tx,
       item.productoId,
@@ -247,12 +353,27 @@ export async function revertirIngresoEmbarque(tx: TxClient, embarqueId: string):
 }
 
 /**
- * Replays todos los `MovimientoStock` del producto en orden cronológico
- * para reconstruir `stockActual` y `costoPromedio` desde cero. Usa la
- * misma fórmula de promedio ponderado que `aplicarIngresoProducto`.
+ * Replays los `MovimientoStock` del producto en orden cronológico para
+ * reconstruir `stockActual` y `costoPromedio` desde cero, contando SÓLO el
+ * stock NACIONALIZADO (vendable): movimientos en depósitos `tipo=NACIONAL`.
  *
- * INGRESO suma cantidad y promedia costo. EGRESO/AJUSTE/TRANSFERENCIA
- * sólo afectan stock; el costo medio se mantiene (FIFO/AVCO clásico).
+ * Decisión (Comex Modelo Y): `Producto.stockActual`/`costoPromedio` reflejan
+ * únicamente la mercadería disponible para la venta. La mercadería en zona
+ * primaria / depósito fiscal (`tipo=ZONA_PRIMARIA`) NO es vendable hasta su
+ * nacionalización, por eso se ignora en el agregado a nivel Producto (vive en
+ * `StockPorDeposito` y en las cuentas 1.1.5.04/05). El criterio es
+ * `Deposito.tipo`.
+ *
+ * Reglas (sólo depósitos NACIONAL):
+ *  - INGRESO          → suma cantidad y promedia costo (costo landed).
+ *  - EGRESO           → resta cantidad (mantiene costo medio).
+ *  - AJUSTE           → cantidad signada; mantiene costo medio.
+ *  - TRANSFERENCIA    → cada par tiene 2 movimientos (origen cantidad<0,
+ *                       destino cantidad>0). La pata DESTINO en NACIONAL es
+ *                       una ENTRADA (suma + promedia el costo de la
+ *                       transferencia → costo landed nacionalizado); la pata
+ *                       ORIGEN en NACIONAL es una SALIDA (resta). Las patas en
+ *                       depósitos ZONA_PRIMARIA se ignoran.
  */
 export async function recalcularStockYCostoPromedio(
   tx: TxClient,
@@ -261,13 +382,21 @@ export async function recalcularStockYCostoPromedio(
   const movimientos = await tx.movimientoStock.findMany({
     where: { productoId },
     orderBy: [{ fecha: "asc" }, { id: "asc" }],
-    select: { tipo: true, cantidad: true, costoUnitario: true },
+    select: {
+      tipo: true,
+      cantidad: true,
+      costoUnitario: true,
+      deposito: { select: { tipo: true } },
+    },
   });
 
   let stock = 0;
   let promedio = new Decimal(0);
 
   for (const m of movimientos) {
+    // Sólo el stock en depósitos NACIONAL es vendable y entra al agregado.
+    if (m.deposito.tipo !== TipoDeposito.NACIONAL) continue;
+
     if (m.tipo === MovimientoStockTipo.INGRESO) {
       promedio = calcularNuevoPromedio(stock, promedio, m.cantidad, toDecimal(m.costoUnitario));
       stock += m.cantidad;
@@ -276,10 +405,16 @@ export async function recalcularStockYCostoPromedio(
     } else if (m.tipo === MovimientoStockTipo.AJUSTE) {
       // AJUSTE: cantidad signada (positiva o negativa). Mantiene costo medio.
       stock += m.cantidad;
+    } else if (m.tipo === MovimientoStockTipo.TRANSFERENCIA) {
+      // cantidad > 0 = entrada al depósito NACIONAL (promedia costo landed);
+      // cantidad < 0 = salida de un depósito NACIONAL (resta, sin promediar).
+      if (m.cantidad > 0) {
+        promedio = calcularNuevoPromedio(stock, promedio, m.cantidad, toDecimal(m.costoUnitario));
+        stock += m.cantidad;
+      } else {
+        stock += m.cantidad; // cantidad ya es negativa
+      }
     }
-    // TRANSFERENCIA: no afecta stock total ni costo a nivel Producto
-    // (es un movimento interno entre depósitos; ver recalcularSPDPorProducto
-    // para el efecto a nivel SPD).
   }
 
   await tx.producto.update({
@@ -429,6 +564,11 @@ export async function aplicarTransferenciaSPD(
     cantidad: number;
     fecha: Date;
     transferenciaId: string;
+    // Override opcional del costo unitario. Útil para la transferencia
+    // automática de despacho ZPA→Nacional, donde queremos preservar el
+    // costo original del ItemEmbarque (no el promedio mezclado de la
+    // ZPA si hay varios embarques).
+    costoUnitarioOverride?: Decimal;
   },
 ): Promise<void> {
   const origen = await tx.stockPorDeposito.findUnique({
@@ -446,7 +586,7 @@ export async function aplicarTransferenciaSPD(
       `No hay stock del producto ${params.productoId} en el depósito origen ${params.depositoOrigenId}.`,
     );
   }
-  const costoUnitario = toDecimal(origen.costoPromedio);
+  const costoUnitario = params.costoUnitarioOverride ?? toDecimal(origen.costoPromedio);
 
   // Decrementar origen
   await tx.stockPorDeposito.update({
@@ -495,6 +635,232 @@ export async function aplicarTransferenciaSPD(
       },
     ],
   });
+}
+
+type TransferenciaDespachoItem = {
+  productoId: string;
+  cantidad: number;
+  /** Costo unitario del ItemEmbarque-pai — preservado del rateio ZPA. */
+  costoUnitario: Decimal;
+};
+
+/**
+ * Aplica las transferencias de stock generadas por contabilizar un
+ * Despacho parcial: por cada ItemDespacho, mueve la cantidad despachada
+ * desde el depósito ZPA al depósito destino del embarque (típicamente
+ * NACIONAL). Crea 1 `Transferencia` row por producto + 2 MovimientoStock
+ * (egreso ZPA + ingreso destino).
+ *
+ * Usa `costoUnitarioOverride` igual al ItemEmbarque.costoUnitario para
+ * preservar el costo FOB+ZP original del embarque-pai, evitando que la
+ * media ponderada de la ZPA (potencialmente mezclada con otros embarques)
+ * contamine el costo del stock nacionalizado.
+ *
+ * NO pasa por crearTransferenciaAction (que es feature-flagged para uso
+ * manual). Esta vía es automática y siempre activa.
+ */
+export async function aplicarTransferenciaDespacho(
+  tx: TxClient,
+  params: {
+    despachoId: string;
+    despachoCodigo: string;
+    depositoZpaId: string;
+    depositoDestinoId: string;
+    fecha: Date;
+    items: readonly TransferenciaDespachoItem[];
+  },
+): Promise<void> {
+  if (params.depositoZpaId === params.depositoDestinoId) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      "El depósito de origen y destino del despacho no pueden ser el mismo.",
+    );
+  }
+
+  for (const item of params.items) {
+    const numero = await siguienteNumeroTransferenciaDespacho(tx, params.despachoCodigo);
+    const transferencia = await tx.transferencia.create({
+      data: {
+        numero,
+        productoId: item.productoId,
+        depositoOrigenId: params.depositoZpaId,
+        depositoDestinoId: params.depositoDestinoId,
+        cantidad: item.cantidad,
+        fecha: params.fecha,
+        despachoId: params.despachoId,
+        observacion: `Despacho ${params.despachoCodigo} — transferencia automática ZPA → destino`,
+        // estado default = CONFIRMADA
+      },
+      select: { id: true },
+    });
+
+    await aplicarTransferenciaSPD(tx, {
+      productoId: item.productoId,
+      depositoOrigenId: params.depositoZpaId,
+      depositoDestinoId: params.depositoDestinoId,
+      cantidad: item.cantidad,
+      fecha: params.fecha,
+      transferenciaId: transferencia.id,
+      costoUnitarioOverride: item.costoUnitario,
+    });
+  }
+
+  // El destino es típicamente NACIONAL: recalcular el agregado del Producto
+  // (stockActual/costoPromedio) que la transferencia acaba de alimentar con
+  // el costo landed. recalcularStockYCostoPromedio filtra por Deposito.tipo,
+  // así que sólo cuenta las patas en depósitos NACIONAL.
+  const productoIds = Array.from(new Set(params.items.map((i) => i.productoId)));
+  for (const productoId of productoIds) {
+    await recalcularStockYCostoPromedio(tx, productoId);
+  }
+}
+
+type NacionalizacionDFItem = {
+  productoId: string;
+  cantidad: number;
+  /** Costo unitario LANDED en ARS (costoFC×TC + capitalizables prorrateados),
+   *  computado por `calcularCostoLandedDespacho` — la misma fuente que el
+   *  DEBE 1.1.5.01 del asiento. Es el costo del stock NACIONALIZADO (vendable). */
+  costoUnitario: Decimal;
+  /** Depósito fiscal de origen — puede diferir por línea (un despacho cruzado
+   *  consume de N contenedores, potencialmente en DF distintos). */
+  depositoFiscalId: string;
+};
+
+/**
+ * Aplica el movimiento físico de stock al nacionalizar un despacho parcial
+ * CRUZADO (Fase 4): por cada línea, transfiere la cantidad desde el depósito
+ * fiscal del contenedor de origen al depósito destino del embarque. Espeja a
+ * `aplicarTransferenciaDespacho` (1 `Transferencia` + 2 MovimientoStock vía
+ * `aplicarTransferenciaSPD`), pero el origen es el DF (no la ZPA) y el costo
+ * es el costo LANDED del ItemDespacho (FC + tributos/facturas capitalizados).
+ *
+ * Contablemente acompaña al asiento NACIONALIZACION_VIA_DF (DEBE 1.1.5.01 /
+ * HABER 1.1.5.05). El stock en el DF fue ingresado al desconsolidar (PR 3.2).
+ * Al final recalcula `Producto.stockActual`/`costoPromedio` (sólo NACIONAL).
+ */
+export async function aplicarNacionalizacionDF(
+  tx: TxClient,
+  params: {
+    despachoId: string;
+    despachoCodigo: string;
+    depositoDestinoId: string;
+    fecha: Date;
+    items: readonly NacionalizacionDFItem[];
+  },
+): Promise<void> {
+  for (const item of params.items) {
+    if (item.depositoFiscalId === params.depositoDestinoId) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        "El depósito fiscal de origen y el destino del despacho no pueden ser el mismo.",
+      );
+    }
+    const numero = await siguienteNumeroTransferenciaDespacho(tx, params.despachoCodigo);
+    const transferencia = await tx.transferencia.create({
+      data: {
+        numero,
+        productoId: item.productoId,
+        depositoOrigenId: item.depositoFiscalId,
+        depositoDestinoId: params.depositoDestinoId,
+        cantidad: item.cantidad,
+        fecha: params.fecha,
+        despachoId: params.despachoId,
+        observacion: `Despacho ${params.despachoCodigo} — nacionalización depósito fiscal → destino`,
+        // estado default = CONFIRMADA
+      },
+      select: { id: true },
+    });
+
+    await aplicarTransferenciaSPD(tx, {
+      productoId: item.productoId,
+      depositoOrigenId: item.depositoFiscalId,
+      depositoDestinoId: params.depositoDestinoId,
+      cantidad: item.cantidad,
+      fecha: params.fecha,
+      transferenciaId: transferencia.id,
+      costoUnitarioOverride: item.costoUnitario,
+    });
+  }
+
+  // El destino es NACIONAL: recalcular el agregado del Producto con el costo
+  // landed que la nacionalización acaba de ingresar. recalcularStockYCostoPromedio
+  // sólo cuenta movimientos en depósitos NACIONAL (la pata DF se ignora).
+  const productoIds = Array.from(new Set(params.items.map((i) => i.productoId)));
+  for (const productoId of productoIds) {
+    await recalcularStockYCostoPromedio(tx, productoId);
+  }
+}
+
+async function siguienteNumeroTransferenciaDespacho(
+  tx: TxClient,
+  despachoCodigo: string,
+): Promise<string> {
+  // Número derivado del código del despacho + sufijo incremental para
+  // soportar múltiples productos en el mismo despacho.
+  const prefix = `${despachoCodigo}-T`;
+  const existentes = await tx.transferencia.count({
+    where: { numero: { startsWith: prefix } },
+  });
+  return `${prefix}${existentes + 1}`;
+}
+
+/**
+ * Revierte las transferencias de stock generadas por un despacho.
+ * Deleta los MovimientoStock + Transferencia ligados al despacho y
+ * recalcula SPD de los productos afectados. Usado al anular despacho
+ * que usaba flujo ZPA (Fase C).
+ */
+export async function revertirTransferenciaDespacho(
+  tx: TxClient,
+  despachoId: string,
+): Promise<void> {
+  const transferencias = await tx.transferencia.findMany({
+    where: { despachoId },
+    select: { id: true, productoId: true, depositoOrigenId: true, depositoDestinoId: true },
+  });
+  if (transferencias.length === 0) return;
+
+  const transferenciaIds = transferencias.map((t) => t.id);
+  const productoIds = Array.from(new Set(transferencias.map((t) => t.productoId)));
+
+  // Depósitos (producto→depósitos) tocados por las transferencias a borrar.
+  // Tras el recalc, los que queden sin ningún movimiento deben caer a 0:
+  // `recalcularSPDPorProducto` sólo actualiza depósitos presentes en algún
+  // MovimientoStock, así que un depósito que recibió SÓLO esta transferencia
+  // (típico del destino del despacho) quedaría con stock fantasma si no se
+  // limpia explícitamente. Acotado a los depósitos de esta reversión para no
+  // tocar saldos mantenidos incrementalmente por otros flujos.
+  const afectados = new Map<string, Set<string>>();
+  for (const t of transferencias) {
+    const set = afectados.get(t.productoId) ?? new Set<string>();
+    set.add(t.depositoOrigenId);
+    set.add(t.depositoDestinoId);
+    afectados.set(t.productoId, set);
+  }
+
+  // Borrar movimientos antes de las transferencias (FK).
+  await tx.movimientoStock.deleteMany({
+    where: { transferenciaId: { in: transferenciaIds } },
+  });
+  await tx.transferencia.deleteMany({
+    where: { id: { in: transferenciaIds } },
+  });
+
+  for (const productoId of productoIds) {
+    await recalcularSPDPorProducto(tx, productoId);
+    const depositos = afectados.get(productoId);
+    if (!depositos) continue;
+    for (const depositoId of depositos) {
+      const movs = await tx.movimientoStock.count({ where: { productoId, depositoId } });
+      if (movs === 0) {
+        await tx.stockPorDeposito.updateMany({
+          where: { productoId, depositoId },
+          data: { cantidadFisica: 0, costoPromedio: 0 },
+        });
+      }
+    }
+  }
 }
 
 /**
@@ -576,94 +942,6 @@ export async function recalcularSPDPorProducto(tx: TxClient, productoId: string)
   }
 }
 
-/**
- * S3.3 — Recalcula `StockPorDeposito.cantidadReservada` para un
- * producto a partir del estado actual de ventas/entregas.
- *
- * Reservas vivas = items de Ventas en estado EMITIDA cuya cantidad
- * todavía no fue cubierta por una entrega no-anulada. Se agrupa por
- * depósito (default global hasta que S3.1 entregue `ItemVenta.depositoId`,
- * después se debe usar `it.depositoId ?? defaultDepId`).
- *
- * Estrategia:
- *  1. Zera `cantidadReservada` de todos los SPD del producto.
- *  2. Itera ItemVenta de ventas EMITIDA y suma cantidad pendiente de
- *     entrega (cantidad - SUM(itemEntrega.cantidad WHERE estado != ANULADA)).
- *  3. Upsert el SPD del depósito con la cantidad reservada calculada.
- *
- * Útil después de un replay de movimientos (`recalcularSPDPorProducto`),
- * que zera las reservas para reconstruirlas desde la fuente de verdad.
- */
-export async function recalcularReservasPorProducto(
-  tx: TxClient,
-  productoId: string,
-): Promise<void> {
-  // 1. Zera reservada para todos los depósitos de este producto.
-  await tx.stockPorDeposito.updateMany({
-    where: { productoId },
-    data: { cantidadReservada: 0 },
-  });
-
-  // 2. Itera ItemVenta de ventas EMITIDA y calcula pendiente.
-  const items = await tx.itemVenta.findMany({
-    where: {
-      productoId,
-      venta: { estado: "EMITIDA" },
-    },
-    select: {
-      cantidad: true,
-      itemsEntrega: {
-        where: { entrega: { estado: { not: "ANULADA" } } },
-        select: { cantidad: true },
-      },
-    },
-  });
-
-  // 3. Suma pendientes por depósito. Pre-S3.1: todos van al default.
-  // Post-S3.1: cambiar a `it.depositoId ?? defaultDepId` cuando el
-  // schema tenga la columna.
-  const defaultDepId = await getDepositoPorDefectoTx(tx);
-  const pendientesPorDep = new Map<string, number>();
-  for (const it of items) {
-    const entregadas = it.itemsEntrega.reduce((sum, ie) => sum + ie.cantidad, 0);
-    const pendiente = it.cantidad - entregadas;
-    if (pendiente <= 0) continue;
-    pendientesPorDep.set(defaultDepId, (pendientesPorDep.get(defaultDepId) ?? 0) + pendiente);
-  }
-
-  // 4. Upsert SPD con la cantidad reservada recalculada.
-  for (const [depositoId, qty] of pendientesPorDep) {
-    await tx.stockPorDeposito.upsert({
-      where: { productoId_depositoId: { productoId, depositoId } },
-      create: {
-        productoId,
-        depositoId,
-        cantidadFisica: 0,
-        cantidadReservada: qty,
-        costoPromedio: 0,
-      },
-      update: { cantidadReservada: qty },
-    });
-  }
-}
-
-/**
- * Lookup interno del depósito default. Inline para evitar dependencia
- * circular con `stock-helpers.ts` (que importa cosas de este archivo).
- */
-async function getDepositoPorDefectoTx(tx: TxClient): Promise<string> {
-  const nacional = await tx.deposito.findFirst({
-    where: { nombre: "NACIONAL", activo: true },
-    select: { id: true },
-  });
-  if (nacional) return nacional.id;
-  const primero = await tx.deposito.findFirst({
-    where: { activo: true },
-    orderBy: { nombre: "asc" },
-    select: { id: true },
-  });
-  if (!primero) {
-    throw new Error("No hay ningún depósito activo configurado.");
-  }
-  return primero.id;
-}
+// `recalcularReservasPorProducto` movida a `stock-recalc.ts` (sin
+// `server-only`) para que el validador standalone (CI) pueda importarla.
+export { recalcularReservasPorProducto } from "@/lib/services/stock-recalc";

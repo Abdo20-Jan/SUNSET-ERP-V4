@@ -21,11 +21,7 @@ import type { EmbarqueReciente } from "@/lib/services/dashboard";
 
 import { EmbarqueEstadoBadge } from "./embarque-estado-badge";
 
-export function EmbarquesRecientesCard({
-  embarques,
-}: {
-  embarques: EmbarqueReciente[];
-}) {
+export function EmbarquesRecientesCard({ embarques }: { embarques: EmbarqueReciente[] }) {
   return (
     <Card>
       <CardHeader className="border-b">

@@ -3,15 +3,35 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { money, toDecimal } from "@/lib/decimal";
+import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
 import {
   anularAsiento,
   AsientoError,
   contabilizarAsiento,
   crearAsientoDespacho,
+  crearAsientoDespachoCruzado,
 } from "@/lib/services/asiento-automatico";
-import { aplicarIngresoDespacho, revertirIngresoDespacho } from "@/lib/services/stock";
+import {
+  aplicarIngresoDespacho,
+  aplicarNacionalizacionDF,
+  aplicarTransferenciaDespacho,
+  revertirIngresoDespacho,
+  revertirTransferenciaDespacho,
+} from "@/lib/services/stock";
+import { resolverDepositoZpa } from "@/lib/services/embarque-zpa";
+import {
+  calcularCostoLandedDespacho,
+  contabilizarBorrador,
+  crearBorrador,
+  DespachoParcialError,
+  expirarBorrador,
+  materializarDespachoCruzado,
+  revertirCountersDespacho,
+} from "@/lib/services/despacho-parcial";
+import { validarDisponible } from "@/lib/services/stock-helpers";
 import { Prisma } from "@/generated/prisma/client";
 
 // ============================================================
@@ -172,6 +192,8 @@ export async function obtenerDespachoPorId(despachoId: string): Promise<Despacho
 const itemSchema = z.object({
   itemEmbarqueId: z.number().int().positive(),
   cantidad: z.number().int().positive(),
+  // Origen del flujo cruzado (Fase 4, flag ON). El legacy lo ignora.
+  itemContenedorId: z.number().int().positive().optional(),
 });
 
 const decimalish = z.union([z.string(), z.number()]).transform((v) => {
@@ -179,11 +201,19 @@ const decimalish = z.union([z.string(), z.number()]).transform((v) => {
   return Number.isFinite(n) && n >= 0 ? v.toString() : "0";
 });
 
+const decimalishPositive = z
+  .union([z.string(), z.number()])
+  .transform((v) => (typeof v === "string" ? Number(v) : v))
+  .refine((n) => Number.isFinite(n) && n > 0, {
+    message: "Debe ser un número mayor que 0.",
+  })
+  .transform((n) => n.toString());
+
 const crearDespachoSchema = z.object({
   embarqueId: z.string().min(1),
   fecha: z.union([z.string(), z.date()]),
   numeroOM: z.string().trim().optional().nullable(),
-  tipoCambio: decimalish,
+  tipoCambio: decimalishPositive,
   die: decimalish.default("0"),
   tasaEstadistica: decimalish.default("0"),
   arancelSim: decimalish.default("0"),
@@ -212,6 +242,176 @@ async function siguienteCodigoDespacho(
   return `${embarqueCodigo}-D${existentes + 1}`;
 }
 
+type CrearDespachoData = z.infer<typeof crearDespachoSchema>;
+type TxClient = Prisma.TransactionClient;
+
+// Fork legacy/nuevo del despacho (P1-5). Con la flag apagada (default prod)
+// se ejecuta SIEMPRE el flujo legacy (bundled, a nivel ItemEmbarque), idéntico
+// al histórico. El flujo por contenedor (Fase 4) sólo se activa en staging.
+
+/**
+ * Flujo legacy (bundled): el despacho consume cantidades a nivel ItemEmbarque
+ * del embarque. Comportamiento histórico extraído sin cambios — NO modificar
+ * acá; las divergencias del flujo cruzado van en `crearDespachoContenedor`.
+ */
+async function crearDespachoLegacy(
+  tx: TxClient,
+  data: CrearDespachoData,
+  fecha: Date,
+): Promise<{ despachoId: string; codigo: string }> {
+  const embarque = await tx.embarque.findUnique({
+    where: { id: data.embarqueId },
+    select: {
+      id: true,
+      codigo: true,
+      asientoId: true,
+      asientoZonaPrimariaId: true,
+      items: { select: { id: true, cantidad: true } },
+    },
+  });
+  if (!embarque) {
+    throw new AsientoError("DOMINIO_INVALIDO", "El embarque no existe.");
+  }
+  if (embarque.asientoId) {
+    throw new AsientoError(
+      "ESTADO_INVALIDO",
+      `El embarque ${embarque.codigo} ya tiene cierre monolítico — anule primero el cierre o use el flujo legacy.`,
+    );
+  }
+  if (!embarque.asientoZonaPrimariaId) {
+    throw new AsientoError(
+      "ESTADO_INVALIDO",
+      `El embarque ${embarque.codigo}: confirmá zona primaria antes de despachar.`,
+    );
+  }
+
+  // Validar items pertenecen al embarque + cantidades vs remanente
+  const itemsEmbById = new Map(embarque.items.map((i) => [i.id, i.cantidad]));
+  const otrosItems = await tx.itemDespacho.findMany({
+    where: {
+      despacho: { embarqueId: embarque.id, estado: { not: "ANULADO" } },
+    },
+    select: { itemEmbarqueId: true, cantidad: true },
+  });
+  const yaDespachadoPorIE = new Map<number, number>();
+  for (const oi of otrosItems) {
+    yaDespachadoPorIE.set(
+      oi.itemEmbarqueId,
+      (yaDespachadoPorIE.get(oi.itemEmbarqueId) ?? 0) + oi.cantidad,
+    );
+  }
+  for (const it of data.items) {
+    const cantTotal = itemsEmbById.get(it.itemEmbarqueId);
+    if (cantTotal == null) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Ítem ${it.itemEmbarqueId} no pertenece al embarque.`,
+      );
+    }
+    const remanente = cantTotal - (yaDespachadoPorIE.get(it.itemEmbarqueId) ?? 0);
+    if (it.cantidad > remanente) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Cantidad ${it.cantidad} excede remanente ${remanente} del ítem #${it.itemEmbarqueId}.`,
+      );
+    }
+  }
+
+  // Validar facturas (si pasaron) son del embarque + momento DESPACHO
+  // + no están linkadas a otro despacho activo
+  if (data.facturasIds.length > 0) {
+    const facturas = await tx.embarqueCosto.findMany({
+      where: { id: { in: data.facturasIds } },
+      select: { id: true, embarqueId: true, momento: true, despachoId: true },
+    });
+    for (const fid of data.facturasIds) {
+      const f = facturas.find((x) => x.id === fid);
+      if (!f) {
+        throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no existe.`);
+      }
+      if (f.embarqueId !== embarque.id) {
+        throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no pertenece al embarque.`);
+      }
+      if (f.momento !== "DESPACHO") {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `Factura ${fid}: sólo facturas con momento DESPACHO se pueden linkar.`,
+        );
+      }
+      if (f.despachoId) {
+        throw new AsientoError(
+          "ESTADO_INVALIDO",
+          `Factura ${fid} ya está linkada a otro despacho.`,
+        );
+      }
+    }
+  }
+
+  const codigo = await siguienteCodigoDespacho(tx, embarque.codigo);
+
+  const despacho = await tx.despacho.create({
+    data: {
+      codigo,
+      embarqueId: embarque.id,
+      fecha,
+      numeroOM: data.numeroOM?.trim() || null,
+      tipoCambio: money(toDecimal(data.tipoCambio)),
+      die: money(toDecimal(data.die)),
+      tasaEstadistica: money(toDecimal(data.tasaEstadistica)),
+      arancelSim: money(toDecimal(data.arancelSim)),
+      iva: money(toDecimal(data.iva)),
+      ivaAdicional: money(toDecimal(data.ivaAdicional)),
+      iibb: money(toDecimal(data.iibb)),
+      ganancias: money(toDecimal(data.ganancias)),
+      notas: data.notas?.trim() || null,
+      items: {
+        create: data.items.map((i) => ({
+          itemEmbarqueId: i.itemEmbarqueId,
+          cantidad: i.cantidad,
+        })),
+      },
+    },
+  });
+
+  if (data.facturasIds.length > 0) {
+    await tx.embarqueCosto.updateMany({
+      where: { id: { in: data.facturasIds } },
+      data: { despachoId: despacho.id },
+    });
+  }
+
+  return { despachoId: despacho.id, codigo: despacho.codigo };
+}
+
+/**
+ * Flujo nuevo (despacho cruzado por contenedor): consume counters de
+ * ItemContenedor (cantidadDisponible→cantidadDespachada) en lugar de
+ * cantidades a nivel ItemEmbarque. Delega en el service de despacho parcial
+ * (PR 4.2) con fuente DIRECTO. Inalcanzable en prod mientras la flag esté
+ * apagada. El asiento sigue siendo del flujo de contabilización (PR 4.5).
+ */
+async function crearDespachoContenedor(
+  tx: TxClient,
+  data: CrearDespachoData,
+  fecha: Date,
+): Promise<{ despachoId: string; codigo: string }> {
+  const lineas = data.items.map((i) => {
+    if (i.itemContenedorId == null) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `El ítem (itemEmbarque ${i.itemEmbarqueId}) no tiene itemContenedorId: el flujo cruzado requiere el origen por contenedor.`,
+      );
+    }
+    return { itemContenedorId: i.itemContenedorId, cantidad: i.cantidad };
+  });
+  return materializarDespachoCruzado(tx, {
+    embarqueId: data.embarqueId,
+    fecha,
+    lineas,
+    fuente: "DIRECTO",
+  });
+}
+
 export async function crearDespachoAction(input: CrearDespachoInput): Promise<CrearDespachoResult> {
   const parsed = crearDespachoSchema.safeParse(input);
   if (!parsed.success) {
@@ -224,135 +424,16 @@ export async function crearDespachoAction(input: CrearDespachoInput): Promise<Cr
   const fecha = data.fecha instanceof Date ? data.fecha : new Date(data.fecha);
 
   try {
-    const result = await db.$transaction(async (tx) => {
-      const embarque = await tx.embarque.findUnique({
-        where: { id: data.embarqueId },
-        select: {
-          id: true,
-          codigo: true,
-          asientoId: true,
-          asientoZonaPrimariaId: true,
-          items: { select: { id: true, cantidad: true } },
-        },
-      });
-      if (!embarque) {
-        throw new AsientoError("DOMINIO_INVALIDO", "El embarque no existe.");
-      }
-      if (embarque.asientoId) {
-        throw new AsientoError(
-          "ESTADO_INVALIDO",
-          `El embarque ${embarque.codigo} ya tiene cierre monolítico — anule primero el cierre o use el flujo legacy.`,
-        );
-      }
-      if (!embarque.asientoZonaPrimariaId) {
-        throw new AsientoError(
-          "ESTADO_INVALIDO",
-          `El embarque ${embarque.codigo}: confirmá zona primaria antes de despachar.`,
-        );
-      }
-
-      // Validar items pertenecen al embarque + cantidades vs remanente
-      const itemsEmbById = new Map(embarque.items.map((i) => [i.id, i.cantidad]));
-      const otrosItems = await tx.itemDespacho.findMany({
-        where: {
-          despacho: { embarqueId: embarque.id, estado: { not: "ANULADO" } },
-        },
-        select: { itemEmbarqueId: true, cantidad: true },
-      });
-      const yaDespachadoPorIE = new Map<number, number>();
-      for (const oi of otrosItems) {
-        yaDespachadoPorIE.set(
-          oi.itemEmbarqueId,
-          (yaDespachadoPorIE.get(oi.itemEmbarqueId) ?? 0) + oi.cantidad,
-        );
-      }
-      for (const it of data.items) {
-        const cantTotal = itemsEmbById.get(it.itemEmbarqueId);
-        if (cantTotal == null) {
-          throw new AsientoError(
-            "DOMINIO_INVALIDO",
-            `Ítem ${it.itemEmbarqueId} no pertenece al embarque.`,
-          );
-        }
-        const remanente = cantTotal - (yaDespachadoPorIE.get(it.itemEmbarqueId) ?? 0);
-        if (it.cantidad > remanente) {
-          throw new AsientoError(
-            "DOMINIO_INVALIDO",
-            `Cantidad ${it.cantidad} excede remanente ${remanente} del ítem #${it.itemEmbarqueId}.`,
-          );
-        }
-      }
-
-      // Validar facturas (si pasaron) son del embarque + momento DESPACHO
-      // + no están linkadas a otro despacho activo
-      if (data.facturasIds.length > 0) {
-        const facturas = await tx.embarqueCosto.findMany({
-          where: { id: { in: data.facturasIds } },
-          select: { id: true, embarqueId: true, momento: true, despachoId: true },
-        });
-        for (const fid of data.facturasIds) {
-          const f = facturas.find((x) => x.id === fid);
-          if (!f) {
-            throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no existe.`);
-          }
-          if (f.embarqueId !== embarque.id) {
-            throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no pertenece al embarque.`);
-          }
-          if (f.momento !== "DESPACHO") {
-            throw new AsientoError(
-              "DOMINIO_INVALIDO",
-              `Factura ${fid}: sólo facturas con momento DESPACHO se pueden linkar.`,
-            );
-          }
-          if (f.despachoId) {
-            throw new AsientoError(
-              "ESTADO_INVALIDO",
-              `Factura ${fid} ya está linkada a otro despacho.`,
-            );
-          }
-        }
-      }
-
-      const codigo = await siguienteCodigoDespacho(tx, embarque.codigo);
-
-      const despacho = await tx.despacho.create({
-        data: {
-          codigo,
-          embarqueId: embarque.id,
-          fecha,
-          numeroOM: data.numeroOM?.trim() || null,
-          tipoCambio: money(toDecimal(data.tipoCambio)),
-          die: money(toDecimal(data.die)),
-          tasaEstadistica: money(toDecimal(data.tasaEstadistica)),
-          arancelSim: money(toDecimal(data.arancelSim)),
-          iva: money(toDecimal(data.iva)),
-          ivaAdicional: money(toDecimal(data.ivaAdicional)),
-          iibb: money(toDecimal(data.iibb)),
-          ganancias: money(toDecimal(data.ganancias)),
-          notas: data.notas?.trim() || null,
-          items: {
-            create: data.items.map((i) => ({
-              itemEmbarqueId: i.itemEmbarqueId,
-              cantidad: i.cantidad,
-            })),
-          },
-        },
-      });
-
-      if (data.facturasIds.length > 0) {
-        await tx.embarqueCosto.updateMany({
-          where: { id: { in: data.facturasIds } },
-          data: { despachoId: despacho.id },
-        });
-      }
-
-      return { despachoId: despacho.id, codigo: despacho.codigo };
-    });
+    const result = await db.$transaction((tx) =>
+      isContenedorDesconsolidacionEnabled()
+        ? crearDespachoContenedor(tx, data, fecha)
+        : crearDespachoLegacy(tx, data, fecha),
+    );
 
     revalidatePath(`/comex/embarques/${data.embarqueId}`);
     return { ok: true, ...result };
   } catch (err) {
-    if (err instanceof AsientoError) {
+    if (err instanceof AsientoError || err instanceof DespachoParcialError) {
       return { ok: false, error: err.message };
     }
     console.error("crearDespachoAction failed", err);
@@ -392,13 +473,142 @@ export async function contabilizarDespachoAction(
 
       const embarque = await tx.embarque.findUnique({
         where: { id: despachoCheck.embarqueId },
-        select: { id: true, codigo: true, depositoDestinoId: true },
+        select: {
+          id: true,
+          codigo: true,
+          tipoCambio: true,
+          depositoDestinoId: true,
+          asientoZonaPrimariaId: true,
+          depositoZonaPrimariaId: true,
+        },
       });
       if (!embarque?.depositoDestinoId) {
         throw new AsientoError(
           "DOMINIO_INVALIDO",
           `Embarque ${embarque?.codigo}: definí depósito destino antes de contabilizar.`,
         );
+      }
+
+      // Fork por contenido: si alguna línea tiene itemContenedorId, es un
+      // despacho CRUZADO (Fase 4) → asiento NACIONALIZACION_VIA_DF + stock
+      // DF→destino. La detección es por datos (no por flag) porque la flag
+      // pudo cambiar entre crear y contabilizar.
+      const itemsFork = await tx.itemDespacho.findMany({
+        where: { despachoId },
+        select: { itemContenedorId: true },
+      });
+      const esCruzado = itemsFork.some((i) => i.itemContenedorId != null);
+
+      if (esCruzado) {
+        const asientoCruz = await crearAsientoDespachoCruzado(despachoId, tx);
+        const contabilizadoCruz = await contabilizarAsiento(asientoCruz.id, tx);
+
+        const despCruz = await tx.despacho.findUniqueOrThrow({
+          where: { id: despachoId },
+          select: {
+            codigo: true,
+            fecha: true,
+            tipoCambio: true,
+            die: true,
+            tasaEstadistica: true,
+            arancelSim: true,
+            items: {
+              orderBy: { id: "asc" },
+              select: {
+                id: true,
+                cantidad: true,
+                itemContenedor: {
+                  select: {
+                    productoId: true,
+                    costoFCUnitario: true,
+                    contenedor: { select: { depositoFiscalId: true } },
+                  },
+                },
+              },
+            },
+            // Facturas DESPACHO linkadas — mismo filtro que crearAsientoDespachoCruzado
+            // (BORRADOR/LEGACY_BUNDLED, momento != ZONA_PRIMARIA). Su subtotal
+            // capitaliza al costo landed.
+            costos: {
+              where: {
+                momento: { not: "ZONA_PRIMARIA" },
+                estado: { in: ["BORRADOR", "LEGACY_BUNDLED"] },
+              },
+              select: {
+                tipoCambio: true,
+                lineas: { select: { subtotal: true }, orderBy: { id: "asc" } },
+              },
+              orderBy: { id: "asc" },
+            },
+          },
+        });
+
+        const tcEmb = toDecimal(embarque.tipoCambio);
+        // FUENTE ÚNICA de costo: el costo landed (FC + DIE/Tasa/Arancel +
+        // facturas DESPACHO capitalizadas) es el mismo que usó el asiento.
+        const landedCruz = calcularCostoLandedDespacho({
+          tipoCambioEmbarque: tcEmb,
+          tipoCambioDespacho: despCruz.tipoCambio,
+          die: despCruz.die,
+          tasaEstadistica: despCruz.tasaEstadistica,
+          arancelSim: despCruz.arancelSim,
+          facturasDespacho: despCruz.costos.flatMap((f) =>
+            f.lineas.map((l) => ({ subtotal: l.subtotal, tipoCambio: f.tipoCambio })),
+          ),
+          items: despCruz.items.map((i) => {
+            const ic = i.itemContenedor;
+            if (ic?.costoFCUnitario == null) {
+              throw new AsientoError(
+                "DOMINIO_INVALIDO",
+                "Una línea cruzada no tiene costo FC (cerrá costos antes de nacionalizar).",
+              );
+            }
+            return {
+              itemDespachoId: i.id,
+              productoId: ic.productoId,
+              cantidad: i.cantidad,
+              costoFCUnitario: ic.costoFCUnitario,
+            };
+          }),
+        });
+
+        const itemsDF = despCruz.items.map((i) => {
+          const ic = i.itemContenedor;
+          if (!ic?.contenedor.depositoFiscalId) {
+            throw new AsientoError(
+              "DOMINIO_INVALIDO",
+              "Una línea cruzada no tiene depósito fiscal de origen asignado.",
+            );
+          }
+          // Costo landed por línea (no el FC puro) → el ingreso de stock
+          // NACIONAL queda con el mismo costo que el DEBE 1.1.5.01. La clave
+          // existe siempre: el helper computó todas las líneas del despacho.
+          const landedUnit = landedCruz.costoUnitarioLandedPorItem.get(i.id);
+          if (landedUnit == null) {
+            throw new AsientoError(
+              "DOMINIO_INVALIDO",
+              "No se pudo determinar el costo landed de una línea cruzada.",
+            );
+          }
+          return {
+            productoId: ic.productoId,
+            cantidad: i.cantidad,
+            costoUnitario: landedUnit,
+            depositoFiscalId: ic.contenedor.depositoFiscalId,
+          };
+        });
+
+        await aplicarNacionalizacionDF(tx, {
+          despachoId,
+          despachoCodigo: despCruz.codigo,
+          depositoDestinoId: embarque.depositoDestinoId,
+          fecha: despCruz.fecha,
+          items: itemsDF,
+        });
+
+        await tx.despacho.update({ where: { id: despachoId }, data: { estado: "CONTABILIZADO" } });
+        await crearOActualizarVepDespacho(tx, despachoId);
+        return { asientoNumero: contabilizadoCruz.numero };
       }
 
       const asiento = await crearAsientoDespacho(despachoId, tx);
@@ -408,13 +618,14 @@ export async function contabilizarDespachoAction(
       const despachoConItems = await tx.despacho.findUnique({
         where: { id: despachoId },
         select: {
+          codigo: true,
           fecha: true,
           items: {
             select: {
               id: true,
               cantidad: true,
               costoUnitario: true,
-              itemEmbarque: { select: { productoId: true } },
+              itemEmbarque: { select: { id: true, productoId: true, costoUnitario: true } },
             },
           },
         },
@@ -423,21 +634,60 @@ export async function contabilizarDespachoAction(
         throw new AsientoError("DOMINIO_INVALIDO", "Despacho no existe.");
       }
 
-      await aplicarIngresoDespacho(tx, {
-        depositoDestinoId: embarque.depositoDestinoId,
-        fecha: despachoConItems.fecha,
-        items: despachoConItems.items.map((i) => ({
-          itemDespachoId: i.id,
-          productoId: i.itemEmbarque.productoId,
-          cantidad: i.cantidad,
-          costoUnitario: toDecimal(i.costoUnitario),
-        })),
-      });
+      if (embarque.asientoZonaPrimariaId) {
+        // Flujo modular: stock ya está en ZPA (ingresado al confirmar ZP).
+        // Transferir cantidad despachada ZPA → destino preservando el costo
+        // original del ItemEmbarque (no el promedio mezclado de la ZPA).
+        const depositoZpa = await resolverDepositoZpa(tx, {
+          codigo: embarque.codigo,
+          depositoZonaPrimariaId: embarque.depositoZonaPrimariaId,
+        });
+
+        // Defensa en profundidad: validar stock disponible en ZPA antes
+        // de transferir. Si la confirmación ZP no creó stock (embarque
+        // legacy pre-Fase B sin backfill), falla acá con mensaje claro.
+        for (const it of despachoConItems.items) {
+          await validarDisponible(tx, it.itemEmbarque.productoId, depositoZpa.id, it.cantidad);
+        }
+
+        await aplicarTransferenciaDespacho(tx, {
+          despachoId,
+          despachoCodigo: despachoConItems.codigo,
+          depositoZpaId: depositoZpa.id,
+          depositoDestinoId: embarque.depositoDestinoId,
+          fecha: despachoConItems.fecha,
+          items: despachoConItems.items.map((i) => ({
+            productoId: i.itemEmbarque.productoId,
+            cantidad: i.cantidad,
+            // Usa costoUnitario del ItemEmbarque (preservado en Fase B
+            // al confirmar ZP), no el costo del rateio actual.
+            costoUnitario: toDecimal(i.itemEmbarque.costoUnitario),
+          })),
+        });
+      } else {
+        // Flujo legacy: sin Zona Primaria previa. Stock ingresa
+        // directamente al destino (puede ser NACIONAL o cualquier otro).
+        await aplicarIngresoDespacho(tx, {
+          depositoDestinoId: embarque.depositoDestinoId,
+          fecha: despachoConItems.fecha,
+          items: despachoConItems.items.map((i) => ({
+            itemDespachoId: i.id,
+            productoId: i.itemEmbarque.productoId,
+            cantidad: i.cantidad,
+            costoUnitario: toDecimal(i.costoUnitario),
+          })),
+        });
+      }
 
       await tx.despacho.update({
         where: { id: despachoId },
         data: { estado: "CONTABILIZADO" },
       });
+
+      // Auto-generar VepDespacho con la suma de tributos en ARS
+      // (montos del despacho × TC del despacho). El operador lo paga
+      // luego via pagarVepDespachoAction (Tesorería).
+      await crearOActualizarVepDespacho(tx, despachoId);
 
       return { asientoNumero: contabilizado.numero };
     });
@@ -468,7 +718,27 @@ export async function anularDespachoAction(despachoId: string): Promise<AnularDe
     await db.$transaction(async (tx) => {
       const d = await tx.despacho.findUnique({
         where: { id: despachoId },
-        select: { id: true, codigo: true, estado: true, asientoId: true },
+        select: {
+          id: true,
+          codigo: true,
+          estado: true,
+          asientoId: true,
+          embarque: {
+            select: {
+              id: true,
+              codigo: true,
+              depositoDestinoId: true,
+              asientoZonaPrimariaId: true,
+            },
+          },
+          items: {
+            select: {
+              cantidad: true,
+              itemContenedorId: true,
+              itemEmbarque: { select: { productoId: true } },
+            },
+          },
+        },
       });
       if (!d) {
         throw new AsientoError("DOMINIO_INVALIDO", "Despacho no existe.");
@@ -477,15 +747,79 @@ export async function anularDespachoAction(despachoId: string): Promise<AnularDe
         throw new AsientoError("ESTADO_INVALIDO", "Despacho ya está anulado.");
       }
 
-      if (d.asientoId) {
+      // Fork por contenido: si alguna línea tiene itemContenedorId es un
+      // despacho CRUZADO (Fase 4) → la reversión de stock es la transferencia
+      // DF→destino y además hay que devolver los counters de ItemContenedor
+      // (cantidadDespachada → cantidadDisponible), incluso en BORRADOR (los
+      // counters se consumieron al materializar, antes de contabilizar).
+      const esCruzado = d.items.some((it) => it.itemContenedorId != null);
+
+      if (esCruzado) {
+        if (d.asientoId) {
+          // Contabilizado: revertir stock DF→destino + anular asiento.
+          if (d.embarque.depositoDestinoId) {
+            for (const it of d.items) {
+              await validarDisponible(
+                tx,
+                it.itemEmbarque.productoId,
+                d.embarque.depositoDestinoId,
+                it.cantidad,
+              );
+            }
+          }
+          // revertirTransferenciaDespacho borra las Transferencia +
+          // MovimientoStock ligadas al despacho (sirve igual para la
+          // nacionalización DF→destino del flujo cruzado).
+          await revertirTransferenciaDespacho(tx, despachoId);
+          await anularAsiento(d.asientoId, tx);
+        }
+        // Counters: siempre (BORRADOR o CONTABILIZADO).
+        await revertirCountersDespacho(tx, despachoId);
+      } else if (d.asientoId) {
+        const usoFlujoZpa = !!d.embarque.asientoZonaPrimariaId;
+
+        if (usoFlujoZpa && d.embarque.depositoDestinoId) {
+          // Defensa en profundidad: si la mercadería ya fue vendida/
+          // entregada desde el destino, revertir generaría stock negativo.
+          // Validamos disponibilidad en el destino antes de revertir.
+          for (const it of d.items) {
+            await validarDisponible(
+              tx,
+              it.itemEmbarque.productoId,
+              d.embarque.depositoDestinoId,
+              it.cantidad,
+            );
+          }
+          await revertirTransferenciaDespacho(tx, despachoId);
+        } else {
+          // Flujo legacy: stock ingresó directo al destino sin pasar por ZPA.
+          await revertirIngresoDespacho(tx, despachoId);
+        }
+
         await anularAsiento(d.asientoId, tx);
-        await revertirIngresoDespacho(tx, despachoId);
       }
 
       await tx.despacho.update({
         where: { id: despachoId },
         data: { estado: "ANULADO" },
       });
+
+      // Marcar VepDespacho como ANULADO (no eliminarlo — preserva trail).
+      // Si ya estaba PAGADO, no se anula automáticamente — el operador
+      // debe revertir el pago primero. Detectamos eso aquí.
+      const vep = await tx.vepDespacho.findUnique({
+        where: { despachoId },
+        select: { id: true, estado: true },
+      });
+      if (vep) {
+        if (vep.estado === "PAGADO") {
+          throw new AsientoError(
+            "ESTADO_INVALIDO",
+            "El VEP de este despacho ya fue pagado. Anule el pago en Tesorería antes de anular el despacho.",
+          );
+        }
+        await tx.vepDespacho.delete({ where: { id: vep.id } });
+      }
 
       // Liberar facturas linkadas para que puedan asignarse a un nuevo
       // despacho.
@@ -499,7 +833,7 @@ export async function anularDespachoAction(despachoId: string): Promise<AnularDe
     revalidatePath("/contabilidad/asientos");
     return { ok: true };
   } catch (err) {
-    if (err instanceof AsientoError) {
+    if (err instanceof AsientoError || err instanceof DespachoParcialError) {
       return { ok: false, error: err.message };
     }
     console.error("anularDespachoAction failed", err);
@@ -522,7 +856,16 @@ export async function eliminarDespachoAction(despachoId: string): Promise<Elimin
     await db.$transaction(async (tx) => {
       const d = await tx.despacho.findUnique({
         where: { id: despachoId },
-        select: { id: true, estado: true, embarqueId: true },
+        select: {
+          id: true,
+          estado: true,
+          embarqueId: true,
+          items: {
+            select: { itemContenedorId: true },
+            take: 1,
+            where: { itemContenedorId: { not: null } },
+          },
+        },
       });
       if (!d) {
         throw new AsientoError("DOMINIO_INVALIDO", "Despacho no existe.");
@@ -532,6 +875,13 @@ export async function eliminarDespachoAction(despachoId: string): Promise<Elimin
           "ESTADO_INVALIDO",
           "Sólo se eliminan despachos en BORRADOR. Para uno contabilizado, anulá.",
         );
+      }
+      // Borrador cruzado: devolver los counters (cantidadDespachada →
+      // cantidadDisponible) antes de borrar, o quedarían inflados (la
+      // materialización ya los había consumido). El delete en cascada
+      // borra los ItemDespacho — por eso revertimos primero.
+      if (d.items.length > 0) {
+        await revertirCountersDespacho(tx, despachoId);
       }
       await tx.embarqueCosto.updateMany({
         where: { despachoId },
@@ -543,10 +893,356 @@ export async function eliminarDespachoAction(despachoId: string): Promise<Elimin
     revalidatePath("/comex/embarques");
     return { ok: true };
   } catch (err) {
-    if (err instanceof AsientoError) {
+    if (err instanceof AsientoError || err instanceof DespachoParcialError) {
       return { ok: false, error: err.message };
     }
     console.error("eliminarDespachoAction failed", err);
     return { ok: false, error: "Error inesperado al eliminar." };
+  }
+}
+
+// ============================================================
+// VEP Despacho — generación al contabilizar
+// ============================================================
+
+/**
+ * Crea o actualiza el VepDespacho asociado a un despacho recién
+ * contabilizado. El monto total son los tributos aduaneros del despacho
+ * (DIE + Tasa + Arancel + IVA + IVA Adic + IIBB + Ganancias) convertidos
+ * a ARS via el TC oficializado del despacho.
+ *
+ * Idempotente: si ya existe un VEP en estado GENERADO para este despacho,
+ * actualiza el montoTotal (caso re-contabilización tras anulación). No
+ * toca VEPs PAGADO (situación anómala — el caller debe validar antes).
+ */
+async function crearOActualizarVepDespacho(
+  tx: Prisma.TransactionClient,
+  despachoId: string,
+): Promise<void> {
+  const d = await tx.despacho.findUnique({
+    where: { id: despachoId },
+    select: {
+      tipoCambio: true,
+      die: true,
+      tasaEstadistica: true,
+      arancelSim: true,
+      iva: true,
+      ivaAdicional: true,
+      iibb: true,
+      ganancias: true,
+    },
+  });
+  if (!d) return;
+
+  const tc = toDecimal(d.tipoCambio);
+  const montoTotal = toDecimal(d.die)
+    .plus(toDecimal(d.tasaEstadistica))
+    .plus(toDecimal(d.arancelSim))
+    .plus(toDecimal(d.iva))
+    .plus(toDecimal(d.ivaAdicional))
+    .plus(toDecimal(d.iibb))
+    .plus(toDecimal(d.ganancias))
+    .times(tc)
+    .toDecimalPlaces(2);
+
+  await tx.vepDespacho.upsert({
+    where: { despachoId },
+    create: {
+      despachoId,
+      montoTotal: money(montoTotal),
+      estado: "GENERADO",
+    },
+    update: {
+      // Solo actualiza si está en GENERADO; el caller ya validó que no
+      // está en PAGADO.
+      montoTotal: money(montoTotal),
+    },
+  });
+}
+
+// ============================================================
+// Borrador de despacho cruzado (Fase 4, flag ON) — actions (PR 4.4)
+// ============================================================
+//
+// Exponen el contrato del borrador server-side (PR 4.2/4.3) a la UI: gate
+// (flag + auth) → safeParse → service → mapError(DespachoParcialError) →
+// revalidatePath. El "retomar" es un READ servido por la página vía
+// `obtenerMatrizDespachoCruzado` (devuelve `borradorVigente`), por eso acá no
+// hay action de retomar. La contabilización del asiento sigue siendo el paso
+// `contabilizarDespachoAction` (PR 4.5) sobre el Despacho ya materializado.
+
+type BorradorGate = { ok: false; error: string } | { ok: true; userId: string };
+
+async function gateBorrador(): Promise<BorradorGate> {
+  if (!isContenedorDesconsolidacionEnabled()) {
+    return { ok: false, error: "La función de desconsolidación no está habilitada." };
+  }
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { ok: false, error: "No autorizado." };
+  }
+  return { ok: true, userId: session.user.id };
+}
+
+function mapBorradorError(err: DespachoParcialError): string {
+  switch (err.code) {
+    case "BORRADOR_INEXISTENTE":
+      return "El borrador no existe.";
+    case "BORRADOR_EXPIRADO":
+      return "El borrador expiró; creá uno nuevo.";
+    case "BORRADOR_ESTADO_INVALIDO":
+      return "El borrador no está en un estado válido para esta operación.";
+    case "LINEAS_VACIAS":
+      return "El despacho no tiene líneas.";
+    case "CANTIDAD_INVALIDA":
+      return "Hay una cantidad inválida (debe ser entero mayor que 0).";
+    case "ITEM_CONTENEDOR_INEXISTENTE":
+      return "Una línea referencia un ítem de contenedor inexistente.";
+    case "ITEM_CONTENEDOR_AJENO":
+      return "Una línea no pertenece a este embarque.";
+    case "ITEM_SIN_ITEM_EMBARQUE":
+      return "Una línea de contenedor no está vinculada a un ítem del embarque.";
+    case "SALDO_INSUFICIENTE":
+      return "Saldo insuficiente: otro despacho ya consumió esas unidades.";
+    case "EMBARQUE_INEXISTENTE":
+      return "El embarque no existe.";
+    default:
+      return "Error al procesar el borrador.";
+  }
+}
+
+const lineaBorradorSchema = z.object({
+  itemContenedorId: z.number().int().positive(),
+  cantidad: z.number().int().positive(),
+});
+
+const crearBorradorSchema = z.object({
+  embarqueId: z.string().min(1),
+  lineas: z.array(lineaBorradorSchema).min(1),
+});
+
+export type CrearBorradorResult = { ok: true; borradorId: string } | { ok: false; error: string };
+
+export async function crearBorradorAction(
+  input: z.input<typeof crearBorradorSchema>,
+): Promise<CrearBorradorResult> {
+  const gate = await gateBorrador();
+  if (!gate.ok) return gate;
+  const parsed = crearBorradorSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+  }
+  try {
+    const borrador = await crearBorrador({
+      userId: gate.userId,
+      embarqueId: parsed.data.embarqueId,
+      lineas: parsed.data.lineas,
+    });
+    revalidatePath(`/comex/embarques/${parsed.data.embarqueId}/despachos`);
+    return { ok: true, borradorId: borrador.id };
+  } catch (err) {
+    if (err instanceof DespachoParcialError) return { ok: false, error: mapBorradorError(err) };
+    console.error("crearBorradorAction failed", err);
+    return { ok: false, error: "Error inesperado al crear el borrador." };
+  }
+}
+
+const contabilizarBorradorSchema = z.object({
+  borradorId: z.string().min(1),
+  embarqueId: z.string().min(1),
+  fecha: z.coerce.date(),
+});
+
+export type ContabilizarBorradorResult =
+  | { ok: true; despachoId: string; codigo: string }
+  | { ok: false; error: string };
+
+export async function contabilizarBorradorAction(
+  input: z.input<typeof contabilizarBorradorSchema>,
+): Promise<ContabilizarBorradorResult> {
+  const gate = await gateBorrador();
+  if (!gate.ok) return gate;
+  const parsed = contabilizarBorradorSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Datos inválidos." };
+  try {
+    const res = await contabilizarBorrador({
+      borradorId: parsed.data.borradorId,
+      fecha: parsed.data.fecha,
+    });
+    revalidatePath(`/comex/embarques/${parsed.data.embarqueId}/despachos`);
+    return { ok: true, despachoId: res.despachoId, codigo: res.codigo };
+  } catch (err) {
+    if (err instanceof DespachoParcialError) return { ok: false, error: mapBorradorError(err) };
+    console.error("contabilizarBorradorAction failed", err);
+    return { ok: false, error: "Error inesperado al confirmar el borrador." };
+  }
+}
+
+// ------------------------------------------------------------
+// Editor de tributos/VEP del despacho cruzado (gap #4)
+// ------------------------------------------------------------
+//
+// El borrador (DespachoBorrador) se materializa en un Despacho CRUZADO con
+// tributos=0 (defaults). Antes de contabilizar, el operador digita los 7
+// tributos + TC + (opcional) facturas DESPACHO con esta action. Reutiliza la
+// misma validación (`decimalish`/`decimalishPositive`) y el patrón de link de
+// facturas del flujo legacy. El asiento/VEP los consume `contabilizarDespachoAction`.
+
+const actualizarTributosCruzadoSchema = z.object({
+  despachoId: z.string().min(1),
+  tipoCambio: decimalishPositive,
+  die: decimalish.default("0"),
+  tasaEstadistica: decimalish.default("0"),
+  arancelSim: decimalish.default("0"),
+  iva: decimalish.default("0"),
+  ivaAdicional: decimalish.default("0"),
+  iibb: decimalish.default("0"),
+  ganancias: decimalish.default("0"),
+  facturasIds: z.array(z.number().int().positive()).optional(),
+  numeroOM: z.string().trim().optional().nullable(),
+  notas: z.string().trim().optional().nullable(),
+});
+
+export type ActualizarTributosCruzadoResult = { ok: true } | { ok: false; error: string };
+
+export async function actualizarTributosDespachoCruzadoAction(
+  input: z.input<typeof actualizarTributosCruzadoSchema>,
+): Promise<ActualizarTributosCruzadoResult> {
+  const gate = await gateBorrador();
+  if (!gate.ok) return gate;
+  const parsed = actualizarTributosCruzadoSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+  }
+  const data = parsed.data;
+
+  try {
+    const embarqueId = await db.$transaction(async (tx) => {
+      const despacho = await tx.despacho.findUnique({
+        where: { id: data.despachoId },
+        select: {
+          embarqueId: true,
+          estado: true,
+          items: { select: { itemContenedorId: true } },
+        },
+      });
+      if (!despacho) {
+        throw new AsientoError("DOMINIO_INVALIDO", "Despacho no existe.");
+      }
+      if (despacho.estado !== "BORRADOR") {
+        throw new AsientoError("ESTADO_INVALIDO", "El despacho ya fue contabilizado.");
+      }
+      const esCruzado = despacho.items.some((i) => i.itemContenedorId != null);
+      if (!esCruzado) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          "Este despacho no es cruzado — usá el formulario legacy para editar sus tributos.",
+        );
+      }
+
+      // Validar/relinkar facturas DESPACHO del embarque (espejo del flujo legacy).
+      if (data.facturasIds != null) {
+        const ids = data.facturasIds;
+        if (ids.length > 0) {
+          const facturas = await tx.embarqueCosto.findMany({
+            where: { id: { in: ids } },
+            select: { id: true, embarqueId: true, momento: true, despachoId: true },
+          });
+          for (const fid of ids) {
+            const f = facturas.find((x) => x.id === fid);
+            if (!f) {
+              throw new AsientoError("DOMINIO_INVALIDO", `Factura ${fid} no existe.`);
+            }
+            if (f.embarqueId !== despacho.embarqueId) {
+              throw new AsientoError(
+                "DOMINIO_INVALIDO",
+                `Factura ${fid} no pertenece al embarque.`,
+              );
+            }
+            if (f.momento !== "DESPACHO") {
+              throw new AsientoError(
+                "DOMINIO_INVALIDO",
+                `Factura ${fid}: sólo facturas con momento DESPACHO se pueden linkar.`,
+              );
+            }
+            if (f.despachoId && f.despachoId !== data.despachoId) {
+              throw new AsientoError(
+                "ESTADO_INVALIDO",
+                `Factura ${fid} ya está linkada a otro despacho.`,
+              );
+            }
+          }
+        }
+        // Desvincular las que estaban en este despacho y ya no figuran.
+        await tx.embarqueCosto.updateMany({
+          where: { despachoId: data.despachoId, id: { notIn: ids } },
+          data: { despachoId: null },
+        });
+        // Vincular las nuevas.
+        if (ids.length > 0) {
+          await tx.embarqueCosto.updateMany({
+            where: {
+              id: { in: ids },
+              embarqueId: despacho.embarqueId,
+              momento: "DESPACHO",
+            },
+            data: { despachoId: data.despachoId },
+          });
+        }
+      }
+
+      await tx.despacho.update({
+        where: { id: data.despachoId },
+        data: {
+          tipoCambio: money(toDecimal(data.tipoCambio)),
+          die: money(toDecimal(data.die)),
+          tasaEstadistica: money(toDecimal(data.tasaEstadistica)),
+          arancelSim: money(toDecimal(data.arancelSim)),
+          iva: money(toDecimal(data.iva)),
+          ivaAdicional: money(toDecimal(data.ivaAdicional)),
+          iibb: money(toDecimal(data.iibb)),
+          ganancias: money(toDecimal(data.ganancias)),
+          ...(data.numeroOM !== undefined ? { numeroOM: data.numeroOM?.trim() || null } : {}),
+          ...(data.notas !== undefined ? { notas: data.notas?.trim() || null } : {}),
+        },
+      });
+
+      return despacho.embarqueId;
+    });
+
+    revalidatePath(`/comex/embarques/${embarqueId}/despachos`);
+    revalidatePath(`/comex/embarques/${embarqueId}`);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof AsientoError) {
+      return { ok: false, error: err.message };
+    }
+    console.error("actualizarTributosDespachoCruzadoAction failed", err);
+    return { ok: false, error: "Error inesperado al guardar los tributos." };
+  }
+}
+
+const expirarBorradorSchema = z.object({
+  borradorId: z.string().min(1),
+  embarqueId: z.string().min(1),
+});
+
+export type ExpirarBorradorResult = { ok: true } | { ok: false; error: string };
+
+export async function expirarBorradorAction(
+  input: z.input<typeof expirarBorradorSchema>,
+): Promise<ExpirarBorradorResult> {
+  const gate = await gateBorrador();
+  if (!gate.ok) return gate;
+  const parsed = expirarBorradorSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Datos inválidos." };
+  try {
+    await expirarBorrador(parsed.data.borradorId);
+    revalidatePath(`/comex/embarques/${parsed.data.embarqueId}/despachos`);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof DespachoParcialError) return { ok: false, error: mapBorradorError(err) };
+    console.error("expirarBorradorAction failed", err);
+    return { ok: false, error: "Error inesperado al cancelar el borrador." };
   }
 }

@@ -8,6 +8,8 @@ import { Card } from "@/components/ui/card";
 
 import { PedidosVentaTable } from "./_components/pedidos-venta-table";
 
+export const dynamic = "force-dynamic";
+
 export default async function PedidosVentaPage() {
   const rows = await listarPedidosVenta();
 

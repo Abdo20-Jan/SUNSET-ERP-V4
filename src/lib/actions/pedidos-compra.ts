@@ -5,13 +5,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { money, sumMoney, toDecimal } from "@/lib/decimal";
-import {
-  CompraEstado,
-  CondicionPago,
-  Moneda,
-  PedidoEstado,
-  Prisma,
-} from "@/generated/prisma/client";
+import { CompraEstado, Moneda, PedidoEstado, Prisma } from "@/generated/prisma/client";
 
 export type PedidoCompraRow = {
   id: number;

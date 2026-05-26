@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { db } from "@/lib/db";
+import { listarProveedoresParaGasto } from "@/lib/actions/gastos";
 import {
   listarClientesParaVenta,
   listarDepositosParaVenta,
@@ -13,21 +14,20 @@ import { VentaDetailView } from "../_components/venta-detail-view";
 
 type PageParams = Promise<{ id: string }>;
 
-export default async function VentaDetailPage({
-  params,
-}: {
-  params: PageParams;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function VentaDetailPage({ params }: { params: PageParams }) {
   const { id } = await params;
 
   const venta = await obtenerVentaPorId(id);
   if (!venta) notFound();
 
   if (venta.estado === "BORRADOR") {
-    const [clientes, productos, depositos] = await Promise.all([
+    const [clientes, productos, depositos, proveedores] = await Promise.all([
       listarClientesParaVenta(),
       listarProductosParaVenta(),
       listarDepositosParaVenta(),
+      listarProveedoresParaGasto(),
     ]);
     return (
       <VentaForm
@@ -36,6 +36,7 @@ export default async function VentaDetailPage({
         clientes={clientes}
         productos={productos}
         depositos={depositos}
+        proveedores={proveedores}
       />
     );
   }
