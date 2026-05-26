@@ -163,6 +163,7 @@ function Section({
               <TableHead className="w-32">Cuenta</TableHead>
               <TableHead>Nombre</TableHead>
               {showProveedores && <TableHead>Proveedores</TableHead>}
+              <TableHead className="text-right">Saldo (USD)</TableHead>
               <TableHead className="text-right">Saldo (ARS)</TableHead>
               <TableHead className="w-28 text-right"></TableHead>
             </TableRow>
@@ -184,6 +185,9 @@ function Section({
                           : `${proveedoresActivos.length} proveedores comparten esta cuenta`}
                     </TableCell>
                   )}
+                  <TableCell className="text-right font-mono tabular-nums text-muted-foreground">
+                    {r.saldoUsd ? `US$ ${fmtMoney(r.saldoUsd)}` : "—"}
+                  </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
                     {fmtMoney(r.saldo)}
                   </TableCell>

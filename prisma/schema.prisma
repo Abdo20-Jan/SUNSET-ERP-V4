@@ -350,6 +350,14 @@ model LineaAsiento {
   haber       Decimal @default(0) @db.Decimal(18, 2)
   descripcion String?
 
+  // Moneda funcional de la línea. Cuando una cuenta es USD-nativa (p. ej.
+  // pasivo con proveedor exterior), montoOrigen guarda el principal en USD
+  // — invariante a TC — y debe/haber siguen siendo la valuación en ARS al
+  // momento del asiento. Para líneas ARS estos campos quedan en null.
+  monedaOrigen      Moneda?
+  montoOrigen       Decimal? @db.Decimal(18, 2)
+  tipoCambioOrigen  Decimal? @db.Decimal(18, 6)
+
   asiento Asiento        @relation(fields: [asientoId], references: [id], onDelete: Restrict)
   cuenta  CuentaContable @relation(fields: [cuentaId], references: [id])
 
@@ -803,6 +811,10 @@ model Proveedor {
   tipoProveedor         TipoProveedor  @default(MERCADERIA_LOCAL)
   conceptoRG830         ConceptoRG830? // mapping para retención Ganancias
   pais                  String         @default("AR")
+  // Moneda funcional del pasivo con este proveedor. USD = factura nato
+  // dolarizada (intercompany, exterior). ARS = default local. Afecta defaults
+  // de UI (Compra/Gasto/EmbarqueCosto.moneda) y diferencia cambiaria.
+  monedaOperacion       Moneda         @default(ARS)
   direccion             String?
   telefono              String?
   email                 String?

@@ -40,6 +40,11 @@ export type CxPRow = {
   cuentaCodigo: string;
   cuentaNombre: string;
   saldo: string;
+  // Saldo USD nativo: presente sólo si la cuenta tiene líneas con
+  // monedaOrigen=USD (proveedores USD-natos). Es invariante a TC — el
+  // principal histórico en USD. El campo `saldo` (ARS) sigue siendo la
+  // valuación contable al TC del momento de cada lanzamiento.
+  saldoUsd?: string;
   proveedores: ProveedorAsociado[];
 };
 
@@ -105,6 +110,61 @@ export async function getCuentasAPagar(): Promise<CuentasAPagar> {
     }),
   );
 
+  // Saldo USD-nativo: suma montoOrigen sólo de líneas con monedaOrigen=USD.
+  // Las cuentas sin ninguna línea USD-nata no aparecen en este map.
+  const sumsUsd = cuentaIds.length
+    ? await db.lineaAsiento.groupBy({
+        by: ["cuentaId"],
+        where: {
+          cuentaId: { in: cuentaIds },
+          monedaOrigen: Moneda.USD,
+          asiento: { estado: AsientoEstado.CONTABILIZADO },
+        },
+        _sum: { montoOrigen: true },
+      })
+    : [];
+  // _sum.montoOrigen viene del campo nullable y mezcla debe/haber sin signo.
+  // Hay que volver a leer por separado (debe vs haber) para netear.
+  const sumsUsdDebe = cuentaIds.length
+    ? await db.lineaAsiento.groupBy({
+        by: ["cuentaId"],
+        where: {
+          cuentaId: { in: cuentaIds },
+          monedaOrigen: Moneda.USD,
+          asiento: { estado: AsientoEstado.CONTABILIZADO },
+          debe: { gt: 0 },
+        },
+        _sum: { montoOrigen: true },
+      })
+    : [];
+  const sumsUsdHaber = cuentaIds.length
+    ? await db.lineaAsiento.groupBy({
+        by: ["cuentaId"],
+        where: {
+          cuentaId: { in: cuentaIds },
+          monedaOrigen: Moneda.USD,
+          asiento: { estado: AsientoEstado.CONTABILIZADO },
+          haber: { gt: 0 },
+        },
+        _sum: { montoOrigen: true },
+      })
+    : [];
+  const usdDebePorCuenta = new Map<number, import("decimal.js").Decimal>(
+    sumsUsdDebe.map((s) => [s.cuentaId, toDecimal(s._sum.montoOrigen ?? 0)]),
+  );
+  const usdHaberPorCuenta = new Map<number, import("decimal.js").Decimal>(
+    sumsUsdHaber.map((s) => [s.cuentaId, toDecimal(s._sum.montoOrigen ?? 0)]),
+  );
+  const saldoUsdPorCuenta = new Map<number, string>();
+  for (const c of sumsUsd) {
+    const debeUsd = usdDebePorCuenta.get(c.cuentaId) ?? toDecimal(0);
+    const haberUsd = usdHaberPorCuenta.get(c.cuentaId) ?? toDecimal(0);
+    const saldoUsd = haberUsd.minus(debeUsd);
+    if (saldoUsd.gt(0.005)) {
+      saldoUsdPorCuenta.set(c.cuentaId, saldoUsd.toFixed(2));
+    }
+  }
+
   const proveedoresComerciales: CxPRow[] = [];
   const aduana: CxPRow[] = [];
   const fiscales: CxPRow[] = [];
@@ -116,11 +176,13 @@ export async function getCuentasAPagar(): Promise<CuentasAPagar> {
     const saldo = toDecimal(saldoStr);
     if (!saldo.gt(0)) continue;
 
+    const saldoUsdStr = saldoUsdPorCuenta.get(c.id);
     const row: CxPRow = {
       cuentaId: c.id,
       cuentaCodigo: c.codigo,
       cuentaNombre: c.nombre,
       saldo: saldoStr,
+      ...(saldoUsdStr ? { saldoUsd: saldoUsdStr } : {}),
       proveedores: c.proveedores,
     };
 
