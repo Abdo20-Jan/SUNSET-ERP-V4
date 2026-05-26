@@ -74,9 +74,9 @@ async function main() {
     totalDebe = totalDebe.plus(debe);
     totalHaber = totalHaber.plus(haber);
 
-    let fuente = a.origen;
+    let fuente: string = a.origen;
     let detalle = a.descripcion ?? "";
-    let monedaSrc = "?";
+    let monedaSrc: string = "?";
 
     if (a.compra) {
       fuente = "COMPRA";
