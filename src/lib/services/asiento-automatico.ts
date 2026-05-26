@@ -69,6 +69,12 @@ const lineaSchema = z.object({
   debe: z.union([z.string(), z.number()]).default(0),
   haber: z.union([z.string(), z.number()]).default(0),
   descripcion: z.string().optional(),
+  // Moneda funcional: completar SÓLO cuando la línea representa un pasivo/activo
+  // en moneda extranjera (p. ej. proveedor USD-nato). Los demás campos (IVA,
+  // IIBB, gastos en ARS) se dejan en undefined para que sigan siendo ARS.
+  monedaOrigen: z.nativeEnum(Moneda).optional(),
+  montoOrigen: z.union([z.string(), z.number()]).optional(),
+  tipoCambioOrigen: z.union([z.string(), z.number()]).optional(),
 });
 
 const crearAsientoSchema = z.object({
@@ -391,6 +397,12 @@ async function crearAsientoEnTx(tx: TxClient, input: CrearAsientoInput): Promise
           debe: money(l.debe ?? 0),
           haber: money(l.haber ?? 0),
           descripcion: l.descripcion,
+          monedaOrigen: l.monedaOrigen ?? null,
+          montoOrigen: l.montoOrigen != null ? money(l.montoOrigen) : null,
+          tipoCambioOrigen:
+            l.tipoCambioOrigen != null
+              ? new Prisma.Decimal(toDecimal(l.tipoCambioOrigen).toFixed(6))
+              : null,
         })),
       },
     },
@@ -559,11 +571,21 @@ export async function crearAsientoPrestamo(
       );
     }
 
-    const valor = money(toDecimal(prestamo.principal).mul(toDecimal(prestamo.tipoCambio)));
+    const principalSrc = toDecimal(prestamo.principal);
+    const tc = toDecimal(prestamo.tipoCambio);
+    const valor = money(principalSrc.mul(tc));
+    const prestamoEsUsd = prestamo.moneda === Moneda.USD;
+    const origenUsd = prestamoEsUsd
+      ? {
+          monedaOrigen: Moneda.USD,
+          montoOrigen: money(principalSrc).toString(),
+          tipoCambioOrigen: tc.toFixed(6),
+        }
+      : {};
 
     const asiento = await crearAsientoEnTx(inner, {
       fecha,
-      descripcion: `Préstamo ${prestamo.prestamista} — principal ${prestamo.moneda} ${toDecimal(prestamo.principal).toFixed(2)}`,
+      descripcion: `Préstamo ${prestamo.prestamista} — principal ${prestamo.moneda} ${principalSrc.toFixed(2)}`,
       origen: AsientoOrigen.TESORERIA,
       lineas: [
         {
@@ -577,6 +599,7 @@ export async function crearAsientoPrestamo(
           debe: 0,
           haber: valor.toString(),
           descripcion: "Reconocimiento de deuda",
+          ...origenUsd,
         },
       ],
     });
@@ -626,6 +649,22 @@ export async function crearAsientoMovimientoTesoreria(
     const bancoCuentaId = mov.cuentaBancaria.cuentaContableId;
     const contrapartidaId = mov.cuentaContableId;
     const valor = money(mov.monto).toString();
+
+    // Si el movimiento es USD, la línea-contrapartida (que reduce o crea el
+    // pasivo/activo del proveedor o cliente) lleva el principal en USD para
+    // mantener el saldo USD invariante a TC. La cuenta de banco se mantiene
+    // sin marca (operación bancaria es siempre en ARS contable, valuada al TC
+    // del día). Diferencia de cambio acumulada queda como residual ARS en
+    // la cuenta proveedor — fase 2 generará un asiento automático que la
+    // limpie usando FIFO por factura.
+    const usdOrigen =
+      mov.moneda === Moneda.USD
+        ? {
+            monedaOrigen: Moneda.USD,
+            montoOrigen: money(mov.monto).toString(),
+            tipoCambioOrigen: toDecimal(mov.tipoCambio).toFixed(6),
+          }
+        : {};
 
     // Caso especial — Impuesto Ley 25413 (Imp. al cheque/IDCB):
     // 33% va como crédito fiscal pago a cuenta de Ganancias (1.1.4.12),
@@ -939,6 +978,9 @@ export async function crearAsientoEmbarque(
       debe: import("decimal.js").Decimal;
       haber: import("decimal.js").Decimal;
       descripcion: string;
+      monedaOrigen?: Moneda;
+      montoOrigen?: import("decimal.js").Decimal;
+      tipoCambioOrigen?: import("decimal.js").Decimal;
     };
     const lineas: Linea[] = [];
 
@@ -959,6 +1001,11 @@ export async function crearAsientoEmbarque(
       cuentaId: number,
       valor: import("decimal.js").Decimal,
       descripcion: string,
+      origen?: {
+        moneda: Moneda;
+        monto: import("decimal.js").Decimal;
+        tc: import("decimal.js").Decimal;
+      },
     ) => {
       if (!valor.gt(0)) return;
       lineas.push({
@@ -966,6 +1013,13 @@ export async function crearAsientoEmbarque(
         debe: toDecimal(0),
         haber: valor,
         descripcion,
+        ...(origen
+          ? {
+              monedaOrigen: origen.moneda,
+              montoOrigen: origen.monto,
+              tipoCambioOrigen: origen.tc,
+            }
+          : {}),
       });
     };
 
@@ -980,6 +1034,10 @@ export async function crearAsientoEmbarque(
       fleteOrigenArs.gt(0) || seguroOrigenArs.gt(0)
         ? ` (FOB + flete${seguroOrigenArs.gt(0) ? " + seguro" : ""} origen)`
         : "";
+    const proveedorExteriorEsUsd = embarque.moneda === Moneda.USD;
+    const totalProveedorExteriorSrc = toDecimal(embarque.fobTotal)
+      .plus(toDecimal(embarque.valorFleteOrigen ?? 0))
+      .plus(toDecimal(embarque.valorSeguroOrigen ?? 0));
     if (!tieneZonaPrimaria) {
       pushDebe(
         porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO.codigo)!,
@@ -990,6 +1048,9 @@ export async function crearAsientoEmbarque(
         proveedorExteriorCuentaId,
         totalProveedorExteriorArs,
         `Proveedor exterior (${embarque.proveedor.nombre})${detalleOrigen}`,
+        proveedorExteriorEsUsd
+          ? { moneda: Moneda.USD, monto: totalProveedorExteriorSrc, tc: tcEmb }
+          : undefined,
       );
     }
 
@@ -1084,10 +1145,12 @@ export async function crearAsientoEmbarque(
       }
 
       const tc = toDecimal(factura.tipoCambio);
+      const facturaEsUsd = factura.moneda === Moneda.USD;
       const facturaLabel = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""}`;
 
       // Subtotales por línea (cada gasto a su cuenta analítica)
       let subtotalFacturaArs = toDecimal(0);
+      let subtotalFacturaSrc = toDecimal(0);
       for (const linea of factura.lineas) {
         const subtotalArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
         if (!subtotalArs.gt(0)) continue;
@@ -1095,12 +1158,16 @@ export async function crearAsientoEmbarque(
         const lineaLabel = linea.descripcion?.trim() || linea.tipo.replace(/_/g, " ").toLowerCase();
         pushDebe(linea.cuentaContableGastoId, subtotalArs, `${facturaLabel} — ${lineaLabel}`);
         subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
+        subtotalFacturaSrc = subtotalFacturaSrc.plus(toDecimal(linea.subtotal));
       }
 
       // IVA/IIBB/otros a nivel factura (no por línea)
-      const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
-      const iibbArs = toDecimal(factura.iibb).times(tc).toDecimalPlaces(2);
-      const otrosArs = toDecimal(factura.otros).times(tc).toDecimalPlaces(2);
+      const ivaSrc = toDecimal(factura.iva);
+      const iibbSrc = toDecimal(factura.iibb);
+      const otrosSrc = toDecimal(factura.otros);
+      const ivaArs = ivaSrc.times(tc).toDecimalPlaces(2);
+      const iibbArs = iibbSrc.times(tc).toDecimalPlaces(2);
+      const otrosArs = otrosSrc.times(tc).toDecimalPlaces(2);
 
       pushDebe(
         porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS.codigo)!,
@@ -1120,12 +1187,14 @@ export async function crearAsientoEmbarque(
       }
 
       const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+      const totalFacturaSrc = subtotalFacturaSrc.plus(ivaSrc).plus(iibbSrc).plus(otrosSrc);
 
       if (totalFacturaArs.gt(0)) {
         pushHaber(
           factura.proveedor.cuentaContableId,
           totalFacturaArs,
           `${facturaLabel} — total a pagar`,
+          facturaEsUsd ? { moneda: Moneda.USD, monto: totalFacturaSrc, tc } : undefined,
         );
       }
     }
@@ -1142,6 +1211,13 @@ export async function crearAsientoEmbarque(
       debe: money(l.debe).toString(),
       haber: money(l.haber).toString(),
       descripcion: l.descripcion,
+      ...(l.monedaOrigen
+        ? {
+            monedaOrigen: l.monedaOrigen,
+            montoOrigen: money(l.montoOrigen!).toString(),
+            tipoCambioOrigen: l.tipoCambioOrigen!.toFixed(6),
+          }
+        : {}),
     }));
 
     const asiento = await crearAsientoEnTx(inner, {
@@ -1239,6 +1315,9 @@ export async function crearAsientoZonaPrimaria(
       debe: import("decimal.js").Decimal;
       haber: import("decimal.js").Decimal;
       descripcion: string;
+      monedaOrigen?: Moneda;
+      montoOrigen?: import("decimal.js").Decimal;
+      tipoCambioOrigen?: import("decimal.js").Decimal;
     };
     const lineas: Linea[] = [];
     const pushDebe = (
@@ -1253,9 +1332,26 @@ export async function crearAsientoZonaPrimaria(
       cuentaId: number,
       valor: import("decimal.js").Decimal,
       descripcion: string,
+      origen?: {
+        moneda: Moneda;
+        monto: import("decimal.js").Decimal;
+        tc: import("decimal.js").Decimal;
+      },
     ) => {
       if (!valor.gt(0)) return;
-      lineas.push({ cuentaId, debe: toDecimal(0), haber: valor, descripcion });
+      lineas.push({
+        cuentaId,
+        debe: toDecimal(0),
+        haber: valor,
+        descripcion,
+        ...(origen
+          ? {
+              monedaOrigen: origen.moneda,
+              montoOrigen: origen.monto,
+              tipoCambioOrigen: origen.tc,
+            }
+          : {}),
+      });
     };
 
     // 1) FOB (+ flete/seguro origen) → Mercadería en tránsito vs proveedor exterior
@@ -1266,6 +1362,10 @@ export async function crearAsientoZonaPrimaria(
       fleteOrigenArs.gt(0) || seguroOrigenArs.gt(0)
         ? ` (FOB + flete${seguroOrigenArs.gt(0) ? " + seguro" : ""} origen)`
         : "";
+    const proveedorExteriorEsUsd = embarque.moneda === Moneda.USD;
+    const totalProveedorExteriorSrc = toDecimal(embarque.fobTotal)
+      .plus(toDecimal(embarque.valorFleteOrigen ?? 0))
+      .plus(toDecimal(embarque.valorSeguroOrigen ?? 0));
     pushDebe(
       porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO.codigo)!,
       totalProveedorExteriorArs,
@@ -1275,6 +1375,9 @@ export async function crearAsientoZonaPrimaria(
       proveedorExteriorCuentaId,
       totalProveedorExteriorArs,
       `Proveedor exterior (${embarque.proveedor.nombre})${detalleOrigen}`,
+      proveedorExteriorEsUsd
+        ? { moneda: Moneda.USD, monto: totalProveedorExteriorSrc, tc: tcEmb }
+        : undefined,
     );
 
     // 2) Facturas con momento === ZONA_PRIMARIA (puerto, frete terrestre,
@@ -1295,20 +1398,26 @@ export async function crearAsientoZonaPrimaria(
       }
 
       const tc = toDecimal(factura.tipoCambio);
+      const facturaEsUsd = factura.moneda === Moneda.USD;
       const facturaLabel = `${factura.proveedor.nombre}${factura.facturaNumero ? ` Fact.${factura.facturaNumero}` : ""}`;
 
       let subtotalFacturaArs = toDecimal(0);
+      let subtotalFacturaSrc = toDecimal(0);
       for (const linea of factura.lineas) {
         const subtotalArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
         if (!subtotalArs.gt(0)) continue;
         const lineaLabel = linea.descripcion?.trim() || linea.tipo.replace(/_/g, " ").toLowerCase();
         pushDebe(linea.cuentaContableGastoId, subtotalArs, `${facturaLabel} — ${lineaLabel} (ZP)`);
         subtotalFacturaArs = subtotalFacturaArs.plus(subtotalArs);
+        subtotalFacturaSrc = subtotalFacturaSrc.plus(toDecimal(linea.subtotal));
       }
 
-      const ivaArs = toDecimal(factura.iva).times(tc).toDecimalPlaces(2);
-      const iibbArs = toDecimal(factura.iibb).times(tc).toDecimalPlaces(2);
-      const otrosArs = toDecimal(factura.otros).times(tc).toDecimalPlaces(2);
+      const ivaSrc = toDecimal(factura.iva);
+      const iibbSrc = toDecimal(factura.iibb);
+      const otrosSrc = toDecimal(factura.otros);
+      const ivaArs = ivaSrc.times(tc).toDecimalPlaces(2);
+      const iibbArs = iibbSrc.times(tc).toDecimalPlaces(2);
+      const otrosArs = otrosSrc.times(tc).toDecimalPlaces(2);
 
       pushDebe(
         porCodigo.get(EMBARQUE_CODIGOS.IVA_CREDITO_COMPRAS.codigo)!,
@@ -1325,11 +1434,13 @@ export async function crearAsientoZonaPrimaria(
       }
 
       const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+      const totalFacturaSrc = subtotalFacturaSrc.plus(ivaSrc).plus(iibbSrc).plus(otrosSrc);
       if (totalFacturaArs.gt(0)) {
         pushHaber(
           factura.proveedor.cuentaContableId,
           totalFacturaArs,
           `${facturaLabel} — total a pagar (ZP)`,
+          facturaEsUsd ? { moneda: Moneda.USD, monto: totalFacturaSrc, tc } : undefined,
         );
       }
     }
@@ -1346,6 +1457,13 @@ export async function crearAsientoZonaPrimaria(
       debe: money(l.debe).toString(),
       haber: money(l.haber).toString(),
       descripcion: l.descripcion,
+      ...(l.monedaOrigen
+        ? {
+            monedaOrigen: l.monedaOrigen,
+            montoOrigen: money(l.montoOrigen!).toString(),
+            tipoCambioOrigen: l.tipoCambioOrigen!.toFixed(6),
+          }
+        : {}),
     }));
 
     const asiento = await crearAsientoEnTx(inner, {
@@ -2974,6 +3092,7 @@ export async function crearAsientoCompra(compraId: string, tx?: TxClient): Promi
             cuentaContableId: true,
             cuentaGastoContableId: true,
             tipoProveedor: true,
+            monedaOperacion: true,
           },
         },
       },
@@ -2998,10 +3117,16 @@ export async function crearAsientoCompra(compraId: string, tx?: TxClient): Promi
       compra.proveedor.cuentaGastoContableId ?? (await getOrCreateCuenta(inner, gastoDef));
 
     const tc = toDecimal(compra.tipoCambio);
-    const subtotal = toDecimal(compra.subtotal).times(tc).toDecimalPlaces(2);
-    const iva = toDecimal(compra.iva).times(tc).toDecimalPlaces(2);
-    const iibb = toDecimal(compra.iibb).times(tc).toDecimalPlaces(2);
-    const otros = toDecimal(compra.otros).times(tc).toDecimalPlaces(2);
+    const subtotalSrc = toDecimal(compra.subtotal);
+    const ivaSrc = toDecimal(compra.iva);
+    const iibbSrc = toDecimal(compra.iibb);
+    const otrosSrc = toDecimal(compra.otros);
+    const totalSrc = subtotalSrc.plus(ivaSrc).plus(iibbSrc).plus(otrosSrc);
+
+    const subtotal = subtotalSrc.times(tc).toDecimalPlaces(2);
+    const iva = ivaSrc.times(tc).toDecimalPlaces(2);
+    const iibb = iibbSrc.times(tc).toDecimalPlaces(2);
+    const otros = otrosSrc.times(tc).toDecimalPlaces(2);
     const total = subtotal.plus(iva).plus(iibb).plus(otros);
 
     let proveedorCuentaId = compra.proveedor.cuentaContableId;
@@ -3014,6 +3139,11 @@ export async function crearAsientoCompra(compraId: string, tx?: TxClient): Promi
         );
       }
     }
+
+    // El pasivo es USD-nato cuando la propia compra está en USD. Persistimos
+    // el principal en USD en la línea HABER del proveedor para que el saldo
+    // USD se mantenga invariante a TC.
+    const pasivoEsUsd = compra.moneda === Moneda.USD;
 
     const lineas: LineaInput[] = [
       {
@@ -3052,6 +3182,13 @@ export async function crearAsientoCompra(compraId: string, tx?: TxClient): Promi
       debe: 0,
       haber: money(total).toString(),
       descripcion: `Compra ${compra.numero} — ${compra.proveedor.nombre}${compra.fechaVencimiento ? ` (vence ${compra.fechaVencimiento.toISOString().slice(0, 10)})` : ""}`,
+      ...(pasivoEsUsd
+        ? {
+            monedaOrigen: Moneda.USD,
+            montoOrigen: money(totalSrc).toString(),
+            tipoCambioOrigen: tc.toFixed(6),
+          }
+        : {}),
     });
 
     const asiento = await crearAsientoEnTx(inner, {
@@ -3140,9 +3277,13 @@ export async function crearAsientoGasto(gastoId: string, tx?: TxClient): Promise
     }
 
     const tc = toDecimal(gasto.tipoCambio);
-    const ivaArs = toDecimal(gasto.iva).times(tc).toDecimalPlaces(2);
-    const iibbArs = toDecimal(gasto.iibb).times(tc).toDecimalPlaces(2);
-    const otrosArs = toDecimal(gasto.otros).times(tc).toDecimalPlaces(2);
+    const pasivoEsUsd = gasto.moneda === Moneda.USD;
+    const ivaSrc = toDecimal(gasto.iva);
+    const iibbSrc = toDecimal(gasto.iibb);
+    const otrosSrc = toDecimal(gasto.otros);
+    const ivaArs = ivaSrc.times(tc).toDecimalPlaces(2);
+    const iibbArs = iibbSrc.times(tc).toDecimalPlaces(2);
+    const otrosArs = otrosSrc.times(tc).toDecimalPlaces(2);
 
     const facturaLabel = gasto.facturaNumero
       ? `${gasto.proveedor.nombre} Fact.${gasto.facturaNumero}`
@@ -3150,6 +3291,7 @@ export async function crearAsientoGasto(gastoId: string, tx?: TxClient): Promise
 
     const lineas: LineaInput[] = [];
     let subtotalArs = toDecimal(0);
+    let subtotalSrc = toDecimal(0);
     for (const linea of gasto.lineas) {
       const lineaArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
       if (!gtZero(lineaArs)) continue;
@@ -3160,6 +3302,7 @@ export async function crearAsientoGasto(gastoId: string, tx?: TxClient): Promise
         descripcion: `${facturaLabel} — ${linea.descripcion}`,
       });
       subtotalArs = subtotalArs.plus(lineaArs);
+      subtotalSrc = subtotalSrc.plus(toDecimal(linea.subtotal));
     }
     if (lineas.length === 0) {
       throw new AsientoError(
@@ -3192,11 +3335,19 @@ export async function crearAsientoGasto(gastoId: string, tx?: TxClient): Promise
       });
     }
     const totalArs = subtotalArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+    const totalSrc = subtotalSrc.plus(ivaSrc).plus(iibbSrc).plus(otrosSrc);
     lineas.push({
       cuentaId: proveedorCuentaId,
       debe: 0,
       haber: money(totalArs).toString(),
       descripcion: `${facturaLabel} — total a pagar${gasto.fechaVencimiento ? ` (vence ${gasto.fechaVencimiento.toISOString().slice(0, 10)})` : ""}`,
+      ...(pasivoEsUsd
+        ? {
+            monedaOrigen: Moneda.USD,
+            montoOrigen: money(totalSrc).toString(),
+            tipoCambioOrigen: tc.toFixed(6),
+          }
+        : {}),
     });
 
     const asiento = await crearAsientoEnTx(inner, {
@@ -3290,14 +3441,19 @@ export async function crearAsientoEmbarqueCosto(
 
     const porCodigo = await ensureCuentasMap(inner, EMBARQUE_CODIGOS);
     const tc = toDecimal(costo.tipoCambio);
-    const ivaArs = toDecimal(costo.iva).times(tc).toDecimalPlaces(2);
-    const iibbArs = toDecimal(costo.iibb).times(tc).toDecimalPlaces(2);
-    const otrosArs = toDecimal(costo.otros).times(tc).toDecimalPlaces(2);
+    const pasivoEsUsd = costo.moneda === Moneda.USD;
+    const ivaSrc = toDecimal(costo.iva);
+    const iibbSrc = toDecimal(costo.iibb);
+    const otrosSrc = toDecimal(costo.otros);
+    const ivaArs = ivaSrc.times(tc).toDecimalPlaces(2);
+    const iibbArs = iibbSrc.times(tc).toDecimalPlaces(2);
+    const otrosArs = otrosSrc.times(tc).toDecimalPlaces(2);
 
     const facturaLabel = `${costo.proveedor.nombre}${costo.facturaNumero ? ` Fact.${costo.facturaNumero}` : ` EmbarqueCosto#${costo.id}`} — ${costo.embarque.codigo}`;
 
     const lineas: LineaInput[] = [];
     let subtotalArs = toDecimal(0);
+    let subtotalSrc = toDecimal(0);
     for (const linea of costo.lineas) {
       const lineaArs = toDecimal(linea.subtotal).times(tc).toDecimalPlaces(2);
       if (!gtZero(lineaArs)) continue;
@@ -3309,6 +3465,7 @@ export async function crearAsientoEmbarqueCosto(
         descripcion: `${facturaLabel} — ${lineaLabel}`,
       });
       subtotalArs = subtotalArs.plus(lineaArs);
+      subtotalSrc = subtotalSrc.plus(toDecimal(linea.subtotal));
     }
     if (lineas.length === 0) {
       throw new AsientoError(
@@ -3343,11 +3500,19 @@ export async function crearAsientoEmbarqueCosto(
       });
     }
     const totalArs = subtotalArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
+    const totalSrc = subtotalSrc.plus(ivaSrc).plus(iibbSrc).plus(otrosSrc);
     lineas.push({
       cuentaId: costo.proveedor.cuentaContableId,
       debe: 0,
       haber: money(totalArs).toString(),
       descripcion: `${facturaLabel} — total a pagar${costo.fechaVencimiento ? ` (vence ${costo.fechaVencimiento.toISOString().slice(0, 10)})` : ""}`,
+      ...(pasivoEsUsd
+        ? {
+            monedaOrigen: Moneda.USD,
+            montoOrigen: money(totalSrc).toString(),
+            tipoCambioOrigen: tc.toFixed(6),
+          }
+        : {}),
     });
 
     const asiento = await crearAsientoEnTx(inner, {

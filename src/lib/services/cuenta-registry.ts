@@ -346,6 +346,23 @@ export const VEP_ADUANA_CODIGOS = {
   },
 } as const satisfies Record<string, CuentaDef>;
 
+// ----- DIFERENCIA DE CAMBIO (pasivos/activos en moneda extranjera) ----
+// Generadas automáticamente al pagar una factura USD con un TC distinto
+// al de emisión. Ganancia si TC_pago < TC_factura (deuda se vuelve más
+// barata); pérdida si TC_pago > TC_factura.
+export const DIFERENCIA_CAMBIO_CODIGOS = {
+  GANANCIA: {
+    codigo: "4.5.1.01",
+    nombre: "GANANCIA POR DIFERENCIA DE CAMBIO",
+    categoria: CuentaCategoria.INGRESO,
+  },
+  PERDIDA: {
+    codigo: "5.5.3.01",
+    nombre: "PÉRDIDA POR DIFERENCIA DE CAMBIO",
+    categoria: CuentaCategoria.EGRESO,
+  },
+} as const satisfies Record<string, CuentaDef>;
+
 // ----- COSTOS FINANCIEROS (incluye impuesto al cheque) ------
 export const COSTOS_FINANCIEROS_CODIGOS = {
   COMISIONES_BANCARIAS: {
