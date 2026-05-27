@@ -296,6 +296,7 @@ const ANALITICAS_BASE: AnaliticaBaseSeed[] = [
   { codigo: "4.2.1.01", nombre: "DESCUENTOS OBTENIDOS",                categoria: CuentaCategoria.INGRESO },
   { codigo: "4.2.1.02", nombre: "INTERESES GANADOS",                   categoria: CuentaCategoria.INGRESO },
   { codigo: "4.3.1.01", nombre: "DIFERENCIA DE CAMBIO POSITIVA",       categoria: CuentaCategoria.INGRESO },
+  { codigo: "4.3.1.02", nombre: "RENDIMIENTO POR INVERSIONES EN FCI",  categoria: CuentaCategoria.INGRESO },
 
   // Egresos financieros
   { codigo: "5.8.1.01", nombre: "COMISIONES BANCARIAS",                categoria: CuentaCategoria.EGRESO },
