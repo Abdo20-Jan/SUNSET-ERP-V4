@@ -180,7 +180,16 @@ async function main() {
       const numero = (last?.numero ?? 0) + 1;
 
       // 5) Crear asiento nuevo ARS misto
-      const lineas = [
+      type LineaMig = {
+        cuentaId: number;
+        debe: string;
+        haber: string;
+        descripcion: string;
+        monedaOrigen: Moneda | null;
+        montoOrigen: string | null;
+        tipoCambioOrigen: string | null;
+      };
+      const lineas: LineaMig[] = [
         {
           cuentaId: sunsetCuenta.id,
           debe: arsFactura.toFixed(2),
@@ -208,9 +217,9 @@ async function main() {
             debe: "0",
             haber: spread.toFixed(2),
             descripcion: `Ganancia diferencia cambiaria (TC fact ${tcFactura.toFixed(4)} → TC pago ${tcPago.toFixed(4)})`,
-            monedaOrigen: null as unknown as Moneda, // dummy — se pasa null abajo
-            montoOrigen: "0",
-            tipoCambioOrigen: "0",
+            monedaOrigen: null,
+            montoOrigen: null,
+            tipoCambioOrigen: null,
           });
         } else {
           // pérdida — 5.5.3.01 sería el caso simétrico, pero los 2 pagos
@@ -239,10 +248,9 @@ async function main() {
               debe: l.debe,
               haber: l.haber,
               descripcion: l.descripcion,
-              // l.monedaOrigen es Moneda.USD o el dummy null-cast — comprueba
-              monedaOrigen: l.cuentaId === cuentaGanancia.id ? null : Moneda.USD,
-              montoOrigen: l.cuentaId === cuentaGanancia.id ? null : l.montoOrigen,
-              tipoCambioOrigen: l.cuentaId === cuentaGanancia.id ? null : l.tipoCambioOrigen,
+              monedaOrigen: l.monedaOrigen,
+              montoOrigen: l.montoOrigen,
+              tipoCambioOrigen: l.tipoCambioOrigen,
             })),
           },
         },
