@@ -67,6 +67,8 @@ export default async function MovimientoDetallePage({ params }: { params: PagePa
               debe: true,
               haber: true,
               descripcion: true,
+              monedaOrigen: true,
+              montoOrigen: true,
               cuenta: {
                 select: { id: true, codigo: true, nombre: true, categoria: true },
               },
@@ -235,58 +237,115 @@ export default async function MovimientoDetallePage({ params }: { params: PagePa
             </CardDescription>
           </CardHeader>
           <CardContent className="px-0 pb-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-16">Pos.</TableHead>
-                  <TableHead className="w-32">Cuenta</TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Descripción línea</TableHead>
-                  <TableHead className="w-28 text-right">Debe</TableHead>
-                  <TableHead className="w-28 text-right">Haber</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {mov.asiento.lineas.map((l, i) => {
-                  const debeNum = toDecimal(l.debe).toNumber();
-                  const haberNum = toDecimal(l.haber).toNumber();
-                  return (
-                    <TableRow key={l.id}>
-                      <TableCell className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                        {debeNum > 0 ? "DEBE" : haberNum > 0 ? "HABER" : "—"} {i + 1}
-                      </TableCell>
-                      <TableCell className="font-mono text-[12px]">{l.cuenta.codigo}</TableCell>
-                      <TableCell className="text-[13px]">
-                        {l.cuenta.nombre}
-                        <span className="ml-2 text-[10px] uppercase text-muted-foreground">
-                          {l.cuenta.categoria}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-[12px] text-muted-foreground">
-                        {l.descripcion ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-[13px] tabular-nums">
-                        {debeNum > 0 ? fmtMoney(l.debe.toString()) : "—"}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-[13px] tabular-nums">
-                        {haberNum > 0 ? fmtMoney(l.haber.toString()) : "—"}
-                      </TableCell>
+            {(() => {
+              const tieneUsd = mov.asiento.lineas.some((l) => l.monedaOrigen === "USD");
+              const totalUsdDebe = mov.asiento.lineas.reduce(
+                (acc, l) =>
+                  l.monedaOrigen === "USD" && toDecimal(l.debe).gt(0) && l.montoOrigen
+                    ? acc + toDecimal(l.montoOrigen).toNumber()
+                    : acc,
+                0,
+              );
+              const totalUsdHaber = mov.asiento.lineas.reduce(
+                (acc, l) =>
+                  l.monedaOrigen === "USD" && toDecimal(l.haber).gt(0) && l.montoOrigen
+                    ? acc + toDecimal(l.montoOrigen).toNumber()
+                    : acc,
+                0,
+              );
+              return (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-16">Pos.</TableHead>
+                      <TableHead className="w-32">Cuenta</TableHead>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Descripción línea</TableHead>
+                      <TableHead className="w-28 text-right">Debe</TableHead>
+                      <TableHead className="w-28 text-right">Haber</TableHead>
+                      {tieneUsd && (
+                        <>
+                          <TableHead className="w-24 text-right text-muted-foreground">
+                            Debe USD
+                          </TableHead>
+                          <TableHead className="w-24 text-right text-muted-foreground">
+                            Haber USD
+                          </TableHead>
+                        </>
+                      )}
                     </TableRow>
-                  );
-                })}
-                <TableRow className="border-t-2 bg-muted/40 font-semibold">
-                  <TableCell colSpan={4} className="text-right text-[12px]">
-                    Totales
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-[13px] tabular-nums">
-                    {fmtMoney(mov.asiento.totalDebe.toString())}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-[13px] tabular-nums">
-                    {fmtMoney(mov.asiento.totalHaber.toString())}
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {mov.asiento.lineas.map((l, i) => {
+                      const debeNum = toDecimal(l.debe).toNumber();
+                      const haberNum = toDecimal(l.haber).toNumber();
+                      const debeUsd =
+                        l.monedaOrigen === "USD" && debeNum > 0 && l.montoOrigen
+                          ? l.montoOrigen.toString()
+                          : null;
+                      const haberUsd =
+                        l.monedaOrigen === "USD" && haberNum > 0 && l.montoOrigen
+                          ? l.montoOrigen.toString()
+                          : null;
+                      return (
+                        <TableRow key={l.id}>
+                          <TableCell className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                            {debeNum > 0 ? "DEBE" : haberNum > 0 ? "HABER" : "—"} {i + 1}
+                          </TableCell>
+                          <TableCell className="font-mono text-[12px]">{l.cuenta.codigo}</TableCell>
+                          <TableCell className="text-[13px]">
+                            {l.cuenta.nombre}
+                            <span className="ml-2 text-[10px] uppercase text-muted-foreground">
+                              {l.cuenta.categoria}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-[12px] text-muted-foreground">
+                            {l.descripcion ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-[13px] tabular-nums">
+                            {debeNum > 0 ? fmtMoney(l.debe.toString()) : "—"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-[13px] tabular-nums">
+                            {haberNum > 0 ? fmtMoney(l.haber.toString()) : "—"}
+                          </TableCell>
+                          {tieneUsd && (
+                            <>
+                              <TableCell className="text-right font-mono text-[13px] tabular-nums text-muted-foreground">
+                                {debeUsd ? `US$ ${fmtMoney(debeUsd)}` : "—"}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-[13px] tabular-nums text-muted-foreground">
+                                {haberUsd ? `US$ ${fmtMoney(haberUsd)}` : "—"}
+                              </TableCell>
+                            </>
+                          )}
+                        </TableRow>
+                      );
+                    })}
+                    <TableRow className="border-t-2 bg-muted/40 font-semibold">
+                      <TableCell colSpan={4} className="text-right text-[12px]">
+                        Totales
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-[13px] tabular-nums">
+                        {fmtMoney(mov.asiento.totalDebe.toString())}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-[13px] tabular-nums">
+                        {fmtMoney(mov.asiento.totalHaber.toString())}
+                      </TableCell>
+                      {tieneUsd && (
+                        <>
+                          <TableCell className="text-right font-mono text-[13px] tabular-nums text-muted-foreground">
+                            US$ {fmtMoney(totalUsdDebe.toFixed(2))}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-[13px] tabular-nums text-muted-foreground">
+                            US$ {fmtMoney(totalUsdHaber.toFixed(2))}
+                          </TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              );
+            })()}
           </CardContent>
         </Card>
       ) : (

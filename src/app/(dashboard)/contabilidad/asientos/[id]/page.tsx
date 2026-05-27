@@ -38,6 +38,20 @@ export default async function AsientoDetallePage({ params }: { params: PageParam
   if (!result.ok) notFound();
   const detalle = result.detalle;
 
+  // Si el asiento toca cuentas USD-natas (proveedor exterior, préstamo USD),
+  // mostramos columnas USD al lado de las ARS para que el usuario vea el
+  // principal invariante a TC junto con la valuación ARS legal.
+  const lineasUsd = detalle.lineas.filter((l) => l.monedaOrigen === "USD");
+  const tieneUsd = lineasUsd.length > 0;
+  const totalUsdDebe = lineasUsd.reduce(
+    (acc, l) => (Number(l.debe) > 0 && l.montoOrigen ? acc + Number(l.montoOrigen) : acc),
+    0,
+  );
+  const totalUsdHaber = lineasUsd.reduce(
+    (acc, l) => (Number(l.haber) > 0 && l.montoOrigen ? acc + Number(l.montoOrigen) : acc),
+    0,
+  );
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-2">
@@ -83,24 +97,50 @@ export default async function AsientoDetallePage({ params }: { params: PageParam
                 <TableHead>Referencia</TableHead>
                 <TableHead className="text-right">Debe</TableHead>
                 <TableHead className="text-right">Haber</TableHead>
+                {tieneUsd && (
+                  <>
+                    <TableHead className="text-right text-muted-foreground">Debe (USD)</TableHead>
+                    <TableHead className="text-right text-muted-foreground">Haber (USD)</TableHead>
+                  </>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {detalle.lineas.map((l) => (
-                <TableRow key={l.id}>
-                  <TableCell className="font-mono text-xs">{l.cuentaCodigo}</TableCell>
-                  <TableCell className="text-sm">{l.cuentaNombre}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {l.descripcion ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm tabular-nums">
-                    {Number(l.debe) > 0 ? l.debe : ""}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm tabular-nums">
-                    {Number(l.haber) > 0 ? l.haber : ""}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {detalle.lineas.map((l) => {
+                const debeUsd =
+                  l.monedaOrigen === "USD" && Number(l.debe) > 0 && l.montoOrigen
+                    ? l.montoOrigen
+                    : null;
+                const haberUsd =
+                  l.monedaOrigen === "USD" && Number(l.haber) > 0 && l.montoOrigen
+                    ? l.montoOrigen
+                    : null;
+                return (
+                  <TableRow key={l.id}>
+                    <TableCell className="font-mono text-xs">{l.cuentaCodigo}</TableCell>
+                    <TableCell className="text-sm">{l.cuentaNombre}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {l.descripcion ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm tabular-nums">
+                      {Number(l.debe) > 0 ? l.debe : ""}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm tabular-nums">
+                      {Number(l.haber) > 0 ? l.haber : ""}
+                    </TableCell>
+                    {tieneUsd && (
+                      <>
+                        <TableCell className="text-right font-mono text-sm tabular-nums text-muted-foreground">
+                          {debeUsd ? `US$ ${debeUsd}` : ""}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm tabular-nums text-muted-foreground">
+                          {haberUsd ? `US$ ${haberUsd}` : ""}
+                        </TableCell>
+                      </>
+                    )}
+                  </TableRow>
+                );
+              })}
               <TableRow className="border-t-2">
                 <TableCell colSpan={3} className="text-right text-sm font-medium">
                   Totales
@@ -111,6 +151,16 @@ export default async function AsientoDetallePage({ params }: { params: PageParam
                 <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">
                   {detalle.totalHaber}
                 </TableCell>
+                {tieneUsd && (
+                  <>
+                    <TableCell className="text-right font-mono text-sm font-semibold tabular-nums text-muted-foreground">
+                      US$ {totalUsdDebe.toFixed(2)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm font-semibold tabular-nums text-muted-foreground">
+                      US$ {totalUsdHaber.toFixed(2)}
+                    </TableCell>
+                  </>
+                )}
               </TableRow>
             </TableBody>
           </Table>

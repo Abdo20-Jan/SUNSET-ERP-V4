@@ -160,6 +160,12 @@ export type AsientoLineaDetalle = {
   debe: string;
   haber: string;
   descripcion: string | null;
+  // Moneda funcional de la línea. Cuando una cuenta es USD-nato (p. ej.
+  // proveedor exterior, préstamo USD), montoOrigen guarda el principal en
+  // USD — invariante a TC. Para líneas ARS estos campos quedan null.
+  monedaOrigen: "ARS" | "USD" | null;
+  montoOrigen: string | null;
+  tipoCambioOrigen: string | null;
 };
 
 export type AsientoDetalle = {
@@ -208,6 +214,9 @@ export async function getAsientoDetalle(asientoId: string): Promise<GetAsientoDe
           debe: true,
           haber: true,
           descripcion: true,
+          monedaOrigen: true,
+          montoOrigen: true,
+          tipoCambioOrigen: true,
           cuenta: { select: { codigo: true, nombre: true } },
         },
       },
@@ -239,6 +248,9 @@ export async function getAsientoDetalle(asientoId: string): Promise<GetAsientoDe
         debe: l.debe.toFixed(2),
         haber: l.haber.toFixed(2),
         descripcion: l.descripcion,
+        monedaOrigen: l.monedaOrigen,
+        montoOrigen: l.montoOrigen?.toFixed(2) ?? null,
+        tipoCambioOrigen: l.tipoCambioOrigen?.toFixed(6) ?? null,
       })),
     },
   };
