@@ -12,6 +12,7 @@ import { revertirIngresoEmbarque } from "@/lib/services/stock";
 import {
   COMEX_ZPA_CODIGOS,
   COMPRA_CODIGOS,
+  DIFERENCIA_CAMBIO_CODIGOS,
   EMBARQUE_CODIGOS,
   EXTRACTO_BANCARIO_CODIGOS,
   GASTO_POR_TIPO_PROVEEDOR,
@@ -622,6 +623,116 @@ export async function crearAsientoPrestamo(
   return withNumeracionRetry(() => db.$transaction(run));
 }
 
+// ============================================================
+// Diferencia cambiaria — FIFO sobre líneas USD pendientes
+// ============================================================
+//
+// Cuando se paga una factura USD contra un proveedor USD-nato, el spread
+// entre el TC al que se reconoció la deuda (TC_factura) y el TC al que se
+// paga (TC_pago) genera una ganancia o pérdida cambiaria que debe ser
+// reconocida contablemente (no quedarse como saldo ARS residual).
+//
+// Algoritmo:
+//  1. Lee líneas con monedaOrigen=USD en la cuenta del proveedor,
+//     ordenadas por fecha asc.
+//  2. Para cada línea, computa el saldo USD pendiente neto (HABER USD ya
+//     consumidos por pagos DEBE USD posteriores). Se ignoran las líneas
+//     ya completamente pagadas.
+//  3. Consume `usdPago` en FIFO sobre las líneas pendientes; cada porción
+//     consumida contribuye (usd_porcion × tcOrigen_de_la_linea) al
+//     monto-equivalente en ARS de la factura.
+//  4. Retorna { arsFactura, tcPonderado, usdConsumido }.
+//     Si usdPago > total disponible, devuelve hasta lo disponible.
+
+export type DiferenciaCambiariaResult = {
+  arsFactura: import("decimal.js").Decimal; // suma de USD_consumido × TC_factura
+  tcPonderado: import("decimal.js").Decimal; // arsFactura / usdConsumido
+  usdConsumido: import("decimal.js").Decimal; // <= usdPago, limitado por saldo pendiente
+};
+
+export async function calcularDiferenciaCambiariaPago(
+  tx: TxClient,
+  cuentaProveedorId: number,
+  usdPago: import("decimal.js").Decimal,
+): Promise<DiferenciaCambiariaResult> {
+  // Líneas USD-natas de la cuenta, ordenadas por fecha del asiento (FIFO).
+  const lineasUsd = await tx.lineaAsiento.findMany({
+    where: {
+      cuentaId: cuentaProveedorId,
+      monedaOrigen: Moneda.USD,
+      asiento: { estado: AsientoEstado.CONTABILIZADO },
+    },
+    select: {
+      id: true,
+      debe: true,
+      haber: true,
+      montoOrigen: true,
+      tipoCambioOrigen: true,
+      asiento: { select: { fecha: true } },
+    },
+    orderBy: { asiento: { fecha: "asc" } },
+  });
+
+  // Net USD pendiente por línea HABER (factura): subtrai sum de USD ya
+  // pagados (DEBE USD de la misma cuenta, posteriores). Simplificación
+  // razonable: FIFO global por fecha — los DEBE USD existentes consumen
+  // las líneas HABER USD más antiguas.
+  type LineaPendiente = {
+    haberUsd: import("decimal.js").Decimal;
+    tc: import("decimal.js").Decimal;
+    fecha: Date;
+  };
+  const habers: LineaPendiente[] = [];
+  let totalDebeUsd = toDecimal(0);
+  for (const l of lineasUsd) {
+    const haberUsd = toDecimal(l.haber).gt(0) ? toDecimal(l.montoOrigen ?? 0) : toDecimal(0);
+    const debeUsd = toDecimal(l.debe).gt(0) ? toDecimal(l.montoOrigen ?? 0) : toDecimal(0);
+    if (haberUsd.gt(0)) {
+      habers.push({
+        haberUsd,
+        tc: toDecimal(l.tipoCambioOrigen ?? 0),
+        fecha: l.asiento.fecha,
+      });
+    }
+    totalDebeUsd = totalDebeUsd.plus(debeUsd);
+  }
+
+  // Consume DEBE USD acumulado sobre HABER USD en orden FIFO.
+  let restanteDebe = totalDebeUsd;
+  const habersPendientes: LineaPendiente[] = [];
+  for (const h of habers) {
+    if (restanteDebe.gte(h.haberUsd)) {
+      restanteDebe = restanteDebe.minus(h.haberUsd);
+      continue;
+    }
+    if (restanteDebe.gt(0)) {
+      habersPendientes.push({ ...h, haberUsd: h.haberUsd.minus(restanteDebe) });
+      restanteDebe = toDecimal(0);
+    } else {
+      habersPendientes.push(h);
+    }
+  }
+
+  // Consume usdPago sobre habers pendientes en FIFO.
+  let pendiente = usdPago;
+  let arsFactura = toDecimal(0);
+  let usdConsumido = toDecimal(0);
+  for (const h of habersPendientes) {
+    if (pendiente.lte(0)) break;
+    const consumir = pendiente.lt(h.haberUsd) ? pendiente : h.haberUsd;
+    arsFactura = arsFactura.plus(consumir.times(h.tc));
+    usdConsumido = usdConsumido.plus(consumir);
+    pendiente = pendiente.minus(consumir);
+  }
+
+  const tcPonderado = usdConsumido.gt(0) ? arsFactura.dividedBy(usdConsumido) : toDecimal(0);
+  return {
+    arsFactura: arsFactura.toDecimalPlaces(2),
+    tcPonderado,
+    usdConsumido,
+  };
+}
+
 export async function crearAsientoMovimientoTesoreria(
   movimientoId: string,
   tx?: TxClient,
@@ -630,7 +741,7 @@ export async function crearAsientoMovimientoTesoreria(
     const mov = await inner.movimientoTesoreria.findUnique({
       where: { id: movimientoId },
       include: {
-        cuentaBancaria: { select: { cuentaContableId: true } },
+        cuentaBancaria: { select: { cuentaContableId: true, moneda: true } },
         cuentaContable: { select: { codigo: true } },
       },
     });
@@ -647,22 +758,21 @@ export async function crearAsientoMovimientoTesoreria(
     }
 
     const bancoCuentaId = mov.cuentaBancaria.cuentaContableId;
+    const bancoEsUsd = mov.cuentaBancaria.moneda === Moneda.USD;
     const contrapartidaId = mov.cuentaContableId;
     const valor = money(mov.monto).toString();
+    const usdPago = toDecimal(mov.monto);
+    const tcPago = toDecimal(mov.tipoCambio);
 
     // Si el movimiento es USD, la línea-contrapartida (que reduce o crea el
     // pasivo/activo del proveedor o cliente) lleva el principal en USD para
-    // mantener el saldo USD invariante a TC. La cuenta de banco se mantiene
-    // sin marca (operación bancaria es siempre en ARS contable, valuada al TC
-    // del día). Diferencia de cambio acumulada queda como residual ARS en
-    // la cuenta proveedor — fase 2 generará un asiento automático que la
-    // limpie usando FIFO por factura.
+    // mantener el saldo USD invariante a TC.
     const usdOrigen =
       mov.moneda === Moneda.USD
         ? {
             monedaOrigen: Moneda.USD,
             montoOrigen: money(mov.monto).toString(),
-            tipoCambioOrigen: toDecimal(mov.tipoCambio).toFixed(6),
+            tipoCambioOrigen: tcPago.toFixed(6),
           }
         : {};
 
@@ -673,9 +783,91 @@ export async function crearAsientoMovimientoTesoreria(
     const esImpuestoLey25413 =
       mov.tipo === MovimientoTesoreriaTipo.PAGO && mov.cuentaContable?.codigo === "5.8.1.06";
 
+    // Caso Fase 2 — Pago USD contra proveedor USD-nato con saldo pendiente:
+    // generar asiento ARS misto con diferencia cambiaria automática.
+    // Detección: tipo=PAGO + mov.moneda=USD + contrapartida tiene saldo USD
+    // pendiente (líneas con monedaOrigen=USD aún no completamente pagadas).
+    let esFase2 = false;
+    let fifo: DiferenciaCambiariaResult | null = null;
+    if (
+      mov.tipo === MovimientoTesoreriaTipo.PAGO &&
+      mov.moneda === Moneda.USD &&
+      !esImpuestoLey25413
+    ) {
+      fifo = await calcularDiferenciaCambiariaPago(inner, contrapartidaId, usdPago);
+      // Sólo activa Fase 2 si hay saldo USD pendiente y consume al menos
+      // una parte del pago. Si usdConsumido < usdPago el resto es anticipo
+      // — limitamos por ahora y forzamos pago exacto o menor.
+      if (fifo.usdConsumido.gt(0)) {
+        if (fifo.usdConsumido.lt(usdPago)) {
+          throw new AsientoError(
+            "DOMINIO_INVALIDO",
+            `Pago USD ${usdPago.toFixed(2)} excede el saldo USD pendiente de la cuenta (${fifo.usdConsumido.toFixed(2)}). Ajustá el monto o pagá en cuotas.`,
+          );
+        }
+        esFase2 = true;
+      }
+    }
+
     let lineas: LineaInput[];
 
-    if (esImpuestoLey25413) {
+    if (esFase2 && fifo) {
+      // Fase 2: asiento ARS misto con 3 líneas (proveedor con monto factura,
+      // banco con monto pago, diferencia cambiaria).
+      const arsFactura = fifo.arsFactura;
+      const tcFacturaPond = fifo.tcPonderado;
+      const arsPago = usdPago.times(tcPago).toDecimalPlaces(2);
+      const spread = arsFactura.minus(arsPago); // > 0 = ganancia; < 0 = pérdida
+
+      const proveedorLinea: LineaInput = {
+        cuentaId: contrapartidaId,
+        debe: money(arsFactura).toString(),
+        haber: 0,
+        descripcion: `Pago factura USD ${usdPago.toFixed(2)} (cancela pasivo al TC factura)`,
+        monedaOrigen: Moneda.USD,
+        montoOrigen: money(usdPago).toString(),
+        tipoCambioOrigen: tcFacturaPond.toFixed(6),
+      };
+      const bancoLinea: LineaInput = {
+        cuentaId: bancoCuentaId,
+        debe: 0,
+        haber: money(arsPago).toString(),
+        descripcion: `Salida banco USD ${usdPago.toFixed(2)} × TC ${tcPago.toFixed(4)}`,
+        ...(bancoEsUsd
+          ? {
+              monedaOrigen: Moneda.USD,
+              montoOrigen: money(usdPago).toString(),
+              tipoCambioOrigen: tcPago.toFixed(6),
+            }
+          : {}),
+      };
+
+      lineas = [proveedorLinea, bancoLinea];
+
+      if (!spread.abs().lte(0.005)) {
+        const cuentaDif = await getOrCreateCuenta(
+          inner,
+          spread.gt(0) ? DIFERENCIA_CAMBIO_CODIGOS.GANANCIA : DIFERENCIA_CAMBIO_CODIGOS.PERDIDA,
+        );
+        if (spread.gt(0)) {
+          // TC factura > TC pago: pagamos menos pesos → ganancia
+          lineas.push({
+            cuentaId: cuentaDif,
+            debe: 0,
+            haber: money(spread).toString(),
+            descripcion: `Ganancia diferencia cambiaria (TC fact ${tcFacturaPond.toFixed(4)} → TC pago ${tcPago.toFixed(4)})`,
+          });
+        } else {
+          // TC factura < TC pago: pagamos más pesos → pérdida
+          lineas.push({
+            cuentaId: cuentaDif,
+            debe: money(spread.abs()).toString(),
+            haber: 0,
+            descripcion: `Pérdida diferencia cambiaria (TC fact ${tcFacturaPond.toFixed(4)} → TC pago ${tcPago.toFixed(4)})`,
+          });
+        }
+      }
+    } else if (esImpuestoLey25413) {
       const creditoCuentaId = await getOrCreateCuenta(
         inner,
         EXTRACTO_BANCARIO_CODIGOS.CREDITO_LEY_25413_GANANCIAS,
@@ -722,12 +914,15 @@ export async function crearAsientoMovimientoTesoreria(
       }
     }
 
+    // En Fase 2 el asiento es ARS misto (líneas con monedaOrigen=USD individuales).
+    // Forzamos moneda=ARS, tipoCambio=1 para mantener la convención del libro
+    // diario en pesos. El USD se preserva en las metadata de cada línea.
     const asiento = await crearAsientoEnTx(inner, {
       fecha: mov.fecha,
       descripcion: `${mov.tipo} ${mov.moneda} ${toDecimal(mov.monto).toFixed(2)}`,
       origen: AsientoOrigen.TESORERIA,
-      moneda: mov.moneda,
-      tipoCambio: mov.tipoCambio.toString(),
+      moneda: esFase2 ? Moneda.ARS : mov.moneda,
+      tipoCambio: esFase2 ? 1 : mov.tipoCambio.toString(),
       lineas,
     });
 
