@@ -145,7 +145,7 @@ async function main() {
     console.log(`   Spread: ${fmt(spread.abs())} (${spread.gt(0) ? "ganancia" : "pérdida"})`);
 
     if (DRY) {
-      console.log(`   [DRY] no aplicado.\n`);
+      console.log("   [DRY] no aplicado.\n");
       continue;
     }
 
@@ -224,7 +224,7 @@ async function main() {
         } else {
           // pérdida — 5.5.3.01 sería el caso simétrico, pero los 2 pagos
           // legacy son ambos ganancias (TC pago < TC factura), no aplica acá
-          throw new Error(`Pérdida inesperada en migración legacy — revisar`);
+          throw new Error("Pérdida inesperada en migración legacy — revisar");
         }
       }
 

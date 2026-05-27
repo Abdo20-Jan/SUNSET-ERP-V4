@@ -42,6 +42,7 @@ import {
   crearAsientoMovimientoTesoreria,
   calcularDiferenciaCambiariaPago,
 } from "@/lib/services/asiento-automatico";
+import { secureRandomInt } from "@/lib/secure-random";
 
 interface Seed {
   cuentaProveedorId: number;
@@ -153,7 +154,7 @@ async function lanzarFacturaUsd(
   const ars = (usd * tc).toFixed(2);
   return prisma.asiento.create({
     data: {
-      numero: Math.floor(Math.random() * 100000),
+      numero: secureRandomInt(100000),
       fecha,
       descripcion,
       estado: AsientoEstado.CONTABILIZADO,
