@@ -135,6 +135,11 @@ export default async function LibroMayorPage({ searchParams }: { searchParams: S
             <span className="font-mono text-sm">{mayor.cuenta.codigo}</span>
             <span className="font-medium">{mayor.cuenta.nombre}</span>
             <Badge variant="secondary">{mayor.cuenta.categoria}</Badge>
+            {mayor.saldoUsdFinal && (
+              <Badge variant="outline" className="font-mono">
+                Saldo USD nativo: US$ {fmtMoney(mayor.saldoUsdFinal.toFixed(2))}
+              </Badge>
+            )}
             <span className="ml-auto text-xs text-muted-foreground">{rangoLabel}</span>
           </div>
           <Table>

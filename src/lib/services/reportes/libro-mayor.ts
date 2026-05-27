@@ -16,6 +16,12 @@ export type LibroMayorLinea = {
   debe: Decimal;
   haber: Decimal;
   saldoAcumulado: Decimal;
+  // Moneda funcional de la línea — completado cuando la línea es USD-nata.
+  // Permite al display mostrar el monto en USD junto al ARS (libro diario
+  // oficial sigue siendo ARS).
+  monedaOrigen: "ARS" | "USD" | null;
+  montoOrigen: Decimal | null;
+  tipoCambioOrigen: Decimal | null;
 };
 
 export type LibroMayorResult = {
@@ -35,6 +41,12 @@ export type LibroMayorResult = {
   totalDebe: Decimal;
   totalHaber: Decimal;
   saldoFinal: Decimal;
+  // Totales en USD cuando la cuenta tiene al menos una línea con
+  // monedaOrigen=USD. Permite al UI mostrar el saldo USD invariante a TC
+  // para cuentas de proveedor exterior / préstamo USD.
+  saldoUsdFinal: Decimal | null;
+  totalUsdDebe: Decimal | null;
+  totalUsdHaber: Decimal | null;
 };
 
 export class LibroMayorError extends Error {
@@ -112,6 +124,9 @@ export async function getLibroMayor(
       debe: true,
       haber: true,
       descripcion: true,
+      monedaOrigen: true,
+      montoOrigen: true,
+      tipoCambioOrigen: true,
       asiento: {
         select: {
           id: true,
@@ -126,12 +141,21 @@ export async function getLibroMayor(
   let acumulado = saldoInicial;
   let totalDebe = new Decimal(0);
   let totalHaber = new Decimal(0);
+  let totalUsdDebe = new Decimal(0);
+  let totalUsdHaber = new Decimal(0);
+  let tieneUsd = false;
 
   const lineas: LibroMayorLinea[] = rows.map((r) => {
     const debe = toDecimal(r.debe);
     const haber = toDecimal(r.haber);
     totalDebe = totalDebe.plus(debe);
     totalHaber = totalHaber.plus(haber);
+    if (r.monedaOrigen === "USD" && r.montoOrigen) {
+      tieneUsd = true;
+      const usd = toDecimal(r.montoOrigen);
+      if (debe.gt(0)) totalUsdDebe = totalUsdDebe.plus(usd);
+      if (haber.gt(0)) totalUsdHaber = totalUsdHaber.plus(usd);
+    }
     acumulado = acumulado.plus(saldoPorCategoria(debe, haber, cuenta.categoria));
     return {
       lineaId: r.id,
@@ -143,8 +167,15 @@ export async function getLibroMayor(
       debe,
       haber,
       saldoAcumulado: acumulado.toDecimalPlaces(2),
+      monedaOrigen: r.monedaOrigen ?? null,
+      montoOrigen: r.montoOrigen ? toDecimal(r.montoOrigen) : null,
+      tipoCambioOrigen: r.tipoCambioOrigen ? toDecimal(r.tipoCambioOrigen) : null,
     };
   });
+
+  const saldoUsdFinal = tieneUsd
+    ? saldoPorCategoria(totalUsdDebe, totalUsdHaber, cuenta.categoria).toDecimalPlaces(2)
+    : null;
 
   return {
     cuenta,
@@ -157,5 +188,8 @@ export async function getLibroMayor(
     totalDebe: totalDebe.toDecimalPlaces(2),
     totalHaber: totalHaber.toDecimalPlaces(2),
     saldoFinal: acumulado.toDecimalPlaces(2),
+    saldoUsdFinal,
+    totalUsdDebe: tieneUsd ? totalUsdDebe.toDecimalPlaces(2) : null,
+    totalUsdHaber: tieneUsd ? totalUsdHaber.toDecimalPlaces(2) : null,
   };
 }
