@@ -56,9 +56,10 @@ interface Seed {
 async function seed(prisma: PrismaClient): Promise<Seed> {
   const periodo = await prisma.periodoContable.create({
     data: {
-      numero: 1,
-      desde: new Date("2025-01-01T00:00:00.000Z"),
-      hasta: new Date("2025-12-31T23:59:59.000Z"),
+      codigo: "2025-T",
+      nombre: "Test Period 2025",
+      fechaInicio: new Date("2025-01-01T00:00:00.000Z"),
+      fechaFin: new Date("2025-12-31T23:59:59.000Z"),
       estado: "ABIERTO",
     },
   });
@@ -117,18 +118,16 @@ async function seed(prisma: PrismaClient): Promise<Seed> {
     data: {
       banco: "Test Bank ARS",
       moneda: Moneda.ARS,
-      tipoCuenta: "CUENTA_CORRIENTE",
+      tipo: "CUENTA_CORRIENTE",
       cuentaContableId: cuentaBancoArs.id,
-      saldoInicial: 1_000_000_000,
     },
   });
   const cuentaBancariaUsd = await prisma.cuentaBancaria.create({
     data: {
       banco: "Test Bank USD",
       moneda: Moneda.USD,
-      tipoCuenta: "CUENTA_CORRIENTE",
+      tipo: "CUENTA_CORRIENTE",
       cuentaContableId: cuentaBancoUsd.id,
-      saldoInicial: 1_000_000,
     },
   });
 
