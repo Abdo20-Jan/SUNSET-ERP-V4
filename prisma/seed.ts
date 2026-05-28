@@ -159,7 +159,7 @@ const CUENTAS_SINTETICAS: CuentaSeed[] = [
   { codigo: "1.1.2",  nombre: "BANCOS",                              categoria: CuentaCategoria.ACTIVO, nivel: 3 },
   { codigo: "1.1.3",  nombre: "CRÉDITOS POR VENTAS",                 categoria: CuentaCategoria.ACTIVO, nivel: 3 },
   { codigo: "1.1.4",  nombre: "OTROS CRÉDITOS",                      categoria: CuentaCategoria.ACTIVO, nivel: 3 },
-  { codigo: "1.1.5",  nombre: "BIENES DE CAMBIO",                    categoria: CuentaCategoria.ACTIVO, nivel: 3 },
+  { codigo: "1.1.5",  nombre: "ESTOQUE",                             categoria: CuentaCategoria.ACTIVO, nivel: 3 },
   { codigo: "1.1.6",  nombre: "INVERSIONES",                         categoria: CuentaCategoria.ACTIVO, nivel: 3 },
   { codigo: "1.2",    nombre: "ACTIVO NO CORRIENTE",                 categoria: CuentaCategoria.ACTIVO, nivel: 2 },
   { codigo: "1.2.1",  nombre: "BIENES DE USO",                       categoria: CuentaCategoria.ACTIVO, nivel: 3 },
