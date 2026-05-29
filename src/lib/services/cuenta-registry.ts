@@ -60,7 +60,7 @@ export const VENTA_CODIGOS = {
   },
   // Costo de Mercadería Vendida (CMV/COGS) — cuando se emite una venta
   // se debita aquí el costo a precio promedio, equilibrando con HABER en
-  // 1.1.5.01 MERCADERÍAS. Esto hace que la utilidad bruta (ingreso - CMV)
+  // 1.1.5.01 Estoque TP - Nacionalizado. Esto hace que la utilidad bruta (ingreso - CMV)
   // quede reflejada en Estado de Resultados.
   CMV: {
     codigo: "5.6.1.01",
@@ -69,7 +69,7 @@ export const VENTA_CODIGOS = {
   },
   MERCADERIAS: {
     codigo: "1.1.5.01",
-    nombre: "MERCADERÍAS",
+    nombre: "Estoque TP - Nacionalizado",
     categoria: CuentaCategoria.ACTIVO,
   },
   // Cuenta provisória del flujo stock dual (W3). Cuando se EMITE una
@@ -84,7 +84,7 @@ export const VENTA_CODIGOS = {
   // provisória usa 1.1.5.03.
   MERCADERIAS_A_ENTREGAR: {
     codigo: "1.1.5.03",
-    nombre: "MERCADERÍAS A ENTREGAR",
+    nombre: "Estoque a Entregar",
     categoria: CuentaCategoria.ACTIVO,
   },
   // Provisión Impuesto a las Ganancias — se devenga la tasa sobre la
@@ -142,7 +142,7 @@ export const TASA_PROVISION_GANANCIAS = 0.35;
 export const COMPRA_CODIGOS = {
   MERCADERIAS: {
     codigo: "1.1.5.01",
-    nombre: "MERCADERÍAS",
+    nombre: "Estoque TP - Nacionalizado",
     categoria: CuentaCategoria.ACTIVO,
   },
   IVA_CREDITO: {
@@ -172,12 +172,12 @@ export const EMBARQUE_CODIGOS = {
   // Activos: capitalización + créditos fiscales importación
   MERCADERIAS: {
     codigo: "1.1.5.01",
-    nombre: "MERCADERÍAS",
+    nombre: "Estoque TP - Nacionalizado",
     categoria: CuentaCategoria.ACTIVO,
   },
   MERCADERIAS_EN_TRANSITO: {
     codigo: "1.1.5.02",
-    nombre: "MERCADERÍAS EN TRÁNSITO",
+    nombre: "Estoque En Tránsito - Marítimo",
     categoria: CuentaCategoria.ACTIVO,
   },
   IVA_CREDITO_IMPORTACION: {
@@ -267,7 +267,7 @@ export const EMBARQUE_CODIGOS = {
 // ----- COMEX ZPA / DESCONSOLIDACIÓN (errata Q6 + D9) ---------
 // Cuentas del flujo de contenedores / zona primaria / depósito fiscal.
 //
-// Q6 (resuelta 2026-05-20): 1.1.5.02 MERCADERÍAS EN TRÁNSITO ya es
+// Q6 (resuelta 2026-05-20): 1.1.5.02 Estoque En Tránsito - Marítimo ya es
 // analítica EN USO (fábrica → puerto) y conserva su historial — NO se
 // toca. Por eso las cuentas nuevas usan códigos vacíos 1.1.5.04 / .05
 // en vez de subcuentas .02.01/.02.02. Mapping de asientos (Fase 3):
@@ -286,12 +286,12 @@ export const EMBARQUE_CODIGOS = {
 export const COMEX_ZPA_CODIGOS = {
   MERCADERIAS_EN_ZONA_PRIMARIA: {
     codigo: "1.1.5.04",
-    nombre: "MERCADERÍAS EN ZONA PRIMARIA ADUANERA",
+    nombre: "Estoque TP Logistica - Zona Primária",
     categoria: CuentaCategoria.ACTIVO,
   },
   MERCADERIAS_EN_DEPOSITO_FISCAL: {
     codigo: "1.1.5.05",
-    nombre: "MERCADERÍAS EN DEPÓSITO FISCAL",
+    nombre: "Estoque TP Logistica - Depósito Fiscal",
     categoria: CuentaCategoria.ACTIVO,
   },
   // D9 — divergencia formal (físico ≠ declarado). Falta sin responsable
@@ -434,12 +434,12 @@ export const PORCENTAJE_LEY_25413_COMPUTABLE = 0.33;
 export const GASTO_POR_TIPO_PROVEEDOR = {
   MERCADERIA_LOCAL: {
     codigo: "1.1.5.01",
-    nombre: "MERCADERÍAS",
+    nombre: "Estoque TP - Nacionalizado",
     categoria: CuentaCategoria.ACTIVO,
   },
   MERCADERIA_EXTERIOR: {
     codigo: "1.1.5.02",
-    nombre: "MERCADERÍAS EN TRÁNSITO",
+    nombre: "Estoque En Tránsito - Marítimo",
     categoria: CuentaCategoria.ACTIVO,
   },
   DESPACHANTE: {
