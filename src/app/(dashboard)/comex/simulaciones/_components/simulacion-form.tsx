@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -323,6 +323,49 @@ export function SimulacionForm(props: Props) {
     costos,
     props.productos,
   ]);
+
+  // Input de margen % por línea (UI-only, no se persiste — el preço de venta sí).
+  // Sync bidireccional: editar margen recalcula P. venta; editar P. venta recalcula margen.
+  const [margenInputs, setMargenInputs] = useState<Record<number, string>>({});
+  const lastEditedRef = useRef<Record<number, "margen" | null>>({});
+
+  useEffect(() => {
+    setMargenInputs((prev) => {
+      let cambiado = false;
+      const next = { ...prev };
+      for (const it of resumen.items) {
+        if (lastEditedRef.current[it.index] === "margen") {
+          lastEditedRef.current[it.index] = null;
+          continue;
+        }
+        const nuevo = it.margenPorcentaje ? it.margenPorcentaje.toFixed(2) : "";
+        if (next[it.index] !== nuevo) {
+          next[it.index] = nuevo;
+          cambiado = true;
+        }
+      }
+      return cambiado ? next : prev;
+    });
+  }, [resumen.items]);
+
+  const handleMargenChange = (idx: number, raw: string) => {
+    lastEditedRef.current[idx] = "margen";
+    setMargenInputs((m) => ({ ...m, [idx]: raw }));
+    const item = resumen.items.find((it) => it.index === idx);
+    const costo = item?.costoUnitarioArs;
+    const value = raw.trim().replace(",", ".");
+    if (value === "") {
+      setValue(`items.${idx}.precioVentaUnitario`, "", { shouldDirty: true });
+      return;
+    }
+    const margen = Number(value);
+    if (!Number.isFinite(margen) || !costo || costo.lte(0)) return;
+    const precioVenta = costo
+      .times(1 + margen / 100)
+      .toDecimalPlaces(2)
+      .toString();
+    setValue(`items.${idx}.precioVentaUnitario`, precioVenta, { shouldDirty: true });
+  };
 
   const handleCalcularTributos = () => {
     if (resumen.cifTotalArs.lte(0)) {
@@ -663,7 +706,7 @@ export function SimulacionForm(props: Props) {
                       )}
                     />
                   </div>
-                  <div className="md:col-span-3">
+                  <div className="md:col-span-2">
                     <Label className="text-xs">Descripción libre</Label>
                     <Input
                       placeholder="Si no tiene SKU"
@@ -707,6 +750,16 @@ export function SimulacionForm(props: Props) {
                     {errors.items?.[idx]?.precioVentaUnitario && (
                       <FieldError message={errors.items[idx]?.precioVentaUnitario?.message} />
                     )}
+                  </div>
+                  <div className="md:col-span-1">
+                    <Label className="text-xs">Margen %</Label>
+                    <Input
+                      inputMode="decimal"
+                      className="text-right tabular-nums"
+                      placeholder="—"
+                      value={margenInputs[idx] ?? ""}
+                      onChange={(e) => handleMargenChange(idx, e.target.value)}
+                    />
                   </div>
                   <div className="flex items-end md:col-span-12 md:justify-end">
                     <Button type="button" variant="ghost" size="sm" onClick={() => removeItem(idx)}>
@@ -1234,12 +1287,20 @@ type BuildInputArgs = {
   productos: ProductoOption[];
 };
 
+function buildProductoLabel(p: ProductoOption): string {
+  const partes: string[] = [p.codigo, p.nombre];
+  const nombreLower = p.nombre.toLowerCase();
+  if (p.marca && !nombreLower.includes(p.marca.toLowerCase())) partes.push(p.marca);
+  if (p.medida && !nombreLower.includes(p.medida.toLowerCase())) partes.push(p.medida);
+  return partes.join(" · ");
+}
+
 function buildItemInput(it: FormValues["items"][number] | undefined, productos: ProductoOption[]) {
   const producto = it?.productoId ? productos.find((p) => p.id === it.productoId) : null;
   return {
     productoId: it?.productoId ?? null,
     descripcionLibre: it?.descripcionLibre ?? null,
-    label: producto ? `${producto.codigo} · ${producto.nombre}` : (it?.descripcionLibre ?? null),
+    label: producto ? buildProductoLabel(producto) : (it?.descripcionLibre ?? null),
     cantidad: Number.isFinite(it?.cantidad) ? (it?.cantidad ?? 0) : 0,
     precioUnitarioFob: safeMoney(it?.precioUnitarioFob),
     precioVentaUnitario: safeOptionalMoney(it?.precioVentaUnitario),
