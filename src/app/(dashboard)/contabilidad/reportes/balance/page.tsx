@@ -1,9 +1,13 @@
 import Link from "next/link";
 
+import { auth } from "@/lib/auth";
 import { getBalanceSumasYSaldos, pruneBalanceSinSaldo } from "@/lib/services/balance-sumas-saldos";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { Card } from "@/components/ui/card";
 import { DateRangeFilter } from "@/components/date-range-filter";
 import { OcultarSinSaldoToggle } from "@/components/ocultar-sin-saldo-toggle";
+
+import { MonedaToggle, type Moneda } from "@/app/(dashboard)/reportes/_components/moneda-toggle";
 
 import { BalanceTreeTable } from "./balance-tree-table";
 
@@ -11,6 +15,7 @@ type SearchParams = Promise<{
   desde?: string;
   hasta?: string;
   todas?: string;
+  moneda?: string;
 }>;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -47,8 +52,25 @@ export default async function BalancePage({ searchParams }: { searchParams: Sear
   const fechaHasta = endOfDay(hastaStr);
   const mostrarTodas = params.todas === "1";
 
-  const balance = await getBalanceSumasYSaldos({ fechaDesde, fechaHasta });
+  const session = await auth();
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    params.moneda === "ARS" ? "ARS" : params.moneda === "USD" ? "USD" : monedaPreferida;
+
+  const cotizacion = await getCotizacionParaFecha(fechaHasta ?? new Date());
+  const tcParaUsd = moneda === "USD" && cotizacion ? cotizacion.valor.toString() : null;
+
+  const balance = await getBalanceSumasYSaldos({ fechaDesde, fechaHasta, tcParaUsd });
+
   const root = mostrarTodas ? balance.root : pruneBalanceSinSaldo(balance.root);
+
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   const rangoLabel =
     fechaDesde && fechaHasta
@@ -80,11 +102,14 @@ export default async function BalancePage({ searchParams }: { searchParams: Sear
 
       <div className="flex flex-col gap-3">
         <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
-        <OcultarSinSaldoToggle />
+        <div className="flex flex-wrap items-center gap-3">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
+          <OcultarSinSaldoToggle />
+        </div>
       </div>
 
       <Card className="py-0">
-        <BalanceTreeTable root={root} />
+        <BalanceTreeTable root={root} moneda={moneda} />
       </Card>
     </div>
   );
