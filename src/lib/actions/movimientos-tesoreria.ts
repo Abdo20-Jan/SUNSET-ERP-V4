@@ -371,7 +371,9 @@ export async function crearMovimientoTesoreriaAction(
       // sujeto dos veces). Lock por-cuenta; se libera al cerrar la transacción.
       // Sólo en PAGO con la feature activa — flujo normal no toma lock.
       if (isRetencionGananciasEnabled() && tipo === MovimientoTesoreriaTipo.PAGO) {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(${primaryCuentaId}::bigint)`;
+        // $executeRaw (no $queryRaw): pg_advisory_xact_lock devuelve `void` y
+        // el adapter pg no puede deserializar esa columna en $queryRaw.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${primaryCuentaId}::bigint)`;
       }
 
       // Retención de Ganancias (RG 830): si el pago corresponde, se paga el

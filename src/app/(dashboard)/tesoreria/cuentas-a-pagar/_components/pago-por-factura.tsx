@@ -489,6 +489,7 @@ function PagoFacturaDialog({
   useEffect(() => {
     const cuentaId = proveedor?.cuentaContableId;
     if (!open || !cuentaId || moneda !== "ARS" || !/^\d+(\.\d{1,2})?$/.test(baseRetencion)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- limpia el preview cuando no aplica
       setRetencion(null);
       return;
     }
