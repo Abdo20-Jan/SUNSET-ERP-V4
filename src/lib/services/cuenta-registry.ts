@@ -138,6 +138,26 @@ export const VENTA_CODIGOS = {
 // según escala. Por ahora 35% (no PyME / monto alto). Editable acá.
 export const TASA_PROVISION_GANANCIAS = 0.35;
 
+// ----- RETENCIÓN GANANCIAS (RG 830) — Sunset agente ----------
+// Pasivo a depositar en ARCA por las retenciones de Ganancias
+// practicadas al pagar facturas de proveedores. Distinto de:
+//   2.1.3.03 GANANCIAS POR PAGAR (tributo de importación)
+//   2.1.3.06 PROVISIÓN GANANCIAS (devengo 35% s/ utilidad de ventas)
+// Acá se acumula lo retenido a terceros, pendiente de depósito (F.997
+// SICORE). Como es 2.1.3.x aparece automáticamente en la vista de
+// cuentas-a-pagar (sección fiscales) sin cambios en cuentas-a-pagar.ts.
+export const RETENCION_GANANCIAS_CODIGOS = {
+  RETENCIONES_GANANCIAS_POR_PAGAR: {
+    codigo: "2.1.3.07",
+    nombre: "RETENCIONES GANANCIAS A PAGAR",
+    categoria: CuentaCategoria.PASIVO,
+  },
+} as const satisfies Record<string, CuentaDef>;
+
+// Días desde la fecha de pago hasta el vencimiento del depósito ARCA
+// (default RG 830). Editable acá hasta parametrizarlo por régimen.
+export const DIAS_VENCIMIENTO_RETENCION_ARCA = 15;
+
 // ----- COMPRAS LOCALES ---------------------------------------
 export const COMPRA_CODIGOS = {
   MERCADERIAS: {

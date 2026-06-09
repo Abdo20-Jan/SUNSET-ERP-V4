@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isRetencionGananciasEnabled } from "@/lib/features";
 import {
   AsientoError,
   contabilizarAsiento,
@@ -14,6 +15,12 @@ import {
   crearAsientoTransferencia,
   type LineaInput,
 } from "@/lib/services/asiento-automatico";
+import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
+import { RETENCION_GANANCIAS_CODIGOS } from "@/lib/services/cuenta-registry";
+import {
+  registrarRetencionPracticada,
+  resolverRetencionGananciasParaPago,
+} from "@/lib/services/retencion-ganancias-pago";
 import { validarSaldoSuficientePrestamo } from "@/lib/services/prestamo";
 import {
   AsientoOrigen,
@@ -358,12 +365,34 @@ export async function crearMovimientoTesoreriaAction(
 
   try {
     const result = await db.$transaction(async (tx) => {
+      // Serializa pagos concurrentes a la MISMA cuenta de proveedor para que
+      // el acumulado mensual RG 830 no se lea en paralelo (bajo READ COMMITTED
+      // dos pagos simultáneos verían el mismo `prev` y aplicarían el mínimo no
+      // sujeto dos veces). Lock por-cuenta; se libera al cerrar la transacción.
+      // Sólo en PAGO con la feature activa — flujo normal no toma lock.
+      if (isRetencionGananciasEnabled() && tipo === MovimientoTesoreriaTipo.PAGO) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(${primaryCuentaId}::bigint)`;
+      }
+
+      // Retención de Ganancias (RG 830): si el pago corresponde, se paga el
+      // NETO al banco y la diferencia queda como pasivo a depositar en ARCA.
+      // Se resuelve DENTRO de la transacción para que el acumulado mensual
+      // sea consistente. `null` ⇒ flujo de pago normal (sin cambios).
+      const retencionCtx = isRetencionGananciasEnabled()
+        ? await resolverRetencionGananciasParaPago({ tipo, moneda, fecha, lineas, base: total }, tx)
+        : null;
+      const retencionMonto = retencionCtx ? retencionCtx.resultado.importeRetenido : new Decimal(0);
+      const netoBanco = total.minus(retencionMonto);
+      // El movimiento bancario refleja la salida REAL de caja: el neto
+      // cuando hay retención, el total cuando no.
+      const montoMovimiento = retencionCtx ? netoBanco.toDecimalPlaces(2).toFixed(2) : totalStr;
+
       const mov = await tx.movimientoTesoreria.create({
         data: {
           tipo,
           cuentaBancariaId,
           fecha,
-          monto: totalStr,
+          monto: montoMovimiento,
           moneda,
           tipoCambio,
           cuentaContableId: primaryCuentaId,
@@ -377,7 +406,74 @@ export async function crearMovimientoTesoreriaAction(
       let asientoId: string;
       let asientoNumero: number;
 
-      if (lineas.length === 1) {
+      if (retencionCtx) {
+        // Pago con retención Ganancias. Asiento:
+        //   DEBE  [proveedor]  (1 línea por factura, suma = total bruto)
+        //   HABER [banco]      neto (total − retención)
+        //   HABER [2.1.3.07]   retención (pasivo a depositar a ARCA)
+        // El proveedor se cancela por el BRUTO (saldo CxP baja por el total
+        // facturado); la retención es un detalle de financiación.
+        const cuentaRetencionId = await getOrCreateCuenta(
+          tx,
+          RETENCION_GANANCIAS_CODIGOS.RETENCIONES_GANANCIAS_POR_PAGAR,
+        );
+        const retencionStr = retencionMonto.toDecimalPlaces(2).toFixed(2);
+        const netoStr = netoBanco.toDecimalPlaces(2).toFixed(2);
+
+        const asientoLineas: LineaInput[] = lineas.map((l) => ({
+          cuentaId: l.cuentaContableId,
+          debe: l.monto,
+          haber: 0,
+          descripcion: l.descripcion ?? undefined,
+        }));
+        asientoLineas.push({
+          cuentaId: cuentaBancaria.cuentaContableId,
+          debe: 0,
+          haber: netoStr,
+          descripcion: `Pago neto — retención Ganancias ${retencionStr}`,
+        });
+        asientoLineas.push({
+          cuentaId: cuentaRetencionId,
+          debe: 0,
+          haber: retencionStr,
+          descripcion: `Retención Ganancias RG 830 — ${retencionCtx.proveedor.nombre}`,
+        });
+
+        const asiento = await crearAsientoManual(
+          {
+            fecha,
+            descripcion:
+              descripcion ?? `Pago ${moneda} ${totalStr} (ret. Ganancias ${retencionStr})`,
+            origen: AsientoOrigen.TESORERIA,
+            moneda,
+            tipoCambio,
+            lineas: asientoLineas,
+          },
+          tx,
+        );
+        const updMovRet = await tx.movimientoTesoreria.updateMany({
+          where: { id: mov.id, asientoId: null },
+          data: { asientoId: asiento.id },
+        });
+        if (updMovRet.count !== 1) {
+          throw new AsientoError(
+            "CONCURRENCIA",
+            `MovimientoTesoreria ${mov.id} fue contabilizado simultáneamente por otro proceso.`,
+          );
+        }
+        const contabilizado = await contabilizarAsiento(asiento.id, tx);
+        asientoId = contabilizado.id;
+        asientoNumero = contabilizado.numero;
+        // Las N primeras líneas DEBE (orden de `lineas`) son las facturas.
+        await gravarAplicacionesPago(tx, contabilizado.id, lineas);
+        // Registrar la retención practicada + auditoría.
+        await registrarRetencionPracticada(tx, {
+          contexto: retencionCtx,
+          movimientoTesoreriaId: mov.id,
+          fecha,
+          createdById: session.user.id,
+        });
+      } else if (lineas.length === 1) {
         // 1 contrapartida — flujo clásico con split IDCB automático.
         const asiento = await crearAsientoMovimientoTesoreria(mov.id, tx);
         const contabilizado = await contabilizarAsiento(asiento.id, tx);
@@ -457,12 +553,21 @@ export async function crearMovimientoTesoreriaAction(
     revalidatePath("/tesoreria/cuentas");
     revalidatePath("/tesoreria/movimientos");
     revalidatePath("/tesoreria/prestamos");
+    revalidatePath("/tesoreria/cuentas-a-pagar");
     revalidatePath("/contabilidad/asientos");
 
     return { ok: true, ...result };
   } catch (err) {
     if (err instanceof AsientoError) {
       return { ok: false, error: mapAsientoErrorMessage(err) };
+    }
+    // Colisión de número de certificado de retención (count+1 bajo concurrencia):
+    // el @unique aborta la tx sin datos corruptos — pedir reintento limpio.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return {
+        ok: false,
+        error: "Conflicto de numeración (certificado de retención). Reintentá el pago.",
+      };
     }
     console.error("crearMovimientoTesoreriaAction failed", err);
     return {

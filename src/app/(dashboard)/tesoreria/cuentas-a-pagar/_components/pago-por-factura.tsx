@@ -11,6 +11,10 @@ import {
   crearMovimientoTesoreriaAction,
   type CuentaBancariaOption,
 } from "@/lib/actions/movimientos-tesoreria";
+import {
+  simularRetencionGananciasAction,
+  type SimulacionRetencion,
+} from "@/lib/actions/retenciones";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -471,11 +475,35 @@ function PagoFacturaDialog({
   const [comprobante, setComprobante] = useState<string>("");
   const [referenciaBanco, setReferenciaBanco] = useState<string>("");
   const [montoEditable, setMontoEditable] = useState<string>("");
+  const [retencion, setRetencion] = useState<SimulacionRetencion | null>(null);
 
   const sumaFacturas = useMemo(() => sumarMontos(facturas), [facturas]);
   const proveedor = facturas[0] ?? null;
   const moneda = facturas[0]?.moneda ?? "ARS";
   const isMulti = facturas.length > 1;
+  const baseRetencion = isMulti ? sumaFacturas : montoEditable;
+
+  // Preview de retención Ganancias (RG 830). El backend decide si aplica
+  // (flag + proveedor sujeto + concepto + mínimo mensual); acá sólo se
+  // muestra para que el usuario no la olvide antes de confirmar.
+  useEffect(() => {
+    const cuentaId = proveedor?.cuentaContableId;
+    if (!open || !cuentaId || moneda !== "ARS" || !/^\d+(\.\d{1,2})?$/.test(baseRetencion)) {
+      setRetencion(null);
+      return;
+    }
+    let cancelled = false;
+    void simularRetencionGananciasAction({
+      cuentaContableId: cuentaId,
+      fecha: new Date(fecha),
+      base: baseRetencion,
+    }).then((r) => {
+      if (!cancelled) setRetencion(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, proveedor, moneda, baseRetencion, fecha]);
 
   // Reset monto editable cuando cambia la selección al abrir.
   // TODO(fase-3.4): absorver na extração `<BatchPaymentDialog>` genérico.
@@ -490,6 +518,7 @@ function PagoFacturaDialog({
     setComprobante("");
     setReferenciaBanco("");
     setMontoEditable("");
+    setRetencion(null);
   };
 
   const handleSubmit = () => {
@@ -637,6 +666,44 @@ function PagoFacturaDialog({
                   />
                 </div>
               </div>
+
+              {retencion?.aplica && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+                  <div className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                    Retención Ganancias (RG 830)
+                  </div>
+                  <ul className="mt-1.5 flex flex-col gap-1 text-xs">
+                    <li className="flex justify-between gap-2">
+                      <span className="text-muted-foreground">Total factura</span>
+                      <span className="font-mono tabular-nums">
+                        {fmtMoney(retencion.base)} {moneda}
+                      </span>
+                    </li>
+                    <li className="flex justify-between gap-2">
+                      <span className="text-muted-foreground">
+                        Retención ({retencion.alicuota}%)
+                      </span>
+                      <span className="font-mono tabular-nums text-amber-700 dark:text-amber-400">
+                        − {fmtMoney(retencion.importeRetenido)} {moneda}
+                      </span>
+                    </li>
+                    <li className="flex justify-between gap-2 border-t pt-1 font-medium">
+                      <span>Neto a pagar al proveedor</span>
+                      <span className="font-mono tabular-nums">
+                        {fmtMoney(retencion.importeNetoAPagar)} {moneda}
+                      </span>
+                    </li>
+                    <li className="flex justify-between gap-2 text-muted-foreground">
+                      <span>Vencimiento depósito ARCA</span>
+                      <span className="font-mono">{retencion.fechaVencimientoArca}</span>
+                    </li>
+                  </ul>
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">
+                    Se paga el neto, y la retención queda como pasivo a depositar (cta. 2.1.3.07)
+                    con su certificado.
+                  </p>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
