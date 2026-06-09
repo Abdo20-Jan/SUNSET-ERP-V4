@@ -515,11 +515,15 @@ async function upsertFleteGasto(
   tx: Prisma.TransactionClient,
   ventaId: string,
   ff: NonNullable<z.infer<typeof ventaInputSchema>["fleteFactura"]>,
+  fechaVenta: Date,
 ): Promise<void> {
   const cuentaFleteId = await getOrCreateCuenta(tx, VENTA_CODIGOS.FLETE_GASTO);
   const subtotal = money(ff.subtotal);
   const total = money(toDecimal(ff.subtotal).plus(ff.iva).plus(ff.iibb).plus(ff.otros));
-  const fecha = ff.fechaFactura ? new Date(ff.fechaFactura) : new Date();
+  // Sin fechaFactura, espelha la fecha de la venta — el gasto de flete está
+  // vinculado a la venta y debe caer en el mismo período contable (su asiento
+  // se contabiliza junto con el de la venta en emitirVentaAction).
+  const fecha = ff.fechaFactura ? new Date(ff.fechaFactura) : fechaVenta;
 
   const existente = await tx.gasto.findUnique({
     where: { ventaId },
@@ -732,7 +736,7 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
       // Gasto. Ausente en edición → eliminar el gasto BORRADOR previo (si lo
       // hay) para volver al flete suelto/sin flete.
       if (input.fleteFactura) {
-        await upsertFleteGasto(tx, id, input.fleteFactura);
+        await upsertFleteGasto(tx, id, input.fleteFactura, new Date(input.fecha));
       } else {
         const previo = await tx.gasto.findUnique({
           where: { ventaId: id },

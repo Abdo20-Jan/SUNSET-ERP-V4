@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   type ColumnDef,
   type ExpandedState,
@@ -26,6 +26,8 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
+import type { Moneda } from "@/app/(dashboard)/reportes/_components/moneda-toggle";
+
 type Row = BalanceNode | BalanceLinea;
 
 const fmt = new Intl.NumberFormat("es-AR", {
@@ -33,13 +35,15 @@ const fmt = new Intl.NumberFormat("es-AR", {
   maximumFractionDigits: 2,
 });
 
-function fmtMoney(s: string) {
+function fmtMoney(s: string | null) {
+  if (s === null) return "—";
   const n = Number.parseFloat(s);
   if (!Number.isFinite(n)) return s;
   return fmt.format(n);
 }
 
-function fmtCredito(s: string) {
+function fmtCredito(s: string | null) {
+  if (s === null) return "—";
   const n = Number.parseFloat(s);
   if (!Number.isFinite(n) || n === 0) return fmt.format(0);
   return `(${fmt.format(n)})`;
@@ -49,129 +53,143 @@ function isCuenta(row: Row): row is BalanceNode {
   return row.kind === "cuenta";
 }
 
-const columns: ColumnDef<Row>[] = [
-  {
-    id: "codigo",
-    header: "Código",
-    cell: ({ row }) => {
-      const canExpand = row.getCanExpand();
-      const r = row.original;
-      return (
-        <div
-          className="flex items-center gap-1 font-mono text-xs"
-          style={{ paddingLeft: `${row.depth * 20}px` }}
-        >
-          {canExpand ? (
-            <button
-              type="button"
-              onClick={row.getToggleExpandedHandler()}
-              className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-muted"
-              aria-label={row.getIsExpanded() ? "Recolher" : "Expandir"}
-            >
-              <HugeiconsIcon
-                icon={row.getIsExpanded() ? ArrowDown01Icon : ArrowRight01Icon}
-                className="size-4"
-              />
-            </button>
-          ) : (
-            <span className="inline-block size-5 shrink-0" />
-          )}
-          <span>{isCuenta(r) ? r.codigo : format(r.fecha, "yyyy-MM-dd")}</span>
-        </div>
-      );
-    },
-  },
-  {
-    id: "nombre",
-    header: "Cuenta / Transacción",
-    cell: ({ row }) => {
-      const r = row.original;
-      if (isCuenta(r)) {
-        return <span className={cn(r.tipo === "SINTETICA" && "font-semibold")}>{r.nombre}</span>;
-      }
-      return (
-        <span className="text-xs italic text-muted-foreground">Transacción: {r.descripcion}</span>
-      );
-    },
-  },
-  {
-    id: "tipo",
-    header: "Tipo",
-    cell: ({ row }) => {
-      const r = row.original;
-      if (isCuenta(r)) {
+// Seleciona valor ARS ou USD por moneda. Para campos USD, "ARS" sempre devuelve
+// el valor ARS; "USD" devolve el campo *Usd (que pode ser null se ningún TC ni
+// monedaOrigen estaban presentes para essa linha — exibe "—").
+function pickMoney(ars: string, usd: string | null, moneda: Moneda): string | null {
+  return moneda === "USD" ? usd : ars;
+}
+
+function buildColumns(moneda: Moneda): ColumnDef<Row>[] {
+  return [
+    {
+      id: "codigo",
+      header: "Código",
+      cell: ({ row }) => {
+        const canExpand = row.getCanExpand();
+        const r = row.original;
         return (
-          <Badge variant={r.tipo === "SINTETICA" ? "secondary" : "outline"}>
-            {r.tipo === "SINTETICA" ? "SINTÉTICO" : "ANALÍTICO"}
-          </Badge>
+          <div
+            className="flex items-center gap-1 font-mono text-xs"
+            style={{ paddingLeft: `${row.depth * 20}px` }}
+          >
+            {canExpand ? (
+              <button
+                type="button"
+                onClick={row.getToggleExpandedHandler()}
+                className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-muted"
+                aria-label={row.getIsExpanded() ? "Recolher" : "Expandir"}
+              >
+                <HugeiconsIcon
+                  icon={row.getIsExpanded() ? ArrowDown01Icon : ArrowRight01Icon}
+                  className="size-4"
+                />
+              </button>
+            ) : (
+              <span className="inline-block size-5 shrink-0" />
+            )}
+            <span>{isCuenta(r) ? r.codigo : format(r.fecha, "yyyy-MM-dd")}</span>
+          </div>
         );
-      }
-      return (
-        <Link
-          href={`/contabilidad/asientos/${r.asientoId}`}
-          className="font-mono text-xs text-primary underline-offset-2 hover:underline"
-        >
-          Asiento #{r.asientoNumero}
-        </Link>
-      );
+      },
     },
-  },
-  {
-    id: "saldoInicial",
-    header: () => <span className="block text-right">Saldo Inicial</span>,
-    cell: ({ row }) => {
-      const r = row.original;
-      if (!isCuenta(r)) return null;
-      return (
-        <span className="block text-right font-mono text-xs tabular-nums">
-          {fmtMoney(r.saldoInicial)}
-        </span>
-      );
+    {
+      id: "nombre",
+      header: "Cuenta / Transacción",
+      cell: ({ row }) => {
+        const r = row.original;
+        if (isCuenta(r)) {
+          return <span className={cn(r.tipo === "SINTETICA" && "font-semibold")}>{r.nombre}</span>;
+        }
+        return (
+          <span className="text-xs italic text-muted-foreground">Transacción: {r.descripcion}</span>
+        );
+      },
     },
-  },
-  {
-    id: "credito",
-    header: () => <span className="block text-right">Crédito</span>,
-    cell: ({ row }) => {
-      const r = row.original;
-      const value = isCuenta(r) ? r.haber : r.haber;
-      return (
-        <span className="block text-right font-mono text-xs tabular-nums text-rose-700 dark:text-rose-400">
-          {fmtCredito(value)}
-        </span>
-      );
+    {
+      id: "tipo",
+      header: "Tipo",
+      cell: ({ row }) => {
+        const r = row.original;
+        if (isCuenta(r)) {
+          return (
+            <Badge variant={r.tipo === "SINTETICA" ? "secondary" : "outline"}>
+              {r.tipo === "SINTETICA" ? "SINTÉTICO" : "ANALÍTICO"}
+            </Badge>
+          );
+        }
+        return (
+          <Link
+            href={`/contabilidad/asientos/${r.asientoId}`}
+            className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+          >
+            Asiento #{r.asientoNumero}
+          </Link>
+        );
+      },
     },
-  },
-  {
-    id: "debito",
-    header: () => <span className="block text-right">Débito</span>,
-    cell: ({ row }) => {
-      const r = row.original;
-      const value = isCuenta(r) ? r.debe : r.debe;
-      return (
-        <span className="block text-right font-mono text-xs tabular-nums">{fmtMoney(value)}</span>
-      );
+    {
+      id: "saldoInicial",
+      header: () => <span className="block text-right">Saldo Inicial</span>,
+      cell: ({ row }) => {
+        const r = row.original;
+        if (!isCuenta(r)) return null;
+        const value = pickMoney(r.saldoInicial, r.saldoInicialUsd, moneda);
+        return (
+          <span className="block text-right font-mono text-xs tabular-nums">{fmtMoney(value)}</span>
+        );
+      },
     },
-  },
-  {
-    id: "saldoFinal",
-    header: () => <span className="block text-right">Saldo Final</span>,
-    cell: ({ row }) => {
-      const r = row.original;
-      const value = isCuenta(r) ? r.saldoFinal : r.saldoAcumulado;
-      return (
-        <span
-          className={cn(
-            "block text-right font-mono text-xs tabular-nums",
-            isCuenta(r) && r.tipo === "SINTETICA" && "font-semibold",
-          )}
-        >
-          {fmtMoney(value)}
-        </span>
-      );
+    {
+      id: "credito",
+      header: () => <span className="block text-right">Crédito</span>,
+      cell: ({ row }) => {
+        const r = row.original;
+        const value = isCuenta(r)
+          ? pickMoney(r.haber, r.haberUsd, moneda)
+          : pickMoney(r.haber, r.haberUsd, moneda);
+        return (
+          <span className="block text-right font-mono text-xs tabular-nums text-rose-700 dark:text-rose-400">
+            {fmtCredito(value)}
+          </span>
+        );
+      },
     },
-  },
-];
+    {
+      id: "debito",
+      header: () => <span className="block text-right">Débito</span>,
+      cell: ({ row }) => {
+        const r = row.original;
+        const value = isCuenta(r)
+          ? pickMoney(r.debe, r.debeUsd, moneda)
+          : pickMoney(r.debe, r.debeUsd, moneda);
+        return (
+          <span className="block text-right font-mono text-xs tabular-nums">{fmtMoney(value)}</span>
+        );
+      },
+    },
+    {
+      id: "saldoFinal",
+      header: () => <span className="block text-right">Saldo Final</span>,
+      cell: ({ row }) => {
+        const r = row.original;
+        const value = isCuenta(r)
+          ? pickMoney(r.saldoFinal, r.saldoFinalUsd, moneda)
+          : pickMoney(r.saldoAcumulado, r.saldoAcumuladoUsd, moneda);
+        return (
+          <span
+            className={cn(
+              "block text-right font-mono text-xs tabular-nums",
+              isCuenta(r) && r.tipo === "SINTETICA" && "font-semibold",
+            )}
+          >
+            {fmtMoney(value)}
+          </span>
+        );
+      },
+    },
+  ];
+}
 
 function getSubRows(row: Row): Row[] | undefined {
   if (!isCuenta(row)) return undefined;
@@ -179,7 +197,7 @@ function getSubRows(row: Row): Row[] | undefined {
   return row.lineas as Row[] | undefined;
 }
 
-export function BalanceTreeTable({ root }: { root: BalanceNode[] }) {
+export function BalanceTreeTable({ root, moneda }: { root: BalanceNode[]; moneda: Moneda }) {
   // Expande apenas o primeiro nível (raízes) por padrão.
   const [expanded, setExpanded] = useState<ExpandedState>(() => {
     const init: Record<string, boolean> = {};
@@ -188,6 +206,8 @@ export function BalanceTreeTable({ root }: { root: BalanceNode[] }) {
     });
     return init;
   });
+
+  const columns = useMemo(() => buildColumns(moneda), [moneda]);
 
   const table = useReactTable<Row>({
     data: root as Row[],
