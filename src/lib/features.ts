@@ -108,3 +108,30 @@ export function isContenedorDesconsolidacionEnabled(): boolean {
 export function isUnidadInventarioTrackingEnabled(): boolean {
   return process.env.UNIDAD_INVENTARIO_TRACKING_ENABLED === "true";
 }
+
+/**
+ * Feature flag: retención de Impuesto a las Ganancias (RG 830) al pagar
+ * facturas de proveedores. Sunset actúa como agente de retención.
+ *
+ * **Cuando está OFF (default)**: el flujo de pago (`crearMovimientoTesoreriaAction`)
+ * opera exactamente como hoy — sin detectar ni aplicar retención. Cero
+ * regresión: los campos fiscales del proveedor y las tablas
+ * `RetencionPracticada` / `ParametroRetencion` existen pero no se tocan.
+ *
+ * **Cuando está ON**: al registrar un PAGO en ARS a un único proveedor
+ * marcado `sujetoRetencionGanancias`, el sistema calcula la retención
+ * (acumulado mensual RG 830), paga el NETO al proveedor, genera el pasivo
+ * `2.1.3.07 RETENCIONES GANANCIAS A PAGAR` y registra la `RetencionPracticada`
+ * con su certificado.
+ *
+ * **Activación**: setear `RETENCION_GANANCIAS_ENABLED=true`. Default: off.
+ *
+ * **Pre-requisitos** antes de prender la flag:
+ *  1. `pnpm db:push` ejecutado (campos del proveedor + tablas de retención).
+ *  2. `ParametroRetencion` seedeado con las reglas RG 830 vigentes.
+ *  3. Proveedores sujetos marcados (`sujetoRetencionGanancias` + `conceptoRG830`
+ *     + `condicionGanancias`).
+ */
+export function isRetencionGananciasEnabled(): boolean {
+  return process.env.RETENCION_GANANCIAS_ENABLED === "true";
+}

@@ -83,6 +83,18 @@ export default async function MovimientoDetallePage({ params }: { params: PagePa
           razonSugerencia: true,
         },
       },
+      retencionGanancias: {
+        select: {
+          id: true,
+          certificadoNumero: true,
+          concepto: true,
+          base: true,
+          alicuota: true,
+          importeRetenido: true,
+          fechaVencimientoArca: true,
+          estado: true,
+        },
+      },
     },
   });
 
@@ -225,6 +237,49 @@ export default async function MovimientoDetallePage({ params }: { params: PagePa
           </dl>
         </CardContent>
       </Card>
+
+      {/* Retención de Ganancias (RG 830) */}
+      {mov.retencionGanancias && (
+        <Card className="border-l-4 border-l-amber-500">
+          <CardHeader>
+            <CardTitle className="text-[14px]">Retención Ganancias (RG 830)</CardTitle>
+            <CardDescription>
+              Certificado{" "}
+              <span className="font-mono">{mov.retencionGanancias.certificadoNumero}</span> ·{" "}
+              {mov.retencionGanancias.estado}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-[13px] md:grid-cols-2">
+              <DataRow label="Concepto" value={mov.retencionGanancias.concepto} />
+              <DataRow
+                label="Base sujeta"
+                value={`ARS ${fmtMoney(mov.retencionGanancias.base.toString())}`}
+              />
+              <DataRow label="Alícuota" value={`${mov.retencionGanancias.alicuota.toString()} %`} />
+              <DataRow
+                label="Importe retenido"
+                value={`ARS ${fmtMoney(mov.retencionGanancias.importeRetenido.toString())}`}
+              />
+              <DataRow
+                label="Vencimiento ARCA"
+                value={formatFecha(mov.retencionGanancias.fechaVencimientoArca)}
+              />
+            </dl>
+            <div>
+              <a
+                href={`/api/retenciones/${mov.retencionGanancias.id}/certificado`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Button size="sm" variant="outline">
+                  Descargar certificado (PDF)
+                </Button>
+              </a>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Asiento contable */}
       {mov.asiento ? (

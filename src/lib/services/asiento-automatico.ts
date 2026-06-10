@@ -508,6 +508,28 @@ async function anularEnTx(tx: TxClient, asientoId: string): Promise<Asiento> {
       estado: EmbarqueEstado.EN_DEPOSITO,
     },
   });
+  // Retención Ganancias (RG 830): si el pago tenía retención practicada,
+  // anularla (PENDIENTE_ARCA → ANULADA) ANTES de desvincular el movimiento,
+  // para no sobre-reportar a ARCA un importe que se acaba de revertir
+  // contablemente (la línea 2.1.3.07 sale del saldo al quedar ANULADO el
+  // asiento). Las ya depositadas (PAGADA_ARCA) NO se tocan — requieren
+  // corrección manual por un admin.
+  const movsDesvinculados = await tx.movimientoTesoreria.findMany({
+    where: { asientoId },
+    select: { id: true },
+  });
+  if (movsDesvinculados.length > 0) {
+    await tx.retencionPracticada.updateMany({
+      where: {
+        movimientoTesoreriaId: { in: movsDesvinculados.map((m) => m.id) },
+        estado: "PENDIENTE_ARCA",
+      },
+      data: {
+        estado: "ANULADA",
+        motivoAnulacion: "Anulación automática por anulación del asiento de pago.",
+      },
+    });
+  }
   await tx.movimientoTesoreria.updateMany({
     where: { asientoId },
     data: { asientoId: null },
