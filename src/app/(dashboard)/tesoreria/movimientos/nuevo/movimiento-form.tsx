@@ -25,6 +25,10 @@ import {
   type CuentaBancariaOption,
   type CuentaContableContrapartidaOption,
 } from "@/lib/actions/movimientos-tesoreria";
+import {
+  simularRetencionGananciasAction,
+  type SimulacionRetencion,
+} from "@/lib/actions/retenciones";
 import type { ContextoAmortizacion } from "@/lib/actions/prestamos";
 import type { FacturaPendiente } from "@/lib/services/cuentas-a-pagar";
 import { cn } from "@/lib/utils";
@@ -277,6 +281,39 @@ export function MovimientoForm({
     () => cuentasContrapartida.find((c) => c.id === primeraLineaCuentaId) ?? null,
     [cuentasContrapartida, primeraLineaCuentaId],
   );
+
+  // Retención Ganancias (RG 830): el backend la aplica sólo en PAGO en ARS a
+  // UN único proveedor (todas las líneas a la misma cuenta). Calculamos el
+  // preview en ese caso para que el usuario lo vea antes de confirmar.
+  const fecha = useWatch({ control, name: "fecha" });
+  const cuentaUnicaContrapartida = useMemo(() => {
+    const ids = [
+      ...new Set(
+        (lineas ?? []).map((l) => l?.cuentaContableId).filter((x): x is number => !!x && x > 0),
+      ),
+    ];
+    return ids.length === 1 ? ids[0]! : null;
+  }, [lineas]);
+  const [retencion, setRetencion] = useState<SimulacionRetencion | null>(null);
+  const baseRetStr = totalCalculado > 0 ? totalCalculado.toFixed(2) : "";
+  useEffect(() => {
+    if (tipo !== "PAGO" || moneda !== "ARS" || !cuentaUnicaContrapartida || !fecha || !baseRetStr) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- limpia el preview cuando no aplica
+      setRetencion(null);
+      return;
+    }
+    let cancelled = false;
+    void simularRetencionGananciasAction({
+      cuentaContableId: cuentaUnicaContrapartida,
+      fecha,
+      base: baseRetStr,
+    }).then((r) => {
+      if (!cancelled) setRetencion(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tipo, moneda, cuentaUnicaContrapartida, fecha, baseRetStr]);
 
   const handleModoChange = (nuevoModo: ModoAmortizacion) => {
     if (!contextoAmortizacion) return;
@@ -696,6 +733,16 @@ export function MovimientoForm({
                 como gasto (5.8.1.06) y 33% como crédito pago a cuenta de Ganancias (1.1.4.12).
               </div>
             )}
+          {retencion?.aplica && (
+            <div className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
+              <strong>Retención Ganancias (RG 830)</strong> — se retendrá{" "}
+              <span className="font-mono">ARS {retencion.importeRetenido}</span> (
+              {retencion.alicuota}
+              %). Neto al proveedor:{" "}
+              <span className="font-mono">ARS {retencion.importeNetoAPagar}</span>. Vencimiento
+              ARCA: {retencion.fechaVencimientoArca}. Se genera el pasivo 2.1.3.07 y su certificado.
+            </div>
+          )}
           <AsientoPreview
             tipo={tipo}
             moneda={moneda}
@@ -706,6 +753,7 @@ export function MovimientoForm({
               descripcion: l?.descripcion ?? "",
             }))}
             totalCalculado={totalCalculado}
+            retencion={retencion?.aplica ? retencion : null}
           />
         </CardContent>
       </Card>
@@ -781,6 +829,7 @@ function AsientoPreview({
   banco,
   lineas,
   totalCalculado,
+  retencion,
 }: {
   tipo: "COBRO" | "PAGO";
   moneda: "ARS" | "USD";
@@ -791,6 +840,7 @@ function AsientoPreview({
     descripcion: string;
   }>;
   totalCalculado: number;
+  retencion: { importeRetenido: string; importeNetoAPagar: string } | null;
 }) {
   const valorFmt = totalCalculado > 0 ? totalCalculado.toFixed(2) : "—";
 
@@ -842,6 +892,23 @@ function AsientoPreview({
           haber: m > 0 ? m.toFixed(2) : "—",
         };
       }),
+    ];
+  } else if (tipo === "PAGO" && retencion) {
+    // Pago con retención Ganancias: proveedor por el bruto, banco por el neto,
+    // y el pasivo 2.1.3.07 por la retención.
+    rows = [
+      ...lineas.map((l) => {
+        const m = Number(l.monto);
+        return { role: "DEBE", cuenta: l.cuenta, debe: m > 0 ? m.toFixed(2) : "—", haber: "—" };
+      }),
+      { role: "HABER", cuenta: banco, debe: "—", haber: retencion.importeNetoAPagar },
+      {
+        role: "HABER",
+        cuenta: null,
+        cuentaOverride: { codigo: "2.1.3.07", nombre: "RETENCIONES GANANCIAS A PAGAR" },
+        debe: "—",
+        haber: retencion.importeRetenido,
+      },
     ];
   } else {
     rows = [
