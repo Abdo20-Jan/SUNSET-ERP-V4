@@ -31,6 +31,7 @@ import {
 } from "@/lib/actions/retenciones";
 import type { ContextoAmortizacion } from "@/lib/actions/prestamos";
 import type { FacturaPendiente } from "@/lib/services/cuentas-a-pagar";
+import { ConceptoRG830 } from "@/generated/prisma/client";
 import { cn } from "@/lib/utils";
 import { parseDefaultFecha } from "@/lib/utils/parse-default-fecha";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,15 @@ import { Textarea } from "@/components/ui/textarea";
 
 const DECIMAL_RE = /^\d+(\.\d{1,2})?$/;
 const FX_RE = /^\d+(\.\d{1,6})?$/;
+
+const CONCEPTO_LABEL: Record<ConceptoRG830, string> = {
+  BIENES_DE_CAMBIO: "Bienes de cambio",
+  HONORARIOS: "Honorarios",
+  ALQUILERES: "Alquileres",
+  SERVICIOS_GENERALES: "Servicios generales",
+  LOCACIONES_SERVICIOS: "Locaciones / servicios",
+};
+const CONCEPTO_VALUES = Object.keys(CONCEPTO_LABEL) as ConceptoRG830[];
 
 const lineaSchema = z.object({
   cuentaContableId: z.number().int().positive({ message: "Seleccione la cuenta" }),
@@ -211,6 +221,7 @@ export function MovimientoForm({
   contextoAmortizacion,
   modoInicial,
   defaultFecha,
+  retencionGananciasEnabled = false,
 }: {
   cuentasBancarias: CuentaBancariaOption[];
   cuentasContrapartida: CuentaContableContrapartidaOption[];
@@ -219,6 +230,7 @@ export function MovimientoForm({
   contextoAmortizacion?: ContextoAmortizacion | null;
   modoInicial?: ModoAmortizacion;
   defaultFecha?: string;
+  retencionGananciasEnabled?: boolean;
 }) {
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
@@ -315,6 +327,44 @@ export function MovimientoForm({
     };
   }, [tipo, moneda, cuentaUnicaContrapartida, fecha, baseRetStr]);
 
+  // Retención manual: el usuario decide aplicarla y carga el importe a mano.
+  // Disponible sólo en PAGO ARS a una única cuenta de proveedor (no en
+  // amortización de préstamo), para cualquier proveedor.
+  const [retManualOn, setRetManualOn] = useState(false);
+  const [retConcepto, setRetConcepto] = useState<ConceptoRG830>("BIENES_DE_CAMBIO");
+  const [retImporte, setRetImporte] = useState("");
+  const retManualDisponible =
+    retencionGananciasEnabled &&
+    !contextoAmortizacion &&
+    tipo === "PAGO" &&
+    moneda === "ARS" &&
+    !!cuentaUnicaContrapartida;
+  const retImporteNum = Number(retImporte);
+  const retManualEnviable =
+    retManualDisponible && retManualOn && DECIMAL_RE.test(retImporte) && retImporteNum > 0;
+  const retManualValido = retManualEnviable && retImporteNum < totalCalculado;
+  // Retención "efectiva" para el preview/asiento: manual cuando está activa y
+  // es válida; si no, el cálculo automático cuando aplica y el manual está off.
+  const retencionEfectiva = retManualValido
+    ? {
+        importeRetenido: retImporteNum.toFixed(2),
+        importeNetoAPagar: (totalCalculado - retImporteNum).toFixed(2),
+        alicuota: ((retImporteNum / totalCalculado) * 100).toFixed(2),
+      }
+    : !retManualOn && retencion?.aplica
+      ? {
+          importeRetenido: retencion.importeRetenido,
+          importeNetoAPagar: retencion.importeNetoAPagar,
+          alicuota: retencion.alicuota,
+        }
+      : null;
+  const toggleRetManual = (on: boolean) => {
+    setRetManualOn(on);
+    if (on && retImporte === "" && retencion?.aplica) {
+      setRetImporte(retencion.importeRetenido);
+    }
+  };
+
   const handleModoChange = (nuevoModo: ModoAmortizacion) => {
     if (!contextoAmortizacion) return;
     if (nuevoModo === "intereses" && !contextoAmortizacion.cuentaIntereses) {
@@ -360,6 +410,9 @@ export function MovimientoForm({
         descripcion: values.descripcion,
         comprobante: values.comprobante,
         referenciaBanco: values.referenciaBanco,
+        retencionGananciasManual: retManualEnviable
+          ? { importeRetenido: retImporte, concepto: retConcepto }
+          : undefined,
       });
 
       if (result.ok) {
@@ -672,6 +725,72 @@ export function MovimientoForm({
                   })}
                 </span>
               </div>
+              {retManualDisponible && (
+                <div className="flex flex-col gap-2 rounded-md border p-3">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      checked={retManualOn}
+                      onChange={(e) => toggleRetManual(e.target.checked)}
+                    />
+                    Aplicar retención de Ganancias (RG 830)
+                  </label>
+                  {retManualOn && (
+                    <div className="flex flex-col gap-3">
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="flex flex-col gap-1.5">
+                          <Label>Concepto</Label>
+                          <Select
+                            value={retConcepto}
+                            onValueChange={(v) => setRetConcepto(v as ConceptoRG830)}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CONCEPTO_VALUES.map((c) => (
+                                <SelectItem key={c} value={c}>
+                                  {CONCEPTO_LABEL[c]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor="ret-importe">Importe retenido (ARS)</Label>
+                          <Input
+                            id="ret-importe"
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            className="text-right tabular-nums"
+                            value={retImporte}
+                            onChange={(e) => setRetImporte(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      {retencion?.aplica && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Sugerido RG 830:{" "}
+                          <button
+                            type="button"
+                            className="underline underline-offset-2"
+                            onClick={() => setRetImporte(retencion.importeRetenido)}
+                          >
+                            ARS {retencion.importeRetenido}
+                          </button>{" "}
+                          ({retencion.alicuota}%).
+                        </p>
+                      )}
+                      {retImporte !== "" && !retManualValido && (
+                        <p className="text-[11px] text-destructive">
+                          El importe debe ser mayor a 0 y menor al total del pago.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <p className="text-xs text-muted-foreground">
                 {tipo === "COBRO"
                   ? "Origen del cobro: cliente, ingreso, pasivo cancelado, etc. Podés partir el cobro en varias contrapartidas (ej: cliente paga factura + impuesto)."
@@ -733,14 +852,16 @@ export function MovimientoForm({
                 como gasto (5.8.1.06) y 33% como crédito pago a cuenta de Ganancias (1.1.4.12).
               </div>
             )}
-          {retencion?.aplica && (
+          {retencionEfectiva && (
             <div className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
-              <strong>Retención Ganancias (RG 830)</strong> — se retendrá{" "}
-              <span className="font-mono">ARS {retencion.importeRetenido}</span> (
-              {retencion.alicuota}
-              %). Neto al proveedor:{" "}
-              <span className="font-mono">ARS {retencion.importeNetoAPagar}</span>. Vencimiento
-              ARCA: {retencion.fechaVencimientoArca}. Se genera el pasivo 2.1.3.07 y su certificado.
+              <strong>Retención Ganancias (RG 830){retManualValido ? " — manual" : ""}</strong> — se
+              retendrá <span className="font-mono">ARS {retencionEfectiva.importeRetenido}</span> (
+              {retencionEfectiva.alicuota}%). Neto al proveedor:{" "}
+              <span className="font-mono">ARS {retencionEfectiva.importeNetoAPagar}</span>.
+              {!retManualValido && retencion?.aplica
+                ? ` Vencimiento ARCA: ${retencion.fechaVencimientoArca}.`
+                : ""}{" "}
+              Se genera el pasivo 2.1.3.07 y su certificado.
             </div>
           )}
           <AsientoPreview
@@ -753,7 +874,7 @@ export function MovimientoForm({
               descripcion: l?.descripcion ?? "",
             }))}
             totalCalculado={totalCalculado}
-            retencion={retencion?.aplica ? retencion : null}
+            retencion={retencionEfectiva}
           />
         </CardContent>
       </Card>

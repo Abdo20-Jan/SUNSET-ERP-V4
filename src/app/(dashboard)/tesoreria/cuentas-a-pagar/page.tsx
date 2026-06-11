@@ -25,6 +25,7 @@ import { listarCuentasBancariasParaVep } from "@/lib/actions/vep-embarque";
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
 import { listarVepDespachosPendientes } from "@/lib/actions/vep-despacho";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
+import { isRetencionGananciasEnabled } from "@/lib/features";
 
 import { VepSection } from "./vep-section";
 import { VepDespachoSection } from "./vep-despacho-section";
@@ -97,6 +98,7 @@ export default async function CuentasAPagarPage() {
         proveedores={saldosProveedores}
         cuentasBancarias={cuentasBancariasMov}
         defaultFecha={defaultFecha}
+        retencionGananciasEnabled={isRetencionGananciasEnabled()}
       />
 
       <EmbarqueBatchPago
