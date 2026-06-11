@@ -328,8 +328,14 @@ export function MovimientoForm({
   }, [tipo, moneda, cuentaUnicaContrapartida, fecha, baseRetStr]);
 
   // Retención manual: el usuario decide aplicarla y carga el importe a mano.
-  // Disponible sólo en PAGO ARS a una única cuenta de proveedor (no en
-  // amortización de préstamo), para cualquier proveedor.
+  // Disponible sólo en PAGO ARS a una única cuenta de proveedor, una sola
+  // línea (no en amortización), para cualquier proveedor.
+  //
+  // Semántica: el "Monto" que el usuario escribe es el NETO que sale del
+  // banco (lo que efectivamente transfiere). La retención se SUMA para
+  // obtener el bruto, que es lo que se debita al proveedor (cancela la
+  // factura completa). Asiento: DEBE proveedor (bruto = neto + retención) /
+  // HABER banco (neto) / HABER 2.1.3.07 (retención).
   const [retManualOn, setRetManualOn] = useState(false);
   const [retConcepto, setRetConcepto] = useState<ConceptoRG830>("BIENES_DE_CAMBIO");
   const [retImporte, setRetImporte] = useState("");
@@ -338,18 +344,21 @@ export function MovimientoForm({
     !contextoAmortizacion &&
     tipo === "PAGO" &&
     moneda === "ARS" &&
-    !!cuentaUnicaContrapartida;
+    !!cuentaUnicaContrapartida &&
+    (lineas?.length ?? 0) === 1;
   const retImporteNum = Number(retImporte);
   const retManualEnviable =
     retManualDisponible && retManualOn && DECIMAL_RE.test(retImporte) && retImporteNum > 0;
-  const retManualValido = retManualEnviable && retImporteNum < totalCalculado;
+  const retManualValido = retManualEnviable && totalCalculado > 0;
+  // Bruto = neto tipeado + retención. Lo que se debita al proveedor.
+  const brutoManual = totalCalculado + retImporteNum;
   // Retención "efectiva" para el preview/asiento: manual cuando está activa y
   // es válida; si no, el cálculo automático cuando aplica y el manual está off.
   const retencionEfectiva = retManualValido
     ? {
         importeRetenido: retImporteNum.toFixed(2),
-        importeNetoAPagar: (totalCalculado - retImporteNum).toFixed(2),
-        alicuota: ((retImporteNum / totalCalculado) * 100).toFixed(2),
+        importeNetoAPagar: totalCalculado.toFixed(2),
+        alicuota: brutoManual > 0 ? ((retImporteNum / brutoManual) * 100).toFixed(2) : "0",
       }
     : !retManualOn && retencion?.aplica
       ? {
@@ -393,20 +402,27 @@ export function MovimientoForm({
         fecha: values.fecha,
         moneda: values.moneda,
         tipoCambio: values.tipoCambio,
-        lineas: values.lineas.map((l, idx) => ({
-          cuentaContableId: l.cuentaContableId,
-          monto: l.monto,
-          descripcion: l.descripcion,
-          appliedTo:
-            values.tipo === "PAGO"
-              ? buildAppliedToForLinea({
-                  monto: l.monto,
-                  cuentaContableId: l.cuentaContableId,
-                  selectedKeys: appliedFactByLinea[idx],
-                  facturasPendientesPorCuenta,
-                })
-              : undefined,
-        })),
+        lineas: values.lineas.map((l, idx) => {
+          // Con retención manual, el monto tipeado es el NETO; al proveedor
+          // se le debita el BRUTO (= neto + retención). El backend deriva el
+          // neto al banco restando la retención del bruto.
+          const montoEfectivo =
+            retManualEnviable && idx === 0 ? (Number(l.monto) + retImporteNum).toFixed(2) : l.monto;
+          return {
+            cuentaContableId: l.cuentaContableId,
+            monto: montoEfectivo,
+            descripcion: l.descripcion,
+            appliedTo:
+              values.tipo === "PAGO"
+                ? buildAppliedToForLinea({
+                    monto: montoEfectivo,
+                    cuentaContableId: l.cuentaContableId,
+                    selectedKeys: appliedFactByLinea[idx],
+                    facturasPendientesPorCuenta,
+                  })
+                : undefined,
+          };
+        }),
         descripcion: values.descripcion,
         comprobante: values.comprobante,
         referenciaBanco: values.referenciaBanco,
@@ -769,6 +785,10 @@ export function MovimientoForm({
                           />
                         </div>
                       </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        El <strong>Monto</strong> de arriba es el neto que sale del banco. La
+                        retención se suma para cancelar la factura completa del proveedor.
+                      </p>
                       {retencion?.aplica && (
                         <p className="text-[11px] text-muted-foreground">
                           Sugerido RG 830:{" "}
@@ -782,10 +802,33 @@ export function MovimientoForm({
                           ({retencion.alicuota}%).
                         </p>
                       )}
-                      {retImporte !== "" && !retManualValido && (
-                        <p className="text-[11px] text-destructive">
-                          El importe debe ser mayor a 0 y menor al total del pago.
-                        </p>
+                      {retManualValido ? (
+                        <div className="flex flex-col gap-0.5 rounded border bg-muted/40 px-2.5 py-1.5 text-[11px]">
+                          <div className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">Sale del banco (neto)</span>
+                            <span className="font-mono tabular-nums">
+                              ARS {totalCalculado.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">Retención a depositar</span>
+                            <span className="font-mono tabular-nums">
+                              ARS {retImporteNum.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between gap-2 border-t pt-0.5 font-medium">
+                            <span>Débito al proveedor (bruto)</span>
+                            <span className="font-mono tabular-nums">
+                              ARS {brutoManual.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        retImporte !== "" && (
+                          <p className="text-[11px] text-destructive">
+                            El importe debe ser mayor a 0.
+                          </p>
+                        )
                       )}
                     </div>
                   )}
@@ -856,7 +899,7 @@ export function MovimientoForm({
             <div className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
               <strong>Retención Ganancias (RG 830){retManualValido ? " — manual" : ""}</strong> — se
               retendrá <span className="font-mono">ARS {retencionEfectiva.importeRetenido}</span> (
-              {retencionEfectiva.alicuota}%). Neto al proveedor:{" "}
+              {retencionEfectiva.alicuota}%). Sale del banco (neto):{" "}
               <span className="font-mono">ARS {retencionEfectiva.importeNetoAPagar}</span>.
               {!retManualValido && retencion?.aplica
                 ? ` Vencimiento ARCA: ${retencion.fechaVencimientoArca}.`
@@ -868,12 +911,12 @@ export function MovimientoForm({
             tipo={tipo}
             moneda={moneda}
             banco={bancoSeleccionado}
-            lineas={(lineas ?? []).map((l) => ({
+            lineas={(lineas ?? []).map((l, idx) => ({
               cuenta: cuentasContrapartida.find((c) => c.id === l?.cuentaContableId) ?? null,
-              monto: l?.monto ?? "0",
+              monto: retManualValido && idx === 0 ? brutoManual.toFixed(2) : (l?.monto ?? "0"),
               descripcion: l?.descripcion ?? "",
             }))}
-            totalCalculado={totalCalculado}
+            totalCalculado={retManualValido ? brutoManual : totalCalculado}
             retencion={retencionEfectiva}
           />
         </CardContent>
