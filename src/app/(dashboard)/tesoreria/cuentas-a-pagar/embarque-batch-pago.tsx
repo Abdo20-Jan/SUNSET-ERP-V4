@@ -419,6 +419,14 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, intermediarios, defa
               </Button>
             </div>
 
+            {seleccionados.length > 1 && (
+              <div className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
+                <strong>Retención Ganancias:</strong> en pago múltiple (varios proveedores) NO se
+                aplica retención automática. Si algún proveedor local es sujeto, pagalo por separado
+                para que el sistema retenga.
+              </div>
+            )}
+
             {/* Toggle pago vía intermediário (despachante) */}
             <label className="flex cursor-pointer items-start gap-2 rounded-md border bg-card px-3 py-2 text-[12px]">
               <Checkbox
