@@ -352,6 +352,18 @@ export function MovimientoForm({
   const retManualValido = retManualEnviable && totalCalculado > 0;
   // Bruto = neto tipeado + retención. Lo que se debita al proveedor.
   const brutoManual = totalCalculado + retImporteNum;
+  // Total pendiente del proveedor según sus facturas registradas (mismo dato
+  // que el selector Layer 0). Permite mostrar cuánto le queda pendiente luego
+  // de aplicar el bruto. null si no hay facturas pendientes conocidas.
+  const totalPendienteProveedor = useMemo(() => {
+    if (!cuentaUnicaContrapartida) return null;
+    const fs = facturasPendientesPorCuenta?.[cuentaUnicaContrapartida];
+    if (!fs || fs.length === 0) return null;
+    return fs.reduce((s, f) => s + (Number(f.monto) || 0), 0);
+  }, [cuentaUnicaContrapartida, facturasPendientesPorCuenta]);
+  // Saldo del proveedor luego de imputar el bruto de este pago.
+  const pendienteDespuesProveedor =
+    totalPendienteProveedor != null ? totalPendienteProveedor - brutoManual : null;
   // Retención "efectiva" para el preview/asiento: manual cuando está activa y
   // es válida; si no, el cálculo automático cuando aplica y el manual está off.
   const retencionEfectiva = retManualValido
@@ -822,6 +834,20 @@ export function MovimientoForm({
                               ARS {brutoManual.toFixed(2)}
                             </span>
                           </div>
+                          {pendienteDespuesProveedor != null && (
+                            <div className="flex justify-between gap-2 border-t pt-0.5">
+                              <span className="text-muted-foreground">
+                                {pendienteDespuesProveedor > 0.005
+                                  ? "Queda pendiente del proveedor"
+                                  : pendienteDespuesProveedor < -0.005
+                                    ? "Excede lo pendiente (saldo a favor)"
+                                    : "Cancela la factura completa ✓"}
+                              </span>
+                              <span className="font-mono tabular-nums">
+                                ARS {Math.abs(pendienteDespuesProveedor).toFixed(2)}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         retImporte !== "" && (
