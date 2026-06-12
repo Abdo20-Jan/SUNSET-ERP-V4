@@ -11,6 +11,7 @@ import {
   GastoEstado,
   Moneda,
   MovimientoTesoreriaTipo,
+  type Prisma,
   TipoProveedor,
 } from "@/generated/prisma/client";
 
@@ -1617,6 +1618,179 @@ function tokenizar(s: string | null | undefined): Set<string> {
   return new Set(s.split(/[\s—,;]+/).filter((t) => t.length > 0));
 }
 
+// ------------------------------------------------------------
+// Pagos USD aplicados a cuentas de proveedores del exterior.
+//
+// Fuente del monto USD de cada línea DEBE de pago, en orden:
+//   1. montoOrigen con monedaOrigen=USD — canónico: el principal USD es
+//      metadata de la línea, invariante a TC (debe/haber viven en ARS).
+//   2. Legacy sin metadata (asiento USD + MovimientoTesoreria PAGO USD):
+//      con una sola línea DEBE en el asiento, el monto USD del movimiento
+//      es de esa línea (cubre el pago exterior 2-líneas con debe en ARS y
+//      el pago manual single-contrapartida); con multi-DEBE, las líneas
+//      legacy están grabadas en USD crudo y `debe` ES el USD.
+//   Nunca debe−haber como si fuera USD: en el modelo canónico debe está
+//   en ARS y leerlo como USD hacía desaparecer facturas (pagado ARS
+//   gigante → saldo negativo → filtrada de la vista).
+//
+// Match pago→factura:
+//   - Si la línea tiene AplicacionPago* (FK estructural), cuenta SOLO
+//     para sus facturas aplicadas (prorrateo por montoArs si hay split);
+//     los tokens se ignoran — evita doble descuento cuando otra factura
+//     del mismo embarque comparte el código en la descripción.
+//   - Sin aplicaciones (legacy / embarqueFob): tokens en la descripción.
+//
+// Compartido entre getSaldosExteriorPorProveedor (vista) y
+// pagarFacturaExteriorAction (validación de saldo) para que ambos vean
+// exactamente el mismo pagado USD.
+// ------------------------------------------------------------
+
+type DecimalT = ReturnType<typeof toDecimal>;
+type DbClient = Prisma.TransactionClient | typeof db;
+
+export type PagoUsdAplicado = {
+  usd: DecimalT;
+  tokens: Set<string>;
+  aplicacionesCompra: Array<{ compraId: string; montoArs: DecimalT }>;
+  aplicacionesEmbarqueCosto: Array<{ embarqueCostoId: number; montoArs: DecimalT }>;
+  // Aplicaciones a gastos: nunca matchean facturas del exterior, pero su
+  // presencia ancla la línea (layer 0) — no debe caer al fallback de tokens.
+  aplicadoGastoArs: DecimalT;
+};
+
+export type FacturaUsdRef = {
+  origen: "compra" | "embarqueCosto" | "embarqueFob";
+  /** UUID (compra / embarqueFob = id del Embarque) o id numérico como string (embarqueCosto). */
+  id: string;
+  numero: string;
+  embarqueCodigo: string | null;
+};
+
+export async function getPagosUsdPorCuenta(
+  client: DbClient,
+  cuentaIds: number[],
+): Promise<Map<number, PagoUsdAplicado[]>> {
+  const out = new Map<number, PagoUsdAplicado[]>();
+  if (cuentaIds.length === 0) return out;
+
+  const lineas = await client.lineaAsiento.findMany({
+    where: {
+      cuentaId: { in: cuentaIds },
+      debe: { gt: 0 },
+      asiento: {
+        estado: AsientoEstado.CONTABILIZADO,
+        movimiento: { tipo: MovimientoTesoreriaTipo.PAGO },
+      },
+      OR: [
+        { monedaOrigen: Moneda.USD },
+        { asiento: { moneda: Moneda.USD, movimiento: { moneda: Moneda.USD } } },
+      ],
+    },
+    select: {
+      cuentaId: true,
+      debe: true,
+      descripcion: true,
+      monedaOrigen: true,
+      montoOrigen: true,
+      asiento: {
+        select: {
+          moneda: true,
+          movimiento: { select: { monto: true, moneda: true } },
+          lineas: { where: { debe: { gt: 0 } }, select: { id: true } },
+        },
+      },
+      aplicacionesPagoCompra: { select: { compraId: true, montoArs: true } },
+      aplicacionesPagoEmbarqueCosto: { select: { embarqueCostoId: true, montoArs: true } },
+      aplicacionesPagoGasto: { select: { montoArs: true } },
+    },
+  });
+
+  for (const l of lineas) {
+    const usd = usdDeLineaPago(l);
+    if (usd.lte(0.005)) continue;
+    const arr = out.get(l.cuentaId) ?? [];
+    arr.push({
+      usd,
+      tokens: tokenizar(l.descripcion),
+      aplicacionesCompra: l.aplicacionesPagoCompra.map((a) => ({
+        compraId: a.compraId,
+        montoArs: toDecimal(a.montoArs),
+      })),
+      aplicacionesEmbarqueCosto: l.aplicacionesPagoEmbarqueCosto.map((a) => ({
+        embarqueCostoId: a.embarqueCostoId,
+        montoArs: toDecimal(a.montoArs),
+      })),
+      aplicadoGastoArs: l.aplicacionesPagoGasto.reduce(
+        (acc, a) => acc.plus(toDecimal(a.montoArs)),
+        toDecimal(0),
+      ),
+    });
+    out.set(l.cuentaId, arr);
+  }
+  return out;
+}
+
+function usdDeLineaPago(l: {
+  debe: Prisma.Decimal;
+  monedaOrigen: Moneda | null;
+  montoOrigen: Prisma.Decimal | null;
+  asiento: {
+    moneda: Moneda;
+    movimiento: { monto: Prisma.Decimal; moneda: Moneda } | null;
+    lineas: Array<{ id: number }>;
+  };
+}): DecimalT {
+  if (l.monedaOrigen === Moneda.USD && l.montoOrigen !== null) {
+    return toDecimal(l.montoOrigen);
+  }
+  const mov = l.asiento.movimiento;
+  if (l.asiento.moneda === Moneda.USD && mov !== null && mov.moneda === Moneda.USD) {
+    if (l.asiento.lineas.length === 1) return toDecimal(mov.monto);
+    return toDecimal(l.debe);
+  }
+  return toDecimal(0);
+}
+
+export function pagadoUsdParaFactura(
+  pagos: PagoUsdAplicado[] | undefined,
+  factura: FacturaUsdRef,
+): DecimalT {
+  let pagado = toDecimal(0);
+  if (!pagos || pagos.length === 0) return pagado;
+  const numTokens = tokenizar(factura.numero);
+
+  for (const p of pagos) {
+    const totalAplicadoArs = [...p.aplicacionesCompra, ...p.aplicacionesEmbarqueCosto]
+      .reduce((acc, a) => acc.plus(a.montoArs), toDecimal(0))
+      .plus(p.aplicadoGastoArs);
+
+    if (totalAplicadoArs.gt(0)) {
+      // Layer 0 — FK estructural: la línea cuenta sólo para sus facturas.
+      let arsParaFactura = toDecimal(0);
+      if (factura.origen === "compra") {
+        for (const a of p.aplicacionesCompra) {
+          if (a.compraId === factura.id) arsParaFactura = arsParaFactura.plus(a.montoArs);
+        }
+      } else if (factura.origen === "embarqueCosto") {
+        const idNum = Number(factura.id);
+        for (const a of p.aplicacionesEmbarqueCosto) {
+          if (a.embarqueCostoId === idNum) arsParaFactura = arsParaFactura.plus(a.montoArs);
+        }
+      }
+      if (arsParaFactura.gt(0)) {
+        pagado = pagado.plus(p.usd.times(arsParaFactura).dividedBy(totalAplicadoArs));
+      }
+      continue;
+    }
+
+    // Fallback legacy / embarqueFob (sin tabla de aplicación): tokens.
+    const matchNumero = numTokens.size > 0 && [...numTokens].every((t) => p.tokens.has(t));
+    const matchEmbarque = factura.embarqueCodigo !== null && p.tokens.has(factura.embarqueCodigo);
+    if (matchNumero || matchEmbarque) pagado = pagado.plus(p.usd);
+  }
+  return pagado.toDecimalPlaces(2);
+}
+
 export async function getSaldosExteriorPorProveedor(): Promise<ProveedorExteriorSaldo[]> {
   const proveedores = await db.proveedor.findMany({
     where: {
@@ -1641,65 +1815,9 @@ export async function getSaldosExteriorPorProveedor(): Promise<ProveedorExterior
     .map((p) => p.cuentaContableId)
     .filter((id): id is number => id !== null);
 
-  // MovimientosTesoreria USD tipo PAGO que toquen las cuentas de proveedores
-  // exterior. Tomamos la línea DEBE (la que reduce el pasivo del proveedor).
-  const lineasPago =
-    cuentaIds.length > 0
-      ? await db.lineaAsiento.findMany({
-          where: {
-            cuentaId: { in: cuentaIds },
-            asiento: {
-              estado: AsientoEstado.CONTABILIZADO,
-              moneda: Moneda.USD,
-              movimiento: {
-                tipo: MovimientoTesoreriaTipo.PAGO,
-                moneda: Moneda.USD,
-              },
-            },
-          },
-          select: {
-            cuentaId: true,
-            debe: true,
-            haber: true,
-            descripcion: true,
-          },
-        })
-      : [];
-
-  // Por cuenta del proveedor: lista de pagos USD con sus tokens
-  const pagosUsdPorCuenta = new Map<
-    number,
-    Array<{ neto: ReturnType<typeof toDecimal>; tokens: Set<string> }>
-  >();
-  for (const l of lineasPago) {
-    const debe = toDecimal(l.debe);
-    const haber = toDecimal(l.haber);
-    const neto = debe.minus(haber);
-    if (neto.lte(0.005)) continue;
-    const arr = pagosUsdPorCuenta.get(l.cuentaId) ?? [];
-    arr.push({ neto, tokens: tokenizar(l.descripcion) });
-    pagosUsdPorCuenta.set(l.cuentaId, arr);
-  }
-
-  function pagadoUsdParaFactura(
-    cuentaId: number | null,
-    numero: string,
-    embarqueCodigo: string | null,
-  ): ReturnType<typeof toDecimal> {
-    if (cuentaId === null) return toDecimal(0);
-    const pagos = pagosUsdPorCuenta.get(cuentaId);
-    if (!pagos) return toDecimal(0);
-    const numTokens = tokenizar(numero);
-    let pagado = toDecimal(0);
-    for (const p of pagos) {
-      const matchNumero = numTokens.size > 0 && [...numTokens].every((t) => p.tokens.has(t));
-      const matchEmbarque = embarqueCodigo !== null && p.tokens.has(embarqueCodigo);
-      if (matchNumero || matchEmbarque) {
-        pagado = pagado.plus(p.neto);
-      }
-    }
-    return pagado;
-  }
+  // Pagos USD por cuenta del proveedor — montoOrigen + AplicacionPago* como
+  // fuente de verdad, con fallback legacy (ver getPagosUsdPorCuenta arriba).
+  const pagosUsdPorCuenta = await getPagosUsdPorCuenta(db, cuentaIds);
 
   // Compras USD del proveedor
   const compras = await db.compra.findMany({
@@ -1818,6 +1936,7 @@ export async function getSaldosExteriorPorProveedor(): Promise<ProveedorExterior
 
   for (const p of proveedores) {
     const cuentaId = cuentaPorProveedor.get(p.id) ?? null;
+    const pagosProv = cuentaId !== null ? pagosUsdPorCuenta.get(cuentaId) : undefined;
     const embarquesProv = embarquesPorProveedor.get(p.id) ?? [];
 
     // Bucket por embarque + sueltas
@@ -1831,7 +1950,12 @@ export async function getSaldosExteriorPorProveedor(): Promise<ProveedorExterior
       const embarqueRef = pedidoId !== null ? embarquePorPedido.get(pedidoId) : undefined;
       const embCodigo = embarqueRef?.codigo ?? null;
       const totalUsd = toDecimal(c.total);
-      const pagadoUsd = pagadoUsdParaFactura(cuentaId, c.numero, embCodigo);
+      const pagadoUsd = pagadoUsdParaFactura(pagosProv, {
+        origen: "compra",
+        id: c.id,
+        numero: c.numero,
+        embarqueCodigo: embCodigo,
+      });
       const saldoUsd = totalUsd.minus(pagadoUsd);
       if (saldoUsd.lte(0.005)) continue;
       const f: FacturaSaldoUsd = {
@@ -1867,7 +1991,12 @@ export async function getSaldosExteriorPorProveedor(): Promise<ProveedorExterior
         .plus(toDecimal(c.otros));
       const facturaNumero = c.facturaNumero ?? `Factura #${c.id}`;
       const embCodigo = c.embarque.codigo;
-      const pagadoUsd = pagadoUsdParaFactura(cuentaId, facturaNumero, embCodigo);
+      const pagadoUsd = pagadoUsdParaFactura(pagosProv, {
+        origen: "embarqueCosto",
+        id: String(c.id),
+        numero: facturaNumero,
+        embarqueCodigo: embCodigo,
+      });
       const saldoUsd = totalUsd.minus(pagadoUsd);
       if (saldoUsd.lte(0.005)) continue;
       const f: FacturaSaldoUsd = {
@@ -1898,7 +2027,12 @@ export async function getSaldosExteriorPorProveedor(): Promise<ProveedorExterior
         toDecimal(0),
       );
       if (totalUsd.lte(0.005)) continue;
-      const pagadoUsd = pagadoUsdParaFactura(cuentaId, emb.codigo, emb.codigo);
+      const pagadoUsd = pagadoUsdParaFactura(pagosProv, {
+        origen: "embarqueFob",
+        id: emb.id,
+        numero: emb.codigo,
+        embarqueCodigo: emb.codigo,
+      });
       const saldoUsd = totalUsd.minus(pagadoUsd);
       if (saldoUsd.lte(0.005)) continue;
       facturasPorEmbarque.set(emb.id, [
