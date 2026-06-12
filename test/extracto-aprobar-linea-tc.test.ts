@@ -196,12 +196,27 @@ describe("aprobarLineaAction — TC real en extracto de cuenta extranjera", () =
 
     const mov = await db.prisma.movimientoTesoreria.findUniqueOrThrow({
       where: { id: r.movimientoId },
-      include: { asiento: { select: { tipoCambio: true, moneda: true } } },
+      include: {
+        asiento: {
+          select: { tipoCambio: true, moneda: true, lineas: { orderBy: { debe: "desc" } } },
+        },
+      },
     });
     expect(Number(mov.tipoCambio)).toBeCloseTo(1100.5, 4);
     expect(mov.moneda).toBe("USD");
-    // El asiento hereda el TC real del movimiento.
-    expect(Number(mov.asiento?.tipoCambio)).toBeCloseTo(1100.5, 4);
+    // Libro ARS-único (E3): el asiento es ARS/TC=1, el debe/haber va en pesos
+    // (1500 × 1100.5) y el principal USD + TC real quedan en la metadata.
+    expect(mov.asiento?.moneda).toBe("ARS");
+    expect(Number(mov.asiento?.tipoCambio)).toBe(1);
+    const lineasAsiento = mov.asiento?.lineas ?? [];
+    expect(lineasAsiento).toHaveLength(2);
+    for (const la of lineasAsiento) {
+      const ars = Number(la.debe) > 0 ? Number(la.debe) : Number(la.haber);
+      expect(ars).toBeCloseTo(1500 * 1100.5, 2);
+      expect(la.monedaOrigen).toBe("USD");
+      expect(Number(la.montoOrigen)).toBeCloseTo(1500, 2);
+      expect(Number(la.tipoCambioOrigen)).toBeCloseTo(1100.5, 4);
+    }
 
     const lineaDb = await db.prisma.lineaExtractoSugerencia.findUniqueOrThrow({
       where: { id: linea.id },
@@ -236,10 +251,20 @@ describe("aprobarLineaAction — TC real en extracto de cuenta extranjera", () =
 
     const mov = await db.prisma.movimientoTesoreria.findUniqueOrThrow({
       where: { id: r.movimientoId },
+      include: { asiento: { select: { moneda: true, tipoCambio: true, lineas: true } } },
     });
     expect(mov.tipo).toBe("PAGO");
     expect(Number(mov.tipoCambio)).toBeCloseTo(1250, 4);
     expect(Number(mov.monto)).toBeCloseTo(800, 2);
+    // Libro ARS-único: debe/haber en pesos (800 × 1250), USD en metadata.
+    expect(mov.asiento?.moneda).toBe("ARS");
+    expect(Number(mov.asiento?.tipoCambio)).toBe(1);
+    for (const la of mov.asiento?.lineas ?? []) {
+      const ars = Number(la.debe) > 0 ? Number(la.debe) : Number(la.haber);
+      expect(ars).toBeCloseTo(800 * 1250, 2);
+      expect(la.monedaOrigen).toBe("USD");
+      expect(Number(la.montoOrigen)).toBeCloseTo(800, 2);
+    }
   });
 
   it("TC manual inválido (<= 0): rechaza antes de tocar la base", async () => {
