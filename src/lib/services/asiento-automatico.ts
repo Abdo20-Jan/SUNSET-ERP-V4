@@ -2588,6 +2588,20 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
       );
     }
 
+    // Marca facturas BORRADOR bundleadas como LEGACY_BUNDLED. Sin esto,
+    // CxP "Por embarque" (filtra EMITIDA / LEGACY_BUNDLED) las ignora
+    // aunque el HABER al proveedor ya esté en el asiento del despacho.
+    // No se asigna asientoId — la columna es @unique y reservada para
+    // facturas EMITIDA (asiento standalone, 1-a-1). En LEGACY_BUNDLED el
+    // mismo asiento del despacho suele incluir varias facturas.
+    const bundleablesIds = facturasDespacho.filter((f) => f.estado === "BORRADOR").map((f) => f.id);
+    if (bundleablesIds.length > 0) {
+      await inner.embarqueCosto.updateMany({
+        where: { id: { in: bundleablesIds }, estado: "BORRADOR" },
+        data: { estado: "LEGACY_BUNDLED" },
+      });
+    }
+
     return asiento;
   };
 
@@ -2920,6 +2934,20 @@ export async function crearAsientoDespachoCruzado(
         "CONCURRENCIA",
         `Despacho ${despacho.id} fue contabilizado simultáneamente por otro proceso (race detectado).`,
       );
+    }
+
+    // Marca facturas BORRADOR bundleadas como LEGACY_BUNDLED. Sin esto,
+    // CxP "Por embarque" (filtra EMITIDA / LEGACY_BUNDLED) las ignora
+    // aunque el HABER al proveedor ya esté en el asiento del despacho.
+    // No se asigna asientoId — la columna es @unique y reservada para
+    // facturas EMITIDA (asiento standalone, 1-a-1). En LEGACY_BUNDLED el
+    // mismo asiento del despacho suele incluir varias facturas.
+    const bundleablesIds = facturasDespacho.filter((f) => f.estado === "BORRADOR").map((f) => f.id);
+    if (bundleablesIds.length > 0) {
+      await inner.embarqueCosto.updateMany({
+        where: { id: { in: bundleablesIds }, estado: "BORRADOR" },
+        data: { estado: "LEGACY_BUNDLED" },
+      });
     }
 
     return asiento;

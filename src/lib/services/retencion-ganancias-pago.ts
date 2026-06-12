@@ -224,6 +224,77 @@ export async function resolverRetencionGananciasParaPago(
   return { proveedor, cuentaProveedorId, resultado, parametroSnapshot };
 }
 
+/**
+ * Construye el contexto de una retención de Ganancias MANUAL: el usuario
+ * ingresa el importe a retener directamente en el diálogo de pago, sin que
+ * el sistema lo calcule desde parámetros ni acumulado mensual. A diferencia
+ * de `resolverRetencionGananciasParaPago`, NO exige que el proveedor esté
+ * marcado `sujetoRetencionGanancias` — aplica a cualquier proveedor, siempre
+ * que el pago sea en ARS a una única cuenta de proveedor identificable
+ * (mapea a exactamente un proveedor, para poder emitir el certificado con el
+ * CUIT correcto). Devuelve `null` cuando no se puede atribuir el proveedor o
+ * los datos son inválidos; el caller traduce eso a un error claro. La
+ * persistencia (`registrarRetencionPracticada`) y el asiento son idénticos
+ * al camino automático.
+ */
+export async function construirRetencionManualParaPago(
+  args: {
+    tipo: MovimientoTesoreriaTipo;
+    moneda: Moneda;
+    lineas: { cuentaContableId: number }[];
+    base: Decimal;
+    importeRetenido: Decimal;
+    concepto: ConceptoRG830;
+  },
+  dbc: ReaderClient = db,
+): Promise<RetencionPagoContexto | null> {
+  if (args.tipo !== MovimientoTesoreriaTipo.PAGO) return null;
+  if (args.moneda !== Moneda.ARS) return null;
+
+  const base = args.base.toDecimalPlaces(2);
+  const importeRetenido = args.importeRetenido.toDecimalPlaces(2);
+  // Defensa: la retención debe ser positiva y dejar un neto > 0 (no se puede
+  // retener todo el pago). El schema del action ya valida esto, acá es red de
+  // seguridad para cualquier otro caller.
+  if (importeRetenido.lte(0) || importeRetenido.gte(base)) return null;
+
+  const cuentaIds = [...new Set(args.lineas.map((l) => l.cuentaContableId))];
+  if (cuentaIds.length !== 1) return null;
+  const cuentaProveedorId = cuentaIds[0]!;
+
+  const proveedores = (await dbc.proveedor.findMany({
+    where: { cuentaContableId: cuentaProveedorId },
+    select: PROVEEDOR_SELECT,
+    take: 2,
+  })) as ProveedorRetencion[];
+  if (proveedores.length !== 1) return null;
+  const proveedor = proveedores[0]!;
+
+  const alicuota = importeRetenido.div(base).mul(100).toDecimalPlaces(4);
+  const importeNetoAPagar = base.minus(importeRetenido);
+
+  const resultado: ResultadoRetencionGanancias = {
+    aplica: true,
+    motivoNoAplica: null,
+    concepto: args.concepto,
+    condicion: proveedor.condicionGanancias,
+    base,
+    baseAcumuladaMesPrevio: new Decimal(0),
+    minimoNoSujeto: new Decimal(0),
+    baseExcedente: base,
+    montoFijo: new Decimal(0),
+    alicuota,
+    importeRetenido,
+    importeNetoAPagar,
+    detalleCalculo:
+      `RG 830 (manual) — ${args.concepto} (${proveedor.condicionGanancias}). ` +
+      `Base ${base.toFixed(2)}; importe retenido ingresado manualmente ${importeRetenido.toFixed(2)} ` +
+      `(alícuota implícita ${alicuota.toString()}%). Neto a pagar ${importeNetoAPagar.toFixed(2)}.`,
+  };
+
+  return { proveedor, cuentaProveedorId, resultado, parametroSnapshot: null };
+}
+
 function addDays(fecha: Date, dias: number): Date {
   return new Date(fecha.getTime() + dias * 86_400_000);
 }

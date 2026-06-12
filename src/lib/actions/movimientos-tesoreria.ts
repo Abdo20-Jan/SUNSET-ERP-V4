@@ -18,12 +18,14 @@ import {
 import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { RETENCION_GANANCIAS_CODIGOS } from "@/lib/services/cuenta-registry";
 import {
+  construirRetencionManualParaPago,
   registrarRetencionPracticada,
   resolverRetencionGananciasParaPago,
 } from "@/lib/services/retencion-ganancias-pago";
 import { validarSaldoSuficientePrestamo } from "@/lib/services/prestamo";
 import {
   AsientoOrigen,
+  ConceptoRG830,
   CuentaTipo,
   Moneda,
   MovimientoTesoreriaTipo,
@@ -211,6 +213,16 @@ const crearMovimientoSchema = z
       .max(100)
       .optional()
       .transform((v) => (v && v.length > 0 ? v : null)),
+    // Retención de Ganancias cargada MANUALMENTE en el diálogo de pago: el
+    // usuario ingresa el importe a retener (no se calcula). Cuando viene,
+    // el pago se hace por el NETO y la retención queda como pasivo 2.1.3.07.
+    // Sólo válida en PAGO en ARS a un único proveedor (ver action).
+    retencionGananciasManual: z
+      .object({
+        importeRetenido: z.string().regex(MONEY_RE, "Importe de retención inválido"),
+        concepto: z.nativeEnum(ConceptoRG830),
+      })
+      .optional(),
   })
   .superRefine((data, ctx) => {
     let total = new Decimal(0);
@@ -231,6 +243,36 @@ const crearMovimientoSchema = z
         code: "custom",
         message: "El total del movimiento debe ser mayor a 0",
       });
+    }
+    if (data.retencionGananciasManual) {
+      if (data.tipo !== MovimientoTesoreriaTipo.PAGO) {
+        ctx.addIssue({
+          path: ["retencionGananciasManual"],
+          code: "custom",
+          message: "La retención de Ganancias sólo aplica a pagos",
+        });
+      }
+      if (data.moneda !== Moneda.ARS) {
+        ctx.addIssue({
+          path: ["retencionGananciasManual"],
+          code: "custom",
+          message: "La retención de Ganancias sólo aplica a pagos en ARS",
+        });
+      }
+      const imp = new Decimal(data.retencionGananciasManual.importeRetenido);
+      if (imp.lte(0)) {
+        ctx.addIssue({
+          path: ["retencionGananciasManual", "importeRetenido"],
+          code: "custom",
+          message: "La retención debe ser mayor a 0",
+        });
+      } else if (imp.gte(total)) {
+        ctx.addIssue({
+          path: ["retencionGananciasManual", "importeRetenido"],
+          code: "custom",
+          message: "La retención no puede ser mayor o igual al total del pago",
+        });
+      }
     }
     // Cuentas duplicadas → permitimos (el user puede partir un mismo
     // gasto en 2 líneas con descripciones distintas). Sin chequeo.
@@ -285,7 +327,14 @@ export async function crearMovimientoTesoreriaAction(
     descripcion,
     comprobante,
     referenciaBanco,
+    retencionGananciasManual,
   } = parsed.data;
+
+  // La retención manual también queda detrás de la feature flag (consistente
+  // con el camino automático): si está apagada, no se puede cargar.
+  if (retencionGananciasManual && !isRetencionGananciasEnabled()) {
+    return { ok: false, error: "La retención de Ganancias no está habilitada." };
+  }
 
   const total = lineas.reduce((s, l) => s.plus(new Decimal(l.monto)), new Decimal(0));
   const totalStr = total.toDecimalPlaces(2).toFixed(2);
@@ -380,9 +429,33 @@ export async function crearMovimientoTesoreriaAction(
       // NETO al banco y la diferencia queda como pasivo a depositar en ARCA.
       // Se resuelve DENTRO de la transacción para que el acumulado mensual
       // sea consistente. `null` ⇒ flujo de pago normal (sin cambios).
-      const retencionCtx = isRetencionGananciasEnabled()
-        ? await resolverRetencionGananciasParaPago({ tipo, moneda, fecha, lineas, base: total }, tx)
-        : null;
+      //   - Manual: el usuario cargó el importe → se usa tal cual (cualquier
+      //     proveedor, sin chequear `sujetoRetencionGanancias`).
+      //   - Automático: se calcula desde parámetros + acumulado mensual.
+      const retencionCtx = retencionGananciasManual
+        ? await construirRetencionManualParaPago(
+            {
+              tipo,
+              moneda,
+              lineas,
+              base: total,
+              importeRetenido: new Decimal(retencionGananciasManual.importeRetenido),
+              concepto: retencionGananciasManual.concepto,
+            },
+            tx,
+          )
+        : isRetencionGananciasEnabled()
+          ? await resolverRetencionGananciasParaPago(
+              { tipo, moneda, fecha, lineas, base: total },
+              tx,
+            )
+          : null;
+      if (retencionGananciasManual && !retencionCtx) {
+        throw new AsientoError(
+          "LINEA_INVALIDA",
+          "No se pudo aplicar la retención: el pago debe ser en ARS a un único proveedor identificable (todas las líneas a la misma cuenta del mismo proveedor).",
+        );
+      }
       const retencionMonto = retencionCtx ? retencionCtx.resultado.importeRetenido : new Decimal(0);
       const netoBanco = total.minus(retencionMonto);
       // El movimiento bancario refleja la salida REAL de caja: el neto
