@@ -9,8 +9,10 @@ import { createTestDb, type TestDb } from "./db";
 //   - El input es UNO de los dos: tipoCambioBanco O montoArs; el otro se deriva.
 //   - MovimientoTesoreria USD con tipoCambio aplicado (informativo).
 //   - AplicacionPago* gravada para compra/embarqueCosto (no para embarqueFob).
-//   - El saldo USD se descuenta por descripción tokenizada (mismo algoritmo
-//     de getSaldosExteriorPorProveedor).
+//   - La línea DEBE lleva monedaOrigen=USD + montoOrigen + tipoCambioOrigen:
+//     el principal USD pagado, invariante a TC. El saldo USD se descuenta
+//     desde esa metadata (helper compartido con getSaldosExteriorPorProveedor),
+//     con tokens en la descripción sólo como fallback legacy.
 
 const h = vi.hoisted(() => {
   let client: PrismaClient | undefined;
@@ -345,6 +347,14 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS (asiento 2 líneas)"
     expect(lineas[0]!.cuentaId).toBe(s.cuentaProveedorExteriorId);
     expect(Number(lineas[1]!.haber)).toBeCloseTo(25245000, 2);
     expect(lineas[1]!.cuentaId).toBe(s.cuentaBancoArsId);
+
+    // Línea DEBE lleva el principal USD como metadata, invariante a TC.
+    expect(lineas[0]!.monedaOrigen).toBe("USD");
+    expect(Number(lineas[0]!.montoOrigen)).toBeCloseTo(22000, 2);
+    expect(Number(lineas[0]!.tipoCambioOrigen)).toBeCloseTo(1147.5, 6);
+    // La línea HABER del banco ARS no lleva metadata USD.
+    expect(lineas[1]!.monedaOrigen).toBeNull();
+    expect(lineas[1]!.montoOrigen).toBeNull();
   });
 
   // ============================================================
