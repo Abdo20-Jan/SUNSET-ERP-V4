@@ -5,6 +5,7 @@ import {
 import { obtenerContextoAmortizacion } from "@/lib/actions/prestamos";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
 import { getFacturasPendientesPorCuenta } from "@/lib/services/cuentas-a-pagar";
+import { isRetencionGananciasEnabled } from "@/lib/features";
 
 import { MovimientoForm, type MovimientoFormInitial } from "./movimiento-form";
 
@@ -109,6 +110,7 @@ export default async function NuevoMovimientoPage({
         contextoAmortizacion={contexto}
         modoInicial={modoInicial}
         defaultFecha={defaultFecha}
+        retencionGananciasEnabled={isRetencionGananciasEnabled()}
       />
     </div>
   );

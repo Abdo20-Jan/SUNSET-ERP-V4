@@ -354,6 +354,16 @@ export function SaldosBatchPago({
               </Button>
             </div>
 
+            {/* Aviso retención Ganancias — sólo aplica a pago de UN proveedor */}
+            {seleccionados.length > 1 && (
+              <div className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
+                <strong>Retención Ganancias:</strong> en pago múltiple (varios proveedores) NO se
+                aplica retención automática. Si algún proveedor es sujeto a retención, pagalo por
+                separado en <span className="font-medium">Cuentas a Pagar → Pago por factura</span>{" "}
+                (o un solo proveedor) para que el sistema retenga.
+              </div>
+            )}
+
             {/* Toggle de intermediário */}
             <label className="flex cursor-pointer items-start gap-2 rounded-md border bg-card px-3 py-2 text-[12px]">
               <Checkbox
