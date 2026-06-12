@@ -45,6 +45,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ConceptoRG830 } from "@/generated/prisma/client";
+
+const CONCEPTO_LABEL: Record<ConceptoRG830, string> = {
+  BIENES_DE_CAMBIO: "Bienes de cambio",
+  HONORARIOS: "Honorarios",
+  ALQUILERES: "Alquileres",
+  SERVICIOS_GENERALES: "Servicios generales",
+  LOCACIONES_SERVICIOS: "Locaciones / servicios",
+};
+const CONCEPTO_VALUES = Object.keys(CONCEPTO_LABEL) as ConceptoRG830[];
 
 type FacturaPendiente = {
   origen: "compra" | "embarque" | "gasto";
@@ -82,6 +92,7 @@ type Props = {
   proveedores: SaldoProveedorAging[];
   cuentasBancarias: CuentaBancariaOption[];
   defaultFecha?: string;
+  retencionGananciasEnabled?: boolean;
 };
 
 const ORIGEN_LABEL: Record<FacturaPendiente["origen"], string> = {
@@ -110,7 +121,12 @@ function sumarMontos(facturas: FacturaConProveedor[]): string {
   return total.toFixed(2);
 }
 
-export function PagoPorFactura({ proveedores, cuentasBancarias, defaultFecha }: Props) {
+export function PagoPorFactura({
+  proveedores,
+  cuentasBancarias,
+  defaultFecha,
+  retencionGananciasEnabled = false,
+}: Props) {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [bucketFilter, setBucketFilter] = useState<"all" | FacturaPendiente["bucket"]>("all");
@@ -449,6 +465,7 @@ export function PagoPorFactura({ proveedores, cuentasBancarias, defaultFecha }: 
           router.refresh();
         }}
         defaultFecha={defaultFecha}
+        retencionEnabled={retencionGananciasEnabled}
       />
     </Card>
   );
@@ -461,6 +478,7 @@ function PagoFacturaDialog({
   onClose,
   onPaid,
   defaultFecha,
+  retencionEnabled = false,
 }: {
   open: boolean;
   facturas: FacturaConProveedor[];
@@ -468,6 +486,7 @@ function PagoFacturaDialog({
   onClose: () => void;
   onPaid: () => void;
   defaultFecha?: string;
+  retencionEnabled?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [cuentaBancariaId, setCuentaBancariaId] = useState<string>("");
@@ -476,12 +495,25 @@ function PagoFacturaDialog({
   const [referenciaBanco, setReferenciaBanco] = useState<string>("");
   const [montoEditable, setMontoEditable] = useState<string>("");
   const [retencion, setRetencion] = useState<SimulacionRetencion | null>(null);
+  // Retención manual: el usuario decide aplicarla y carga el importe a mano.
+  const [retManualOn, setRetManualOn] = useState(false);
+  const [retConcepto, setRetConcepto] = useState<ConceptoRG830>("BIENES_DE_CAMBIO");
+  const [retImporte, setRetImporte] = useState<string>("");
 
   const sumaFacturas = useMemo(() => sumarMontos(facturas), [facturas]);
   const proveedor = facturas[0] ?? null;
   const moneda = facturas[0]?.moneda ?? "ARS";
   const isMulti = facturas.length > 1;
   const baseRetencion = isMulti ? sumaFacturas : montoEditable;
+
+  const retImporteValido =
+    retManualOn && /^\d+(\.\d{1,2})?$/.test(retImporte) && Number(retImporte) > 0;
+  const netoManual = useMemo(() => {
+    const b = Number(baseRetencion);
+    const r = Number(retImporte);
+    if (!Number.isFinite(b) || !Number.isFinite(r) || r <= 0) return baseRetencion || "0";
+    return Math.max(0, b - r).toFixed(2);
+  }, [baseRetencion, retImporte]);
 
   // Preview de retención Ganancias (RG 830). El backend decide si aplica
   // (flag + proveedor sujeto + concepto + mínimo mensual); acá sólo se
@@ -520,6 +552,18 @@ function PagoFacturaDialog({
     setReferenciaBanco("");
     setMontoEditable("");
     setRetencion(null);
+    setRetManualOn(false);
+    setRetConcepto("BIENES_DE_CAMBIO");
+    setRetImporte("");
+  };
+
+  const toggleRetManual = (on: boolean) => {
+    setRetManualOn(on);
+    // Al prender, si el cálculo automático RG 830 aplica, pre-cargar su
+    // importe como sugerencia editable. Si no, queda en blanco.
+    if (on && retImporte === "" && retencion?.aplica) {
+      setRetImporte(retencion.importeRetenido);
+    }
   };
 
   const handleSubmit = () => {
@@ -568,6 +612,10 @@ function PagoFacturaDialog({
         descripcion: descripcion.slice(0, 255),
         comprobante: comprobante || undefined,
         referenciaBanco: referenciaBanco || undefined,
+        retencionGananciasManual:
+          moneda === "ARS" && retImporteValido
+            ? { importeRetenido: retImporte, concepto: retConcepto }
+            : undefined,
       });
       if (!r.ok) {
         toast.error(r.error);
@@ -668,7 +716,78 @@ function PagoFacturaDialog({
                 </div>
               </div>
 
-              {retencion?.aplica && (
+              {retencionEnabled && moneda === "ARS" && (
+                <div className="flex flex-col gap-2 rounded-md border p-3">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      checked={retManualOn}
+                      onChange={(e) => toggleRetManual(e.target.checked)}
+                    />
+                    Aplicar retención de Ganancias (RG 830)
+                  </label>
+                  {retManualOn && (
+                    <div className="flex flex-col gap-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor="pf-ret-concepto">Concepto</Label>
+                          <Select
+                            value={retConcepto}
+                            onValueChange={(v) => setRetConcepto(v as ConceptoRG830)}
+                          >
+                            <SelectTrigger id="pf-ret-concepto" className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CONCEPTO_VALUES.map((c) => (
+                                <SelectItem key={c} value={c}>
+                                  {CONCEPTO_LABEL[c]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor="pf-ret-importe">Importe retenido ({moneda})</Label>
+                          <Input
+                            id="pf-ret-importe"
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            value={retImporte}
+                            onChange={(e) => setRetImporte(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      {retencion?.aplica && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Sugerido RG 830:{" "}
+                          <button
+                            type="button"
+                            className="underline underline-offset-2"
+                            onClick={() => setRetImporte(retencion.importeRetenido)}
+                          >
+                            {fmtMoney(retencion.importeRetenido)} {moneda}
+                          </button>{" "}
+                          ({retencion.alicuota}%).
+                        </p>
+                      )}
+                      <div className="flex justify-between gap-2 border-t pt-1.5 text-sm font-medium">
+                        <span>Neto a pagar al proveedor</span>
+                        <span className="font-mono tabular-nums">
+                          {fmtMoney(netoManual)} {moneda}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Se paga el neto; la retención queda como pasivo a depositar (cta. 2.1.3.07)
+                        con su certificado.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!retManualOn && retencion?.aplica && (
                 <div className="rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
                   <div className="text-sm font-medium text-amber-900 dark:text-amber-200">
                     Retención Ganancias (RG 830)

@@ -5,7 +5,7 @@ import "server-only";
 // se configuran por env (datos sensibles/variables) — completarlos antes de
 // emitir certificados a proveedores.
 export const EMPRESA = {
-  razonSocial: process.env.EMPRESA_RAZON_SOCIAL || "SUNSET TIRES CORPORATION S.A.C.I.S.",
+  razonSocial: process.env.EMPRESA_RAZON_SOCIAL || "SUNSET TIRES CORPORATION SAS",
   cuit: process.env.EMPRESA_CUIT || "",
   domicilio: process.env.EMPRESA_DOMICILIO || "",
 } as const;
