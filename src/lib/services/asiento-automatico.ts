@@ -38,6 +38,7 @@ type TxClient = Prisma.TransactionClient;
 
 export type AsientoErrorCode =
   | "DESBALANCEADO"
+  | "MONEDA_INVALIDA"
   | "LINEA_INVALIDA"
   | "CUENTA_INVALIDA"
   | "CUENTA_INACTIVA"
@@ -364,12 +365,18 @@ async function crearAsientoEnTx(tx: TxClient, input: CrearAsientoInput): Promise
 
   const { totalDebe, totalHaber } = validarLineasYBalance(parsed.lineas);
 
-  const tcDec = toDecimal(parsed.tipoCambio);
-  if (tcDec.lte(0)) {
-    throw new AsientoError("LINEA_INVALIDA", "tipoCambio debe ser mayor a cero.");
+  // Libro diario ARS-único: todo asiento nuevo se registra en pesos. El
+  // principal en moneda extranjera viaja en metadata de línea
+  // (monedaOrigen/montoOrigen/tipoCambioOrigen), nunca en el debe/haber.
+  if (parsed.moneda !== Moneda.ARS) {
+    throw new AsientoError(
+      "MONEDA_INVALIDA",
+      `moneda=${parsed.moneda} no permitida: el libro diario se registra en ARS y el principal en moneda extranjera va en la metadata de cada línea.`,
+    );
   }
-  if (parsed.moneda === Moneda.ARS && !tcDec.eq(1)) {
-    throw new AsientoError("LINEA_INVALIDA", "tipoCambio debe ser 1 cuando moneda=ARS.");
+  const tcDec = toDecimal(parsed.tipoCambio);
+  if (!tcDec.eq(1)) {
+    throw new AsientoError("LINEA_INVALIDA", "tipoCambio debe ser 1: el libro diario es en ARS.");
   }
 
   const periodo = await resolverPeriodo(tx, parsed.fecha);
@@ -782,9 +789,13 @@ export async function crearAsientoMovimientoTesoreria(
     const bancoCuentaId = mov.cuentaBancaria.cuentaContableId;
     const bancoEsUsd = mov.cuentaBancaria.moneda === Moneda.USD;
     const contrapartidaId = mov.cuentaContableId;
-    const valor = money(mov.monto).toString();
     const usdPago = toDecimal(mov.monto);
     const tcPago = toDecimal(mov.tipoCambio);
+
+    // Libro ARS-único: si el movimiento es USD, el debe/haber del asiento va
+    // en pesos (monto × TC) y el principal USD queda en la metadata de línea.
+    const valorArs = mov.moneda === Moneda.ARS ? money(mov.monto) : money(usdPago.times(tcPago));
+    const valor = valorArs.toString();
 
     // Si el movimiento es USD, la línea-contrapartida (que reduce o crea el
     // pasivo/activo del proveedor o cliente) lleva el principal en USD para
@@ -894,7 +905,9 @@ export async function crearAsientoMovimientoTesoreria(
         inner,
         EXTRACTO_BANCARIO_CODIGOS.CREDITO_LEY_25413_GANANCIAS,
       );
-      const montoAbs = toDecimal(mov.monto).toNumber();
+      // Split sobre el valor en ARS; el resto del crédito va al gasto para
+      // que la partida cierre exacta contra el HABER del banco.
+      const montoAbs = valorArs.toNumber();
       const creditoMonto = Math.round(montoAbs * PORCENTAJE_LEY_25413_COMPUTABLE * 100) / 100;
       const gastoMonto = Math.round((montoAbs - creditoMonto) * 100) / 100;
       lineas = [
@@ -910,41 +923,41 @@ export async function crearAsientoMovimientoTesoreria(
           haber: 0,
           descripcion: "Pago a cuenta Ganancias (33%)",
         },
-        { cuentaId: bancoCuentaId, debe: 0, haber: valor },
+        { cuentaId: bancoCuentaId, debe: 0, haber: valor, ...usdOrigen },
       ];
     } else {
       switch (mov.tipo) {
         case MovimientoTesoreriaTipo.COBRO:
           lineas = [
-            { cuentaId: bancoCuentaId, debe: valor, haber: 0 },
-            { cuentaId: contrapartidaId, debe: 0, haber: valor },
+            { cuentaId: bancoCuentaId, debe: valor, haber: 0, ...usdOrigen },
+            { cuentaId: contrapartidaId, debe: 0, haber: valor, ...usdOrigen },
           ];
           break;
         case MovimientoTesoreriaTipo.PAGO:
           lineas = [
-            { cuentaId: contrapartidaId, debe: valor, haber: 0 },
-            { cuentaId: bancoCuentaId, debe: 0, haber: valor },
+            { cuentaId: contrapartidaId, debe: valor, haber: 0, ...usdOrigen },
+            { cuentaId: bancoCuentaId, debe: 0, haber: valor, ...usdOrigen },
           ];
           break;
         case MovimientoTesoreriaTipo.TRANSFERENCIA:
           // contrapartida = cuenta contable del banco DESTINO
           lineas = [
-            { cuentaId: contrapartidaId, debe: valor, haber: 0 },
-            { cuentaId: bancoCuentaId, debe: 0, haber: valor },
+            { cuentaId: contrapartidaId, debe: valor, haber: 0, ...usdOrigen },
+            { cuentaId: bancoCuentaId, debe: 0, haber: valor, ...usdOrigen },
           ];
           break;
       }
     }
 
-    // En Fase 2 el asiento es ARS misto (líneas con monedaOrigen=USD individuales).
-    // Forzamos moneda=ARS, tipoCambio=1 para mantener la convención del libro
-    // diario en pesos. El USD se preserva en las metadata de cada línea.
+    // Convención del libro diario en pesos: el asiento siempre es ARS/TC=1.
+    // El USD se preserva en la metadata de cada línea (monedaOrigen/montoOrigen/
+    // tipoCambioOrigen); el TC del pago queda en MovimientoTesoreria.tipoCambio.
     const asiento = await crearAsientoEnTx(inner, {
       fecha: mov.fecha,
       descripcion: `${mov.tipo} ${mov.moneda} ${toDecimal(mov.monto).toFixed(2)}`,
       origen: AsientoOrigen.TESORERIA,
-      moneda: esFase2 ? Moneda.ARS : mov.moneda,
-      tipoCambio: esFase2 ? 1 : mov.tipoCambio.toString(),
+      moneda: Moneda.ARS,
+      tipoCambio: 1,
       lineas,
     });
 
@@ -1063,18 +1076,34 @@ export async function crearAsientoTransferencia(
       ? ` — Ref ${input.referenciaBancoDestino.trim()}`
       : "";
 
+    // El principal en moneda extranjera viaja en la metadata de la línea de
+    // cada banco (el saldo USD de la cuenta se calcula desde montoOrigen).
     const lineas: LineaInput[] = [
       {
         cuentaId: destino.cuentaContableId,
         debe: destinoArs.toString(),
         haber: 0,
         descripcion: `Transferencia recibida desde ${origen.banco}${refDestinoSuffix}`,
+        ...(destino.moneda === Moneda.USD
+          ? {
+              monedaOrigen: Moneda.USD,
+              montoOrigen: money(montoDestinoDec).toString(),
+              tipoCambioOrigen: tcDestinoDec.toFixed(6),
+            }
+          : {}),
       },
       {
         cuentaId: origen.cuentaContableId,
         debe: 0,
         haber: origenArs.toString(),
         descripcion: `Transferencia enviada a ${destino.banco}${refOrigenSuffix}`,
+        ...(origen.moneda === Moneda.USD
+          ? {
+              monedaOrigen: Moneda.USD,
+              montoOrigen: money(montoOrigenDec).toString(),
+              tipoCambioOrigen: tcOrigenDec.toFixed(6),
+            }
+          : {}),
       },
     ];
 

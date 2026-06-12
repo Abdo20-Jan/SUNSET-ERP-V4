@@ -22,9 +22,9 @@ status: vigente
 
 ## Estado
 
-- **Próxima etapa:** E3 (COBRO/PAGO/TRANSFERENCIA USD gravam ARS — asiento-automatico.ts:763-925)
-- **Última concluída:** E2 (2026-06-11, PR #201)
-- **Branch base:** origin/main (`29fa473`, pós-#200). O branch `feat/comex-simulacion-margen-y-nombre-completo` já foi mesclado (#178) — não usar.
+- **Próxima etapa:** E4 (Fase 2 em pago multi-contrapartida/intermediario + dif. cambiaria no pagarFacturaExteriorAction + préstamo USD — movimientos-tesoreria.ts)
+- **Última concluída:** E3 (2026-06-11, PR #202)
+- **Branch base:** origin/main (`afe7780`, pós-#201). O branch `feat/comex-simulacion-margen-y-nombre-completo` já foi mesclado (#178) — não usar.
 
 ---
 
@@ -34,7 +34,7 @@ status: vigente
 |---|---|---|---|---|---|
 | ☑ | **E1** | PE.1+PE.2: `monedaOrigen/montoOrigen/tipoCambioOrigen` na línea DEBE do pago exterior + saldos exterior por montoOrigen/aplicaciones (matar leitura de debe cru) + testes | pago-exterior.ts:277, cuentas-a-pagar.ts:1650-1700 | M | **PR #200** (merged `29fa473`) — helper compartilhado `getPagosUsdPorCuenta`/`pagadoUsdParaFactura` (montoOrigen → fallback legacy 1-DEBE=mov.monto / multi-DEBE=USD cru; AplicacionPago* layer 0 com prorrateio, tokens só fallback); action e vista usam o mesmo algoritmo; +6 testes serviço, 264 verdes; review adversarial incorporada |
 | ☑ | **E2** | PE.5: TC real obrigatório no extrato USD (fix ternário `"1":"1"`, cotización ou input na UI de revisão) + teste | extractos.ts:137, lineas-review.tsx | S | **PR #201** — ARS→TC=1; extranjera→TC manual (dialog, parsing es-AR) → `getCotizacionParaFecha(fecha, tx)` → erro claro (línea PENDIENTE); asiento herda TC real; +6 testes (270 verdes); review: dialog inicia vazio (default = cotización por fecha) |
-| ☐ | **E3** | PE.4: COBRO/PAGO/TRANSFERENCIA USD gravam ARS (monto×TC) usando a `usdOrigen` pronta; bloquear línea com moeda ≠ ARS no motor | asiento-automatico.ts:763-925 | M | |
+| ☑ | **E3** | PE.4: COBRO/PAGO/TRANSFERENCIA USD gravam ARS (monto×TC) usando a `usdOrigen` pronta; bloquear línea com moeda ≠ ARS no motor | asiento-automatico.ts:763-925 | M | **PR #202** — guard `MONEDA_INVALIDA` no motor (moneda≠ARS e TC≠1); caso simples + Ley 25413 convertem a ARS c/ metadata (split 33/67 sobre ARS); path Ley 25413 duplicado do extracto removido (tudo via motor); pago exterior header ARS/1; multi-contrapartida/intermediario por parcela round 2 + banco = Σ exata; gasto fijo + transferencias c/ metadata (achados do review adversarial, 8 agentes); saldo bancário na moneda da cuenta (`calcularSaldosCuentasBancariasEnMonedaCuenta`: USD = Σ±montoOrigen + fallback legado cru) em cuentas/dashboard/BI; asiento manual só ARS; +8 testes (278 verdes) |
 | ☐ | **E4** | PE.3: Fase 2 (dif. cambiaria) em pago multi-contrapartida e intermediario + fix validação de préstamo USD (validar em USD, não TC do dia) | movimientos-tesoreria.ts:344,409,671 | M/L | |
 | ☐ | **E5** | PE.6: relatórios USD só de montoOrigen (nunca ÷TC; sem metadata = "—") + balancete: saldo inicial de volta a groupBy SQL + prune considera campos USD | balance-sumas-saldos.ts:64,117,172 | M | |
 | ☐ | **E6** | PE.7: script de migração de asientos USD legados (uma vez, com dry-run) + validador de invariante no CI (moeda única ARS, saldo USD = Σ montoOrigen, partida doble) espelhando validar-stock.yml | prisma/scripts + .github/workflows | L | |
@@ -115,3 +115,6 @@ status: vigente
 - **(E1)** Token-matching legado: pago batch cujа descripción menciona 2+ códigos de embarque desconta o valor cheio em cada FOB virtual (sem âncora estrutural não há prorrateio) — resolve-se na E26 (AplicacionPago para embarqueFob)
 - **(E1)** Prorrateio de split multi-factura pode deixar resíduo USD 0,01 visível na vista (tolerância da action = 0.005) — edge raro, observar
 - **(E1)** Ambiente local: `pdf-lib` faltava no node_modules (rodar `pnpm install` pós-PRs retención); pasta untracked `bmad-method/` polui `pnpm typecheck` local (CI não afetado)
+- **(E3)** `flujo-caja.ts:101,119` filtra asientos por `asiento.moneda` — o flujo USD não verá os asientos novos (ARS c/ metadata) até a **E5**; até lá o flujo de caja USD mostra só legados. Confirmado pelo review adversarial; a E5 deve trocar o filtro para `monedaOrigen` por línea
+- **(E3)** Pago USD multi-contrapartida com `appliedTo`: o `montoArs` da aplicación é comparado com `monto` (USD) no superRefine — semântica ambígua em pagos USD (já mapeado p/ E26; reforço)
+- **(E3)** Gasto fijo USD não tem suite própria de testes (fix da conversão ARS coberto só pelo guard do motor + typecheck) — candidato a teste na E7 (smoke dos paths de pago) ou E14
