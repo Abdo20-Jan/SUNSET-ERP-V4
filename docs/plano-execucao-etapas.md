@@ -22,9 +22,9 @@ status: vigente
 
 ## Estado
 
-- **Próxima etapa:** E2 (TC real no extrato USD — extractos.ts:137)
-- **Última concluída:** E1 (2026-06-11, PR #200)
-- **Branch base:** origin/main (`e29e3b4`, pós-#199). O branch `feat/comex-simulacion-margen-y-nombre-completo` já foi mesclado (#178) — não usar.
+- **Próxima etapa:** E3 (COBRO/PAGO/TRANSFERENCIA USD gravam ARS — asiento-automatico.ts:763-925)
+- **Última concluída:** E2 (2026-06-11, PR #201)
+- **Branch base:** origin/main (`29fa473`, pós-#200). O branch `feat/comex-simulacion-margen-y-nombre-completo` já foi mesclado (#178) — não usar.
 
 ---
 
@@ -32,8 +32,8 @@ status: vigente
 
 | ☐ | Etapa | Conteúdo | Arquivos-chave | Tam. | Resultado |
 |---|---|---|---|---|---|
-| ☑ | **E1** | PE.1+PE.2: `monedaOrigen/montoOrigen/tipoCambioOrigen` na línea DEBE do pago exterior + saldos exterior por montoOrigen/aplicaciones (matar leitura de debe cru) + testes | pago-exterior.ts:277, cuentas-a-pagar.ts:1650-1700 | M | **PR #200** — helper compartilhado `getPagosUsdPorCuenta`/`pagadoUsdParaFactura` (montoOrigen → fallback legacy 1-DEBE=mov.monto / multi-DEBE=USD cru; AplicacionPago* layer 0 com prorrateio, tokens só fallback); action e vista usam o mesmo algoritmo; +6 testes serviço, 264 verdes; review adversarial incorporada |
-| ☐ | **E2** | PE.5: TC real obrigatório no extrato USD (fix ternário `"1":"1"`, cotización ou input na UI de revisão) + teste | extractos.ts:137, lineas-review.tsx | S | |
+| ☑ | **E1** | PE.1+PE.2: `monedaOrigen/montoOrigen/tipoCambioOrigen` na línea DEBE do pago exterior + saldos exterior por montoOrigen/aplicaciones (matar leitura de debe cru) + testes | pago-exterior.ts:277, cuentas-a-pagar.ts:1650-1700 | M | **PR #200** (merged `29fa473`) — helper compartilhado `getPagosUsdPorCuenta`/`pagadoUsdParaFactura` (montoOrigen → fallback legacy 1-DEBE=mov.monto / multi-DEBE=USD cru; AplicacionPago* layer 0 com prorrateio, tokens só fallback); action e vista usam o mesmo algoritmo; +6 testes serviço, 264 verdes; review adversarial incorporada |
+| ☑ | **E2** | PE.5: TC real obrigatório no extrato USD (fix ternário `"1":"1"`, cotización ou input na UI de revisão) + teste | extractos.ts:137, lineas-review.tsx | S | **PR #201** — ARS→TC=1; extranjera→TC manual (dialog, parsing es-AR) → `getCotizacionParaFecha(fecha, tx)` → erro claro (línea PENDIENTE); asiento herda TC real; +6 testes (270 verdes); review: dialog inicia vazio (default = cotización por fecha) |
 | ☐ | **E3** | PE.4: COBRO/PAGO/TRANSFERENCIA USD gravam ARS (monto×TC) usando a `usdOrigen` pronta; bloquear línea com moeda ≠ ARS no motor | asiento-automatico.ts:763-925 | M | |
 | ☐ | **E4** | PE.3: Fase 2 (dif. cambiaria) em pago multi-contrapartida e intermediario + fix validação de préstamo USD (validar em USD, não TC do dia) | movimientos-tesoreria.ts:344,409,671 | M/L | |
 | ☐ | **E5** | PE.6: relatórios USD só de montoOrigen (nunca ÷TC; sem metadata = "—") + balancete: saldo inicial de volta a groupBy SQL + prune considera campos USD | balance-sumas-saldos.ts:64,117,172 | M | |
