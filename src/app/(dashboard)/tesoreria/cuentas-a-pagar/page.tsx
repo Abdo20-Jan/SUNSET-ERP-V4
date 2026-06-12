@@ -24,7 +24,10 @@ import {
 import { listarCuentasBancariasParaVep } from "@/lib/actions/vep-embarque";
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
 import { listarVepDespachosPendientes } from "@/lib/actions/vep-despacho";
+import { listarRetencionesPracticadas } from "@/lib/actions/retenciones";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
+import { isRetencionGananciasEnabled } from "@/lib/features";
+import { RetencionesPorDepositar } from "./_components/retenciones-por-depositar";
 
 import { VepSection } from "./vep-section";
 import { VepDespachoSection } from "./vep-despacho-section";
@@ -67,6 +70,14 @@ export default async function CuentasAPagarPage() {
   // de refuerzo se gestiona en la sección VEP con flujo dedicado.
   const aduanaSinRefuerzo = data.aduana.filter((r) => r.cuentaCodigo !== "2.1.5.99");
 
+  // Retenciones de Ganancias practicadas pendientes de depósito en ARCA —
+  // recordatorio del VEP (sólo si la feature está activa).
+  const retencionEnabled = isRetencionGananciasEnabled();
+  const retencionesPorDepositar = retencionEnabled
+    ? await listarRetencionesPracticadas({ estado: "PENDIENTE_ARCA" })
+    : [];
+  const hoy = new Date().toISOString().slice(0, 10);
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
@@ -93,10 +104,13 @@ export default async function CuentasAPagarPage() {
         </CardContent>
       </Card>
 
+      {retencionEnabled && <RetencionesPorDepositar rows={retencionesPorDepositar} hoy={hoy} />}
+
       <PagoPorFactura
         proveedores={saldosProveedores}
         cuentasBancarias={cuentasBancariasMov}
         defaultFecha={defaultFecha}
+        retencionGananciasEnabled={retencionEnabled}
       />
 
       <EmbarqueBatchPago

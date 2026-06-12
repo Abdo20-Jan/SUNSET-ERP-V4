@@ -20,7 +20,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Sunset Tires ERP",
-  description: "Sistema de gestión integral — Sunset Tires Corporation SA",
+  description: "Sistema de gestión integral — Sunset Tires Corporation S.A.S.",
 };
 
 export default function RootLayout({
