@@ -12,6 +12,7 @@ import {
   crearAsientoManual,
   crearAsientoMovimientoTesoreria,
 } from "@/lib/services/asiento-automatico";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import {
   EXTRACTO_BANCARIO_CODIGOS,
@@ -69,8 +70,17 @@ export async function editarLineaAction(
   return { ok: true };
 }
 
+const aprobarOptsSchema = z.object({
+  // TC manual al aprobar una línea de cuenta en moneda extranjera.
+  // Si no viene, se usa la cotización vigente a la fecha de la línea.
+  tipoCambio: z.number().finite().positive("El tipo de cambio debe ser mayor a 0.").optional(),
+});
+
+export type AprobarLineaOpts = z.input<typeof aprobarOptsSchema>;
+
 export async function aprobarLineaAction(
   lineaId: string,
+  opts?: AprobarLineaOpts,
 ): Promise<{ ok: true; movimientoId: string } | { ok: false; error: string }> {
   const session = await auth();
   if (!session) return { ok: false, error: "No autorizado." };
@@ -78,6 +88,11 @@ export async function aprobarLineaAction(
   if (!z.string().uuid().safeParse(lineaId).success) {
     return { ok: false, error: "ID inválido." };
   }
+  const parsedOpts = aprobarOptsSchema.safeParse(opts ?? {});
+  if (!parsedOpts.success) {
+    return { ok: false, error: parsedOpts.error.issues[0]?.message ?? "Datos inválidos." };
+  }
+  const tcManual = parsedOpts.data.tipoCambio;
 
   try {
     const result = await db.$transaction(async (tx) => {
@@ -134,7 +149,25 @@ export async function aprobarLineaAction(
       const tipo = montoNum > 0 ? MovimientoTesoreriaTipo.COBRO : MovimientoTesoreriaTipo.PAGO;
 
       const moneda = linea.importacion.cuentaBancaria.moneda;
-      const tipoCambio = moneda === Moneda.ARS ? "1" : "1";
+
+      // Regla canónica: una cuenta en moneda extranjera nunca registra TC=1.
+      // Prioridad: TC manual del aprobador → cotización vigente a la fecha
+      // de la línea → error (la línea queda PENDIENTE).
+      let tipoCambio = "1";
+      if (moneda !== Moneda.ARS) {
+        if (tcManual !== undefined) {
+          tipoCambio = tcManual.toFixed(6);
+        } else {
+          const cotizacion = await getCotizacionParaFecha(linea.fecha, tx);
+          if (!cotizacion) {
+            throw new Error(
+              `La cuenta es en ${moneda} y no hay cotización cargada para el ${linea.fecha.toISOString().slice(0, 10)}. Ingresá el tipo de cambio al aprobar o cargá la cotización del día.`,
+            );
+          }
+          tipoCambio = cotizacion.valor.toFixed(6);
+        }
+      }
+
       const descripcion = (linea.descripcionAsiento ?? linea.descripcion).slice(0, 255);
 
       const mov = await tx.movimientoTesoreria.create({
