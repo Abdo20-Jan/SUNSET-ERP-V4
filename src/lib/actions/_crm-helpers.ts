@@ -1,6 +1,6 @@
 import "server-only";
 
-import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { isCrmEnabled } from "@/lib/features";
 
 export type CrmAuthOk = { ok: true; userId: string };
@@ -13,9 +13,9 @@ export async function requireCrmAuth(): Promise<CrmAuthOk | CrmAuthErr> {
       error: "CRM no está habilitado (flag CRM_ENABLED=false).",
     };
   }
-  const session = await auth();
-  const userId = session?.user.id;
-  if (!userId) return { ok: false, error: "No autorizado." };
+  // Valida que el user del JWT siga existiendo y activo; si no, redirige a
+  // /login con motivo claro (en vez de romper al escribir el ownerId).
+  const userId = await requireSessionUser();
   return { ok: true, userId };
 }
 
