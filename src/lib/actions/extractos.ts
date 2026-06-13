@@ -9,23 +9,15 @@ import {
   anularAsiento,
   AsientoError,
   contabilizarAsiento,
-  crearAsientoManual,
   crearAsientoMovimientoTesoreria,
 } from "@/lib/services/asiento-automatico";
-import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import {
-  EXTRACTO_BANCARIO_CODIGOS,
-  PORCENTAJE_LEY_25413_COMPUTABLE,
-} from "@/lib/services/cuenta-registry";
-import {
-  AsientoOrigen,
   ImportacionExtractoStatus,
   LineaExtractoStatus,
   Moneda,
   MovimientoTesoreriaTipo,
 } from "@/generated/prisma/client";
-
-const CODIGO_IMPUESTO_LEY_25413 = "5.8.1.06";
 
 const editarLineaSchema = z.object({
   lineaId: z.string().uuid(),
@@ -69,8 +61,17 @@ export async function editarLineaAction(
   return { ok: true };
 }
 
+const aprobarOptsSchema = z.object({
+  // TC manual al aprobar una línea de cuenta en moneda extranjera.
+  // Si no viene, se usa la cotización vigente a la fecha de la línea.
+  tipoCambio: z.number().finite().positive("El tipo de cambio debe ser mayor a 0.").optional(),
+});
+
+export type AprobarLineaOpts = z.input<typeof aprobarOptsSchema>;
+
 export async function aprobarLineaAction(
   lineaId: string,
+  opts?: AprobarLineaOpts,
 ): Promise<{ ok: true; movimientoId: string } | { ok: false; error: string }> {
   const session = await auth();
   if (!session) return { ok: false, error: "No autorizado." };
@@ -78,6 +79,11 @@ export async function aprobarLineaAction(
   if (!z.string().uuid().safeParse(lineaId).success) {
     return { ok: false, error: "ID inválido." };
   }
+  const parsedOpts = aprobarOptsSchema.safeParse(opts ?? {});
+  if (!parsedOpts.success) {
+    return { ok: false, error: parsedOpts.error.issues[0]?.message ?? "Datos inválidos." };
+  }
+  const tcManual = parsedOpts.data.tipoCambio;
 
   try {
     const result = await db.$transaction(async (tx) => {
@@ -103,10 +109,8 @@ export async function aprobarLineaAction(
       }
 
       let contrapartidaId: number | null = null;
-      let contrapartidaCodigo: string | null = null;
       if (linea.cuentaSugerida) {
         contrapartidaId = linea.cuentaSugerida.id;
-        contrapartidaCodigo = linea.cuentaSugerida.codigo;
       } else if (linea.proveedor?.cuentaContableId) {
         contrapartidaId = linea.proveedor.cuentaContableId;
       } else if (linea.cliente?.cuentaContableId) {
@@ -134,7 +138,25 @@ export async function aprobarLineaAction(
       const tipo = montoNum > 0 ? MovimientoTesoreriaTipo.COBRO : MovimientoTesoreriaTipo.PAGO;
 
       const moneda = linea.importacion.cuentaBancaria.moneda;
-      const tipoCambio = moneda === Moneda.ARS ? "1" : "1";
+
+      // Regla canónica: una cuenta en moneda extranjera nunca registra TC=1.
+      // Prioridad: TC manual del aprobador → cotización vigente a la fecha
+      // de la línea → error (la línea queda PENDIENTE).
+      let tipoCambio = "1";
+      if (moneda !== Moneda.ARS) {
+        if (tcManual !== undefined) {
+          tipoCambio = tcManual.toFixed(6);
+        } else {
+          const cotizacion = await getCotizacionParaFecha(linea.fecha, tx);
+          if (!cotizacion) {
+            throw new Error(
+              `La cuenta es en ${moneda} y no hay cotización cargada para el ${linea.fecha.toISOString().slice(0, 10)}. Ingresá el tipo de cambio al aprobar o cargá la cotización del día.`,
+            );
+          }
+          tipoCambio = cotizacion.valor.toFixed(6);
+        }
+      }
+
       const descripcion = (linea.descripcionAsiento ?? linea.descripcion).slice(0, 255);
 
       const mov = await tx.movimientoTesoreria.create({
@@ -153,57 +175,11 @@ export async function aprobarLineaAction(
         select: { id: true },
       });
 
-      // Caso especial — Impuesto Ley 25413 (Imp. al cheque): 33% va como
-      // crédito fiscal pago a cuenta de Ganancias (1.1.4.12), 67% como
-      // gasto (5.8.1.06). Reemplaza el asiento auto de 2 lineas por uno
-      // de 3 lineas con la división.
-      const esImpuestoLey25413 = contrapartidaCodigo === CODIGO_IMPUESTO_LEY_25413;
-
-      if (esImpuestoLey25413 && tipo === MovimientoTesoreriaTipo.PAGO) {
-        const creditoCuentaId = await getOrCreateCuenta(
-          tx,
-          EXTRACTO_BANCARIO_CODIGOS.CREDITO_LEY_25413_GANANCIAS,
-        );
-
-        // Round 33% to 2 decimals; resto va al gasto para evitar drift de centavos
-        const creditoMonto = Math.round(montoAbs * PORCENTAJE_LEY_25413_COMPUTABLE * 100) / 100;
-        const gastoMonto = Math.round((montoAbs - creditoMonto) * 100) / 100;
-
-        const asiento = await crearAsientoManual(
-          {
-            fecha: linea.fecha,
-            descripcion,
-            origen: AsientoOrigen.TESORERIA,
-            moneda,
-            tipoCambio,
-            lineas: [
-              {
-                cuentaId: contrapartidaId,
-                debe: gastoMonto.toFixed(2),
-                haber: "0",
-                descripcion: "Gasto no computable (67%)",
-              },
-              {
-                cuentaId: creditoCuentaId,
-                debe: creditoMonto.toFixed(2),
-                haber: "0",
-                descripcion: "Pago a cuenta Ganancias (33%)",
-              },
-              { cuentaId: bancoCuentaId, debe: "0", haber: montoAbsStr },
-            ],
-          },
-          tx,
-        );
-
-        await tx.movimientoTesoreria.update({
-          where: { id: mov.id },
-          data: { asientoId: asiento.id },
-        });
-        await contabilizarAsiento(asiento.id, tx);
-      } else {
-        const asiento = await crearAsientoMovimientoTesoreria(mov.id, tx);
-        await contabilizarAsiento(asiento.id, tx);
-      }
+      // El motor resuelve el asiento (incluido el caso especial Ley 25413 —
+      // split 33/67 cuando la contrapartida es 5.8.1.06 — y la conversión a
+      // ARS cuando la cuenta es en moneda extranjera).
+      const asiento = await crearAsientoMovimientoTesoreria(mov.id, tx);
+      await contabilizarAsiento(asiento.id, tx);
 
       await tx.lineaExtractoSugerencia.update({
         where: { id: lineaId },

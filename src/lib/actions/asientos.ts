@@ -260,6 +260,8 @@ function mapAsientoErrorMessage(err: AsientoError): string {
   switch (err.code) {
     case "DESBALANCEADO":
       return "El asiento está desbalanceado: la suma del Debe no coincide con el Haber.";
+    case "MONEDA_INVALIDA":
+      return "Los asientos se registran en pesos (ARS). El principal en moneda extranjera va en la metadata de cada línea.";
     case "LINEA_INVALIDA":
       return err.message;
     case "CUENTA_INVALIDA":

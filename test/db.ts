@@ -55,9 +55,26 @@ export async function createTestDb(): Promise<TestDb> {
   }
 
   const reset = async (tables: readonly string[]): Promise<void> => {
-    if (tables.length === 0) return;
-    const list = tables.map((t) => `"${t}"`).join(", ");
-    await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE;`);
+    if (tables.length > 0) {
+      const list = tables.map((t) => `"${t}"`).join(", ");
+      await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE;`);
+    }
+    // Los tests mockean `auth` con un id de usuario fijo ("user-uuid"). El guard
+    // de sesión (requireSessionUser) exige que ese User exista en la base antes
+    // de escribir cualquier FK (createdById/ownerId/usuarioId); si no, redirige
+    // a /login y la action nunca corre. Lo garantizamos acá (idempotente) tras
+    // cada reset para que el escenario por defecto sea "sesión válida".
+    await prisma.user.upsert({
+      where: { id: "user-uuid" },
+      update: {},
+      create: {
+        id: "user-uuid",
+        username: "tester",
+        passwordHash: "x",
+        nombre: "Tester",
+        role: "ADMIN",
+      },
+    });
   };
 
   const stop = async (): Promise<void> => {

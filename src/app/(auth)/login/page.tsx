@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+import { Suspense, useActionState } from "react";
+import { useSearchParams } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Alert02Icon, Loading03Icon } from "@hugeicons/core-free-icons";
 
@@ -9,6 +10,27 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+// Mensajes para el motivo con que el guard de sesión redirige a /login. Tras un
+// reseed de la base, el id del JWT puede apuntar a un User inexistente; en vez
+// de "Error inesperado" llevamos al usuario acá con una explicación clara.
+const MENSAJES_MOTIVO: Record<string, string> = {
+  "sesion-expirada": "Tu sesión expiró. Iniciá sesión nuevamente.",
+  "sesion-invalida": "Tu sesión ya no es válida. Iniciá sesión nuevamente para continuar.",
+  "usuario-inactivo": "Tu usuario está inactivo. Contactá a un administrador.",
+};
+
+function MotivoSesionAlert() {
+  const motivo = useSearchParams().get("motivo");
+  const mensaje = motivo ? MENSAJES_MOTIVO[motivo] : undefined;
+  if (!mensaje) return null;
+  return (
+    <p role="alert" className="flex items-center gap-2 text-sm text-destructive">
+      <HugeiconsIcon icon={Alert02Icon} className="size-4" />
+      {mensaje}
+    </p>
+  );
+}
 
 export default function LoginPage() {
   const [errorMessage, formAction, isPending] = useActionState(login, undefined);
@@ -21,6 +43,9 @@ export default function LoginPage() {
       </CardHeader>
       <CardContent>
         <form action={formAction} className="flex flex-col gap-4">
+          <Suspense fallback={null}>
+            <MotivoSesionAlert />
+          </Suspense>
           <div className="flex flex-col gap-2">
             <Label htmlFor="username">Usuario</Label>
             <Input
