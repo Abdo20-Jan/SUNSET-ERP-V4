@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import { isRetencionGananciasEnabled } from "@/lib/features";
 import {
@@ -306,10 +307,10 @@ export type CrearMovimientoResult =
 export async function crearMovimientoTesoreriaAction(
   raw: CrearMovimientoInput,
 ): Promise<CrearMovimientoResult> {
-  const session = await auth();
-  if (!session) {
-    return { ok: false, error: "No autorizado." };
-  }
+  // Valida que el user del JWT siga existiendo (redirige a /login si no): el
+  // pago con retención graba RetencionPracticada.createdById (FK obligatoria) y
+  // tras un reseed ese id rompe con P2003 luego de montar medio asiento.
+  const userId = await requireSessionUser();
 
   const parsed = crearMovimientoSchema.safeParse(raw);
   if (!parsed.success) {
@@ -546,7 +547,7 @@ export async function crearMovimientoTesoreriaAction(
           contexto: retencionCtx,
           movimientoTesoreriaId: mov.id,
           fecha,
-          createdById: session.user.id,
+          createdById: userId,
         });
       } else if (lineas.length === 1) {
         // 1 contrapartida — flujo clásico con split IDCB automático.

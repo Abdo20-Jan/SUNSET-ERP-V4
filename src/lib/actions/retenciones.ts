@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import { isRetencionGananciasEnabled } from "@/lib/features";
 import { DIAS_VENCIMIENTO_RETENCION_ARCA } from "@/lib/services/cuenta-registry";
@@ -183,17 +184,16 @@ const anularSchema = z.object({
 export async function anularRetencionGananciasAction(
   raw: z.input<typeof anularSchema>,
 ): Promise<AnularRetencionResult> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
-  // Revalida contra la DB en vez de confiar en el claim del JWT (estrategia
-  // jwt: el rol/activo sólo se setean al login y no se refrescan). Anular una
-  // retención es una mutación fiscal sensible — exige admin ACTIVO al momento.
+  // Garantiza que el user del JWT siga existiendo y activo (redirige a /login
+  // si no): el AuditLog.usuarioId es FK obligatoria y tras un reseed rompería
+  // con P2003. Anular una retención es una mutación fiscal sensible, así que
+  // además revalida el rol contra la DB (la estrategia jwt no refresca el rol).
+  const userId = await requireSessionUser();
   const actor = await db.user.findUnique({
-    where: { id: session.user.id },
-    select: { activo: true, role: true },
+    where: { id: userId },
+    select: { role: true },
   });
-  if (!actor?.activo) return { ok: false, error: "Usuario inactivo o inexistente." };
-  if (actor.role !== Role.ADMIN) {
+  if (actor?.role !== Role.ADMIN) {
     return { ok: false, error: "Sólo un administrador puede anular retenciones." };
   }
 
@@ -223,7 +223,7 @@ export async function anularRetencionGananciasAction(
           accion: "UPDATE",
           datosAnteriores: { estado: ret.estado },
           datosNuevos: { estado: "ANULADA", motivo: parsed.data.motivo },
-          usuarioId: session.user.id,
+          usuarioId: userId,
         },
       });
     });
