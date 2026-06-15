@@ -2373,8 +2373,14 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
     const seguroOrigenArs = embarque.valorSeguroOrigen
       ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
       : toDecimal(0);
+    // Sólo BORRADOR y LEGACY_BUNDLED capitalizan acá (igual que el confirm de
+    // zona primaria y que las facturas de despacho). Las EMITIDA tienen asiento
+    // standalone propio (DEBE gasto 5.x / HABER proveedor) y NUNCA se cargaron
+    // en 1.1.5.02 — incluirlas en el traslado las duplicaría (gasto + costo) y
+    // dejaría 1.1.5.02 en saldo ACREEDOR.
     const facturasZP = embarque.costos.filter(
-      (f) => f.momento === "ZONA_PRIMARIA" && f.estado !== "ANULADA",
+      (f) =>
+        f.momento === "ZONA_PRIMARIA" && (f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED"),
     );
     let zpFacturasArs = toDecimal(0);
     for (const f of facturasZP) {
