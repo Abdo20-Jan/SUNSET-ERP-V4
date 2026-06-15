@@ -246,6 +246,39 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
       ]);
     });
 
+    it("alinea el redondeo del traslado por unidad (asiento == costoUnit × cantidad) — Onda A #4", async () => {
+      // FC × TC con sub-centavos: 12.3457 × 1000.5 = 12351.87285 por unidad.
+      // El traslado debe redondear el unitario a 2dp ANTES de multiplicar
+      // (idéntico a la nacionalización: round2(FC×TC)), de modo que el DEBE
+      // 1.1.5.05 del asiento == costoUnitario del MovimientoStock × cantidad.
+      // Sin alinear, el asiento redondea el total (49407.49) y el movimiento el
+      // unitario (12351.87 × 4 = 49407.48) → residuo de 0,01 en 1.1.5.05.
+      const s = await seed([{ codigo: "SKU-RND", declarada: 4, fc: "12.3457" }]);
+      const cont = await db.prisma.contenedor.findUniqueOrThrow({
+        where: { id: s.contenedorId },
+        select: { embarqueId: true },
+      });
+      await db.prisma.embarque.update({
+        where: { id: cont.embarqueId },
+        data: { tipoCambio: "1000.500000" },
+      });
+
+      const out = await desconsolidar({ contenedorId: s.contenedorId, fecha: FECHA }, db.prisma);
+
+      const movs = await db.prisma.movimientoStock.findMany({
+        where: { desconsolidacionId: out.desconsolidacion.id },
+      });
+      expect(movs).toHaveLength(1);
+      const costoUnit = movs[0]!.costoUnitario;
+      expect(costoUnit.toFixed(2)).toBe("12351.87");
+
+      const lineas = await lineasDe(out.asiento!.id);
+      const debe05 = lineas.find((l) => l.codigo === "1.1.5.05")?.debe;
+      // Reconciliación interna: DEBE 1.1.5.05 == costoUnitario × cantidad.
+      expect(debe05).toBe(costoUnit.times(4).toFixed(2));
+      expect(debe05).toBe("49407.48");
+    });
+
     it("sin conferencia explícita asume físico == declarado (sin divergencia)", async () => {
       const s = await seed();
       const out = await desconsolidar({ contenedorId: s.contenedorId, fecha: FECHA }, db.prisma);
