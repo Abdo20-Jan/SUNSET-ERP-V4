@@ -32,6 +32,17 @@ enum CuentaCategoria {
   EGRESO
 }
 
+enum Naturaleza {
+  DEUDOR
+  ACREEDOR
+}
+
+enum MonedaCuenta {
+  ARS
+  USD
+  BI
+}
+
 enum PeriodoEstado {
   ABIERTO
   CERRADO
@@ -392,6 +403,18 @@ model CuentaContable {
   nivel       Int
   padreCodigo String?
   activa      Boolean         @default(true)
+
+  // Naturaleza del saldo (DEUDOR/ACREEDOR). Normalmente derivada de la
+  // categoría, pero explícita para soportar cuentas regularizadoras
+  // (Depreciación Acumulada, Devoluciones, Dividendos Declarados, RECPAM).
+  // Nullable durante la transición: null = usar naturaleza por defecto de la
+  // categoría (comportamiento histórico). El backfill la completa.
+  naturaleza Naturaleza?
+  // Moneda funcional de la cuenta para revalúo al cierre. BI = bimonetaria
+  // (acumula valores en distintas monedas, p. ej. mercaderías en tránsito).
+  moneda     MonedaCuenta?
+  // Rubro de Estados Contables (RT9) para agrupar el balance y el ER.
+  rubroEECC  String?
 
   padre CuentaContable?  @relation("CuentaPadre", fields: [padreCodigo], references: [codigo])
   hijos CuentaContable[] @relation("CuentaPadre")
