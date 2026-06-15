@@ -12,6 +12,10 @@ import {
   crearAsientoEntrega,
 } from "@/lib/services/asiento-automatico";
 import { generarNumeroEntrega } from "@/lib/services/entrega-borrador";
+import {
+  cargarVentasConEntregaPendiente,
+  type VentaConPendiente,
+} from "@/lib/services/entregas-pendientes-loader";
 import { aplicarEgresoSPD } from "@/lib/services/stock";
 import { getStockPorDeposito } from "@/lib/services/stock-helpers";
 import { EntregaEstado, MovimientoStockTipo, type Prisma } from "@/generated/prisma/client";
@@ -401,6 +405,13 @@ export async function listarEntregasDeVenta(ventaId: string) {
       },
     },
   });
+}
+
+// Hub de entregas: todas las ventas EMITIDA con despacho físico pendiente
+// (remito CONFIRMADA no cubre lo vendido). Usada por la pantalla /entregas.
+export async function listarVentasConEntregaPendiente(): Promise<VentaConPendiente[]> {
+  if (!isStockDualEnabled()) return [];
+  return cargarVentasConEntregaPendiente(db);
 }
 
 export async function saldoPendientePorItemVenta(ventaId: string) {
