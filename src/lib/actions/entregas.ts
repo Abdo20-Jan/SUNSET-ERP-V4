@@ -11,6 +11,7 @@ import {
   contabilizarAsiento,
   crearAsientoEntrega,
 } from "@/lib/services/asiento-automatico";
+import { generarNumeroEntrega } from "@/lib/services/entrega-borrador";
 import { aplicarEgresoSPD } from "@/lib/services/stock";
 import { getStockPorDeposito } from "@/lib/services/stock-helpers";
 import { EntregaEstado, MovimientoStockTipo, type Prisma } from "@/generated/prisma/client";
@@ -42,17 +43,6 @@ const FLAG_OFF_ERROR = {
 // ---------------------------------------------------------------
 // Helpers compartidos
 // ---------------------------------------------------------------
-
-async function generarNumeroEntrega(tx: TxClient): Promise<string> {
-  const year = new Date().getFullYear();
-  const last = await tx.entregaVenta.findFirst({
-    where: { numero: { startsWith: `R-${year}-` } },
-    orderBy: { numero: "desc" },
-    select: { numero: true },
-  });
-  const nextSeq = last ? Number.parseInt(last.numero.slice(`R-${year}-`.length), 10) + 1 : 1;
-  return `R-${year}-${String(nextSeq).padStart(4, "0")}`;
-}
 
 async function validarTopeItemVenta(
   tx: TxClient,

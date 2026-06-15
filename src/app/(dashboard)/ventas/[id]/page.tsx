@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { db } from "@/lib/db";
+import { isStockDualEnabled } from "@/lib/features";
 import { listarProveedoresParaGasto } from "@/lib/actions/gastos";
 import {
   listarClientesParaVenta,
@@ -42,8 +43,9 @@ export default async function VentaDetailPage({ params }: { params: PageParams }
   }
 
   const depositoIds = venta.items.map((it) => it.depositoId).filter((d): d is string => d !== null);
+  const stockDualOn = isStockDualEnabled();
 
-  const [cliente, productos, depositos, asiento] = await Promise.all([
+  const [cliente, productos, depositos, asiento, entregasPendientes] = await Promise.all([
     db.cliente.findUnique({
       where: { id: venta.clienteId },
       select: { nombre: true },
@@ -64,6 +66,9 @@ export default async function VentaDetailPage({ params }: { params: PageParams }
           select: { numero: true },
         })
       : Promise.resolve(null),
+    stockDualOn
+      ? db.entregaVenta.count({ where: { ventaId: id, estado: "BORRADOR" } })
+      : Promise.resolve(0),
   ]);
 
   const productosMap: Record<string, { codigo: string; nombre: string }> = {};
@@ -83,6 +88,8 @@ export default async function VentaDetailPage({ params }: { params: PageParams }
       productosMap={productosMap}
       depositosMap={depositosMap}
       asientoNumero={asiento?.numero ?? null}
+      stockDualOn={stockDualOn}
+      entregasPendientes={entregasPendientes}
     />
   );
 }
