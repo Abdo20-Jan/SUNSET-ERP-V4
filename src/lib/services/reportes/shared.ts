@@ -8,6 +8,7 @@ import {
   type CuentaTipo,
   type Moneda,
 } from "@/generated/prisma/client";
+import { naturalezaPorDefecto, saldoNatural } from "../cuenta-naturaleza";
 
 export type LineaContabilizada = {
   id: number;
@@ -92,18 +93,15 @@ export async function fetchLineasContabilizadas(
   }));
 }
 
-// Sinal natural: valor positivo representa o saldo na natureza da conta.
-// ACTIVO/EGRESO → saldo devedor (debe - haber).
-// PASIVO/PATRIMONIO/INGRESO → saldo credor (haber - debe).
+// Sinal natural por categoría (sin override de regularizadora). Delega en
+// saldoNatural con la naturaleza por defecto de la categoría. Se mantiene por
+// compatibilidad con reportes que sólo disponen de la categoría (libro mayor).
 export function saldoPorCategoria(
   debe: Decimal,
   haber: Decimal,
   categoria: CuentaCategoria,
 ): Decimal {
-  if (categoria === "ACTIVO" || categoria === "EGRESO") {
-    return debe.minus(haber);
-  }
-  return haber.minus(debe);
+  return saldoNatural(naturalezaPorDefecto(categoria), debe, haber);
 }
 
 // Chave YYYY-MM usada em todas as agregações mensais.
@@ -230,6 +228,7 @@ export async function buildCuentaTree(
         categoria: true,
         nivel: true,
         padreCodigo: true,
+        naturaleza: true,
       },
     }),
     db.lineaAsiento.groupBy({
@@ -286,17 +285,21 @@ export async function buildCuentaTree(
     const debe = agg?.debe ?? new Decimal(0);
     const haber = agg?.haber ?? new Decimal(0);
 
-    // saldoInicial signado por categoría (ACTIVO/EGRESO=debe-haber; resto=haber-debe)
+    // Naturaleza explícita; si falta (cuenta sin backfill), naturaleza por
+    // defecto de la categoría (comportamiento histórico).
+    const nat = c.naturaleza ?? naturalezaPorDefecto(c.categoria);
+
+    // saldoInicial signado por naturaleza. inicialBruto está en términos
+    // deudores (debe-haber); para cuentas ACREEDOR se invierte.
     const inicialBruto = inicialPorCuenta.get(c.id) ?? new Decimal(0);
     const saldoInicial =
       c.tipo === "ANALITICA"
-        ? c.categoria === "ACTIVO" || c.categoria === "EGRESO"
+        ? nat === "DEUDOR"
           ? inicialBruto
           : inicialBruto.negated()
         : new Decimal(0);
 
-    const saldoMov =
-      c.tipo === "ANALITICA" ? saldoPorCategoria(debe, haber, c.categoria) : new Decimal(0);
+    const saldoMov = c.tipo === "ANALITICA" ? saldoNatural(nat, debe, haber) : new Decimal(0);
 
     byCodigo.set(c.codigo, {
       id: c.id,
