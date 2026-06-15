@@ -248,7 +248,12 @@ async function ejecutar(t: TxClient, input: DesconsolidarInput): Promise<Descons
   let montoTotalARS = new Prisma.Decimal(0);
   const grupos = agruparPorProducto(contenedor.items, fisicaPorItem);
   for (const grupo of grupos) {
-    const arsUnitario = grupo.fcPromedio.times(tipoCambio);
+    // Onda A #4: redondear el unitario ARS a 2dp ANTES de multiplicar — idéntico
+    // al criterio de la nacionalización (calcularCostoLandedDespacho: round2(FC×TC)).
+    // Así el DEBE 1.1.5.05 del traslado y el HABER 1.1.5.05 del despacho cuadran
+    // por unidad (la subcuenta DF neta a cero al nacionalizar todo) y el asiento,
+    // el MovimientoStock y el SPD comparten la misma base, sin residuo de centavos.
+    const arsUnitario = money(grupo.fcPromedio.times(tipoCambio));
     montoTotalARS = montoTotalARS.plus(arsUnitario.times(grupo.cantidad));
 
     await t.movimientoStock.create({
@@ -257,7 +262,7 @@ async function ejecutar(t: TxClient, input: DesconsolidarInput): Promise<Descons
         depositoId: contenedor.depositoFiscalId,
         tipo: MovimientoStockTipo.INGRESO,
         cantidad: grupo.cantidad,
-        costoUnitario: money(arsUnitario),
+        costoUnitario: arsUnitario,
         fecha: input.fecha,
         contenedorId: input.contenedorId,
         itemContenedorId: grupo.itemContenedorId,
