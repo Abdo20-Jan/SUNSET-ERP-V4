@@ -47,7 +47,8 @@ export type DesconsolidacionErrorCode =
   | "DEPOSITO_FISCAL_FALTANTE"
   | "CONFERENCIA_INVALIDA"
   | "PACKING_LIST_VACIO"
-  | "TIPO_CAMBIO_INVALIDO";
+  | "TIPO_CAMBIO_INVALIDO"
+  | "ARRIBO_PENDIENTE";
 
 export class DesconsolidacionError extends Error {
   readonly code: DesconsolidacionErrorCode;
@@ -111,7 +112,10 @@ async function ejecutar(t: TxClient, input: DesconsolidarInput): Promise<Descons
 
   const contenedor = await t.contenedor.findUnique({
     where: { id: input.contenedorId },
-    include: { items: true, embarque: { select: { tipoCambio: true } } },
+    include: {
+      items: true,
+      embarque: { select: { tipoCambio: true, asientoZonaPrimariaId: true } },
+    },
   });
   if (!contenedor) {
     throw new DesconsolidacionError(
@@ -219,6 +223,17 @@ async function ejecutar(t: TxClient, input: DesconsolidarInput): Promise<Descons
       asientoId: null,
     });
     return { desconsolidacion, contenedor: actualizado, divergencia: true, asiento: null, diffs };
+  }
+
+  // Guard de coherencia de camino (Onda A #3): el traslado 1.1.5.04 → 1.1.5.05
+  // sólo es válido si el arribo a zona primaria YA debitó 1.1.5.04
+  // (embarque.asientoZonaPrimariaId). Sin arribo, acreditar 1.1.5.04 la dejaría
+  // con saldo acreedor y 1.1.5.05 inflada — raíz de la anomalía de 1.1.5.05.
+  if (!contenedor.embarque.asientoZonaPrimariaId) {
+    throw new DesconsolidacionError(
+      "ARRIBO_PENDIENTE",
+      `El contenedor ${input.contenedorId}: el embarque no confirmó zona primaria (arribo) — corré el arribo antes de desconsolidar.`,
+    );
   }
 
   // 8. Sin divergencia: counters, stock consolidado por SKU y asiento principal.
