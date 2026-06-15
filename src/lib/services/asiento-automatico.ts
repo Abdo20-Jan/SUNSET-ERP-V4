@@ -2678,7 +2678,9 @@ export async function crearAsientoDespachoCruzado(
                 id: true,
                 productoId: true,
                 costoFCUnitario: true,
-                contenedor: { select: { depositoFiscalId: true } },
+                contenedor: {
+                  select: { depositoFiscalId: true, estado: true, numeroContenedor: true },
+                },
               },
             },
           },
@@ -2769,6 +2771,18 @@ export async function crearAsientoDespachoCruzado(
         throw new AsientoError(
           "DOMINIO_INVALIDO",
           `Despacho ${despacho.codigo}: el ItemContenedor ${ic.id} no tiene costo FC (cerrá costos antes de nacionalizar).`,
+        );
+      }
+      // Guard de coherencia de camino (Onda A #1): el cruzado credita 1.1.5.05
+      // (depósito fiscal), subcuenta que SÓLO queda financiada por el traslado
+      // 1.1.5.04 → 1.1.5.05 que corre en la desconsolidación (deja el contenedor
+      // DESCONSOLIDADO). Nacionalizar sin ese traslado dejaría 1.1.5.05 con saldo
+      // acreedor — raíz de la anomalía de 1.1.5.05. Espeja el guard de zona
+      // primaria del legacy (`crearAsientoDespacho`).
+      if (ic.contenedor.estado !== "DESCONSOLIDADO") {
+        throw new AsientoError(
+          "ESTADO_INVALIDO",
+          `Despacho ${despacho.codigo}: el contenedor ${ic.contenedor.numeroContenedor} no está DESCONSOLIDADO (estado actual: ${ic.contenedor.estado}) — desconsolidá antes de nacionalizar.`,
         );
       }
     }
