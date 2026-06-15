@@ -38,6 +38,9 @@
   "exclude": [
     "node_modules",
     "check_data.ts",
-    "src/generated/**"
+    "src/generated/**",
+    "bmad-method/**",
+    "_bmad/**",
+    "graphify-out/**"
   ]
 }
