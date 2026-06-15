@@ -1577,6 +1577,13 @@ model ItemVenta {
   subtotal       Decimal @db.Decimal(18, 2)
   iva            Decimal @db.Decimal(18, 2)
   total          Decimal @db.Decimal(18, 2)
+  // Snapshot del costoPromedio (ARS) usado para el CMV al EMITIR la venta.
+  // Es la base con la que se debitó CMV y se acreditó 1.1.5.03 MERCADERÍAS A
+  // ENTREGAR (stock dual). La entrega cancela 1.1.5.03 por ESTE valor para que
+  // la cuenta-puente cierre exacto; la diferencia con el costo físico real
+  // (SPD) va a una cuenta de variación de inventario. `0` = venta legacy
+  // (pre-snapshot): la entrega cae al costo SPD (comportamiento previo).
+  costoUnitarioCmv Decimal @default(0) @db.Decimal(18, 2)
   // Depósito desde el cual se reserva/entrega este item. Nullable:
   // cuando es null, cae al default global (`getDepositoPorDefecto`),
   // manteniendo retrocompatibilidad con ventas pre-S3.1.

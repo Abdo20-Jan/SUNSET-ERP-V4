@@ -3047,6 +3047,7 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
         cliente: { select: { id: true, nombre: true, cuentaContableId: true } },
         items: {
           select: {
+            id: true,
             cantidad: true,
             producto: { select: { costoPromedio: true } },
           },
@@ -3089,6 +3090,17 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
         toDecimal(0),
       )
       .toDecimalPlaces(2);
+
+    // Snapshot del costoPromedio usado para el CMV — la entrega cancelará
+    // 1.1.5.03 (stock dual) por ESTE valor para que la cuenta-puente cierre
+    // exacto, sin importar cómo evolucione el costoPromedio entre emisión y
+    // entrega. Persistido por ítem en ItemVenta.costoUnitarioCmv.
+    for (const it of venta.items) {
+      await inner.itemVenta.update({
+        where: { id: it.id },
+        data: { costoUnitarioCmv: money(toDecimal(it.producto.costoPromedio)).toString() },
+      });
+    }
 
     // Provisión Impuesto Ganancias sobre la utilidad bruta
     // (subtotal - costo - flete - IIBB embutido). Flete e IIBB
@@ -3300,7 +3312,11 @@ export async function crearAsientoEntrega(entregaId: string, tx?: TxClient): Pro
         asientoId: true,
         venta: { select: { numero: true } },
         items: {
-          select: { cantidad: true, costoUnitario: true },
+          select: {
+            cantidad: true,
+            costoUnitario: true,
+            itemVenta: { select: { costoUnitarioCmv: true } },
+          },
         },
       },
     });
@@ -3314,32 +3330,73 @@ export async function crearAsientoEntrega(entregaId: string, tx?: TxClient): Pro
       );
     }
 
-    const totalCosto = entrega.items
+    // Egreso físico real: lo que sale del stock, valuado al costo del depósito
+    // (SPD) capturado en la entrega. Acredita 1.1.5.01 MERCADERÍAS.
+    const egresoReal = entrega.items
       .reduce((acc, it) => acc.plus(toDecimal(it.costoUnitario).times(it.cantidad)), toDecimal(0))
       .toDecimalPlaces(2);
 
-    if (!totalCosto.gt(0)) {
+    if (!egresoReal.gt(0)) {
       throw new AsientoError(
         "DOMINIO_INVALIDO",
         `Entrega ${entrega.numero} no tiene costo registrado — nada que asentar.`,
       );
     }
 
-    const porCodigo = await ensureCuentasMap(inner, VENTA_CODIGOS);
+    // Base de cancelación de 1.1.5.03: el snapshot del costo con el que la venta
+    // ACREDITÓ la cuenta-puente (ItemVenta.costoUnitarioCmv). Así 1.1.5.03 cierra
+    // exacto contra lo que la venta provisionó, sin importar cómo evolucionó el
+    // costoPromedio entre emisión y entrega. Ventas legacy (snapshot 0) caen al
+    // costo SPD → cancela igual que el egreso, sin variación (comportamiento previo).
+    const cancelacionPuente = entrega.items
+      .reduce((acc, it) => {
+        const snapshot = toDecimal(it.itemVenta.costoUnitarioCmv);
+        const base = snapshot.gt(0) ? snapshot : toDecimal(it.costoUnitario);
+        return acc.plus(base.times(it.cantidad));
+      }, toDecimal(0))
+      .toDecimalPlaces(2);
+
+    // Diferencia entre lo provisionado por la venta y el egreso físico real →
+    // variación de costo de inventario (resultado). Cierra el asiento y deja
+    // 1.1.5.03 en cero contra la venta.
+    const variacion = cancelacionPuente.minus(egresoReal);
+
+    const porCodigo = await ensureCuentasMap(inner, {
+      ...VENTA_CODIGOS,
+      PERDIDA_INVENTARIO: COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS,
+      INGRESO_INVENTARIO: COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO,
+    });
     const lineas: LineaInput[] = [
       {
         cuentaId: porCodigo.get(VENTA_CODIGOS.MERCADERIAS_A_ENTREGAR.codigo)!,
-        debe: money(totalCosto).toString(),
+        debe: money(cancelacionPuente).toString(),
         haber: 0,
         descripcion: `Entrega ${entrega.numero} — cancela mercaderías a entregar (venta ${entrega.venta.numero})`,
       },
       {
         cuentaId: porCodigo.get(VENTA_CODIGOS.MERCADERIAS.codigo)!,
         debe: 0,
-        haber: money(totalCosto).toString(),
+        haber: money(egresoReal).toString(),
         descripcion: `Entrega ${entrega.numero} — egreso de stock`,
       },
     ];
+    if (variacion.gt(0)) {
+      // La venta provisionó MÁS que el costo físico real → ingreso por diferencia.
+      lineas.push({
+        cuentaId: porCodigo.get(COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO.codigo)!,
+        debe: 0,
+        haber: money(variacion).toString(),
+        descripcion: `Entrega ${entrega.numero} — variación de costo de inventario`,
+      });
+    } else if (variacion.lt(0)) {
+      // El costo físico real fue MAYOR que lo provisionado → pérdida de inventario.
+      lineas.push({
+        cuentaId: porCodigo.get(COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS.codigo)!,
+        debe: money(variacion.abs()).toString(),
+        haber: 0,
+        descripcion: `Entrega ${entrega.numero} — variación de costo de inventario`,
+      });
+    }
 
     const asiento = await crearAsientoEnTx(inner, {
       fecha: entrega.fecha,
