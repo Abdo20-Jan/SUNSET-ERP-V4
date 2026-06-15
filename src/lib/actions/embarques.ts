@@ -966,6 +966,20 @@ export async function revertirZonaPrimariaAction(
           `El embarque ${embarque.codigo} tiene ${despachosActivosCount} despacho(s) parcial(es) activo(s) — anule los despachos primero.`,
         );
       }
+      // Modelo Y: el arribo DEBITA 1.1.5.04 sin mover stock; el traslado a
+      // 1.1.5.05 + el stock del DF nacen en la desconsolidación. Si un
+      // contenedor ya fue desconsolidado, anular el arribo borraría el DÉBITO
+      // 1.1.5.04 dejando el traslado (HABER 1.1.5.04) y el stock huérfanos →
+      // 1.1.5.04 en saldo ACREEDOR. Bloquear hasta deshacer la desconsolidación.
+      const desconsolidacionesCount = await tx.desconsolidacion.count({
+        where: { contenedor: { embarqueId } },
+      });
+      if (desconsolidacionesCount > 0) {
+        throw new AsientoError(
+          "ESTADO_INVALIDO",
+          `El embarque ${embarque.codigo} tiene ${desconsolidacionesCount} contenedor(es) desconsolidado(s) — deshaga la desconsolidación antes de revertir el arribo a zona primaria.`,
+        );
+      }
 
       // 1) Revertir el ingreso de stock en ZPA (deleta MovimientoStock
       //    ligados a ItemEmbarque + recalcula stockActual y SPD).
