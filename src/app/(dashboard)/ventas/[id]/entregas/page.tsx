@@ -1,16 +1,31 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { listarEntregasDeVenta } from "@/lib/actions/entregas";
 import { db } from "@/lib/db";
 import { isStockDualEnabled } from "@/lib/features";
 import { fmtDate } from "@/lib/format";
+import type { EntregaEstado } from "@/generated/prisma/client";
 
 import { EntregaActions } from "./_components/entrega-actions";
 
 type PageParams = Promise<{ id: string }>;
 
 export const dynamic = "force-dynamic";
+
+function estadoVariant(estado: EntregaEstado): "default" | "secondary" | "destructive" {
+  switch (estado) {
+    case "CONFIRMADA":
+      return "default";
+    case "ANULADA":
+      return "destructive";
+    default:
+      return "secondary";
+  }
+}
 
 export default async function EntregasPage({ params }: { params: PageParams }) {
   const { id } = await params;
@@ -23,9 +38,9 @@ export default async function EntregasPage({ params }: { params: PageParams }) {
 
   if (!isStockDualEnabled()) {
     return (
-      <main className="container mx-auto p-6">
-        <h1 className="text-2xl font-semibold">Entregas — Venta {venta.numero}</h1>
-        <p className="mt-4 text-muted-foreground">
+      <main className="container mx-auto space-y-4 p-6">
+        <h1 className="text-2xl font-semibold">Entregas — Venta {venta.numero.trim()}</h1>
+        <p className="text-muted-foreground">
           El módulo de entregas (stock dual) no está habilitado en este ambiente. Setear{" "}
           <code>STOCK_DUAL_ENABLED=true</code> para activarlo.
         </p>
@@ -34,20 +49,30 @@ export default async function EntregasPage({ params }: { params: PageParams }) {
   }
 
   const entregas = await listarEntregasDeVenta(id);
+  const confirmadas = entregas.filter((e) => e.estado === "CONFIRMADA").length;
+  const borradores = entregas.filter((e) => e.estado === "BORRADOR").length;
 
   return (
     <main className="container mx-auto space-y-6 p-6">
-      <header className="flex items-center justify-between">
-        <div>
+      <header className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <Link
+            href={`/ventas/${id}`}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            ← Venta {venta.numero.trim()}
+          </Link>
           <h1 className="text-2xl font-semibold">Entregas</h1>
           <p className="text-sm text-muted-foreground">
-            Venta {venta.numero} · {entregas.length} entrega(s)
+            {entregas.length} remito(s)
+            {borradores > 0 ? ` · ${borradores} borrador` : ""}
+            {confirmadas > 0 ? ` · ${confirmadas} confirmado(s)` : ""}
           </p>
         </div>
         {venta.estado === "EMITIDA" && (
           <Link
             href={`/ventas/${id}/entregas/nueva`}
-            className="rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
+            className={buttonVariants({ variant: "default" })}
           >
             Nueva entrega
           </Link>
@@ -55,49 +80,43 @@ export default async function EntregasPage({ params }: { params: PageParams }) {
       </header>
 
       {entregas.length === 0 ? (
-        <p className="text-muted-foreground">Aún no hay entregas registradas.</p>
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            Aún no hay remitos para esta venta. Usá “Nueva entrega” para registrar un despacho
+            (total o parcial).
+          </CardContent>
+        </Card>
       ) : (
-        <ul className="space-y-3">
+        <div className="space-y-3">
           {entregas.map((e) => (
-            <li key={e.id} className="rounded-md border bg-card p-4 shadow-sm">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="font-medium">
-                    {e.numero} · {e.deposito.nombre} ·{" "}
-                    <span className="text-sm text-muted-foreground">{fmtDate(e.fecha)}</span>
-                  </p>
-                  <p className="text-sm">
-                    Estado:{" "}
-                    <span
-                      className={
-                        e.estado === "CONFIRMADA"
-                          ? "font-medium text-green-700"
-                          : e.estado === "ANULADA"
-                            ? "text-red-700"
-                            : "text-amber-700"
-                      }
-                    >
-                      {e.estado}
-                    </span>
+            <Card key={e.id}>
+              <CardContent className="flex items-start justify-between gap-4">
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{e.numero}</span>
+                    <Badge variant={estadoVariant(e.estado)}>{e.estado}</Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {e.deposito.nombre} · {fmtDate(e.fecha)}
                   </p>
                   {e.observacion && (
-                    <p className="mt-1 text-sm text-muted-foreground">{e.observacion}</p>
+                    <p className="text-sm text-muted-foreground">{e.observacion}</p>
                   )}
-                  <ul className="mt-2 space-y-1 text-sm">
+                  <ul className="mt-1 space-y-1 text-sm">
                     {e.items.map((it) => (
                       <li key={it.id}>
                         {it.cantidad} ×{" "}
-                        <span className="font-mono">{it.itemVenta.producto.codigo}</span> —{" "}
+                        <span className="font-mono text-xs">{it.itemVenta.producto.codigo}</span> —{" "}
                         {it.itemVenta.producto.nombre}
                       </li>
                     ))}
                   </ul>
                 </div>
-                <EntregaActions entregaId={e.id} estado={e.estado} />
-              </div>
-            </li>
+                <EntregaActions entregaId={e.id} numero={e.numero} estado={e.estado} />
+              </CardContent>
+            </Card>
           ))}
-        </ul>
+        </div>
       )}
     </main>
   );

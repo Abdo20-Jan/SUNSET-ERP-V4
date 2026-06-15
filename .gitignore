@@ -79,3 +79,8 @@ cleanup-*.sql
 
 # Local AI assistant rules (per-developer Codacy/MCP overrides)
 .github/instructions/codacy.instructions.md
+
+# Untracked tooling/scratch dirs (no afectan Vercel; rompen tsc/build local)
+/bmad-method
+/_bmad
+/graphify-out
