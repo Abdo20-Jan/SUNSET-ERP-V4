@@ -6,7 +6,10 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { isStockDualEnabled } from "@/lib/features";
 import { AsientoError } from "@/lib/services/asiento-automatico";
-import { aplicarTransferenciaSPD } from "@/lib/services/stock";
+import {
+  aplicarTransferenciaSPD,
+  recalcularTrasReversionTransferencia,
+} from "@/lib/services/stock";
 import { validarDisponible } from "@/lib/services/stock-helpers";
 import {
   MovimientoStockTipo,
@@ -104,39 +107,6 @@ async function ensureDepositoActivoConId(
   }
 }
 
-/**
- * Mueve `cantidadFisica` entre dos SPD. Usado tanto al crear (vía
- * aplicarTransferenciaSPD) como al anular (en sentido inverso). Útil
- * para evitar duplicar el patrón {increment} / {decrement}.
- */
-async function moverCantidadFisica(
-  tx: TxClient,
-  productoId: string,
-  depositoOrigenId: string,
-  depositoDestinoId: string,
-  cantidad: number,
-): Promise<void> {
-  const now = new Date();
-  await tx.stockPorDeposito.update({
-    where: {
-      productoId_depositoId: { productoId, depositoId: depositoOrigenId },
-    },
-    data: {
-      cantidadFisica: { increment: cantidad },
-      ultimoMovimiento: now,
-    },
-  });
-  await tx.stockPorDeposito.update({
-    where: {
-      productoId_depositoId: { productoId, depositoId: depositoDestinoId },
-    },
-    data: {
-      cantidadFisica: { decrement: cantidad },
-      ultimoMovimiento: now,
-    },
-  });
-}
-
 // ---------------------------------------------------------------
 // Crear transferencia
 // ---------------------------------------------------------------
@@ -211,8 +181,13 @@ async function revertirTransferenciaConfirmada(
       tipo: MovimientoStockTipo.TRANSFERENCIA,
     },
   });
-  // Sentido inverso: origen recibe, destino devuelve.
-  await moverCantidadFisica(tx, t.productoId, t.depositoOrigenId, t.depositoDestinoId, t.cantidad);
+  // Recalcular SPD + agregado Producto desde los movimientos restantes (no
+  // basta mover cantidadFisica: el promedio del destino quedó contaminado por
+  // la mezcla y el agregado quedaría stale → CMV errado en la próxima venta).
+  await recalcularTrasReversionTransferencia(
+    tx,
+    new Map([[t.productoId, new Set([t.depositoOrigenId, t.depositoDestinoId])]]),
+  );
   await tx.transferencia.update({
     where: { id: t.id },
     data: { estado: TransferenciaEstado.ANULADA },
