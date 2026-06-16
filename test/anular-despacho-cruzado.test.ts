@@ -205,6 +205,9 @@ describe("anulación / eliminación despacho cruzado (PR 4.6)", () => {
       where: { productoId_depositoId: { productoId: s.productoId, depositoId: s.depDestinoId } },
     });
     expect(spdDestinoPre.cantidadFisica).toBe(30);
+    // El agregado Producto fue alimentado por la nacionalización (destino NACIONAL).
+    const prodPre = await db.prisma.producto.findUniqueOrThrow({ where: { id: s.productoId } });
+    expect(prodPre.stockActual).toBe(30);
 
     const res = await anularDespachoAction(s.despachoId);
     expect(res.ok).toBe(true);
@@ -234,6 +237,14 @@ describe("anulación / eliminación despacho cruzado (PR 4.6)", () => {
       where: { productoId_depositoId: { productoId: s.productoId, depositoId: s.depDestinoId } },
     });
     expect(spdDestino?.cantidadFisica ?? 0).toBe(0);
+
+    // Agregado Producto recalculado (E8): la nacionalización revertida ya no
+    // cuenta → vuelve a 0 (sin la transferencia, sólo queda el INGRESO al DF,
+    // que es ZONA_PRIMARIA y no entra al agregado vendible). Sin el recalc del
+    // agregado en la reversión, stockActual quedaría stale en 30.
+    const prodPost = await db.prisma.producto.findUniqueOrThrow({ where: { id: s.productoId } });
+    expect(prodPost.stockActual).toBe(0);
+    expect(Number(prodPost.costoPromedio)).toBe(0);
 
     // VEP eliminado.
     const vep = await db.prisma.vepDespacho.findUnique({ where: { despachoId: s.despachoId } });
