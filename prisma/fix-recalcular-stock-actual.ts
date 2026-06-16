@@ -1,8 +1,9 @@
 /**
  * Recalcula `Producto.stockActual` y `Producto.costoPromedio` (campos
- * legacy) a partir de los MovimientoStock actuales del producto. Replica
- * exactamente la lógica de `recalcularStockYCostoPromedio` em
- * src/lib/services/stock.ts (no importable desde tsx por 'server-only').
+ * legacy) a partir de los MovimientoStock actuales del producto. Usa el
+ * MISMO replay que el runtime — `replayStockNacional` de
+ * src/lib/services/stock-recalc.ts (sin 'server-only', importable desde tsx) —
+ * para no divergir (antes este script perdía las TRANSFERENCIAS).
  *
  * Útil cuando se eliminan ItemEmbarque/MovimientoStock históricos pero
  * los campos agregados quedan stale.
@@ -16,7 +17,8 @@
 import { config as dotenvConfig } from "dotenv";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Decimal } from "decimal.js";
-import { MovimientoStockTipo, PrismaClient } from "../src/generated/prisma/client";
+import { replayStockNacional } from "../src/lib/services/stock-recalc";
+import { PrismaClient } from "../src/generated/prisma/client";
 
 dotenvConfig({ path: ".env.local" });
 dotenvConfig({ path: ".env" });
@@ -28,20 +30,6 @@ const prisma = new PrismaClient({
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
 const codigoFiltro = args.find((a) => !a.startsWith("--"));
-
-function calcularNuevoPromedio(
-  stockActual: number,
-  promedioActual: Decimal,
-  cantidadIngreso: number,
-  costoIngreso: Decimal,
-): Decimal {
-  if (stockActual <= 0) return costoIngreso;
-  const valorActual = promedioActual.times(stockActual);
-  const valorIngreso = costoIngreso.times(cantidadIngreso);
-  const nuevoTotal = stockActual + cantidadIngreso;
-  if (nuevoTotal === 0) return new Decimal(0);
-  return valorActual.plus(valorIngreso).div(nuevoTotal);
-}
 
 async function main() {
   console.log(`Modo: ${APPLY ? "APPLY" : "DRY-RUN"}\n`);
@@ -62,26 +50,22 @@ async function main() {
     const movs = await prisma.movimientoStock.findMany({
       where: { productoId: p.id },
       orderBy: [{ fecha: "asc" }, { id: "asc" }],
-      select: { tipo: true, cantidad: true, costoUnitario: true },
+      select: {
+        tipo: true,
+        cantidad: true,
+        costoUnitario: true,
+        deposito: { select: { tipo: true } },
+      },
     });
 
-    let stock = 0;
-    let promedio = new Decimal(0);
-    for (const m of movs) {
-      if (m.tipo === MovimientoStockTipo.INGRESO) {
-        promedio = calcularNuevoPromedio(
-          stock,
-          promedio,
-          m.cantidad,
-          new Decimal(m.costoUnitario.toString()),
-        );
-        stock += m.cantidad;
-      } else if (m.tipo === MovimientoStockTipo.EGRESO) {
-        stock -= m.cantidad;
-      } else if (m.tipo === MovimientoStockTipo.AJUSTE) {
-        stock += m.cantidad;
-      }
-    }
+    const { stock, promedio } = replayStockNacional(
+      movs.map((m) => ({
+        tipo: m.tipo,
+        cantidad: m.cantidad,
+        costoUnitario: m.costoUnitario,
+        depositoTipo: m.deposito.tipo,
+      })),
+    );
 
     const promedioFinal = promedio.toDecimalPlaces(2);
     const stockAtual = p.stockActual;

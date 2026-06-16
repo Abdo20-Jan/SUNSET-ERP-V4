@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import { isCrmEnabled } from "@/lib/features";
 import { Moneda, OportunidadEstado, Prisma } from "@/generated/prisma/client";
@@ -128,8 +129,9 @@ export async function crearOportunidadAction(
   raw: OportunidadInput,
 ): Promise<ActionResult<{ id: string; numero: string }>> {
   if (!isCrmEnabled()) return FLAG_OFF_ERROR;
-  const session = await auth();
-  if (!session?.user.id) return NO_AUTH;
+  // Valida que el user del JWT siga existiendo (redirige a /login si no); el
+  // ownerId es FK obligatoria y romperia con P2003 tras un reseed.
+  const userId = await requireSessionUser();
 
   const parsed = oportunidadSchema.safeParse(raw);
   if (!parsed.success) {
@@ -152,7 +154,7 @@ export async function crearOportunidadAction(
           leadId: parsed.data.leadId,
           clienteId: parsed.data.clienteId,
           notas: parsed.data.notas,
-          ownerId: session.user.id,
+          ownerId: userId,
         },
         select: { id: true, numero: true },
       });

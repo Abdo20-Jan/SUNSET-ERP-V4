@@ -11,9 +11,19 @@ import {
   contabilizarAsiento,
   crearAsientoEntrega,
 } from "@/lib/services/asiento-automatico";
+import { generarNumeroEntrega } from "@/lib/services/entrega-borrador";
+import {
+  cargarVentasConEntregaPendiente,
+  type VentaConPendiente,
+} from "@/lib/services/entregas-pendientes-loader";
 import { aplicarEgresoSPD } from "@/lib/services/stock";
 import { getStockPorDeposito } from "@/lib/services/stock-helpers";
-import { EntregaEstado, MovimientoStockTipo, type Prisma } from "@/generated/prisma/client";
+import {
+  EntregaEstado,
+  MovimientoStockTipo,
+  type Prisma,
+  VentaEstado,
+} from "@/generated/prisma/client";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -42,17 +52,6 @@ const FLAG_OFF_ERROR = {
 // ---------------------------------------------------------------
 // Helpers compartidos
 // ---------------------------------------------------------------
-
-async function generarNumeroEntrega(tx: TxClient): Promise<string> {
-  const year = new Date().getFullYear();
-  const last = await tx.entregaVenta.findFirst({
-    where: { numero: { startsWith: `R-${year}-` } },
-    orderBy: { numero: "desc" },
-    select: { numero: true },
-  });
-  const nextSeq = last ? Number.parseInt(last.numero.slice(`R-${year}-`.length), 10) + 1 : 1;
-  return `R-${year}-${String(nextSeq).padStart(4, "0")}`;
-}
 
 async function validarTopeItemVenta(
   tx: TxClient,
@@ -188,6 +187,7 @@ async function loadEntregaForConfirm(tx: TxClient, entregaId: string) {
       asientoId: true,
       ventaId: true,
       depositoId: true,
+      venta: { select: { estado: true, numero: true } },
       items: {
         select: {
           id: true,
@@ -215,6 +215,15 @@ function ensureEntregaConfirmable(entrega: EntregaEnConfirmacion): void {
   }
   if (entrega.asientoId) {
     throw new AsientoError("DOMINIO_INVALIDO", `Entrega ${entrega.numero} ya tiene asiento.`);
+  }
+  // La venta debe seguir EMITIDA: si fue CANCELADA, su asiento de CMV (HABER
+  // 1.1.5.03) ya se revirtió; confirmar la entrega DEBITARÍA 1.1.5.03 sin
+  // crédito → débito huérfano. (El estado físico tampoco debe egresar.)
+  if (entrega.venta.estado !== VentaEstado.EMITIDA) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Venta ${entrega.venta.numero} no está EMITIDA (estado actual: ${entrega.venta.estado}) — no se puede confirmar la entrega.`,
+    );
   }
 }
 
@@ -411,6 +420,13 @@ export async function listarEntregasDeVenta(ventaId: string) {
       },
     },
   });
+}
+
+// Hub de entregas: todas las ventas EMITIDA con despacho físico pendiente
+// (remito CONFIRMADA no cubre lo vendido). Usada por la pantalla /entregas.
+export async function listarVentasConEntregaPendiente(): Promise<VentaConPendiente[]> {
+  if (!isStockDualEnabled()) return [];
+  return cargarVentasConEntregaPendiente(db);
 }
 
 export async function saldoPendientePorItemVenta(ventaId: string) {
