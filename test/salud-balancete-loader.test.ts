@@ -44,7 +44,7 @@ describe("cargarSaldosParaSalud + detectarAnomaliasBalancete (integración)", ()
       });
 
     const caja = await mk("1.1.1.01", "ACTIVO", "DEUDOR");
-    const aEntregar = await mk("1.1.5.03", "ACTIVO", "DEUDOR");
+    const aEntregar = await mk("1.1.7.05", "ACTIVO", "DEUDOR");
     const deprAcum = await mk("1.2.1.09", "ACTIVO", "ACREEDOR"); // regularizadora
     const deprGasto = await mk("5.9.1.09", "EGRESO", "DEUDOR");
 
@@ -92,7 +92,7 @@ describe("cargarSaldosParaSalud + detectarAnomaliasBalancete (integración)", ()
     const anomalias = detectarAnomaliasBalancete(saldos);
 
     expect(anomalias).toHaveLength(1);
-    expect(anomalias[0].codigo).toBe("1.1.5.03");
+    expect(anomalias[0].codigo).toBe("1.1.7.05");
     expect(anomalias[0].saldo).toBe("-152.00");
   });
 });

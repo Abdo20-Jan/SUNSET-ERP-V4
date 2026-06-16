@@ -8,7 +8,7 @@ import { createTestDb, type TestDb } from "./db";
 // (Gasto.ventaId). Cuando existe ese gasto:
 //  - crearAsientoVenta NO lanza las líneas inline FLETE_GASTO/FLETE_POR_PAGAR
 //    (evita doble contabilización),
-//  - al emitir la venta se contabiliza el Gasto (DEBE flete 5.5.1.60 + DEBE IVA
+//  - al emitir la venta se contabiliza el Gasto (DEBE flete 5.2.1.01 + DEBE IVA
 //    crédito 1.1.4.08 / HABER proveedor → CxP real),
 //  - al anular la venta se anula también el gasto vinculado,
 //  - Venta.flete = subtotal neto del gasto (base de rentabilidad).
@@ -45,9 +45,9 @@ import {
   type VentaInput,
 } from "@/lib/actions/ventas";
 
-const FLETE_GASTO_CODIGO = "5.5.1.60";
+const FLETE_GASTO_CODIGO = "5.2.1.01";
 const FLETE_POR_PAGAR_CODIGO = "2.1.1.05";
-const IVA_CREDITO_CODIGO = "1.1.4.08";
+const IVA_CREDITO_CODIGO = "1.1.5.1.01";
 const PROVEEDOR_FALLBACK_CODIGO = "2.1.1.01";
 
 describe("Venta — flete como factura de gasto", () => {

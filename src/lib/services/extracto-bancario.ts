@@ -4,6 +4,7 @@ import Decimal from "decimal.js";
 
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
+import { PREFIJOS_BANCO_CAJA } from "@/lib/services/prefijos-plan";
 import { AsientoEstado } from "@/generated/prisma/client";
 
 export type ExtractoLinea = {
@@ -39,7 +40,7 @@ export type ExtractoBancario = {
   lineas: ExtractoLinea[];
 };
 
-const BANCO_CAJA_PREFIXES = ["1.1.1.", "1.1.2."];
+const BANCO_CAJA_PREFIXES = PREFIJOS_BANCO_CAJA;
 
 function esBancoCaja(codigo: string): boolean {
   return BANCO_CAJA_PREFIXES.some((p) => codigo.startsWith(p));

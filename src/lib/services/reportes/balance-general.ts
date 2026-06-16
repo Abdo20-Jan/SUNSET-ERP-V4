@@ -3,6 +3,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { Decimal, eqMoney, sumMoney } from "@/lib/decimal";
 
+import { PREFIJO_CLIENTES, PREFIJOS_PROVEEDORES } from "@/lib/services/prefijos-plan";
 import { getEstadoResultados, getEstadoResultadosByFecha } from "./estado-resultados";
 import { buildCuentaTree, type CuentaTreeNode } from "./shared";
 
@@ -54,8 +55,8 @@ const CODIGO_RESULTADO_EJERCICIO = "3.2.1.02";
 // saldos a favor / anticipos y se reclasifican al lado opuesto del Balance.
 // Se limita a estos prefijos a propósito: NO se reclasifican por signo
 // cuentas de inventario/banco/impuestos con saldo invertido (otra naturaleza).
-const RUBRO_PROVEEDORES = ["2.1.1.", "2.1.8."]; // deudas comerciales locales + exterior
-const RUBRO_CLIENTES = ["1.1.3."]; // deudores por ventas
+const RUBRO_PROVEEDORES = [...PREFIJOS_PROVEEDORES]; // deudas comerciales locales + exterior
+const RUBRO_CLIENTES = [PREFIJO_CLIENTES]; // deudores por ventas
 
 // Ids sintéticos (negativos para no colisionar con cuentas reales) de los
 // grupos de reclasificación que se insertan en el lado opuesto.

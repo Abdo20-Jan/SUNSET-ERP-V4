@@ -6,6 +6,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { crearCuentaParaEntidad, rangoClienteByCanal } from "@/lib/services/cuenta-auto";
+import { PREFIJO_CLIENTES } from "@/lib/services/prefijos-plan";
 import { CondicionIva, CuentaTipo, Prisma, TipoCanal } from "@/generated/prisma/client";
 
 export type ClienteRow = {
@@ -37,7 +38,7 @@ export type CuentaContableOption = {
   nombre: string;
 };
 
-const CUENTAS_CLIENTES_PREFIX = "1.1.3.";
+const CUENTAS_CLIENTES_PREFIX = PREFIJO_CLIENTES;
 
 export async function listarClientes(): Promise<ClienteRow[]> {
   const rows = await db.cliente.findMany({

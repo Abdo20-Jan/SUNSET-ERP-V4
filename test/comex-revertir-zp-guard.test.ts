@@ -148,7 +148,7 @@ describe("revertir zona primaria — guard de desconsolidación (Onda A #6)", ()
     // 1) Arribo real (Modelo Y): DEBE 1.1.5.04 = 1.000.000, sin stock.
     const arribo = await confirmarZonaPrimariaAction(s.embarqueId, FECHA_ISO);
     expect(arribo.ok).toBe(true);
-    expect(await netoCuenta("1.1.5.04")).toBeCloseTo(1_000_000, 2);
+    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(1_000_000, 2);
 
     // 2) Avanzar el contenedor a EN_DEPOSITO_FISCAL y desconsolidar de verdad:
     //    traslado 1.1.5.04 → 1.1.5.05 + stock al DF + registro Desconsolidacion.
@@ -164,8 +164,8 @@ describe("revertir zona primaria — guard de desconsolidación (Onda A #6)", ()
     expect(desc.asiento).not.toBeNull();
     // Post-desconsolidación coherente: 1.1.5.04 neto 0 (debitó arribo, acreditó
     // traslado) y 1.1.5.05 = 1.000.000.
-    expect(await netoCuenta("1.1.5.04")).toBeCloseTo(0, 2);
-    expect(await netoCuenta("1.1.5.05")).toBeCloseTo(1_000_000, 2);
+    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(0, 2);
+    expect(await netoCuenta("1.1.7.04")).toBeCloseTo(1_000_000, 2);
 
     // 3) Revertir zona primaria DEBE ser rechazado.
     const revert = await revertirZonaPrimariaAction(s.embarqueId);
@@ -180,15 +180,15 @@ describe("revertir zona primaria — guard de desconsolidación (Onda A #6)", ()
       where: { id: embarque.asientoZonaPrimariaId! },
     });
     expect(arriboAsiento.estado).toBe("CONTABILIZADO");
-    expect(await netoCuenta("1.1.5.04")).toBeCloseTo(0, 2);
-    expect(await netoCuenta("1.1.5.05")).toBeCloseTo(1_000_000, 2);
+    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(0, 2);
+    expect(await netoCuenta("1.1.7.04")).toBeCloseTo(1_000_000, 2);
   });
 
   it("sin desconsolidación, revertir zona primaria sigue funcionando (control)", async () => {
     const s = await seedModeloY();
     const arribo = await confirmarZonaPrimariaAction(s.embarqueId, FECHA_ISO);
     expect(arribo.ok).toBe(true);
-    expect(await netoCuenta("1.1.5.04")).toBeCloseTo(1_000_000, 2);
+    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(1_000_000, 2);
 
     const revert = await revertirZonaPrimariaAction(s.embarqueId);
     expect(revert.ok).toBe(true);
@@ -197,6 +197,6 @@ describe("revertir zona primaria — guard de desconsolidación (Onda A #6)", ()
     expect(embarque.asientoZonaPrimariaId).toBeNull();
     expect(embarque.estado).toBe("EN_PUERTO");
     // El arribo fue anulado → 1.1.5.04 neteado a cero.
-    expect(await netoCuenta("1.1.5.04")).toBeCloseTo(0, 2);
+    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(0, 2);
   });
 });

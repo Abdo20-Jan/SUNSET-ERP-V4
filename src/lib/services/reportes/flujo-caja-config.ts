@@ -4,6 +4,12 @@
  * não há conta contábil dedicada — isso preserva a estrutura completa do relatório
  * conforme PRD (`01-contabilidad/relatorios-financeiros.md`).
  *
+ * TODO(#4 reports): os `cuentaCodigos` abaixo ainda usam a numeração PRÉ-rebuild
+ * (plano antigo). O remap para os códigos RT9 + a semântica de capitalização das
+ * linhas de logística de importação faz parte do PR #4 (relatórios), junto com
+ * estado-resultados RT9 e `rubroEECC`. Sem dado real até o replay (#6), o fluxo
+ * de caixa fica transitoriamente desalinhado; nenhum teste depende destes códigos.
+ *
  * Convenção de mapeamento (ownership único):
  * - Cada `codigo` de conta contábil deve aparecer em NO MÁXIMO um `item` em toda
  *   a estrutura. Validado em runtime por `assertOwnershipUnico()`.

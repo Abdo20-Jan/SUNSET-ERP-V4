@@ -255,9 +255,9 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
     }
 
     // DEBE 1.1.5.01 = nacionalizado 375000 + capitalizables 170000 = 545000.
-    expect(debePorCuenta.get("1.1.5.01")).toBeCloseTo(545000, 2);
+    expect(debePorCuenta.get("1.1.7.01")).toBeCloseTo(545000, 2);
     // HABER 1.1.5.05 = sólo nacionalizado 375000.
-    expect(haberPorCuenta.get("1.1.5.05")).toBeCloseTo(375000, 2);
+    expect(haberPorCuenta.get("1.1.7.04")).toBeCloseTo(375000, 2);
 
     // Tributos capitalizables YA NO van a egreso 5.7.1.x.
     expect(debePorCuenta.has("5.7.1.01")).toBe(false); // DIE
@@ -278,10 +278,10 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
     expect(haberPorCuenta.get(provCodigo)).toBeCloseTo(40000, 2); // 40 × 1000
 
     // IVA/IIBB/Ganancias de aduana siguen como crédito fiscal (no capitalizan).
-    expect(debePorCuenta.get("1.1.4.04")).toBeCloseTo(5000, 2); // IVA importación
-    expect(debePorCuenta.get("1.1.4.05")).toBeCloseTo(3000, 2); // IVA adicional
-    expect(debePorCuenta.get("1.1.4.06")).toBeCloseTo(1000, 2); // IIBB importación
-    expect(debePorCuenta.get("1.1.4.07")).toBeCloseTo(2000, 2); // Ganancias
+    expect(debePorCuenta.get("1.1.5.1.03")).toBeCloseTo(5000, 2); // IVA importación
+    expect(debePorCuenta.get("1.1.5.1.04")).toBeCloseTo(3000, 2); // IVA adicional
+    expect(debePorCuenta.get("1.1.5.2.01")).toBeCloseTo(1000, 2); // IIBB importación
+    expect(debePorCuenta.get("1.1.5.3.01")).toBeCloseTo(2000, 2); // Ganancias
 
     // Asiento balanceado.
     const totalDebe = lineas.reduce((acc, l) => acc + Number(l.debe), 0);
@@ -470,8 +470,8 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
       if (debe.gt(0)) debePorCuenta.set(l.cuenta.codigo, debe.toFixed(2));
       if (haber.gt(0)) haberPorCuenta.set(l.cuenta.codigo, haber.toFixed(2));
     }
-    expect(debePorCuenta.get("1.1.5.01")).toBe("19961063.11");
-    expect(haberPorCuenta.get("1.1.5.05")).toBe("17008398.00");
+    expect(debePorCuenta.get("1.1.7.01")).toBe("19961063.11");
+    expect(haberPorCuenta.get("1.1.7.04")).toBe("17008398.00");
 
     // Pasivos aduaneros por separado (cada uno round2(tributo×TCdsp)).
     expect(haberPorCuenta.get("2.1.5.01")).toBe("2474665.88"); // DIE

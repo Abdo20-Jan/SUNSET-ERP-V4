@@ -322,8 +322,8 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       );
       const { asiento } = await concluirInvestigacion(inv.id, { fecha: FECHA }, db.prisma);
       expect(await lineasDe(asiento!.id)).toEqual([
-        { codigo: "1.1.5.05", debe: "50000.00", haber: "0.00" },
-        { codigo: "4.9.1.01", debe: "0.00", haber: "50000.00" },
+        { codigo: "1.1.7.04", debe: "50000.00", haber: "0.00" },
+        { codigo: "4.2.2.01", debe: "0.00", haber: "50000.00" },
       ]);
     });
 
@@ -338,8 +338,8 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       );
       const { asiento } = await concluirInvestigacion(inv.id, { fecha: FECHA }, db.prisma);
       expect(await lineasDe(asiento!.id)).toEqual([
-        { codigo: "5.9.2.01", debe: "100000.00", haber: "0.00" },
-        { codigo: "1.1.5.05", debe: "0.00", haber: "100000.00" },
+        { codigo: "5.1.1.02", debe: "100000.00", haber: "0.00" },
+        { codigo: "1.1.7.04", debe: "0.00", haber: "100000.00" },
       ]);
     });
 
@@ -360,7 +360,7 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       );
       expect(await lineasDe(asiento!.id)).toEqual([
         { codigo: "1.1.2.99", debe: "100000.00", haber: "0.00" },
-        { codigo: "1.1.5.05", debe: "0.00", haber: "100000.00" },
+        { codigo: "1.1.7.04", debe: "0.00", haber: "100000.00" },
       ]);
     });
 

@@ -200,7 +200,7 @@ export async function getResumenEjecutivo(rng: DateRange): Promise<ResumenEjecut
         asiento: { estado: AsientoEstado.CONTABILIZADO },
         cuenta: {
           tipo: CuentaTipo.ANALITICA,
-          codigo: { startsWith: "1.1.3." },
+          codigo: { startsWith: "1.1.4." },
         },
       },
       _sum: { debe: true, haber: true },
@@ -1607,7 +1607,7 @@ export async function getAnalisisFiscal(rng: DateRange): Promise<AnalisisFiscal>
             estado: AsientoEstado.CONTABILIZADO,
             fecha: { gte: desde12m },
           },
-          cuenta: { codigo: { startsWith: "1.1.4." } },
+          cuenta: { codigo: { startsWith: "1.1.5." } },
         },
         select: {
           debe: true,
@@ -1675,9 +1675,9 @@ export async function getAnalisisFiscal(rng: DateRange): Promise<AnalisisFiscal>
     const debe = toDecimal(l.debe);
     const haber = toDecimal(l.haber);
     if (
-      l.cuenta.codigo.startsWith("1.1.4.01") ||
-      l.cuenta.codigo.startsWith("1.1.4.05") ||
-      l.cuenta.codigo.startsWith("1.1.4.10")
+      l.cuenta.codigo.startsWith("1.1.5.1.01") ||
+      l.cuenta.codigo.startsWith("1.1.5.1.04") ||
+      l.cuenta.codigo.startsWith("1.1.5.2.03")
     ) {
       // IVA crédito (sumamos saldo deudor)
       ivaCredMes.set(k, (ivaCredMes.get(k) ?? new Decimal(0)).plus(debe).minus(haber));

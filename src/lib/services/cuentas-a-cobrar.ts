@@ -2,6 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
+import { CODIGO_VALORES_A_COBRAR, PREFIJO_CLIENTES } from "@/lib/services/prefijos-plan";
 import { AsientoEstado, VentaEstado } from "@/generated/prisma/client";
 
 // ============================================================
@@ -34,8 +35,8 @@ export type CuentasACobrar = {
 };
 
 const PREFIXES = {
-  CLIENTES: "1.1.3.",
-  VALORES: "1.1.4.20",
+  CLIENTES: PREFIJO_CLIENTES,
+  VALORES: CODIGO_VALORES_A_COBRAR,
 } as const;
 
 // Saldos por debajo de este umbral se consideran ruido de redondeo (IVA,

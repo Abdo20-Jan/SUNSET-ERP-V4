@@ -63,10 +63,10 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       debe: string;
       haber: string;
     }> = [
-      { flujo: "ARRIBO_ZONA_PRIMARIA", debe: "1.1.5.04", haber: "1.1.5.02" },
-      { flujo: "TRASLADO_DEPOSITO_FISCAL", debe: "1.1.5.05", haber: "1.1.5.04" },
-      { flujo: "NACIONALIZACION_VIA_DF", debe: "1.1.5.01", haber: "1.1.5.05" },
-      { flujo: "NACIONALIZACION_DIRECTA", debe: "1.1.5.01", haber: "1.1.5.04" },
+      { flujo: "ARRIBO_ZONA_PRIMARIA", debe: "1.1.7.03", haber: "1.1.7.02" },
+      { flujo: "TRASLADO_DEPOSITO_FISCAL", debe: "1.1.7.04", haber: "1.1.7.03" },
+      { flujo: "NACIONALIZACION_VIA_DF", debe: "1.1.7.01", haber: "1.1.7.04" },
+      { flujo: "NACIONALIZACION_DIRECTA", debe: "1.1.7.01", haber: "1.1.7.03" },
     ];
 
     for (const caso of casos) {
@@ -101,8 +101,8 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       const codigos = (await db.prisma.cuentaContable.findMany({ select: { codigo: true } })).map(
         (c) => c.codigo,
       );
-      expect(codigos).toContain("1.1.5.04");
-      expect(codigos).toContain("1.1.5.05");
+      expect(codigos).toContain("1.1.7.03");
+      expect(codigos).toContain("1.1.7.04");
     });
 
     it("rechaza monto <= 0", async () => {
@@ -128,8 +128,8 @@ describe("asientos comex ZPA (PR 3.1)", () => {
         ),
       );
       expect(await lineasDe(asiento.id)).toEqual([
-        { codigo: "1.1.5.05", debe: "750.00", haber: "0.00" },
-        { codigo: "4.9.1.01", debe: "0.00", haber: "750.00" },
+        { codigo: "1.1.7.04", debe: "750.00", haber: "0.00" },
+        { codigo: "4.2.2.01", debe: "0.00", haber: "750.00" },
       ]);
     });
 
@@ -141,8 +141,8 @@ describe("asientos comex ZPA (PR 3.1)", () => {
         ),
       );
       expect(await lineasDe(asiento.id)).toEqual([
-        { codigo: "5.9.2.01", debe: "750.00", haber: "0.00" },
-        { codigo: "1.1.5.04", debe: "0.00", haber: "750.00" },
+        { codigo: "5.1.1.02", debe: "750.00", haber: "0.00" },
+        { codigo: "1.1.7.03", debe: "0.00", haber: "750.00" },
       ]);
     });
 
@@ -171,7 +171,7 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       );
       expect(await lineasDe(asiento.id)).toEqual([
         { codigo: "1.1.2.99", debe: "750.00", haber: "0.00" },
-        { codigo: "1.1.5.05", debe: "0.00", haber: "750.00" },
+        { codigo: "1.1.7.04", debe: "0.00", haber: "750.00" },
       ]);
     });
 
@@ -211,7 +211,7 @@ describe("asientos comex ZPA (PR 3.1)", () => {
         ),
       );
       const lineas = await lineasDe(asiento.id);
-      expect(lineas[0]?.codigo).toBe("1.1.5.04");
+      expect(lineas[0]?.codigo).toBe("1.1.7.03");
     });
   });
 });

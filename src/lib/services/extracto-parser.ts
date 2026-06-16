@@ -54,19 +54,19 @@ CAMPOS DE IDENTIFICACIÓN DE LA LÍNEA — IMPORTANTE distinguir entre dos tipos
 PLAN DE CUENTAS — REGLAS DE CLASIFICACIÓN (descripción → codigoCuentaSugerida):
 
 A. IMPUESTOS / RETENCIONES BANCARIAS:
-- "IMP. DEB. LEY 25413" / "Impuesto ley 25.413" / "IDCB" → "5.8.1.06" (IMPUESTO LEY 25413)
+- "IMP. DEB. LEY 25413" / "Impuesto ley 25.413" / "IDCB" → "5.8.1.05" (IMPUESTO LEY 25413)
 - "IMPUESTO DE SELLOS" / "Imp. Sellos" → "5.8.1.04"
-- "IMP. ING. BRUTOS" / "Regimen recaudacion sircreb" / "Percepcion ingresos brutos" → "1.1.4.10" (PERCEPCIÓN IIBB SIRCREB)
-- "PERCEP. IVA" / "Iva percepcion rg 2408" → "1.1.4.02" (PERCEPCIÓN IVA RG 2408)
-- "IVA" sobre comisiones bancarias (ej "Iva 21% reg transfsc ley27743") → "1.1.4.01" (IVA CRÉDITO FISCAL)
+- "IMP. ING. BRUTOS" / "Regimen recaudacion sircreb" / "Percepcion ingresos brutos" → "1.1.5.2.03" (PERCEPCIÓN IIBB SIRCREB)
+- "PERCEP. IVA" / "Iva percepcion rg 2408" → "1.1.5.1.02" (PERCEPCIÓN IVA RG 2408)
+- "IVA" sobre comisiones bancarias (ej "Iva 21% reg transfsc ley27743") → "1.1.5.1.01" (IVA CRÉDITO FISCAL)
 
 B. COSTOS FINANCIEROS:
 - "COMISION SERVICIO" / "Comision compensacion cheques" / "Comision por servicio" / "Comision echeq rechazado" / "COM. GESTION TRANSF" → "5.8.1.01" (COMISIONES BANCARIAS)
-- "INTERESES SOBRE SALDOS DEUDORES" → "5.8.2.02" (INTERESES PAGADOS)
+- "INTERESES SOBRE SALDOS DEUDORES" → "5.8.1.07" (INTERESES PAGADOS)
 
 C. INVERSIONES (FCI / fondos comunes):
-- "SUSCRIPCION FIMA" / "Suscripción FCI" → "1.1.6.01" (sale del banco, entra al FCI). monto negativo.
-- "RESCATE FIMA" / "Rescate FCI" → "1.1.6.01" (vuelve del FCI al banco). monto positivo.
+- "SUSCRIPCION FIMA" / "Suscripción FCI" → "1.1.3.01" (sale del banco, entra al FCI). monto negativo.
+- "RESCATE FIMA" / "Rescate FCI" → "1.1.3.01" (vuelve del FCI al banco). monto positivo.
 
 D. TRANSFERENCIAS / PAGOS:
 - "TRF INMED PROVEED" + CUIT del beneficiario → tipoEntidad="PROVEEDOR", cuitDetectado=<cuit sin guiones>, codigoCuentaSugerida=null (lo resuelve el sistema). razon="Pago a proveedor — match por CUIT".
