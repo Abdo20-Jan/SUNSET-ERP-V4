@@ -96,7 +96,7 @@ describe("emitir venta — guard de costoPromedio 0 (Onda B #10)", () => {
     const asiento = await crearAsientoVenta(ventaId, db.prisma);
     expect(asiento).toBeTruthy();
     const haber03 = await db.prisma.lineaAsiento.findMany({
-      where: { asientoId: asiento.id, cuenta: { codigo: "1.1.5.03" } },
+      where: { asientoId: asiento.id, cuenta: { codigo: "1.1.7.05" } },
       select: { haber: true },
     });
     const totalHaber = haber03.reduce((a, l) => a + Number(l.haber), 0);

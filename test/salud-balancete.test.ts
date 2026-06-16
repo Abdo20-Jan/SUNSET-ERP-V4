@@ -18,10 +18,10 @@ describe("detectarAnomaliasBalancete", () => {
   it("marca cuenta de estoque (ACTIVO/DEUDOR) con saldo acreedor como anomalía", () => {
     // 1.1.5.03 con haber 152 y debe 0 → saldo natural −152 (invertido, no comercial)
     const anomalias = detectarAnomaliasBalancete([
-      cuenta({ codigo: "1.1.5.03", haber: new Decimal(152) }),
+      cuenta({ codigo: "1.1.7.05", haber: new Decimal(152) }),
     ]);
     expect(anomalias).toHaveLength(1);
-    expect(anomalias[0].codigo).toBe("1.1.5.03");
+    expect(anomalias[0].codigo).toBe("1.1.7.05");
     expect(anomalias[0].saldo).toBe("-152.00");
   });
 
@@ -48,7 +48,7 @@ describe("detectarAnomaliasBalancete", () => {
 
   it("NO marca un cliente (1.1.3.x) con saldo acreedor (anticipo comercial)", () => {
     const anomalias = detectarAnomaliasBalancete([
-      cuenta({ codigo: "1.1.3.10", haber: new Decimal(300) }),
+      cuenta({ codigo: "1.1.4.10", haber: new Decimal(300) }),
     ]);
     expect(anomalias).toHaveLength(0);
   });
@@ -63,7 +63,7 @@ describe("detectarAnomaliasBalancete", () => {
 
   it("NO marca cuentas con saldo en su naturaleza (positivo)", () => {
     const anomalias = detectarAnomaliasBalancete([
-      cuenta({ codigo: "1.1.5.01", debe: new Decimal(40) }),
+      cuenta({ codigo: "1.1.7.01", debe: new Decimal(40) }),
       cuenta({
         codigo: "2.1.1.01",
         categoria: "PASIVO",
@@ -84,9 +84,9 @@ describe("detectarAnomaliasBalancete", () => {
   it("usa naturaleza por defecto de la categoría cuando naturaleza es null", () => {
     // Sin naturaleza explícita, una cuenta ACTIVO con saldo acreedor es anomalía.
     const anomalias = detectarAnomaliasBalancete([
-      cuenta({ codigo: "1.1.5.05", naturaleza: null, haber: new Decimal(34) }),
+      cuenta({ codigo: "1.1.7.04", naturaleza: null, haber: new Decimal(34) }),
     ]);
     expect(anomalias).toHaveLength(1);
-    expect(anomalias[0].codigo).toBe("1.1.5.05");
+    expect(anomalias[0].codigo).toBe("1.1.7.04");
   });
 });

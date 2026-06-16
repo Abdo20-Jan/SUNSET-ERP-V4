@@ -245,7 +245,7 @@ describe("crearMovimientoTesoreriaAction — retención Ganancias (RG 830)", () 
 
     const debeProv = lineas.find((l) => l.cuenta.codigo === "2.1.1.10");
     const haberBanco = lineas.find((l) => l.cuenta.codigo === "1.1.2.01");
-    const haberRet = lineas.find((l) => l.cuenta.codigo === "2.1.3.07");
+    const haberRet = lineas.find((l) => l.cuenta.codigo === "2.1.3.3.02");
 
     expect(Number(debeProv?.debe)).toBeCloseTo(300000, 2);
     expect(Number(haberBanco?.haber)).toBeCloseTo(298480, 2);
@@ -420,7 +420,7 @@ describe("crearMovimientoTesoreriaAction — retención Ganancias (RG 830)", () 
     expect(Number(mov.monto)).toBeCloseTo(300000, 2);
     // no se creó la cuenta 2.1.3.07
     const cuentaRet = await db.prisma.cuentaContable.findUnique({
-      where: { codigo: "2.1.3.07" },
+      where: { codigo: "2.1.3.3.02" },
     });
     expect(cuentaRet).toBeNull();
   });

@@ -4,6 +4,13 @@ import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
 import { VEP_ADUANA_CODIGOS } from "@/lib/services/cuenta-registry";
 import {
+  CODIGO_SALDO_PENDIENTE_ADUANA,
+  PREFIJO_ADUANA,
+  PREFIJO_DEUDAS_FISCALES,
+  PREFIJO_PROVEEDORES_LOCAL,
+  PREFIJOS_TRIBUTOS_DESPACHO,
+} from "@/lib/services/prefijos-plan";
+import {
   AsientoEstado,
   CompraEstado,
   EmbarqueCostoEstado,
@@ -58,9 +65,9 @@ export type CuentasAPagar = {
 };
 
 const PREFIXES = {
-  PROVEEDORES: "2.1.1.",
-  ADUANA: "2.1.5.",
-  FISCALES: "2.1.3.",
+  PROVEEDORES: PREFIJO_PROVEEDORES_LOCAL,
+  ADUANA: PREFIJO_ADUANA,
+  FISCALES: PREFIJO_DEUDAS_FISCALES,
 } as const;
 
 export async function getCuentasAPagar(): Promise<CuentasAPagar> {
@@ -1336,7 +1343,7 @@ export async function getCuentasAPagarPorEmbarque(): Promise<CuentaAPagarPorEmba
 // pagan en un único Volante Electrónico de Pago.
 // ============================================================
 
-const PREFIXES_TRIBUTOS_DESPACHO = ["2.1.5.", "2.1.3."] as const;
+const PREFIXES_TRIBUTOS_DESPACHO = PREFIJOS_TRIBUTOS_DESPACHO;
 
 export type CuentaVepLinea = {
   cuentaId: number;
@@ -1475,7 +1482,7 @@ const RE_EMBARQUE_CODIGO = /AR-\d{6}-[A-Z0-9]+/;
 
 export async function getRefuerzosVepPendientes(): Promise<RefuerzoVepPendiente[]> {
   const cuenta = await db.cuentaContable.findFirst({
-    where: { codigo: "2.1.5.99" },
+    where: { codigo: CODIGO_SALDO_PENDIENTE_ADUANA },
     select: { id: true },
   });
   if (!cuenta) return [];

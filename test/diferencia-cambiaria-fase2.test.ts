@@ -299,7 +299,7 @@ describe("Fase 2 — Diferencia cambiaria automática en pago USD", () => {
     expect(banco?.haber.toString()).toBe("35480307.5");
 
     // Línea diferencia: HABER ganancia = spread
-    const dif = lineas.find((l) => l.cuenta.codigo === "4.5.1.01");
+    const dif = lineas.find((l) => l.cuenta.codigo === "4.3.1.02");
     expect(dif).toBeDefined();
     expect(dif?.haber.toString()).toBe("1053996.25");
   });
@@ -321,7 +321,7 @@ describe("Fase 2 — Diferencia cambiaria automática en pago USD", () => {
       include: { cuenta: { select: { codigo: true } } },
     });
 
-    const dif = lineas.find((l) => l.cuenta.codigo === "5.5.3.01");
+    const dif = lineas.find((l) => l.cuenta.codigo === "5.8.1.02");
     expect(dif).toBeDefined();
     expect(dif?.debe.toString()).toBe("1000000");
   });

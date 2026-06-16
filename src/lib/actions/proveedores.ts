@@ -10,6 +10,7 @@ import {
   rangoGastoByTipo,
   rangoProveedorByTipo,
 } from "@/lib/services/cuenta-auto";
+import { PREFIJO_PROVEEDORES_LOCAL } from "@/lib/services/prefijos-plan";
 import {
   CondicionGanancias,
   ConceptoRG830,
@@ -50,7 +51,7 @@ export type CuentaContableOption = {
   nombre: string;
 };
 
-const CUENTAS_PROVEEDORES_PREFIX = "2.1.1.";
+const CUENTAS_PROVEEDORES_PREFIX = PREFIJO_PROVEEDORES_LOCAL;
 
 export async function listarProveedores(): Promise<ProveedorRow[]> {
   const rows = await db.proveedor.findMany({

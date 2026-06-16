@@ -558,7 +558,7 @@ function AsientoPreview({
       rows.push({
         role: "HABER",
         label: "DIFERENCIA DE CAMBIO POSITIVA",
-        codigo: "4.3.1.01",
+        codigo: "4.3.1.02",
         debe: "—",
         haber: fmt(absDiff),
       });
@@ -566,7 +566,7 @@ function AsientoPreview({
       rows.push({
         role: "DEBE",
         label: "DIFERENCIA DE CAMBIO NEGATIVA",
-        codigo: "5.8.2.01",
+        codigo: "5.8.1.02",
         debe: fmt(absDiff),
         haber: "—",
       });

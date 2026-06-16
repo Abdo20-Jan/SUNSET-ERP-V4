@@ -7,6 +7,10 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { crearCuentaParaEntidad } from "@/lib/services/cuenta-auto";
 import {
+  PREFIJO_PRESTAMO_CORTO_PLAZO,
+  PREFIJO_PRESTAMO_LARGO_PLAZO,
+} from "@/lib/services/prefijos-plan";
+import {
   AsientoError,
   anularAsiento,
   contabilizarAsiento,
@@ -57,8 +61,8 @@ export type CuentaPrestamoOption = {
 };
 
 const CLASIFICACION_PREFIX: Record<PrestamoClasificacion, string> = {
-  [PrestamoClasificacion.CORTO_PLAZO]: "2.1.7.",
-  [PrestamoClasificacion.LARGO_PLAZO]: "2.2.1.",
+  [PrestamoClasificacion.CORTO_PLAZO]: PREFIJO_PRESTAMO_CORTO_PLAZO,
+  [PrestamoClasificacion.LARGO_PLAZO]: PREFIJO_PRESTAMO_LARGO_PLAZO,
 };
 
 export async function listarCuentasContablesParaPrestamo(
@@ -317,7 +321,7 @@ export type ContextoAmortizacion = {
   saldoPendiente: string;
 };
 
-const CODIGO_INTERESES_PAGADOS = "5.8.2.02";
+const CODIGO_INTERESES_PAGADOS = "5.8.1.07";
 
 export async function obtenerContextoAmortizacion(
   prestamoId: string,

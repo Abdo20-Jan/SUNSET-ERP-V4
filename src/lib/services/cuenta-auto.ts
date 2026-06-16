@@ -35,14 +35,48 @@ function deriveNivel(codigo: string): number {
 // Son rúbricas de uso común; si la SINTETICA ya existe en seed con otro
 // nombre se respeta el existente (find-then-create).
 const SINTETICA_DEFAULTS: Record<string, string> = {
-  "1.1.6": "INVERSIONES",
-  "5.9.1": "PROVISIONES",
+  // ----- ACTIVO -----
+  "1.1.3": "INVERSIONES",
+  "1.1.4": "CRÉDITOS POR VENTAS",
+  "1.1.5": "CRÉDITOS FISCALES",
+  "1.1.5.1": "IVA — CRÉDITO FISCAL Y PERCEPCIONES",
+  "1.1.5.2": "INGRESOS BRUTOS — PERCEPCIONES",
+  "1.1.5.3": "GANANCIAS — PERCEPCIONES Y PAGOS A CUENTA",
+  "1.1.5.4": "ADUANA",
+  "1.1.6": "OTROS CRÉDITOS",
+  "1.1.6.1": "ANTICIPOS",
+  "1.1.6.2": "OTROS",
+  "1.1.7": "BIENES DE CAMBIO",
+  // ----- PASIVO -----
+  "2.1.2": "DEUDAS BANCARIAS Y FINANCIERAS",
+  "2.1.3": "DEUDAS FISCALES",
+  "2.1.3.1": "IVA",
+  "2.1.3.2": "INGRESOS BRUTOS",
+  "2.1.3.3": "GANANCIAS",
+  "2.1.3.4": "RETENCIONES Y OTROS",
+  "2.1.7": "ANTICIPOS DE CLIENTES",
+  "2.1.8": "PROVEEDORES DEL EXTERIOR",
+  // ----- INGRESOS -----
+  "4.2": "OTROS INGRESOS",
+  "4.2.2": "RESULTADOS POR TENENCIA DE INVENTARIO",
+  "4.3": "RESULTADOS FINANCIEROS Y POR TENENCIA",
+  "4.3.1": "RESULTADOS FINANCIEROS POSITIVOS",
+  // ----- EGRESOS -----
+  "5.1": "COSTO DE MERCADERÍAS VENDIDAS",
+  "5.1.1": "COSTO DE VENTAS",
+  "5.2": "GASTOS DE COMERCIALIZACIÓN",
+  "5.2.1": "GASTOS DE COMERCIALIZACIÓN",
+  "5.2.2": "MARKETING POR PROVEEDOR",
+  "5.3": "GASTOS DE ADMINISTRACIÓN",
+  "5.3.1": "GASTOS DE ADMINISTRACIÓN",
+  "5.3.2": "SERVICIOS PROFESIONALES POR PROVEEDOR",
+  "5.3.3": "IT / SOFTWARE POR PROVEEDOR",
+  "5.8": "RESULTADOS FINANCIEROS Y POR TENENCIA",
+  "5.8.1": "RESULTADOS FINANCIEROS NEGATIVOS",
+  "5.10": "IMPUESTO A LAS GANANCIAS",
+  "5.10.1": "IMPUESTO A LAS GANANCIAS",
+  // TODO(#2b): transitorio — tributos de importación que capitalizan a 1.1.7.02.
   "5.7.1": "GASTOS NO OPERATIVOS",
-  // Comex ZPA / divergencia D9 (PR 1.4): padres sintéticos de las
-  // cuentas de diferencia de inventario, para evitar "RUBRO 4.9/5.9.2".
-  "4.9": "OTROS INGRESOS",
-  "4.9.1": "DIFERENCIAS DE INVENTARIO",
-  "5.9.2": "PÉRDIDAS Y FALTANTES",
 };
 
 /**
@@ -152,18 +186,18 @@ import type { TipoCanal, TipoProveedor } from "@/generated/prisma/client";
  */
 const RANGES = {
   // Cliente — por canal
-  CLIENTE_MAYORISTA: { padre: "1.1.3", min: 10, max: 19, categoria: CuentaCategoria.ACTIVO },
-  CLIENTE_MINORISTA: { padre: "1.1.3", min: 20, max: 29, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_MAYORISTA: { padre: "1.1.4", min: 10, max: 19, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_MINORISTA: { padre: "1.1.4", min: 20, max: 29, categoria: CuentaCategoria.ACTIVO },
   CLIENTE_REVENDEDOR_GOMERIA: {
-    padre: "1.1.3",
+    padre: "1.1.4",
     min: 30,
     max: 39,
     categoria: CuentaCategoria.ACTIVO,
   },
-  CLIENTE_TRANSPORTISTA: { padre: "1.1.3", min: 40, max: 49, categoria: CuentaCategoria.ACTIVO },
-  CLIENTE_GRANDE_CUENTA: { padre: "1.1.3", min: 50, max: 59, categoria: CuentaCategoria.ACTIVO },
-  CLIENTE_EXTERIOR: { padre: "1.1.3", min: 60, max: 69, categoria: CuentaCategoria.ACTIVO },
-  CLIENTE_CONSUMIDOR_FINAL: { padre: "1.1.3", min: 99, max: 99, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_TRANSPORTISTA: { padre: "1.1.4", min: 40, max: 49, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_GRANDE_CUENTA: { padre: "1.1.4", min: 50, max: 59, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_EXTERIOR: { padre: "1.1.4", min: 60, max: 69, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_CONSUMIDOR_FINAL: { padre: "1.1.4", min: 99, max: 99, categoria: CuentaCategoria.ACTIVO },
 
   // Proveedor nacional — por tipo, bajo 2.1.1
   PROVEEDOR_MERCADERIA_LOCAL: {
@@ -210,17 +244,22 @@ const RANGES = {
   // facturas. Mismo principio que pasivos (un código por proveedor),
   // pero bajo el árbol de gastos (5.x.x.x).
   // MERCADERIA_LOCAL/EXTERIOR no se desagregan: van al stock compartido
-  // 1.1.5.01 / 1.1.5.02 — el costo por proveedor se rastrea en stock.
+  // 1.1.7.01 / 1.1.7.02 — el costo por proveedor se rastrea en stock.
+  //
+  // TODO(#2b): los servicios de IMPORTACIÓN (DESPACHANTE, GASTOS_PORTUARIOS,
+  // LOGISTICA, ALMACENAJE, SERVICIOS_EXTERIOR) capitalizan a 1.1.7.02 (RT17) y
+  // dejarán de crear cuenta de resultado (rangoGastoByTipo → null). En esta
+  // etapa (#2, renumeración) conservan transitoriamente su rango de egreso.
   GASTO_DESPACHANTE: { padre: "5.1.1", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
   GASTO_SERVICIOS_PROFESIONALES: {
-    padre: "5.1.1",
-    min: 30,
-    max: 49,
+    padre: "5.3.2",
+    min: 10,
+    max: 29,
     categoria: CuentaCategoria.EGRESO,
   },
-  GASTO_ALQUILERES: { padre: "5.2.1", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
-  GASTO_IT_SOFTWARE: { padre: "5.3.1", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
-  GASTO_MARKETING: { padre: "5.3.1", min: 30, max: 49, categoria: CuentaCategoria.EGRESO },
+  GASTO_ALQUILERES: { padre: "5.3.1", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
+  GASTO_IT_SOFTWARE: { padre: "5.3.3", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
+  GASTO_MARKETING: { padre: "5.2.2", min: 10, max: 49, categoria: CuentaCategoria.EGRESO },
   GASTO_OTRO: { padre: "5.3.1", min: 50, max: 89, categoria: CuentaCategoria.EGRESO },
   GASTO_GASTOS_PORTUARIOS: { padre: "5.4.1", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
   GASTO_LOGISTICA: { padre: "5.5.1", min: 10, max: 19, categoria: CuentaCategoria.EGRESO },
@@ -230,7 +269,7 @@ const RANGES = {
   // Bancos / cajas / préstamos — sin desagregación por tipo
   CAJA: { padre: "1.1.1", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
   BANCO: { padre: "1.1.2", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
-  PRESTAMO_CP: { padre: "2.1.7", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
+  PRESTAMO_CP: { padre: "2.1.2", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
   PRESTAMO_LP: { padre: "2.2.1", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
 } as const;
 
@@ -342,7 +381,7 @@ export function rangoProveedorByTipo(tipo: TipoProveedor): RangoCuentaAuto {
 /**
  * Rango de cuenta de gasto/activo (contrapartida del DEBE) por tipo de
  * proveedor. Devuelve null para tipos que no se desagregan
- * (MERCADERIA_LOCAL/EXTERIOR — usan stock compartido 1.1.5.x).
+ * (MERCADERIA_LOCAL/EXTERIOR — usan stock compartido 1.1.7.x).
  */
 export function rangoGastoByTipo(tipo: TipoProveedor): RangoCuentaAuto | null {
   switch (tipo) {

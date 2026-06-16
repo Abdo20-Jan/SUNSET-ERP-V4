@@ -2,6 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { Decimal, sumMoney, toDecimal } from "@/lib/decimal";
+import { PREFIJOS_BANCO_CAJA } from "@/lib/services/prefijos-plan";
 import {
   AsientoEstado,
   type CuentaCategoria,
@@ -62,7 +63,7 @@ export type FlujoCajaResult = {
   advertencias: string[];
 };
 
-const BANCO_CAJA_PREFIXES = ["1.1.1.", "1.1.2."];
+const BANCO_CAJA_PREFIXES = PREFIJOS_BANCO_CAJA;
 
 function esBancoCaja(codigo: string): boolean {
   return BANCO_CAJA_PREFIXES.some((p) => codigo.startsWith(p));
