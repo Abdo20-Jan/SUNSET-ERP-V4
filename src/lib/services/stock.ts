@@ -767,10 +767,45 @@ async function siguienteNumeroTransferenciaDespacho(
 }
 
 /**
+ * Tras revertir transferencias (borrar sus MovimientoStock), recalcula el
+ * estado de stock de los productos afectados desde los movimientos restantes:
+ *  1. SPD por depósito (`recalcularSPDPorProducto`).
+ *  2. Agregado `Producto.stockActual`/`costoPromedio` (`recalcularStockYCostoPromedio`,
+ *     sólo NACIONAL) — imprescindible para que el CMV de la próxima venta no
+ *     use un costo stale.
+ *  3. Zera los depósitos que quedaron sin ningún movimiento: un destino
+ *     alimentado SÓLO por la transferencia revertida quedaría con stock
+ *     fantasma, porque `recalcularSPDPorProducto` sólo toca depósitos presentes
+ *     en algún MovimientoStock.
+ * `afectados` mapea cada producto → depósitos tocados por la reversión.
+ */
+export async function recalcularTrasReversionTransferencia(
+  tx: TxClient,
+  afectados: Map<string, Set<string>>,
+): Promise<void> {
+  for (const [productoId, depositos] of afectados) {
+    await recalcularSPDPorProducto(tx, productoId);
+    await recalcularStockYCostoPromedio(tx, productoId);
+    for (const depositoId of depositos) {
+      const movs = await tx.movimientoStock.count({ where: { productoId, depositoId } });
+      if (movs === 0) {
+        // Un depósito sin ningún movimiento no tiene base física: zera también
+        // `cantidadReservada` para no dejar disponible negativo (fisica 0 con
+        // reserva > 0). Una reserva sobre un depósito huérfano ya es inválida.
+        await tx.stockPorDeposito.updateMany({
+          where: { productoId, depositoId },
+          data: { cantidadFisica: 0, cantidadReservada: 0, costoPromedio: 0 },
+        });
+      }
+    }
+  }
+}
+
+/**
  * Revierte las transferencias de stock generadas por un despacho.
- * Deleta los MovimientoStock + Transferencia ligados al despacho y
- * recalcula SPD de los productos afectados. Usado al anular despacho
- * que usaba flujo ZPA (Fase C).
+ * Deleta los MovimientoStock + Transferencia ligados al despacho y recalcula
+ * SPD + agregado `Producto` de los productos afectados. Usado al anular
+ * despacho que usaba flujo ZPA (Fase C).
  */
 export async function revertirTransferenciaDespacho(
   tx: TxClient,
@@ -783,7 +818,6 @@ export async function revertirTransferenciaDespacho(
   if (transferencias.length === 0) return;
 
   const transferenciaIds = transferencias.map((t) => t.id);
-  const productoIds = Array.from(new Set(transferencias.map((t) => t.productoId)));
 
   // Depósitos (producto→depósitos) tocados por las transferencias a borrar.
   // Tras el recalc, los que queden sin ningún movimiento deben caer a 0:
@@ -808,20 +842,7 @@ export async function revertirTransferenciaDespacho(
     where: { id: { in: transferenciaIds } },
   });
 
-  for (const productoId of productoIds) {
-    await recalcularSPDPorProducto(tx, productoId);
-    const depositos = afectados.get(productoId);
-    if (!depositos) continue;
-    for (const depositoId of depositos) {
-      const movs = await tx.movimientoStock.count({ where: { productoId, depositoId } });
-      if (movs === 0) {
-        await tx.stockPorDeposito.updateMany({
-          where: { productoId, depositoId },
-          data: { cantidadFisica: 0, costoPromedio: 0 },
-        });
-      }
-    }
-  }
+  await recalcularTrasReversionTransferencia(tx, afectados);
 }
 
 /**
