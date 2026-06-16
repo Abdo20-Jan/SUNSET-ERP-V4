@@ -18,7 +18,12 @@ import {
 } from "@/lib/services/entregas-pendientes-loader";
 import { aplicarEgresoSPD } from "@/lib/services/stock";
 import { getStockPorDeposito } from "@/lib/services/stock-helpers";
-import { EntregaEstado, MovimientoStockTipo, type Prisma } from "@/generated/prisma/client";
+import {
+  EntregaEstado,
+  MovimientoStockTipo,
+  type Prisma,
+  VentaEstado,
+} from "@/generated/prisma/client";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -182,6 +187,7 @@ async function loadEntregaForConfirm(tx: TxClient, entregaId: string) {
       asientoId: true,
       ventaId: true,
       depositoId: true,
+      venta: { select: { estado: true, numero: true } },
       items: {
         select: {
           id: true,
@@ -209,6 +215,15 @@ function ensureEntregaConfirmable(entrega: EntregaEnConfirmacion): void {
   }
   if (entrega.asientoId) {
     throw new AsientoError("DOMINIO_INVALIDO", `Entrega ${entrega.numero} ya tiene asiento.`);
+  }
+  // La venta debe seguir EMITIDA: si fue CANCELADA, su asiento de CMV (HABER
+  // 1.1.5.03) ya se revirtió; confirmar la entrega DEBITARÍA 1.1.5.03 sin
+  // crédito → débito huérfano. (El estado físico tampoco debe egresar.)
+  if (entrega.venta.estado !== VentaEstado.EMITIDA) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Venta ${entrega.venta.numero} no está EMITIDA (estado actual: ${entrega.venta.estado}) — no se puede confirmar la entrega.`,
+    );
   }
 }
 
