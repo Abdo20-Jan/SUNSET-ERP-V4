@@ -1,6 +1,7 @@
 import "server-only";
 
 import { CuentaCategoria, CuentaTipo, Prisma } from "@/generated/prisma/client";
+import { naturalezaPorDefecto } from "./cuenta-naturaleza";
 
 type TxClient = Omit<
   Prisma.TransactionClient,
@@ -76,6 +77,7 @@ async function ensurePadreSintetica(
       nivel,
       padreCodigo: abuelo,
       activa: true,
+      naturaleza: naturalezaPorDefecto(categoria),
     },
   });
 }
@@ -107,6 +109,7 @@ export async function getOrCreateCuenta(tx: TxClient, def: CuentaDef): Promise<n
       nivel,
       padreCodigo,
       activa: true,
+      naturaleza: naturalezaPorDefecto(def.categoria),
     },
     select: { id: true },
   });
