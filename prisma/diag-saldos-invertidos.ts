@@ -16,6 +16,7 @@
 
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { naturalezaPorDefecto, saldoNatural } from "../src/lib/services/cuenta-naturaleza";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { Decimal } from "decimal.js";
 
@@ -33,16 +34,10 @@ function fmt(n: Decimal): string {
   return n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
 
-// Idéntico a saldoPorCategoria() en shared.ts.
-function saldoNatural(debe: Decimal, haber: Decimal, categoria: string): Decimal {
-  if (categoria === "ACTIVO" || categoria === "EGRESO") return debe.minus(haber);
-  return haber.minus(debe);
-}
-
 async function main() {
   const cuentas = await prisma.cuentaContable.findMany({
     where: { categoria: { in: ["ACTIVO", "PASIVO"] }, tipo: "ANALITICA" },
-    select: { id: true, codigo: true, nombre: true, categoria: true },
+    select: { id: true, codigo: true, nombre: true, categoria: true, naturaleza: true },
     orderBy: { codigo: "asc" },
   });
 
@@ -68,7 +63,8 @@ async function main() {
   const invertidas: Row[] = [];
   for (const c of cuentas) {
     const m = aggMap.get(c.id) ?? { debe: new Decimal(0), haber: new Decimal(0) };
-    const saldo = saldoNatural(m.debe, m.haber, c.categoria).toDecimalPlaces(2);
+    const nat = c.naturaleza ?? naturalezaPorDefecto(c.categoria);
+    const saldo = saldoNatural(nat, m.debe, m.haber).toDecimalPlaces(2);
     if (saldo.lt(0)) {
       invertidas.push({
         codigo: c.codigo,
@@ -124,7 +120,8 @@ async function main() {
     console.log("  ⚠ cuenta 2.1.1.20 no encontrada");
   } else {
     const m = aggMap.get(tp.id) ?? { debe: new Decimal(0), haber: new Decimal(0) };
-    const saldo = saldoNatural(m.debe, m.haber, "PASIVO").toDecimalPlaces(2);
+    const nat = tp.naturaleza ?? naturalezaPorDefecto(tp.categoria);
+    const saldo = saldoNatural(nat, m.debe, m.haber).toDecimalPlaces(2);
     console.log(`  ${tp.codigo} ${tp.nombre}`);
     console.log(
       `  debe=${fmt(m.debe)}  haber=${fmt(m.haber)}  saldo(natural PASIVO)=${fmt(saldo)}`,
@@ -145,7 +142,8 @@ async function main() {
   const tpDup = cuentas.filter((c) => /logist/i.test(c.nombre) || /\btp\b/i.test(c.nombre));
   for (const c of tpDup) {
     const m = aggMap.get(c.id) ?? { debe: new Decimal(0), haber: new Decimal(0) };
-    const saldo = saldoNatural(m.debe, m.haber, c.categoria).toDecimalPlaces(2);
+    const nat = c.naturaleza ?? naturalezaPorDefecto(c.categoria);
+    const saldo = saldoNatural(nat, m.debe, m.haber).toDecimalPlaces(2);
     console.log(
       `     ${c.codigo.padEnd(10)} ${c.nombre.padEnd(38)} saldo ${fmt(saldo).padStart(18)}`,
     );
