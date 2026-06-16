@@ -138,6 +138,40 @@ export async function anularAsientoAction(asientoId: string): Promise<AsientoSta
       error: `Este asiento es del despacho ${despachoLinkado.codigo} (embarque ${despachoLinkado.embarque.codigo}). Use "Anular despacho" desde el embarque.`,
     };
   }
+  // Igual que ZP/Despacho: venta, entrega y gasto tienen flujos dedicados de
+  // anulación que limpian los datos operacionales (reservas, stock, estado).
+  // Anular su asiento por esta vía los dejaría huérfanos (venta EMITIDA sin
+  // asiento, entrega CONFIRMADA con asiento ANULADO).
+  const ventaLinkada = await db.venta.findFirst({
+    where: { asientoId },
+    select: { numero: true },
+  });
+  if (ventaLinkada) {
+    return {
+      ok: false,
+      error: `Este asiento es de la venta ${ventaLinkada.numero}. Use "Anular venta" desde la venta para anularlo.`,
+    };
+  }
+  const entregaLinkada = await db.entregaVenta.findFirst({
+    where: { asientoId },
+    select: { numero: true },
+  });
+  if (entregaLinkada) {
+    return {
+      ok: false,
+      error: `Este asiento es de la entrega ${entregaLinkada.numero}. Use "Anular entrega" desde la venta para anularlo.`,
+    };
+  }
+  const gastoLinkado = await db.gasto.findFirst({
+    where: { asientoId },
+    select: { numero: true },
+  });
+  if (gastoLinkado) {
+    return {
+      ok: false,
+      error: `Este asiento es del gasto ${gastoLinkado.numero}. Use "Anular gasto" para anularlo.`,
+    };
+  }
 
   try {
     const asiento = await anularAsiento(asientoId);
