@@ -3080,6 +3080,22 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
     // como gasto contra el pasivo a depositar a la jurisdicción.
     const total = subtotal.plus(iva).plus(iibb).plus(otros);
 
+    // #10 — con stock dual, un ítem sin costo (costoPromedio 0) omitiría su CMV
+    // (el bloque `if (totalCosto.gt(0))` no corre) y NO acreditaría 1.1.5.03;
+    // al confirmar la entrega después, se DEBITA 1.1.5.03 nunca acreditada →
+    // débito huérfano que no cierra. Exigir costo cargado antes de emitir.
+    if (isStockDualEnabled()) {
+      const tieneItemSinCosto = venta.items.some(
+        (it) => it.cantidad > 0 && !toDecimal(it.producto.costoPromedio).gt(0),
+      );
+      if (tieneItemSinCosto) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `Venta ${venta.numero}: hay un producto sin costo promedio cargado (costoPromedio 0) — no se puede emitir sin CMV (dejaría 1.1.5.03 sin acreditar). Cargá el costo (ingreso/importación) antes de vender.`,
+        );
+      }
+    }
+
     // Costo de mercadería vendida (CMV) — usa costoPromedio del producto
     // al momento de emitir la venta. En ARS porque costoPromedio se
     // mantiene en pesos (capitalización post-rateio embarque).
