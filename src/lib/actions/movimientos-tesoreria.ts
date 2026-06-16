@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import { isRetencionGananciasEnabled } from "@/lib/features";
 import {
@@ -306,10 +307,10 @@ export type CrearMovimientoResult =
 export async function crearMovimientoTesoreriaAction(
   raw: CrearMovimientoInput,
 ): Promise<CrearMovimientoResult> {
-  const session = await auth();
-  if (!session) {
-    return { ok: false, error: "No autorizado." };
-  }
+  // Valida que el user del JWT siga existiendo (redirige a /login si no): el
+  // pago con retención graba RetencionPracticada.createdById (FK obligatoria) y
+  // tras un reseed ese id rompe con P2003 luego de montar medio asiento.
+  const userId = await requireSessionUser();
 
   const parsed = crearMovimientoSchema.safeParse(raw);
   if (!parsed.success) {
@@ -546,7 +547,7 @@ export async function crearMovimientoTesoreriaAction(
           contexto: retencionCtx,
           movimientoTesoreriaId: mov.id,
           fecha,
-          createdById: session.user.id,
+          createdById: userId,
         });
       } else if (lineas.length === 1) {
         // 1 contrapartida — flujo clásico con split IDCB automático.
@@ -561,34 +562,60 @@ export async function crearMovimientoTesoreriaAction(
         }
       } else {
         // N contrapartidas — asiento manual de N+1 líneas.
+        // Libro ARS-único: si el movimiento es USD, cada línea va en pesos
+        // (monto × TC, redondeo por parcela) con el principal USD en su
+        // metadata; el banco cierra con la SUMA exacta de las parcelas ARS
+        // para que la partida no se desbalancee por redondeo.
+        const esUsd = moneda !== Moneda.ARS;
+        const tcDec = new Decimal(tipoCambio);
+        const lineaArs = (monto: string) =>
+          esUsd
+            ? new Decimal(monto).times(tcDec).toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+            : new Decimal(monto);
+        const metaUsd = (montoUsd: string) =>
+          esUsd
+            ? {
+                monedaOrigen: Moneda.USD,
+                montoOrigen: montoUsd,
+                tipoCambioOrigen: tcDec.toFixed(6),
+              }
+            : {};
+        const bancoArs = lineas
+          .reduce((s, l) => s.plus(lineaArs(l.monto)), new Decimal(0))
+          .toFixed(2);
+
         const asientoLineas: LineaInput[] = [];
         if (tipo === MovimientoTesoreriaTipo.COBRO) {
           asientoLineas.push({
             cuentaId: cuentaBancaria.cuentaContableId,
-            debe: totalStr,
+            debe: bancoArs,
             haber: 0,
+            ...metaUsd(totalStr),
           });
           for (const l of lineas) {
             asientoLineas.push({
               cuentaId: l.cuentaContableId,
               debe: 0,
-              haber: l.monto,
+              haber: lineaArs(l.monto).toFixed(2),
               descripcion: l.descripcion ?? undefined,
+              ...metaUsd(l.monto),
             });
           }
         } else {
           for (const l of lineas) {
             asientoLineas.push({
               cuentaId: l.cuentaContableId,
-              debe: l.monto,
+              debe: lineaArs(l.monto).toFixed(2),
               haber: 0,
               descripcion: l.descripcion ?? undefined,
+              ...metaUsd(l.monto),
             });
           }
           asientoLineas.push({
             cuentaId: cuentaBancaria.cuentaContableId,
             debe: 0,
-            haber: totalStr,
+            haber: bancoArs,
+            ...metaUsd(totalStr),
           });
         }
         const asiento = await crearAsientoManual(
@@ -596,8 +623,8 @@ export async function crearMovimientoTesoreriaAction(
             fecha,
             descripcion: descripcion ?? `${tipo} ${moneda} ${totalStr}`,
             origen: AsientoOrigen.TESORERIA,
-            moneda,
-            tipoCambio,
+            moneda: Moneda.ARS,
+            tipoCambio: 1,
             lineas: asientoLineas,
           },
           tx,
@@ -848,37 +875,66 @@ export async function pagarConIntermediarioAction(
       //   DEBE [beneficiario] diferencia  si transferimos demás (anticipo)
       //   HABER [beneficiario] |diferencia|  si transferimos de menos
       //   HABER [banco] montoTransferido
+      // Libro ARS-único: en USD cada línea va en pesos (monto × TC, redondeo
+      // por parcela) con el principal USD en su metadata.
+      const esUsd = data.moneda !== Moneda.ARS;
+      const tcDec = new Decimal(data.tipoCambio);
+      const lineaArs = (monto: string) =>
+        esUsd
+          ? new Decimal(monto).times(tcDec).toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+          : new Decimal(monto);
+      const metaUsd = (montoUsd: string) =>
+        esUsd
+          ? {
+              monedaOrigen: Moneda.USD,
+              montoOrigen: montoUsd,
+              tipoCambioOrigen: tcDec.toFixed(6),
+            }
+          : {};
       const lineas: LineaInput[] = [];
 
       for (const f of data.facturas) {
         lineas.push({
           cuentaId: f.cuentaContableId,
-          debe: f.monto,
+          debe: lineaArs(f.monto).toFixed(2),
           haber: 0,
           descripcion: f.descripcion ?? undefined,
+          ...metaUsd(f.monto),
         });
       }
 
       if (diferencia.gt(0)) {
         lineas.push({
           cuentaId: data.beneficiarioCuentaId,
-          debe: diferencia.toFixed(2),
+          debe: lineaArs(diferencia.toFixed(2)).toFixed(2),
           haber: 0,
           descripcion: "Anticipo / saldo a favor",
+          ...metaUsd(diferencia.toFixed(2)),
         });
       } else if (diferencia.lt(0)) {
         lineas.push({
           cuentaId: data.beneficiarioCuentaId,
           debe: 0,
-          haber: diferencia.abs().toFixed(2),
+          haber: lineaArs(diferencia.abs().toFixed(2)).toFixed(2),
           descripcion: "Saldo pendiente con intermediario",
+          ...metaUsd(diferencia.abs().toFixed(2)),
         });
       }
 
+      // El banco cierra la partida: suma exacta de DEBEs menos HABERs no-banco
+      // (en USD el redondeo por parcela podría no coincidir con total × TC).
+      const bancoArs = lineas
+        .reduce(
+          (s, l) =>
+            s.plus(new Decimal(String(l.debe ?? 0))).minus(new Decimal(String(l.haber ?? 0))),
+          new Decimal(0),
+        )
+        .toFixed(2);
       lineas.push({
         cuentaId: cuentaBancaria.cuentaContableId,
         debe: 0,
-        haber: total.toFixed(2),
+        haber: bancoArs,
+        ...metaUsd(total.toFixed(2)),
       });
 
       const asiento = await crearAsientoManual(
@@ -890,8 +946,8 @@ export async function pagarConIntermediarioAction(
               data.facturas.length === 1 ? "" : "s"
             }`,
           origen: AsientoOrigen.TESORERIA,
-          moneda: data.moneda,
-          tipoCambio: data.tipoCambio,
+          moneda: Moneda.ARS,
+          tipoCambio: 1,
           lineas,
         },
         tx,

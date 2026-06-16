@@ -5,6 +5,7 @@ import { ArrowLeft02Icon } from "@hugeicons/core-free-icons";
 
 import { db } from "@/lib/db";
 import { fmtDate, fmtMoney } from "@/lib/format";
+import { getUltimaCotizacion } from "@/lib/services/cotizacion";
 import {
   CuentaTipo,
   ImportacionExtractoStatus,
@@ -52,6 +53,9 @@ export default async function ExtractoDetallePage({ params }: { params: Promise<
   });
 
   if (!imp) notFound();
+
+  const esMonedaExtranjera = imp.cuentaBancaria.moneda !== "ARS";
+  const ultimaCotizacion = esMonedaExtranjera ? await getUltimaCotizacion() : null;
 
   const [cuentas, proveedores, clientes] = await Promise.all([
     db.cuentaContable.findMany({
@@ -220,6 +224,8 @@ export default async function ExtractoDetallePage({ params }: { params: Promise<
 
       <LineasReview
         importacionId={imp.id}
+        moneda={imp.cuentaBancaria.moneda}
+        cotizacionSugerida={ultimaCotizacion?.valor.toFixed(2) ?? null}
         lineas={lineasRows}
         cuentas={cuentasFiltradas}
         proveedores={proveedoresOpts}

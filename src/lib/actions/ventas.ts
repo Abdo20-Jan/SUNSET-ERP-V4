@@ -16,6 +16,7 @@ import {
 import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { VENTA_CODIGOS } from "@/lib/services/cuenta-registry";
 import { calcularPercepcionIIBB } from "@/lib/services/percepcion-iibb";
+import { crearEntregaBorradorPorDefecto } from "@/lib/services/entrega-borrador";
 import { aplicarReservaSPD, liberarReservaSPD } from "@/lib/services/stock";
 import {
   getDepositoPorDefecto,
@@ -814,6 +815,7 @@ export async function emitirVentaAction(
         select: {
           asientoId: true,
           numero: true,
+          fecha: true,
           items: {
             select: { productoId: true, cantidad: true, depositoId: true },
           },
@@ -833,6 +835,13 @@ export async function emitirVentaAction(
       if (v.fleteGasto && !v.fleteGasto.asientoId && v.fleteGasto.estado === "BORRADOR") {
         const asientoGasto = await crearAsientoGasto(v.fleteGasto.id, tx);
         await contabilizarAsiento(asientoGasto.id, tx);
+      }
+      // Stock-dual: deja una entrega BORRADOR (100% de los items, por depósito)
+      // pendiente de confirmar. Hace visible el remito en la venta y evita que
+      // la cuenta-puente 1.1.5.03 acumule olvidada. El asiento de baja se genera
+      // recién al CONFIRMAR la entrega.
+      if (isStockDualEnabled()) {
+        await crearEntregaBorradorPorDefecto(tx, ventaId, v.fecha);
       }
       await tx.venta.update({
         where: { id: ventaId },
