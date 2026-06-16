@@ -4,6 +4,7 @@ import Decimal from "decimal.js";
 
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
+import { calcularSaldosCuentasBancariasEnMonedaCuenta } from "@/lib/services/cuenta-bancaria";
 import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
 import {
   AsientoEstado,
@@ -1203,23 +1204,10 @@ export async function getAnalisisTesoreria(rng: DateRange): Promise<AnalisisTeso
       }),
     ]);
 
-  // Saldos bancarios — calcular vía saldos por cuentaContableId.
-  const cuentaIds = Array.from(new Set(cuentasBanco.map((c) => c.cuentaContableId)));
-  const lineasBanco = cuentaIds.length
-    ? await db.lineaAsiento.groupBy({
-        by: ["cuentaId"],
-        where: {
-          cuentaId: { in: cuentaIds },
-          asiento: { estado: AsientoEstado.CONTABILIZADO },
-        },
-        _sum: { debe: true, haber: true },
-      })
-    : [];
-  const saldoPorCuenta = new Map<number, Decimal>(
-    lineasBanco.map((s) => [
-      s.cuentaId,
-      toDecimal(s._sum.debe ?? 0).minus(toDecimal(s._sum.haber ?? 0)),
-    ]),
+  // Saldos bancarios — en la moneda de cada cuenta (USD vía metadata de línea).
+  const porCuenta = new Map(cuentasBanco.map((c) => [c.cuentaContableId, c.moneda]));
+  const saldoPorCuenta = await calcularSaldosCuentasBancariasEnMonedaCuenta(
+    Array.from(porCuenta, ([cuentaContableId, moneda]) => ({ cuentaContableId, moneda })),
   );
   const saldosPorBanco = cuentasBanco.map((c) => ({
     banco: c.banco,

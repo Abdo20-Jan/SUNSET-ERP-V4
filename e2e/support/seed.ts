@@ -181,7 +181,7 @@ export async function seedContenedorDesconsolidado(
 export async function seedContenedorEnDF(
   prisma: PrismaClient,
   defs: SkuDef[],
-  opts: { codigoEmbarque?: string; numeroContenedor?: string } = {},
+  opts: { codigoEmbarque?: string; numeroContenedor?: string; conArribo?: boolean } = {},
 ): Promise<ContenedorEnDfSeed> {
   const { depFiscalId, depDestinoId } = await crearDepositos(prisma);
   const proveedor = await prisma.proveedor.create({ data: { nombre: "Exterior SA" } });
@@ -194,6 +194,35 @@ export async function seedContenedorEnDF(
       depositoDestinoId: depDestinoId,
     },
   });
+  // Arribo a zona primaria (debita 1.1.5.04) — precondición del traslado de la
+  // desconsolidación (guard Onda A #3). Asiento mínimo + FK del embarque. Se
+  // omite (conArribo:false) en los flujos de divergencia, que no postean asiento
+  // y asertan asiento.count()===0.
+  if (opts.conArribo ?? true) {
+    const periodo = await prisma.periodoContable.findFirstOrThrow();
+    const max = await prisma.asiento.aggregate({
+      where: { periodoId: periodo.id },
+      _max: { numero: true },
+    });
+    const arribo = await prisma.asiento.create({
+      data: {
+        numero: (max._max.numero ?? 0) + 1,
+        fecha: new Date("2025-06-10T12:00:00.000Z"),
+        descripcion: `Arribo ZP ${embarque.codigo}`,
+        estado: "CONTABILIZADO",
+        origen: "COMEX",
+        moneda: "ARS",
+        tipoCambio: "1",
+        totalDebe: "0",
+        totalHaber: "0",
+        periodoId: periodo.id,
+      },
+    });
+    await prisma.embarque.update({
+      where: { id: embarque.id },
+      data: { asientoZonaPrimariaId: arribo.id },
+    });
+  }
   const contenedor = await prisma.contenedor.create({
     data: {
       embarqueId: embarque.id,

@@ -47,7 +47,8 @@ export type DesconsolidacionErrorCode =
   | "DEPOSITO_FISCAL_FALTANTE"
   | "CONFERENCIA_INVALIDA"
   | "PACKING_LIST_VACIO"
-  | "TIPO_CAMBIO_INVALIDO";
+  | "TIPO_CAMBIO_INVALIDO"
+  | "ARRIBO_PENDIENTE";
 
 export class DesconsolidacionError extends Error {
   readonly code: DesconsolidacionErrorCode;
@@ -111,7 +112,10 @@ async function ejecutar(t: TxClient, input: DesconsolidarInput): Promise<Descons
 
   const contenedor = await t.contenedor.findUnique({
     where: { id: input.contenedorId },
-    include: { items: true, embarque: { select: { tipoCambio: true } } },
+    include: {
+      items: true,
+      embarque: { select: { tipoCambio: true, asientoZonaPrimariaId: true } },
+    },
   });
   if (!contenedor) {
     throw new DesconsolidacionError(
@@ -221,6 +225,17 @@ async function ejecutar(t: TxClient, input: DesconsolidarInput): Promise<Descons
     return { desconsolidacion, contenedor: actualizado, divergencia: true, asiento: null, diffs };
   }
 
+  // Guard de coherencia de camino (Onda A #3): el traslado 1.1.5.04 → 1.1.5.05
+  // sólo es válido si el arribo a zona primaria YA debitó 1.1.5.04
+  // (embarque.asientoZonaPrimariaId). Sin arribo, acreditar 1.1.5.04 la dejaría
+  // con saldo acreedor y 1.1.5.05 inflada — raíz de la anomalía de 1.1.5.05.
+  if (!contenedor.embarque.asientoZonaPrimariaId) {
+    throw new DesconsolidacionError(
+      "ARRIBO_PENDIENTE",
+      `El contenedor ${input.contenedorId}: el embarque no confirmó zona primaria (arribo) — corré el arribo antes de desconsolidar.`,
+    );
+  }
+
   // 8. Sin divergencia: counters, stock consolidado por SKU y asiento principal.
   for (const it of contenedor.items) {
     const fisica = fisicaPorItem.get(it.id)!;
@@ -233,7 +248,12 @@ async function ejecutar(t: TxClient, input: DesconsolidarInput): Promise<Descons
   let montoTotalARS = new Prisma.Decimal(0);
   const grupos = agruparPorProducto(contenedor.items, fisicaPorItem);
   for (const grupo of grupos) {
-    const arsUnitario = grupo.fcPromedio.times(tipoCambio);
+    // Onda A #4: redondear el unitario ARS a 2dp ANTES de multiplicar — idéntico
+    // al criterio de la nacionalización (calcularCostoLandedDespacho: round2(FC×TC)).
+    // Así el DEBE 1.1.5.05 del traslado y el HABER 1.1.5.05 del despacho cuadran
+    // por unidad (la subcuenta DF neta a cero al nacionalizar todo) y el asiento,
+    // el MovimientoStock y el SPD comparten la misma base, sin residuo de centavos.
+    const arsUnitario = money(grupo.fcPromedio.times(tipoCambio));
     montoTotalARS = montoTotalARS.plus(arsUnitario.times(grupo.cantidad));
 
     await t.movimientoStock.create({
@@ -242,7 +262,7 @@ async function ejecutar(t: TxClient, input: DesconsolidarInput): Promise<Descons
         depositoId: contenedor.depositoFiscalId,
         tipo: MovimientoStockTipo.INGRESO,
         cantidad: grupo.cantidad,
-        costoUnitario: money(arsUnitario),
+        costoUnitario: arsUnitario,
         fecha: input.fecha,
         contenedorId: input.contenedorId,
         itemContenedorId: grupo.itemContenedorId,

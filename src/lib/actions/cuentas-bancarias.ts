@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { calcularSaldosCuentasBancarias } from "@/lib/services/cuenta-bancaria";
+import { calcularSaldosCuentasBancariasEnMonedaCuenta } from "@/lib/services/cuenta-bancaria";
 import { crearCuentaParaEntidad } from "@/lib/services/cuenta-auto";
 import {
   CuentaCategoria,
@@ -49,7 +49,9 @@ export async function listarCuentasBancariasConSaldo(): Promise<CuentaBancariaRo
     },
   });
 
-  const saldos = await calcularSaldosCuentasBancarias(cuentas.map((c) => c.cuentaContable.id));
+  const saldos = await calcularSaldosCuentasBancariasEnMonedaCuenta(
+    cuentas.map((c) => ({ cuentaContableId: c.cuentaContable.id, moneda: c.moneda })),
+  );
 
   return cuentas.map((c) => ({
     id: c.id,

@@ -5,6 +5,7 @@ import Decimal from "decimal.js";
 import { MovimientoStockTipo, TipoDeposito, type Prisma } from "@/generated/prisma/client";
 import { money, toDecimal } from "@/lib/decimal";
 import { AsientoError } from "@/lib/services/asiento-automatico";
+import { calcularNuevoPromedio, replayStockNacional } from "@/lib/services/stock-recalc";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -15,31 +16,9 @@ type IngresoItem = {
   costoUnitario: Decimal;
 };
 
-/**
- * Promedio ponderado: nuevo_promedio = (stock_anterior × promedio_anterior
- * + cantidad × costo_ingreso) / (stock_anterior + cantidad).
- *
- * Cuando `stockAnterior <= 0` o `stockAnterior + cantidadIngreso <= 0`,
- * el promedio anterior pierde sentido (no había costo registrado o el
- * stock va a quedar en 0); en ese caso devuelve el costo del ingreso.
- *
- * Centralizado para evitar duplicar la fórmula en aplicarIngresoProducto,
- * aplicarIngresoSPD, recalcularStockYCostoPromedio y recalcularSPDPorProducto.
- */
-function calcularNuevoPromedio(
-  stockAnterior: number,
-  promedioAnterior: Decimal,
-  cantidadIngreso: number,
-  costoIngreso: Decimal,
-): Decimal {
-  const nuevoStock = stockAnterior + cantidadIngreso;
-  if (stockAnterior <= 0 || nuevoStock <= 0) {
-    return costoIngreso;
-  }
-  const valorAnterior = promedioAnterior.times(stockAnterior);
-  const valorIngreso = costoIngreso.times(cantidadIngreso);
-  return valorAnterior.plus(valorIngreso).dividedBy(nuevoStock);
-}
+// `calcularNuevoPromedio` (promedio ponderado) y `replayStockNacional` viven
+// en `stock-recalc.ts` (sin `server-only`) para que los scripts de `prisma/`
+// consuman la MISMA fórmula que el runtime y no diverjan.
 
 export async function aplicarIngresoEmbarque(
   tx: TxClient,
@@ -390,32 +369,14 @@ export async function recalcularStockYCostoPromedio(
     },
   });
 
-  let stock = 0;
-  let promedio = new Decimal(0);
-
-  for (const m of movimientos) {
-    // Sólo el stock en depósitos NACIONAL es vendable y entra al agregado.
-    if (m.deposito.tipo !== TipoDeposito.NACIONAL) continue;
-
-    if (m.tipo === MovimientoStockTipo.INGRESO) {
-      promedio = calcularNuevoPromedio(stock, promedio, m.cantidad, toDecimal(m.costoUnitario));
-      stock += m.cantidad;
-    } else if (m.tipo === MovimientoStockTipo.EGRESO) {
-      stock -= m.cantidad;
-    } else if (m.tipo === MovimientoStockTipo.AJUSTE) {
-      // AJUSTE: cantidad signada (positiva o negativa). Mantiene costo medio.
-      stock += m.cantidad;
-    } else if (m.tipo === MovimientoStockTipo.TRANSFERENCIA) {
-      // cantidad > 0 = entrada al depósito NACIONAL (promedia costo landed);
-      // cantidad < 0 = salida de un depósito NACIONAL (resta, sin promediar).
-      if (m.cantidad > 0) {
-        promedio = calcularNuevoPromedio(stock, promedio, m.cantidad, toDecimal(m.costoUnitario));
-        stock += m.cantidad;
-      } else {
-        stock += m.cantidad; // cantidad ya es negativa
-      }
-    }
-  }
+  const { stock, promedio } = replayStockNacional(
+    movimientos.map((m) => ({
+      tipo: m.tipo,
+      cantidad: m.cantidad,
+      costoUnitario: m.costoUnitario,
+      depositoTipo: m.deposito.tipo,
+    })),
+  );
 
   await tx.producto.update({
     where: { id: productoId },
@@ -912,11 +873,22 @@ export async function recalcularSPDPorProducto(tx: TxClient, productoId: string)
       cur.stock += m.cantidad;
     } else if (m.tipo === MovimientoStockTipo.EGRESO) {
       cur.stock -= m.cantidad;
-    } else if (
-      m.tipo === MovimientoStockTipo.AJUSTE ||
-      m.tipo === MovimientoStockTipo.TRANSFERENCIA
-    ) {
-      // AJUSTE: cantidad signed; TRANSFERENCIA: -X origen / +X destino.
+    } else if (m.tipo === MovimientoStockTipo.AJUSTE) {
+      // AJUSTE: cantidad signed; mantiene el costo medio del depósito.
+      cur.stock += m.cantidad;
+    } else if (m.tipo === MovimientoStockTipo.TRANSFERENCIA) {
+      // cantidad > 0 = entrada al depósito: promedia el costo landed que trae
+      // el movimiento (si no, un depósito alimentado sólo por transferencias
+      // quedaría con costoPromedio 0). cantidad < 0 = salida: resta sin diluir
+      // el promedio. Espeja recalcularStockYCostoPromedio (agregado global).
+      if (m.cantidad > 0) {
+        cur.promedio = calcularNuevoPromedio(
+          cur.stock,
+          cur.promedio,
+          m.cantidad,
+          toDecimal(m.costoUnitario),
+        );
+      }
       cur.stock += m.cantidad;
     }
     porDeposito.set(m.depositoId, cur);
