@@ -1,6 +1,9 @@
 import { Decimal } from "decimal.js";
 
 import { db } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma/client";
+
+type DbClient = Prisma.TransactionClient | typeof db;
 
 export type CotizacionRow = {
   id: number;
@@ -31,10 +34,13 @@ export async function listarCotizaciones(limit = 60): Promise<CotizacionRow[]> {
  * Si no hay ninguna anterior, devuelve la más antigua disponible.
  * Si no hay cotizaciones, devuelve null.
  */
-export async function getCotizacionParaFecha(fecha: Date): Promise<CotizacionRow | null> {
+export async function getCotizacionParaFecha(
+  fecha: Date,
+  client: DbClient = db,
+): Promise<CotizacionRow | null> {
   const target = toDateOnly(fecha);
 
-  const previa = await db.cotizacion.findFirst({
+  const previa = await client.cotizacion.findFirst({
     where: { fecha: { lte: target } },
     orderBy: { fecha: "desc" },
   });
@@ -47,7 +53,7 @@ export async function getCotizacionParaFecha(fecha: Date): Promise<CotizacionRow
     };
   }
 
-  const fallback = await db.cotizacion.findFirst({
+  const fallback = await client.cotizacion.findFirst({
     orderBy: { fecha: "asc" },
   });
   if (!fallback) return null;

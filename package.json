@@ -36,7 +36,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.97.1",
     "@base-ui/react": "^1.5.0",
-    "@hookform/resolvers": "^5.2.2",
+    "@hookform/resolvers": "^5.4.0",
     "@hugeicons/core-free-icons": "^4.1.4",
     "@hugeicons/react": "^1.1.6",
     "@prisma/adapter-pg": "^7.8.0",
@@ -68,11 +68,11 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
+    "@biomejs/biome": "^2.5.0",
     "@eslint/eslintrc": "^3",
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.61.0",
     "@tailwindcss/postcss": "^4",
-    "@testcontainers/postgresql": "^11.14.0",
+    "@testcontainers/postgresql": "^12.0.1",
     "@types/node": "^25",
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
@@ -87,8 +87,8 @@
     "tailwindcss": "^4",
     "tsx": "^4.22.4",
     "typescript": "^5",
-    "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.2.4"
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^3.2.6"
   },
   "pnpm": {
     "overrides": {

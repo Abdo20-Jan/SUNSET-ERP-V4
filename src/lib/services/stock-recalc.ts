@@ -7,9 +7,82 @@
  * de auth, headers ou outras APIs server-only.
  */
 
-import type { Prisma } from "@/generated/prisma/client";
+import { MovimientoStockTipo, type Prisma, TipoDeposito } from "@/generated/prisma/client";
+import { type MoneyInput, toDecimal } from "@/lib/decimal";
+import Decimal from "decimal.js";
 
 type TxClient = Prisma.TransactionClient;
+
+/**
+ * Promedio ponderado: nuevo_promedio = (stock_anterior × promedio_anterior
+ * + cantidad × costo_ingreso) / (stock_anterior + cantidad). Si no hay stock
+ * previo, el promedio es el costo del ingreso. Función pura — compartida por
+ * `stock.ts` (runtime) y los scripts de `prisma/` (tsx), para que no diverjan.
+ */
+export function calcularNuevoPromedio(
+  stockAnterior: number,
+  promedioAnterior: Decimal,
+  cantidadIngreso: number,
+  costoIngreso: Decimal,
+): Decimal {
+  const nuevoStock = stockAnterior + cantidadIngreso;
+  if (stockAnterior <= 0 || nuevoStock <= 0) {
+    return costoIngreso;
+  }
+  const valorAnterior = promedioAnterior.times(stockAnterior);
+  const valorIngreso = costoIngreso.times(cantidadIngreso);
+  return valorAnterior.plus(valorIngreso).dividedBy(nuevoStock);
+}
+
+/** Movimiento mínimo necesario para reproducir el agregado vendible. */
+export type MovimientoStockReplay = {
+  tipo: MovimientoStockTipo;
+  cantidad: number;
+  costoUnitario: MoneyInput;
+  /** Tipo del depósito de la pata — sólo NACIONAL entra al agregado vendible. */
+  depositoTipo: TipoDeposito;
+};
+
+/**
+ * Reproduce `Producto.stockActual` / `costoPromedio` (campos legacy globales)
+ * a partir de los MovimientoStock ordenados (fecha, id). SÓLO cuenta las patas
+ * en depósitos NACIONAL (la mercadería bonded no es vendable). Reglas:
+ *  - INGRESO        → suma cantidad y promedia el costo.
+ *  - EGRESO         → resta cantidad (cantidad positiva).
+ *  - AJUSTE         → suma cantidad signada; mantiene el promedio.
+ *  - TRANSFERENCIA  → cantidad signada; la entrada (>0) promedia el costo
+ *                     landed nacionalizado, la salida (<0) sólo resta.
+ *
+ * Es la única fuente de verdad del replay: `recalcularStockYCostoPromedio`
+ * (stock.ts) y `prisma/fix-recalcular-stock-actual.ts` la consumen.
+ */
+export function replayStockNacional(movimientos: readonly MovimientoStockReplay[]): {
+  stock: number;
+  promedio: Decimal;
+} {
+  let stock = 0;
+  let promedio = new Decimal(0);
+
+  for (const m of movimientos) {
+    if (m.depositoTipo !== TipoDeposito.NACIONAL) continue;
+
+    if (m.tipo === MovimientoStockTipo.INGRESO) {
+      promedio = calcularNuevoPromedio(stock, promedio, m.cantidad, toDecimal(m.costoUnitario));
+      stock += m.cantidad;
+    } else if (m.tipo === MovimientoStockTipo.EGRESO) {
+      stock -= m.cantidad;
+    } else if (m.tipo === MovimientoStockTipo.AJUSTE) {
+      stock += m.cantidad;
+    } else if (m.tipo === MovimientoStockTipo.TRANSFERENCIA) {
+      if (m.cantidad > 0) {
+        promedio = calcularNuevoPromedio(stock, promedio, m.cantidad, toDecimal(m.costoUnitario));
+      }
+      stock += m.cantidad; // cantidad ya viene signada
+    }
+  }
+
+  return { stock, promedio };
+}
 
 /**
  * S3.3 — Recalcula `StockPorDeposito.cantidadReservada` para um

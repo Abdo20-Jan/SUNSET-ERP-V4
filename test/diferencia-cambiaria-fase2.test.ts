@@ -267,13 +267,7 @@ describe("Fase 2 — Diferencia cambiaria automática en pago USD", () => {
   });
 
   it("genera asiento ARS misto con ganancia cuando TC pago < TC factura", async () => {
-    await lanzarFacturaUsd(
-      db.prisma,
-      s,
-      25_397.5,
-      1438.5,
-      new Date("2025-06-01T12:00:00.000Z"),
-    );
+    await lanzarFacturaUsd(db.prisma, s, 25_397.5, 1438.5, new Date("2025-06-01T12:00:00.000Z"));
 
     const mov = await lanzarPagoUsd(
       db.prisma,
@@ -335,7 +329,13 @@ describe("Fase 2 — Diferencia cambiaria automática en pago USD", () => {
   it("no genera línea de diferencia cuando TC pago == TC factura", async () => {
     await lanzarFacturaUsd(db.prisma, s, 5_000, 1300, new Date("2025-06-01T12:00:00.000Z"));
 
-    const mov = await lanzarPagoUsd(db.prisma, s, 5_000, 1300, new Date("2025-06-20T12:00:00.000Z"));
+    const mov = await lanzarPagoUsd(
+      db.prisma,
+      s,
+      5_000,
+      1300,
+      new Date("2025-06-20T12:00:00.000Z"),
+    );
     const asiento = await crearAsientoMovimientoTesoreria(mov.id);
 
     const lineas = await db.prisma.lineaAsiento.findMany({
@@ -346,19 +346,41 @@ describe("Fase 2 — Diferencia cambiaria automática en pago USD", () => {
 
   it("falla si pago USD excede el saldo USD pendiente", async () => {
     await lanzarFacturaUsd(db.prisma, s, 1_000, 1000, new Date("2025-06-01T12:00:00.000Z"));
-    const mov = await lanzarPagoUsd(db.prisma, s, 5_000, 1100, new Date("2025-06-20T12:00:00.000Z"));
+    const mov = await lanzarPagoUsd(
+      db.prisma,
+      s,
+      5_000,
+      1100,
+      new Date("2025-06-20T12:00:00.000Z"),
+    );
     await expect(crearAsientoMovimientoTesoreria(mov.id)).rejects.toThrow(/excede el saldo/);
   });
 
-  it("comportamiento legacy preservado: pago USD sin saldo USD pendiente genera asiento USD de 2 líneas", async () => {
-    // Sin lanzar factura — saldo USD pendiente = 0
-    const mov = await lanzarPagoUsd(db.prisma, s, 1_000, 1300, new Date("2025-06-20T12:00:00.000Z"));
+  it("pago USD sin saldo USD pendiente: asiento ARS de 2 líneas con metadata USD (E3)", async () => {
+    // Sin lanzar factura — saldo USD pendiente = 0, no aplica Fase 2.
+    // Libro ARS-único: debe/haber en pesos (1.000 × 1.300), principal USD
+    // en la metadata de cada línea.
+    const mov = await lanzarPagoUsd(
+      db.prisma,
+      s,
+      1_000,
+      1300,
+      new Date("2025-06-20T12:00:00.000Z"),
+    );
     const asiento = await crearAsientoMovimientoTesoreria(mov.id);
-    expect(asiento.moneda).toBe(Moneda.USD);
+    expect(asiento.moneda).toBe(Moneda.ARS);
+    expect(Number(asiento.tipoCambio)).toBe(1);
 
     const lineas = await db.prisma.lineaAsiento.findMany({
       where: { asientoId: asiento.id },
     });
     expect(lineas.length).toBe(2);
+    for (const l of lineas) {
+      const ars = Number(l.debe) > 0 ? Number(l.debe) : Number(l.haber);
+      expect(ars).toBeCloseTo(1_000 * 1_300, 2);
+      expect(l.monedaOrigen).toBe(Moneda.USD);
+      expect(Number(l.montoOrigen)).toBeCloseTo(1_000, 2);
+      expect(Number(l.tipoCambioOrigen)).toBeCloseTo(1_300, 4);
+    }
   });
 });

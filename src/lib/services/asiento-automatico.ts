@@ -38,6 +38,7 @@ type TxClient = Prisma.TransactionClient;
 
 export type AsientoErrorCode =
   | "DESBALANCEADO"
+  | "MONEDA_INVALIDA"
   | "LINEA_INVALIDA"
   | "CUENTA_INVALIDA"
   | "CUENTA_INACTIVA"
@@ -364,12 +365,18 @@ async function crearAsientoEnTx(tx: TxClient, input: CrearAsientoInput): Promise
 
   const { totalDebe, totalHaber } = validarLineasYBalance(parsed.lineas);
 
-  const tcDec = toDecimal(parsed.tipoCambio);
-  if (tcDec.lte(0)) {
-    throw new AsientoError("LINEA_INVALIDA", "tipoCambio debe ser mayor a cero.");
+  // Libro diario ARS-único: todo asiento nuevo se registra en pesos. El
+  // principal en moneda extranjera viaja en metadata de línea
+  // (monedaOrigen/montoOrigen/tipoCambioOrigen), nunca en el debe/haber.
+  if (parsed.moneda !== Moneda.ARS) {
+    throw new AsientoError(
+      "MONEDA_INVALIDA",
+      `moneda=${parsed.moneda} no permitida: el libro diario se registra en ARS y el principal en moneda extranjera va en la metadata de cada línea.`,
+    );
   }
-  if (parsed.moneda === Moneda.ARS && !tcDec.eq(1)) {
-    throw new AsientoError("LINEA_INVALIDA", "tipoCambio debe ser 1 cuando moneda=ARS.");
+  const tcDec = toDecimal(parsed.tipoCambio);
+  if (!tcDec.eq(1)) {
+    throw new AsientoError("LINEA_INVALIDA", "tipoCambio debe ser 1: el libro diario es en ARS.");
   }
 
   const periodo = await resolverPeriodo(tx, parsed.fecha);
@@ -782,9 +789,13 @@ export async function crearAsientoMovimientoTesoreria(
     const bancoCuentaId = mov.cuentaBancaria.cuentaContableId;
     const bancoEsUsd = mov.cuentaBancaria.moneda === Moneda.USD;
     const contrapartidaId = mov.cuentaContableId;
-    const valor = money(mov.monto).toString();
     const usdPago = toDecimal(mov.monto);
     const tcPago = toDecimal(mov.tipoCambio);
+
+    // Libro ARS-único: si el movimiento es USD, el debe/haber del asiento va
+    // en pesos (monto × TC) y el principal USD queda en la metadata de línea.
+    const valorArs = mov.moneda === Moneda.ARS ? money(mov.monto) : money(usdPago.times(tcPago));
+    const valor = valorArs.toString();
 
     // Si el movimiento es USD, la línea-contrapartida (que reduce o crea el
     // pasivo/activo del proveedor o cliente) lleva el principal en USD para
@@ -894,7 +905,9 @@ export async function crearAsientoMovimientoTesoreria(
         inner,
         EXTRACTO_BANCARIO_CODIGOS.CREDITO_LEY_25413_GANANCIAS,
       );
-      const montoAbs = toDecimal(mov.monto).toNumber();
+      // Split sobre el valor en ARS; el resto del crédito va al gasto para
+      // que la partida cierre exacta contra el HABER del banco.
+      const montoAbs = valorArs.toNumber();
       const creditoMonto = Math.round(montoAbs * PORCENTAJE_LEY_25413_COMPUTABLE * 100) / 100;
       const gastoMonto = Math.round((montoAbs - creditoMonto) * 100) / 100;
       lineas = [
@@ -910,41 +923,41 @@ export async function crearAsientoMovimientoTesoreria(
           haber: 0,
           descripcion: "Pago a cuenta Ganancias (33%)",
         },
-        { cuentaId: bancoCuentaId, debe: 0, haber: valor },
+        { cuentaId: bancoCuentaId, debe: 0, haber: valor, ...usdOrigen },
       ];
     } else {
       switch (mov.tipo) {
         case MovimientoTesoreriaTipo.COBRO:
           lineas = [
-            { cuentaId: bancoCuentaId, debe: valor, haber: 0 },
-            { cuentaId: contrapartidaId, debe: 0, haber: valor },
+            { cuentaId: bancoCuentaId, debe: valor, haber: 0, ...usdOrigen },
+            { cuentaId: contrapartidaId, debe: 0, haber: valor, ...usdOrigen },
           ];
           break;
         case MovimientoTesoreriaTipo.PAGO:
           lineas = [
-            { cuentaId: contrapartidaId, debe: valor, haber: 0 },
-            { cuentaId: bancoCuentaId, debe: 0, haber: valor },
+            { cuentaId: contrapartidaId, debe: valor, haber: 0, ...usdOrigen },
+            { cuentaId: bancoCuentaId, debe: 0, haber: valor, ...usdOrigen },
           ];
           break;
         case MovimientoTesoreriaTipo.TRANSFERENCIA:
           // contrapartida = cuenta contable del banco DESTINO
           lineas = [
-            { cuentaId: contrapartidaId, debe: valor, haber: 0 },
-            { cuentaId: bancoCuentaId, debe: 0, haber: valor },
+            { cuentaId: contrapartidaId, debe: valor, haber: 0, ...usdOrigen },
+            { cuentaId: bancoCuentaId, debe: 0, haber: valor, ...usdOrigen },
           ];
           break;
       }
     }
 
-    // En Fase 2 el asiento es ARS misto (líneas con monedaOrigen=USD individuales).
-    // Forzamos moneda=ARS, tipoCambio=1 para mantener la convención del libro
-    // diario en pesos. El USD se preserva en las metadata de cada línea.
+    // Convención del libro diario en pesos: el asiento siempre es ARS/TC=1.
+    // El USD se preserva en la metadata de cada línea (monedaOrigen/montoOrigen/
+    // tipoCambioOrigen); el TC del pago queda en MovimientoTesoreria.tipoCambio.
     const asiento = await crearAsientoEnTx(inner, {
       fecha: mov.fecha,
       descripcion: `${mov.tipo} ${mov.moneda} ${toDecimal(mov.monto).toFixed(2)}`,
       origen: AsientoOrigen.TESORERIA,
-      moneda: esFase2 ? Moneda.ARS : mov.moneda,
-      tipoCambio: esFase2 ? 1 : mov.tipoCambio.toString(),
+      moneda: Moneda.ARS,
+      tipoCambio: 1,
       lineas,
     });
 
@@ -1063,18 +1076,34 @@ export async function crearAsientoTransferencia(
       ? ` — Ref ${input.referenciaBancoDestino.trim()}`
       : "";
 
+    // El principal en moneda extranjera viaja en la metadata de la línea de
+    // cada banco (el saldo USD de la cuenta se calcula desde montoOrigen).
     const lineas: LineaInput[] = [
       {
         cuentaId: destino.cuentaContableId,
         debe: destinoArs.toString(),
         haber: 0,
         descripcion: `Transferencia recibida desde ${origen.banco}${refDestinoSuffix}`,
+        ...(destino.moneda === Moneda.USD
+          ? {
+              monedaOrigen: Moneda.USD,
+              montoOrigen: money(montoDestinoDec).toString(),
+              tipoCambioOrigen: tcDestinoDec.toFixed(6),
+            }
+          : {}),
       },
       {
         cuentaId: origen.cuentaContableId,
         debe: 0,
         haber: origenArs.toString(),
         descripcion: `Transferencia enviada a ${destino.banco}${refOrigenSuffix}`,
+        ...(origen.moneda === Moneda.USD
+          ? {
+              monedaOrigen: Moneda.USD,
+              montoOrigen: money(montoOrigenDec).toString(),
+              tipoCambioOrigen: tcOrigenDec.toFixed(6),
+            }
+          : {}),
       },
     ];
 
@@ -2344,8 +2373,14 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
     const seguroOrigenArs = embarque.valorSeguroOrigen
       ? toDecimal(embarque.valorSeguroOrigen).times(tcEmb).toDecimalPlaces(2)
       : toDecimal(0);
+    // Sólo BORRADOR y LEGACY_BUNDLED capitalizan acá (igual que el confirm de
+    // zona primaria y que las facturas de despacho). Las EMITIDA tienen asiento
+    // standalone propio (DEBE gasto 5.x / HABER proveedor) y NUNCA se cargaron
+    // en 1.1.5.02 — incluirlas en el traslado las duplicaría (gasto + costo) y
+    // dejaría 1.1.5.02 en saldo ACREEDOR.
     const facturasZP = embarque.costos.filter(
-      (f) => f.momento === "ZONA_PRIMARIA" && f.estado !== "ANULADA",
+      (f) =>
+        f.momento === "ZONA_PRIMARIA" && (f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED"),
     );
     let zpFacturasArs = toDecimal(0);
     for (const f of facturasZP) {
@@ -2649,7 +2684,9 @@ export async function crearAsientoDespachoCruzado(
                 id: true,
                 productoId: true,
                 costoFCUnitario: true,
-                contenedor: { select: { depositoFiscalId: true } },
+                contenedor: {
+                  select: { depositoFiscalId: true, estado: true, numeroContenedor: true },
+                },
               },
             },
           },
@@ -2740,6 +2777,18 @@ export async function crearAsientoDespachoCruzado(
         throw new AsientoError(
           "DOMINIO_INVALIDO",
           `Despacho ${despacho.codigo}: el ItemContenedor ${ic.id} no tiene costo FC (cerrá costos antes de nacionalizar).`,
+        );
+      }
+      // Guard de coherencia de camino (Onda A #1): el cruzado credita 1.1.5.05
+      // (depósito fiscal), subcuenta que SÓLO queda financiada por el traslado
+      // 1.1.5.04 → 1.1.5.05 que corre en la desconsolidación (deja el contenedor
+      // DESCONSOLIDADO). Nacionalizar sin ese traslado dejaría 1.1.5.05 con saldo
+      // acreedor — raíz de la anomalía de 1.1.5.05. Espeja el guard de zona
+      // primaria del legacy (`crearAsientoDespacho`).
+      if (ic.contenedor.estado !== "DESCONSOLIDADO") {
+        throw new AsientoError(
+          "ESTADO_INVALIDO",
+          `Despacho ${despacho.codigo}: el contenedor ${ic.contenedor.numeroContenedor} no está DESCONSOLIDADO (estado actual: ${ic.contenedor.estado}) — desconsolidá antes de nacionalizar.`,
         );
       }
     }
@@ -2998,6 +3047,7 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
         cliente: { select: { id: true, nombre: true, cuentaContableId: true } },
         items: {
           select: {
+            id: true,
             cantidad: true,
             producto: { select: { costoPromedio: true } },
           },
@@ -3031,6 +3081,22 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
     // como gasto contra el pasivo a depositar a la jurisdicción.
     const total = subtotal.plus(iva).plus(iibb).plus(otros);
 
+    // #10 — con stock dual, un ítem sin costo (costoPromedio 0) omitiría su CMV
+    // (el bloque `if (totalCosto.gt(0))` no corre) y NO acreditaría 1.1.5.03;
+    // al confirmar la entrega después, se DEBITA 1.1.5.03 nunca acreditada →
+    // débito huérfano que no cierra. Exigir costo cargado antes de emitir.
+    if (isStockDualEnabled()) {
+      const tieneItemSinCosto = venta.items.some(
+        (it) => it.cantidad > 0 && !toDecimal(it.producto.costoPromedio).gt(0),
+      );
+      if (tieneItemSinCosto) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          `Venta ${venta.numero}: hay un producto sin costo promedio cargado (costoPromedio 0) — no se puede emitir sin CMV (dejaría 1.1.5.03 sin acreditar). Cargá el costo (ingreso/importación) antes de vender.`,
+        );
+      }
+    }
+
     // Costo de mercadería vendida (CMV) — usa costoPromedio del producto
     // al momento de emitir la venta. En ARS porque costoPromedio se
     // mantiene en pesos (capitalización post-rateio embarque).
@@ -3040,6 +3106,17 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
         toDecimal(0),
       )
       .toDecimalPlaces(2);
+
+    // Snapshot del costoPromedio usado para el CMV — la entrega cancelará
+    // 1.1.5.03 (stock dual) por ESTE valor para que la cuenta-puente cierre
+    // exacto, sin importar cómo evolucione el costoPromedio entre emisión y
+    // entrega. Persistido por ítem en ItemVenta.costoUnitarioCmv.
+    for (const it of venta.items) {
+      await inner.itemVenta.update({
+        where: { id: it.id },
+        data: { costoUnitarioCmv: money(toDecimal(it.producto.costoPromedio)).toString() },
+      });
+    }
 
     // Provisión Impuesto Ganancias sobre la utilidad bruta
     // (subtotal - costo - flete - IIBB embutido). Flete e IIBB
@@ -3251,7 +3328,11 @@ export async function crearAsientoEntrega(entregaId: string, tx?: TxClient): Pro
         asientoId: true,
         venta: { select: { numero: true } },
         items: {
-          select: { cantidad: true, costoUnitario: true },
+          select: {
+            cantidad: true,
+            costoUnitario: true,
+            itemVenta: { select: { costoUnitarioCmv: true } },
+          },
         },
       },
     });
@@ -3265,32 +3346,73 @@ export async function crearAsientoEntrega(entregaId: string, tx?: TxClient): Pro
       );
     }
 
-    const totalCosto = entrega.items
+    // Egreso físico real: lo que sale del stock, valuado al costo del depósito
+    // (SPD) capturado en la entrega. Acredita 1.1.5.01 MERCADERÍAS.
+    const egresoReal = entrega.items
       .reduce((acc, it) => acc.plus(toDecimal(it.costoUnitario).times(it.cantidad)), toDecimal(0))
       .toDecimalPlaces(2);
 
-    if (!totalCosto.gt(0)) {
+    if (!egresoReal.gt(0)) {
       throw new AsientoError(
         "DOMINIO_INVALIDO",
         `Entrega ${entrega.numero} no tiene costo registrado — nada que asentar.`,
       );
     }
 
-    const porCodigo = await ensureCuentasMap(inner, VENTA_CODIGOS);
+    // Base de cancelación de 1.1.5.03: el snapshot del costo con el que la venta
+    // ACREDITÓ la cuenta-puente (ItemVenta.costoUnitarioCmv). Así 1.1.5.03 cierra
+    // exacto contra lo que la venta provisionó, sin importar cómo evolucionó el
+    // costoPromedio entre emisión y entrega. Ventas legacy (snapshot 0) caen al
+    // costo SPD → cancela igual que el egreso, sin variación (comportamiento previo).
+    const cancelacionPuente = entrega.items
+      .reduce((acc, it) => {
+        const snapshot = toDecimal(it.itemVenta.costoUnitarioCmv);
+        const base = snapshot.gt(0) ? snapshot : toDecimal(it.costoUnitario);
+        return acc.plus(base.times(it.cantidad));
+      }, toDecimal(0))
+      .toDecimalPlaces(2);
+
+    // Diferencia entre lo provisionado por la venta y el egreso físico real →
+    // variación de costo de inventario (resultado). Cierra el asiento y deja
+    // 1.1.5.03 en cero contra la venta.
+    const variacion = cancelacionPuente.minus(egresoReal);
+
+    const porCodigo = await ensureCuentasMap(inner, {
+      ...VENTA_CODIGOS,
+      PERDIDA_INVENTARIO: COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS,
+      INGRESO_INVENTARIO: COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO,
+    });
     const lineas: LineaInput[] = [
       {
         cuentaId: porCodigo.get(VENTA_CODIGOS.MERCADERIAS_A_ENTREGAR.codigo)!,
-        debe: money(totalCosto).toString(),
+        debe: money(cancelacionPuente).toString(),
         haber: 0,
         descripcion: `Entrega ${entrega.numero} — cancela mercaderías a entregar (venta ${entrega.venta.numero})`,
       },
       {
         cuentaId: porCodigo.get(VENTA_CODIGOS.MERCADERIAS.codigo)!,
         debe: 0,
-        haber: money(totalCosto).toString(),
+        haber: money(egresoReal).toString(),
         descripcion: `Entrega ${entrega.numero} — egreso de stock`,
       },
     ];
+    if (variacion.gt(0)) {
+      // La venta provisionó MÁS que el costo físico real → ingreso por diferencia.
+      lineas.push({
+        cuentaId: porCodigo.get(COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO.codigo)!,
+        debe: 0,
+        haber: money(variacion).toString(),
+        descripcion: `Entrega ${entrega.numero} — variación de costo de inventario`,
+      });
+    } else if (variacion.lt(0)) {
+      // El costo físico real fue MAYOR que lo provisionado → pérdida de inventario.
+      lineas.push({
+        cuentaId: porCodigo.get(COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS.codigo)!,
+        debe: money(variacion.abs()).toString(),
+        haber: 0,
+        descripcion: `Entrega ${entrega.numero} — variación de costo de inventario`,
+      });
+    }
 
     const asiento = await crearAsientoEnTx(inner, {
       fecha: entrega.fecha,

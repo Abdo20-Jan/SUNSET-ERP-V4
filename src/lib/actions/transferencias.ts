@@ -8,7 +8,12 @@ import { isStockDualEnabled } from "@/lib/features";
 import { AsientoError } from "@/lib/services/asiento-automatico";
 import { aplicarTransferenciaSPD } from "@/lib/services/stock";
 import { validarDisponible } from "@/lib/services/stock-helpers";
-import { MovimientoStockTipo, type Prisma, TransferenciaEstado } from "@/generated/prisma/client";
+import {
+  MovimientoStockTipo,
+  type Prisma,
+  TipoDeposito,
+  TransferenciaEstado,
+} from "@/generated/prisma/client";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -81,10 +86,21 @@ async function ensureDepositoActivoConId(
 ): Promise<void> {
   const dep = await tx.deposito.findUnique({
     where: { id: depositoId },
-    select: { id: true, activo: true },
+    select: { id: true, activo: true, tipo: true },
   });
   if (!dep?.activo) {
     throw new AsientoError("DOMINIO_INVALIDO", `Depósito ${rol} no existe o está inactivo.`);
+  }
+  // Onda C #12: la mercadería en zona primaria aduanera (bonded: ZPA 1.1.5.04 /
+  // DF 1.1.5.05) sólo puede moverse por el flujo COMEX (desconsolidación /
+  // despacho), que genera el asiento y los tributos. Una transferencia manual
+  // hacia o desde un depósito ZONA_PRIMARIA mueve el stock físico sin tocar las
+  // cuentas COMEX → físico ≠ saldo. Se bloquea en ambos sentidos.
+  if (dep.tipo === TipoDeposito.ZONA_PRIMARIA) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `El depósito ${rol} es de zona primaria aduanera (bonded): la mercadería sólo se mueve por el flujo COMEX (desconsolidación / despacho), no por transferencia manual.`,
+    );
   }
 }
 
