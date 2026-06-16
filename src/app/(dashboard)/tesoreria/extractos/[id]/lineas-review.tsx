@@ -130,12 +130,16 @@ const CONFIANZA_VARIANT: Record<"ALTA" | "MEDIA" | "BAJA", "default" | "secondar
 
 export function LineasReview({
   importacionId: _importacionId,
+  moneda,
+  cotizacionSugerida,
   lineas,
   cuentas,
   proveedores,
   clientes,
 }: {
   importacionId: string;
+  moneda: string;
+  cotizacionSugerida: string | null;
   lineas: LineaRow[];
   cuentas: CuentaOption[];
   proveedores: ProveedorOption[];
@@ -144,7 +148,15 @@ export function LineasReview({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [aprobandoTcId, setAprobandoTcId] = useState<string | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
+
+  const esMonedaExtranjera = moneda !== "ARS";
+
+  const aprobandoTcLinea = useMemo(
+    () => (aprobandoTcId ? (lineas.find((l) => l.id === aprobandoTcId) ?? null) : null),
+    [aprobandoTcId, lineas],
+  );
 
   const editingLinea = useMemo(
     () => (editingId ? (lineas.find((l) => l.id === editingId) ?? null) : null),
@@ -179,7 +191,10 @@ export function LineasReview({
       toast.info("No hay líneas pendientes de confianza ALTA con contrapartida resuelta.");
       return;
     }
-    if (!confirm(`Aprobar ${candidatas.length} líneas de confianza ALTA?`)) return;
+    const aviso = esMonedaExtranjera
+      ? ` Cuenta en ${moneda}: cada línea usará la cotización vigente a su fecha.`
+      : "";
+    if (!confirm(`Aprobar ${candidatas.length} líneas de confianza ALTA?${aviso}`)) return;
 
     setBulkRunning(true);
     let ok = 0;
@@ -317,12 +332,16 @@ export function LineasReview({
                               ? "Aprobar y crear movimiento"
                               : "Falta contrapartida — editá primero"
                           }
-                          onClick={() =>
+                          onClick={() => {
+                            if (esMonedaExtranjera) {
+                              setAprobandoTcId(l.id);
+                              return;
+                            }
                             handleAction(
                               () => aprobarLineaAction(l.id),
                               "Línea aprobada — movimiento generado.",
-                            )
-                          }
+                            );
+                          }}
                         >
                           <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} />
                           Aprobar
@@ -417,7 +436,103 @@ export function LineasReview({
         clientes={clientes}
         onClose={() => setEditingId(null)}
       />
+
+      <AprobarConTcDialog
+        linea={aprobandoTcLinea}
+        moneda={moneda}
+        cotizacionSugerida={cotizacionSugerida}
+        onClose={() => setAprobandoTcId(null)}
+      />
     </>
+  );
+}
+
+function AprobarConTcDialog({
+  linea,
+  moneda,
+  cotizacionSugerida,
+  onClose,
+}: {
+  linea: LineaRow | null;
+  moneda: string;
+  cotizacionSugerida: string | null;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [tcInput, setTcInput] = useState<string>("");
+
+  // Re-sync al cambiar de línea: arranca vacío — el default es la cotización
+  // automática a la fecha de la línea, no la última cargada (prefijar la
+  // última invitaría a aprobar líneas históricas con un TC equivocado).
+  useEffect(() => {
+    if (linea) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-sync pattern (mismo patrón que EditarLineaDialog)
+      setTcInput("");
+    }
+  }, [linea]);
+
+  if (!linea) return null;
+
+  function handleAprobar() {
+    if (!linea) return;
+    const raw = tcInput.trim();
+    let tipoCambio: number | undefined;
+    if (raw !== "") {
+      // es-AR: "1.250,50" → coma decimal manda; los puntos son separador de miles.
+      const normalized = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
+      tipoCambio = Number(normalized);
+      if (!Number.isFinite(tipoCambio) || tipoCambio <= 0) {
+        toast.error("El tipo de cambio debe ser un número mayor a 0.");
+        return;
+      }
+    }
+    startTransition(async () => {
+      const r = await aprobarLineaAction(linea.id, tipoCambio !== undefined ? { tipoCambio } : {});
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success("Línea aprobada — movimiento generado.");
+      router.refresh();
+      onClose();
+    });
+  }
+
+  return (
+    <Dialog open={Boolean(linea)} onOpenChange={(open) => (open ? null : onClose())}>
+      <DialogContent className="sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>Aprobar línea en {moneda}</DialogTitle>
+          <DialogDescription>
+            {linea.descripcion} — {fmtMoney(linea.monto)} {moneda}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="tc-aprobar">Tipo de cambio (ARS por {moneda})</Label>
+          <Input
+            id="tc-aprobar"
+            inputMode="decimal"
+            value={tcInput}
+            onChange={(e) => setTcInput(e.target.value)}
+            placeholder="Automático (cotización a la fecha de la línea)"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Dejá vacío para usar la cotización vigente al {fmtDate(new Date(linea.fecha))}.
+            {cotizacionSugerida ? ` Última cotización cargada: ${cotizacionSugerida}.` : ""} Ingresá
+            un valor (ej: 1250,50) para forzar un TC manual.
+          </p>
+        </div>
+
+        <DialogFooter>
+          <DialogClose render={<Button variant="ghost">Cancelar</Button>} />
+          <Button onClick={handleAprobar} disabled={isPending}>
+            {isPending ? "Aprobando…" : "Aprobar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

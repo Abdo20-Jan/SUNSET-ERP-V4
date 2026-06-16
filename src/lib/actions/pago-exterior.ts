@@ -320,13 +320,15 @@ export async function pagarFacturaExteriorAction(
         select: { id: true },
       });
 
+      // Las líneas ya están en ARS (la DEBE lleva el principal USD en su
+      // metadata); el asiento sigue la convención del libro diario en pesos.
       const asiento = await crearAsientoManual(
         {
           fecha,
           descripcion: descripcionAsiento,
           origen: AsientoOrigen.TESORERIA,
-          moneda: Moneda.USD,
-          tipoCambio: tcAplicado.toFixed(6),
+          moneda: Moneda.ARS,
+          tipoCambio: 1,
           lineas,
         },
         tx,

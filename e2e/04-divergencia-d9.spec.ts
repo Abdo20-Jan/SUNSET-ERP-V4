@@ -37,9 +37,13 @@ test.describe("CENÁRIO 4 · divergencia D9 por causa", () => {
 
   test("físico < declarado bloquea asiento/stock; concluir investigación genera el ajuste", async () => {
     // SKU-1: declarado 100, FC 10 USD. Físico conferido = 90 (falta de 10).
-    const s = await seedContenedorEnDF(db.prisma, [
-      { codigo: "SKU-1", declarada: 100, fc: "10.0000" },
-    ]);
+    const s = await seedContenedorEnDF(
+      db.prisma,
+      [{ codigo: "SKU-1", declarada: 100, fc: "10.0000" }],
+      // Camino de divergencia: no postea traslado → no requiere arribo y mantiene
+      // asiento.count()===0.
+      { conArribo: false },
+    );
     const item = s.items[0]!;
 
     // --- Desconsolidación con divergencia: gate D9 bloquea.
@@ -121,9 +125,13 @@ test.describe("CENÁRIO 4 · divergencia D9 por causa", () => {
   });
 
   test("diagnóstico con responsable incoherente para la causa es rechazado", async () => {
-    const s = await seedContenedorEnDF(db.prisma, [
-      { codigo: "SKU-1", declarada: 100, fc: "10.0000" },
-    ]);
+    const s = await seedContenedorEnDF(
+      db.prisma,
+      [{ codigo: "SKU-1", declarada: 100, fc: "10.0000" }],
+      // Camino de divergencia: no postea traslado → no requiere arribo y mantiene
+      // asiento.count()===0.
+      { conArribo: false },
+    );
     const item = s.items[0]!;
     const desc = await desconsolidar(
       {

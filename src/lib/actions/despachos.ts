@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import { money, toDecimal } from "@/lib/decimal";
 import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
@@ -977,11 +977,10 @@ async function gateBorrador(): Promise<BorradorGate> {
   if (!isContenedorDesconsolidacionEnabled()) {
     return { ok: false, error: "La función de desconsolidación no está habilitada." };
   }
-  const session = await auth();
-  if (!session?.user?.id) {
-    return { ok: false, error: "No autorizado." };
-  }
-  return { ok: true, userId: session.user.id };
+  // Valida que el user del JWT siga existiendo (redirige a /login si no): el
+  // DespachoBorrador.userId es FK obligatoria y rompería con P2003 tras un reseed.
+  const userId = await requireSessionUser();
+  return { ok: true, userId };
 }
 
 function mapBorradorError(err: DespachoParcialError): string {
