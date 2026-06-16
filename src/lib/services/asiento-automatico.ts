@@ -810,11 +810,11 @@ export async function crearAsientoMovimientoTesoreria(
         : {};
 
     // Caso especial — Impuesto Ley 25413 (Imp. al cheque/IDCB):
-    // 33% va como crédito fiscal pago a cuenta de Ganancias (1.1.4.12),
-    // 67% como gasto (5.8.1.06). Aplica sólo en PAGO y cuando la
+    // 33% va como crédito fiscal pago a cuenta de Ganancias (1.1.5.3.02),
+    // 67% como gasto (5.8.1.05). Aplica sólo en PAGO y cuando la
     // contrapartida elegida es la cuenta del impuesto.
     const esImpuestoLey25413 =
-      mov.tipo === MovimientoTesoreriaTipo.PAGO && mov.cuentaContable?.codigo === "5.8.1.06";
+      mov.tipo === MovimientoTesoreriaTipo.PAGO && mov.cuentaContable?.codigo === "5.8.1.05";
 
     // Caso Fase 2 — Pago USD contra proveedor USD-nato con saldo pendiente:
     // generar asiento ARS misto con diferencia cambiaria automática.

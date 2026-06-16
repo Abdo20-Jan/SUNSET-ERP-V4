@@ -210,16 +210,16 @@ describe("despacho legacy — facturas ZP EMITIDA no se re-capitalizan (Onda A #
     // EMITIDA NO entra (el confirm filtra BORRADOR/LEGACY_BUNDLED).
     const cf = await confirmarZonaPrimariaAction(s.embarqueId, FECHA_ISO);
     expect(cf.ok).toBe(true);
-    expect(await netoCuenta("1.1.5.02")).toBeCloseTo(1_000_000, 2);
+    expect(await netoCuenta("1.1.7.02")).toBeCloseTo(1_000_000, 2);
 
     // Despachar el total y contabilizar.
     const despachoId = await crearDespachoTotal(s.embarqueId, s.itemEmbarqueId, 100);
     await crearAsientoDespacho(despachoId, db.prisma);
 
     // El traslado capitaliza SÓLO el FOB (no la EMITIDA): 1.1.5.01 = 1.000.000.
-    expect(await debeCuenta("1.1.5.01")).toBeCloseTo(1_000_000, 2);
+    expect(await debeCuenta("1.1.7.01")).toBeCloseTo(1_000_000, 2);
     // 1.1.5.02 vuelve a CERO (entró FOB en el arribo, sale FOB en el despacho).
-    expect(await netoCuenta("1.1.5.02")).toBeCloseTo(0, 2);
+    expect(await netoCuenta("1.1.7.02")).toBeCloseTo(0, 2);
     // El gasto 5.4.1.12 de la EMITIDA NO se duplica: sigue con su único débito.
     expect(await debeCuenta("5.4.1.12")).toBeCloseTo(500_000, 2);
   });
@@ -235,6 +235,6 @@ describe("despacho legacy — facturas ZP EMITIDA no se re-capitalizan (Onda A #
     await crearAsientoDespacho(despachoId, db.prisma);
 
     // BORRADOR sigue dentro del costo capitalizado: 1.1.5.01 = FOB + subtotal ZP.
-    expect(await debeCuenta("1.1.5.01")).toBeCloseTo(1_500_000, 2);
+    expect(await debeCuenta("1.1.7.01")).toBeCloseTo(1_500_000, 2);
   });
 });

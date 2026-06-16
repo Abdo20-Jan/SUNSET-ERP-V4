@@ -20,15 +20,18 @@ import {
 const SUGGESTED_CUENTA_DEFAULTS: Record<string, { nombre: string; categoria: CuentaCategoria }> = {
   "5.8.1.01": { nombre: "COMISIONES BANCARIAS", categoria: CuentaCategoria.EGRESO },
   "5.8.1.04": { nombre: "IMPUESTO DE SELLOS", categoria: CuentaCategoria.EGRESO },
-  "5.8.1.06": {
-    nombre: "IMPUESTO LEY 25413 (DEB/CRED BANCARIOS)",
+  "5.8.1.05": {
+    nombre: "IMPUESTO LEY 25413 (NO COMPUTABLE)",
     categoria: CuentaCategoria.EGRESO,
   },
-  "5.8.2.02": { nombre: "INTERESES PAGADOS", categoria: CuentaCategoria.EGRESO },
-  "1.1.4.01": { nombre: "IVA CRÉDITO FISCAL", categoria: CuentaCategoria.ACTIVO },
-  "1.1.4.02": { nombre: "PERCEPCIÓN IVA RG 2408 (BANCARIA)", categoria: CuentaCategoria.ACTIVO },
-  "1.1.4.10": { nombre: "PERCEPCIÓN IIBB SIRCREB", categoria: CuentaCategoria.ACTIVO },
-  "1.1.6.01": { nombre: "INVERSIONES EN FONDOS COMUNES", categoria: CuentaCategoria.ACTIVO },
+  "5.8.1.07": { nombre: "INTERESES PAGADOS", categoria: CuentaCategoria.EGRESO },
+  "1.1.5.1.01": {
+    nombre: "IVA CRÉDITO FISCAL — COMPRAS LOCALES",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+  "1.1.5.1.02": { nombre: "PERCEPCIÓN IVA RG 2408 (BANCARIA)", categoria: CuentaCategoria.ACTIVO },
+  "1.1.5.2.03": { nombre: "PERCEPCIÓN IIBB BANCARIA (SIRCREB)", categoria: CuentaCategoria.ACTIVO },
+  "1.1.3.01": { nombre: "INVERSIONES EN FONDOS COMUNES", categoria: CuentaCategoria.ACTIVO },
 };
 
 function normalizarCuit(raw: string | null): string | null {

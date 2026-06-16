@@ -198,8 +198,8 @@ describe("contabilización despacho cruzado (PR 4.5)", () => {
     // Nacionalización CON CAPITALIZACIÓN del DIE en el costo de la mercadería:
     //   DEBE 1.1.5.01 = nacionalizado 375000 + DIE capitalizado 100000 = 475000.
     //   HABER 1.1.5.05 = sólo el costo FC nacionalizado (sin tributos) = 375000.
-    expect(debePorCuenta.get("1.1.5.01")).toBe("475000.00");
-    expect(haberPorCuenta.get("1.1.5.05")).toBe("375000.00");
+    expect(debePorCuenta.get("1.1.7.01")).toBe("475000.00");
+    expect(haberPorCuenta.get("1.1.7.04")).toBe("375000.00");
     // El DIE YA NO va a egreso 5.7.1.01 (capitalizado en 1.1.5.01); el HABER
     // del pasivo aduanero (2.1.5.01) permanece como obligación a pagar.
     expect(debePorCuenta.has("5.7.1.01")).toBe(false);

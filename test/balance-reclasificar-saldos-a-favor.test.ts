@@ -58,8 +58,8 @@ describe("reclasificarSaldosAFavor", () => {
   const activo = () => [
     syn("1", [
       syn("1.1", [
-        syn("1.1.5", [leaf("1.1.5.03", -1000, "MERCADERÍAS A ENTREGAR")]),
-        syn("1.1.3", [leaf("1.1.3.10", -300, "CLIENTE ACME")]),
+        syn("1.1.7", [leaf("1.1.7.05", -1000, "MERCADERÍAS A ENTREGAR")]),
+        syn("1.1.4", [leaf("1.1.4.10", -300, "CLIENTE ACME")]),
       ]),
     ]),
   ];
@@ -95,13 +95,13 @@ describe("reclasificarSaldosAFavor", () => {
     const grupo = findByNombre(p, "ANTICIPOS DE CLIENTES (SALDOS A FAVOR)");
     expect(grupo).toBeDefined();
     expect(grupo!.saldo.toFixed(2)).toBe("300.00");
-    expect(contieneCodigo(a, "1.1.3.10")).toBe(false);
+    expect(contieneCodigo(a, "1.1.4.10")).toBe(false);
   });
 
   it("NO reclasifica cuentas fuera del subledger comercial (mercaderías)", () => {
     const { activo: a } = reclasificarSaldosAFavor(activo(), pasivo());
     // 1.1.5.03 sigue en el Activo, con su saldo invertido intacto (no se mueve)
-    expect(contieneCodigo(a, "1.1.5.03")).toBe(true);
+    expect(contieneCodigo(a, "1.1.7.05")).toBe(true);
   });
 
   it("preserva la igualdad A − P (ambos lados se agrupan por igual)", () => {
@@ -114,7 +114,7 @@ describe("reclasificarSaldosAFavor", () => {
   });
 
   it("no crea grupos vacíos si no hay saldos invertidos", () => {
-    const activoOk = [syn("1", [syn("1.1", [leaf("1.1.3.10", 300, "CLIENTE OK")])])];
+    const activoOk = [syn("1", [syn("1.1", [leaf("1.1.4.10", 300, "CLIENTE OK")])])];
     const pasivoOk = [syn("2", [syn("2.1", [syn("2.1.1", [leaf("2.1.1.10", 500, "PROV OK")])])])];
     const { activo: a, pasivo: p } = reclasificarSaldosAFavor(activoOk, pasivoOk);
     expect(findByNombre(a, "ANTICIPOS Y SALDOS A FAVOR A PROVEEDORES")).toBeUndefined();

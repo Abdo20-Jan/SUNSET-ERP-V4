@@ -2,14 +2,12 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
+import { FX_GAIN_CODIGOS, FX_LOSS_CODIGOS } from "@/lib/services/prefijos-plan";
 import { AsientoEstado, Moneda, MovimientoTesoreriaTipo } from "@/generated/prisma/client";
 
-// Cuentas usadas para detectar diferencia cambiaria por pago.
-// Reusamos las cuentas de transferencia (4.3.1.01 / 5.8.2.01) que ya
-// existen y representan diferencia de cambio. Si el flujo CxP USD
-// futuro usa códigos distintos (ex 4.4.1.01 / 5.3.1.01), agregarlos aquí.
-const FX_GAIN_CODIGOS = new Set(["4.3.1.01", "4.4.1.01"]);
-const FX_LOSS_CODIGOS = new Set(["5.8.2.01", "5.3.1.01"]);
+// FX_GAIN_CODIGOS / FX_LOSS_CODIGOS — par único RT9 (ganancia 4.3.1.02 /
+// pérdida 5.8.1.02), importados de prefijos-plan. Se usan para detectar
+// la diferencia cambiaria de un pago.
 
 export type PagoFacturaReferencia = {
   origen: "compra" | "embarque" | "gasto";

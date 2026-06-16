@@ -169,8 +169,8 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
       embarque.asientoZonaPrimariaId!,
     );
     // DEBE en 1.1.5.04 (ZONA PRIMARIA), NUNCA en 1.1.5.02 (EN TRÁNSITO).
-    expect(debe.get("1.1.5.04")).toBeCloseTo(1_000_000, 2);
-    expect(debe.has("1.1.5.02")).toBe(false);
+    expect(debe.get("1.1.7.03")).toBeCloseTo(1_000_000, 2);
+    expect(debe.has("1.1.7.02")).toBe(false);
     // Asiento balanceado; el HABER va a proveedor exterior.
     expect(totalDebe).toBeCloseTo(totalHaber, 2);
     expect(totalDebe).toBeCloseTo(1_000_000, 2);
@@ -184,7 +184,7 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
       (acc, it) => acc + Number(it.costoFCUnitario) * it.cantidadDeclarada * 1000,
       0,
     );
-    expect(reconc).toBeCloseTo(debe.get("1.1.5.04") ?? 0, 2);
+    expect(reconc).toBeCloseTo(debe.get("1.1.7.03") ?? 0, 2);
 
     // Modelo Y: el arribo NO mueve stock (eso ocurre en la desconsolidación).
     const movs = await db.prisma.movimientoStock.count();
@@ -277,7 +277,7 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
       fresh.asientoZonaPrimariaId!,
     );
     // 1.1.5.04 = FOB (1.000.000) + subtotal factura (500.000).
-    expect(debe.get("1.1.5.04")).toBeCloseTo(1_500_000, 2);
+    expect(debe.get("1.1.7.03")).toBeCloseTo(1_500_000, 2);
     // El arribo ACREDITA 5.4.1.11 (reclasificación), neteando el gasto.
     expect(haber.get("5.4.1.11")).toBeCloseTo(500_000, 2);
     expect(totalDebe).toBeCloseTo(totalHaber, 2);
@@ -326,8 +326,8 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
     const fresh = await db.prisma.embarque.findUniqueOrThrow({ where: { id: embarque.id } });
     const { debe } = await lineasPorCuenta(fresh.asientoZonaPrimariaId!);
     // Legacy: DEBE 1.1.5.02 (EN TRÁNSITO), NO 1.1.5.04.
-    expect(debe.get("1.1.5.02")).toBeCloseTo(1_000_000, 2);
-    expect(debe.has("1.1.5.04")).toBe(false);
+    expect(debe.get("1.1.7.02")).toBeCloseTo(1_000_000, 2);
+    expect(debe.has("1.1.7.03")).toBe(false);
     // Legacy SÍ ingresa stock físico al depósito ZPA.
     const movs = await db.prisma.movimientoStock.count();
     expect(movs).toBeGreaterThan(0);

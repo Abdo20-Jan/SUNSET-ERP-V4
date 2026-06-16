@@ -341,7 +341,7 @@ export function PrestamoForm({
                   <span className="font-medium">Crear automáticamente</span> una cuenta analítica
                   para este préstamo
                   <span className="ml-1 text-xs text-muted-foreground">
-                    (rango {clasificacion === "CORTO_PLAZO" ? "2.1.7.10–99" : "2.2.1.10–99"})
+                    (rango {clasificacion === "CORTO_PLAZO" ? "2.1.2.10–99" : "2.2.1.10–99"})
                   </span>
                 </span>
               </label>

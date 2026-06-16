@@ -199,7 +199,7 @@ describe("CxP por factura — facturas EMITIDA en embarques no cerrados (gap #5)
   it("EMITIDA en embarque EN_ZONA_PRIMARIA aparece en ambas vistas (bonded)", async () => {
     const periodo = await seedPeriodo();
     const ctaPasivo = await seedCuenta("2.1.1.01", "PASIVO");
-    const ctaGasto = await seedCuenta("1.1.5.04", "EGRESO");
+    const ctaGasto = await seedCuenta("1.1.7.03", "EGRESO");
     const prov = await seedProveedor(ctaPasivo.id);
     const emb = await seedEmbarque(prov.id, "EN_ZONA_PRIMARIA");
     await seedCosto({
@@ -229,7 +229,7 @@ describe("CxP por factura — facturas EMITIDA en embarques no cerrados (gap #5)
   it("BORRADOR no aparece en ninguna vista", async () => {
     const periodo = await seedPeriodo();
     const ctaPasivo = await seedCuenta("2.1.1.01", "PASIVO");
-    const ctaGasto = await seedCuenta("1.1.5.04", "EGRESO");
+    const ctaGasto = await seedCuenta("1.1.7.03", "EGRESO");
     const prov = await seedProveedor(ctaPasivo.id);
     const emb = await seedEmbarque(prov.id, "EN_ZONA_PRIMARIA");
     await seedCosto({
@@ -253,7 +253,7 @@ describe("CxP por factura — facturas EMITIDA en embarques no cerrados (gap #5)
   it("ANULADA no aparece en ninguna vista", async () => {
     const periodo = await seedPeriodo();
     const ctaPasivo = await seedCuenta("2.1.1.01", "PASIVO");
-    const ctaGasto = await seedCuenta("1.1.5.04", "EGRESO");
+    const ctaGasto = await seedCuenta("1.1.7.03", "EGRESO");
     const prov = await seedProveedor(ctaPasivo.id);
     const emb = await seedEmbarque(prov.id, "EN_ZONA_PRIMARIA");
     await seedCosto({
@@ -277,7 +277,7 @@ describe("CxP por factura — facturas EMITIDA en embarques no cerrados (gap #5)
   it("(regresión) LEGACY_BUNDLED en embarque CERRADO sigue apareciendo", async () => {
     const periodo = await seedPeriodo();
     const ctaPasivo = await seedCuenta("2.1.1.01", "PASIVO");
-    const ctaGasto = await seedCuenta("1.1.5.04", "EGRESO");
+    const ctaGasto = await seedCuenta("1.1.7.03", "EGRESO");
     const prov = await seedProveedor(ctaPasivo.id);
     const emb = await seedEmbarque(prov.id, "CERRADO");
     await seedCosto({

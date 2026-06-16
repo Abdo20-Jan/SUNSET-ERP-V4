@@ -218,8 +218,8 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
 
       // asiento principal: Σ FC × cant × TC = 100 × 10 × 1000 = 1 000 000
       expect(await lineasDe(out.asiento!.id)).toEqual([
-        { codigo: "1.1.5.05", debe: "1000000.00", haber: "0.00" },
-        { codigo: "1.1.5.04", debe: "0.00", haber: "1000000.00" },
+        { codigo: "1.1.7.04", debe: "1000000.00", haber: "0.00" },
+        { codigo: "1.1.7.03", debe: "0.00", haber: "1000000.00" },
       ]);
 
       // header
@@ -241,8 +241,8 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
 
       // 100×10×1000 + 40×5×1000 = 1 000 000 + 200 000 = 1 200 000
       expect(await lineasDe(out.asiento!.id)).toEqual([
-        { codigo: "1.1.5.05", debe: "1200000.00", haber: "0.00" },
-        { codigo: "1.1.5.04", debe: "0.00", haber: "1200000.00" },
+        { codigo: "1.1.7.04", debe: "1200000.00", haber: "0.00" },
+        { codigo: "1.1.7.03", debe: "0.00", haber: "1200000.00" },
       ]);
     });
 
@@ -273,7 +273,7 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
       expect(costoUnit.toFixed(2)).toBe("12351.87");
 
       const lineas = await lineasDe(out.asiento!.id);
-      const debe05 = lineas.find((l) => l.codigo === "1.1.5.05")?.debe;
+      const debe05 = lineas.find((l) => l.codigo === "1.1.7.04")?.debe;
       // Reconciliación interna: DEBE 1.1.5.05 == costoUnitario × cantidad.
       expect(debe05).toBe(costoUnit.times(4).toFixed(2));
       expect(debe05).toBe("49407.48");

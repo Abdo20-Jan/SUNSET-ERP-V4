@@ -1,6 +1,7 @@
 import type { Decimal } from "@/lib/decimal";
 import type { CuentaCategoria, CuentaTipo, Naturaleza } from "@/generated/prisma/client";
 import { naturalezaPorDefecto, saldoNatural } from "./cuenta-naturaleza";
+import { PREFIJO_CLIENTES, PREFIJOS_PROVEEDORES } from "./prefijos-plan";
 
 // Guard de salud del balancete (control preventivo).
 //
@@ -15,13 +16,13 @@ import { naturalezaPorDefecto, saldoNatural } from "./cuenta-naturaleza";
 //     cuenta (p. ej. Depreciación Acumulada, ACTIVO/ACREEDOR) con saldo acreedor
 //     tiene saldo natural POSITIVO, así que no se marca.
 //  2. Subledger comercial reclasificable por signo (saldos a favor / anticipos):
-//     proveedores (2.1.1./2.1.8.) con saldo deudor y clientes (1.1.3.) con saldo
+//     proveedores (2.1.1./2.1.8.) con saldo deudor y clientes (1.1.4.) con saldo
 //     acreedor → el Balance General los reclasifica al lado opuesto. Mismos
 //     prefijos que `reclasificarSaldosAFavor` en reportes/balance-general.ts
 //     (fuente canónica; duplicados acá porque ese módulo es server-only).
 
-const RUBRO_PROVEEDORES = ["2.1.1.", "2.1.8."];
-const RUBRO_CLIENTES = ["1.1.3."];
+const RUBRO_PROVEEDORES = [...PREFIJOS_PROVEEDORES];
+const RUBRO_CLIENTES = [PREFIJO_CLIENTES];
 
 export type CuentaSaldo = {
   codigo: string;

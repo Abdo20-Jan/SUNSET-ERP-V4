@@ -301,7 +301,7 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
   async function seedCreditoAFavor(saldo: number): Promise<void> {
     const cuentaCredito = await db.prisma.cuentaContable.create({
       data: {
-        codigo: "1.1.4.13",
+        codigo: "1.1.5.4.01",
         nombre: "CRÉDITO A FAVOR ADUANA (DIFERENCIA CAMBIARIA)",
         tipo: "ANALITICA",
         categoria: "ACTIVO",
@@ -392,7 +392,7 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     expect(Number(res.diferencia)).toBeCloseTo(0, 2);
 
     // No deben existir líneas en 1.1.4.13 ni 2.1.5.99.
-    const creditoSaldo = await saldoDebePorCodigo("1.1.4.13");
+    const creditoSaldo = await saldoDebePorCodigo("1.1.5.4.01");
     const deudaSaldo = await saldoHaberPorCodigo("2.1.5.99");
     expect(creditoSaldo).toBeCloseTo(0, 2);
     expect(deudaSaldo).toBeCloseTo(0, 2);
@@ -416,7 +416,7 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     expect(Number(res.diferencia)).toBeCloseTo(500, 2);
 
     // 1.1.4.13 con saldo DEBE = 500 (nuevo crédito a favor).
-    const creditoSaldo = await saldoDebePorCodigo("1.1.4.13");
+    const creditoSaldo = await saldoDebePorCodigo("1.1.5.4.01");
     expect(creditoSaldo).toBeCloseTo(500, 2);
 
     // Sin saldo en 2.1.5.99.
@@ -455,7 +455,7 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     expect(deudaSaldo).toBeCloseTo(1000, 2);
 
     // Sin saldo en 1.1.4.13.
-    const creditoSaldo = await saldoDebePorCodigo("1.1.4.13");
+    const creditoSaldo = await saldoDebePorCodigo("1.1.5.4.01");
     expect(creditoSaldo).toBeCloseTo(0, 2);
 
     // Movimiento tesorería por el monto al banco (140.000).
@@ -488,7 +488,7 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     expect(Number(res.creditoAplicado)).toBeCloseTo(20000, 2);
 
     // Saldo 1.1.4.13: 50.000 (seed) − 20.000 (consumido) = 30.000.
-    const creditoSaldo = await saldoDebePorCodigo("1.1.4.13");
+    const creditoSaldo = await saldoDebePorCodigo("1.1.5.4.01");
     expect(creditoSaldo).toBeCloseTo(30000, 2);
 
     // Movimiento tesorería SOLO por monto bancario (121.000).
@@ -550,7 +550,7 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     expect(Number(res.diferencia)).toBeCloseTo(9000, 2);
     expect(Number(res.creditoAplicado)).toBeCloseTo(30000, 2);
 
-    const creditoSaldo = await saldoDebePorCodigo("1.1.4.13");
+    const creditoSaldo = await saldoDebePorCodigo("1.1.5.4.01");
     expect(creditoSaldo).toBeCloseTo(29000, 2);
 
     // 2.1.5.99 sin saldo.
@@ -585,7 +585,7 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     expect(vep.estado).toBe("PAGADO");
 
     // 1.1.4.13: 200.000 − 141.000 = 59.000.
-    const creditoSaldo = await saldoDebePorCodigo("1.1.4.13");
+    const creditoSaldo = await saldoDebePorCodigo("1.1.5.4.01");
     expect(creditoSaldo).toBeCloseTo(59000, 2);
 
     await expectAsientoBalanceado(res.asientoId);
