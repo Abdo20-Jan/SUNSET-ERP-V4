@@ -75,8 +75,6 @@ const SINTETICA_DEFAULTS: Record<string, string> = {
   "5.8.1": "RESULTADOS FINANCIEROS NEGATIVOS",
   "5.10": "IMPUESTO A LAS GANANCIAS",
   "5.10.1": "IMPUESTO A LAS GANANCIAS",
-  // TODO(#2b): transitorio — tributos de importación que capitalizan a 1.1.7.02.
-  "5.7.1": "GASTOS NO OPERATIVOS",
 };
 
 /**
@@ -240,17 +238,12 @@ const RANGES = {
     categoria: CuentaCategoria.PASIVO,
   },
 
-  // Cuenta de gasto/activo POR PROVEEDOR — contrapartida del DEBE en
-  // facturas. Mismo principio que pasivos (un código por proveedor),
-  // pero bajo el árbol de gastos (5.x.x.x).
-  // MERCADERIA_LOCAL/EXTERIOR no se desagregan: van al stock compartido
-  // 1.1.7.01 / 1.1.7.02 — el costo por proveedor se rastrea en stock.
-  //
-  // TODO(#2b): los servicios de IMPORTACIÓN (DESPACHANTE, GASTOS_PORTUARIOS,
-  // LOGISTICA, ALMACENAJE, SERVICIOS_EXTERIOR) capitalizan a 1.1.7.02 (RT17) y
-  // dejarán de crear cuenta de resultado (rangoGastoByTipo → null). En esta
-  // etapa (#2, renumeración) conservan transitoriamente su rango de egreso.
-  GASTO_DESPACHANTE: { padre: "5.1.1", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
+  // Cuenta de gasto POR PROVEEDOR (contrapartida del DEBE en facturas) — sólo
+  // gastos de PERÍODO. Los servicios de IMPORTACIÓN (despachante, portuarios,
+  // logística, almacenaje bonded, flete internacional) capitalizan al stock
+  // (1.1.7.x, RT17) vía GASTO_POR_TIPO_PROVEEDOR y NO crean cuenta de resultado
+  // (rangoGastoByTipo → null). MERCADERIA_LOCAL/EXTERIOR tampoco se desagregan
+  // (stock compartido 1.1.7.01 / 1.1.7.02).
   GASTO_SERVICIOS_PROFESIONALES: {
     padre: "5.3.2",
     min: 10,
@@ -261,10 +254,6 @@ const RANGES = {
   GASTO_IT_SOFTWARE: { padre: "5.3.3", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
   GASTO_MARKETING: { padre: "5.2.2", min: 10, max: 49, categoria: CuentaCategoria.EGRESO },
   GASTO_OTRO: { padre: "5.3.1", min: 50, max: 89, categoria: CuentaCategoria.EGRESO },
-  GASTO_GASTOS_PORTUARIOS: { padre: "5.4.1", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
-  GASTO_LOGISTICA: { padre: "5.5.1", min: 10, max: 19, categoria: CuentaCategoria.EGRESO },
-  GASTO_ALMACENAJE: { padre: "5.5.1", min: 20, max: 39, categoria: CuentaCategoria.EGRESO },
-  GASTO_SERVICIOS_EXTERIOR: { padre: "5.5.1", min: 40, max: 59, categoria: CuentaCategoria.EGRESO },
 
   // Bancos / cajas / préstamos — sin desagregación por tipo
   CAJA: { padre: "1.1.1", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
@@ -389,8 +378,14 @@ export function rangoGastoByTipo(tipo: TipoProveedor): RangoCuentaAuto | null {
       return null;
     case "MERCADERIA_EXTERIOR":
       return null;
+    // Servicios de importación: capitalizan a 1.1.7.02 (RT17) vía
+    // GASTO_POR_TIPO_PROVEEDOR — sin cuenta de resultado por proveedor.
     case "DESPACHANTE":
-      return "GASTO_DESPACHANTE";
+    case "GASTOS_PORTUARIOS":
+    case "LOGISTICA":
+    case "ALMACENAJE":
+    case "SERVICIOS_EXTERIOR":
+      return null;
     case "SERVICIOS_PROFESIONALES":
       return "GASTO_SERVICIOS_PROFESIONALES";
     case "ALQUILERES":
@@ -401,14 +396,6 @@ export function rangoGastoByTipo(tipo: TipoProveedor): RangoCuentaAuto | null {
       return "GASTO_MARKETING";
     case "OTRO":
       return "GASTO_OTRO";
-    case "GASTOS_PORTUARIOS":
-      return "GASTO_GASTOS_PORTUARIOS";
-    case "LOGISTICA":
-      return "GASTO_LOGISTICA";
-    case "ALMACENAJE":
-      return "GASTO_ALMACENAJE";
-    case "SERVICIOS_EXTERIOR":
-      return "GASTO_SERVICIOS_EXTERIOR";
   }
 }
 
