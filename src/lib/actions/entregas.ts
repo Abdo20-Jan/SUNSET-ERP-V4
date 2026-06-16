@@ -16,7 +16,7 @@ import {
   cargarVentasConEntregaPendiente,
   type VentaConPendiente,
 } from "@/lib/services/entregas-pendientes-loader";
-import { aplicarEgresoSPD } from "@/lib/services/stock";
+import { aplicarEgresoSPD, recalcularStockYCostoPromedio } from "@/lib/services/stock";
 import { getStockPorDeposito } from "@/lib/services/stock-helpers";
 import {
   EntregaEstado,
@@ -281,8 +281,17 @@ export async function confirmarEntregaAction(
         throw new AsientoError("DOMINIO_INVALIDO", "Entrega no existe.");
       }
       ensureEntregaConfirmable(entrega);
+      const productosAfectados = new Set<string>();
       for (const it of entrega.items) {
         await aplicarEgresoFisicoItem(tx, entrega, it);
+        productosAfectados.add(it.itemVenta.productoId);
+      }
+      // El egreso movió el SPD del depósito; recalcular el agregado
+      // `Producto.stockActual`/`costoPromedio` desde los movimientos, igual que
+      // los caminos forward de stock.ts (SPD → agregado). Sin esto el agregado
+      // queda sobrestimado y `crearAsientoVenta` toma un CMV stale.
+      for (const productoId of productosAfectados) {
+        await recalcularStockYCostoPromedio(tx, productoId);
       }
       const asiento = await crearAsientoEntrega(entregaId, tx);
       const cont = await contabilizarAsiento(asiento.id, tx);
@@ -353,8 +362,18 @@ async function restaurarSPDPorItemAnulacion(
 }
 
 async function revertirEntregaConfirmada(tx: TxClient, entrega: EntregaEnAnulacion): Promise<void> {
+  const productosAfectados = new Set<string>();
   for (const it of entrega.items) {
     await restaurarSPDPorItemAnulacion(tx, entrega.depositoId, it);
+    productosAfectados.add(it.itemVenta.productoId);
+  }
+  // La restauración devolvió el stock al SPD de forma incremental (la inversa
+  // exacta del egreso, con estado conocido — por eso no usa replay del SPD). El
+  // agregado, en cambio, se recalcula por replay de los MovimientoStock para que
+  // `Producto.stockActual`/`costoPromedio` no queden desincronizados (espeja el
+  // recalc del confirm — la reversión debe ser simétrica).
+  for (const productoId of productosAfectados) {
+    await recalcularStockYCostoPromedio(tx, productoId);
   }
   if (entrega.asientoId) {
     await anularAsiento(entrega.asientoId, tx);
