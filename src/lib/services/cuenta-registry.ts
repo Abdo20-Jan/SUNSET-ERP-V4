@@ -232,24 +232,9 @@ export const EMBARQUE_CODIGOS = {
     nombre: "PERCEPCIÓN IIBB COMPRAS",
     categoria: CuentaCategoria.ACTIVO,
   },
-  // Egresos: tributos aduaneros. TODO(#2b): capitalizan a 1.1.7.02 (RT17);
-  // conservan transitoriamente el código de egreso 5.7.1.x hasta la etapa #2b.
-  DIE_EGRESO: {
-    codigo: "5.7.1.01",
-    nombre: "DERECHOS DE IMPORTACIÓN",
-    categoria: CuentaCategoria.EGRESO,
-  },
-  TASA_ESTADISTICA_EGRESO: {
-    codigo: "5.7.1.02",
-    nombre: "TASA ESTADÍSTICA",
-    categoria: CuentaCategoria.EGRESO,
-  },
-  ARANCEL_SIM_EGRESO: {
-    codigo: "5.7.1.03",
-    nombre: "ARANCEL SIM IMPORTACIÓN",
-    categoria: CuentaCategoria.EGRESO,
-  },
-  // Pasivos: por pagar a Aduana / proveedor exterior
+  // Tributos aduaneros (DIE/Tasa/Arancel) CAPITALIZAN al costo de la mercadería
+  // (1.1.7.01/02, RT17) — no hay cuenta de egreso. El DEBE va al stock; acá
+  // viven sólo los pasivos "por pagar a Aduana".
   DIE_PASIVO: {
     codigo: "2.1.5.01",
     nombre: "DERECHOS DE IMPORTACIÓN POR PAGAR",
@@ -447,41 +432,32 @@ export const PORCENTAJE_LEY_25413_COMPUTABLE = 0.33;
 // Mapa que crearAsientoCompra usa para elegir la cuenta de gasto
 // según proveedor.tipoProveedor.
 //
-// TODO(#2b): los servicios de IMPORTACIÓN (despachante, logística/flete de
-// entrada, almacenaje bonded, gastos portuarios, flete internacional)
-// CAPITALIZAN a 1.1.7.02 (RT17), no son egreso. En esta etapa (#2,
-// renumeración) conservan transitoriamente su código de egreso actual;
-// el redirect a 1.1.7.02 + el guard "inventariable" es la etapa #2b.
+// Regla capitaliza-vs-gasto (RT17/NIC2) — el discriminador es el tipoProveedor:
+// los servicios de IMPORTACIÓN (despachante, logística/flete de entrada,
+// almacenaje bonded, gastos portuarios, flete internacional) CAPITALIZAN al
+// costo de la mercadería; su contrapartida de DEBE es 1.1.7.02 Mercaderías en
+// Tránsito, NO un egreso. Los gastos de PERÍODO (serv. profesionales,
+// alquileres, IT, marketing, otro) siguen siendo egreso de resultado.
+const CAPITALIZA_IMPORTACION = {
+  codigo: "1.1.7.02",
+  nombre: "MERCADERÍAS EN TRÁNSITO",
+  categoria: CuentaCategoria.ACTIVO,
+} as const satisfies CuentaDef;
+
 export const GASTO_POR_TIPO_PROVEEDOR = {
   MERCADERIA_LOCAL: {
     codigo: "1.1.7.01",
     nombre: "MERCADERÍAS NACIONALIZADAS",
     categoria: CuentaCategoria.ACTIVO,
   },
-  MERCADERIA_EXTERIOR: {
-    codigo: "1.1.7.02",
-    nombre: "MERCADERÍAS EN TRÁNSITO",
-    categoria: CuentaCategoria.ACTIVO,
-  },
-  // TODO(#2b): capitaliza a 1.1.7.02
-  DESPACHANTE: {
-    codigo: "5.1.1.03",
-    nombre: "HONORARIOS DESPACHANTE",
-    categoria: CuentaCategoria.EGRESO,
-  },
-  // TODO(#2b): flete de entrada capitaliza a 1.1.7.02
-  LOGISTICA: {
-    codigo: "5.5.1.01",
-    nombre: "FLETE NACIONAL",
-    categoria: CuentaCategoria.EGRESO,
-  },
-  // TODO(#2b): almacenaje bonded/ZPA/DF capitaliza a 1.1.7.02
-  // (el almacenaje de stock propio post-nacionalización va a 5.3.1.07)
-  ALMACENAJE: {
-    codigo: "5.5.1.05",
-    nombre: "ALMACENAJE Y WMS",
-    categoria: CuentaCategoria.EGRESO,
-  },
+  MERCADERIA_EXTERIOR: CAPITALIZA_IMPORTACION,
+  // Servicios de importación → capitalizan a 1.1.7.02 (RT17).
+  DESPACHANTE: CAPITALIZA_IMPORTACION,
+  LOGISTICA: CAPITALIZA_IMPORTACION,
+  ALMACENAJE: CAPITALIZA_IMPORTACION,
+  GASTOS_PORTUARIOS: CAPITALIZA_IMPORTACION,
+  SERVICIOS_EXTERIOR: CAPITALIZA_IMPORTACION,
+  // Gastos de período → egreso de resultado.
   SERVICIOS_PROFESIONALES: {
     codigo: "5.3.1.01",
     nombre: "HONORARIOS CONTABLES Y PROFESIONALES",
@@ -497,21 +473,9 @@ export const GASTO_POR_TIPO_PROVEEDOR = {
     nombre: "SISTEMAS Y SOFTWARE",
     categoria: CuentaCategoria.EGRESO,
   },
-  // TODO(#2b): gastos portuarios capitalizan a 1.1.7.02
-  GASTOS_PORTUARIOS: {
-    codigo: "5.4.1.01",
-    nombre: "GASTOS PORTUARIOS",
-    categoria: CuentaCategoria.EGRESO,
-  },
   MARKETING: {
     codigo: "5.2.1.02",
     nombre: "PUBLICIDAD Y MARKETING",
-    categoria: CuentaCategoria.EGRESO,
-  },
-  // TODO(#2b): flete internacional capitaliza a 1.1.7.02
-  SERVICIOS_EXTERIOR: {
-    codigo: "5.5.1.02",
-    nombre: "FLETE INTERNACIONAL",
     categoria: CuentaCategoria.EGRESO,
   },
   OTRO: {

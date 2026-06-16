@@ -1300,14 +1300,20 @@ export async function crearAsientoEmbarque(
       );
     }
 
-    // 2) Tributos aduaneros (DEBE gasto/crédito, HABER AFIP/Aduana por pagar)
-    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.DIE_EGRESO.codigo)!, die, "DIE");
+    // 2) Tributos aduaneros: DIE/Tasa/Arancel CAPITALIZAN al costo en tránsito
+    //    (1.1.7.02, RT17/NIC2); HABER al pasivo Aduana por pagar. El IVA de
+    //    importación NO capitaliza — es crédito fiscal (más abajo).
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO.codigo)!,
+      die,
+      "DIE (capitaliza)",
+    );
     pushHaber(porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO.codigo)!, die, "DIE por pagar (Aduana)");
 
     pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_EGRESO.codigo)!,
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO.codigo)!,
       te,
-      "Tasa estadística",
+      "Tasa estadística (capitaliza)",
     );
     pushHaber(
       porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_PASIVO.codigo)!,
@@ -1315,7 +1321,11 @@ export async function crearAsientoEmbarque(
       "Tasa estadística por pagar",
     );
 
-    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO.codigo)!, arancelSim, "Arancel SIM");
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS_EN_TRANSITO.codigo)!,
+      arancelSim,
+      "Arancel SIM (capitaliza)",
+    );
     pushHaber(
       porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO.codigo)!,
       arancelSim,
@@ -2471,19 +2481,24 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
     const iibbAduana = toDecimal(despacho.iibb).times(tcDsp).toDecimalPlaces(2);
     const ganancias = toDecimal(despacho.ganancias).times(tcDsp).toDecimalPlaces(2);
 
-    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.DIE_EGRESO.codigo)!, die, "DIE");
+    // Tributos del despacho: capitalizan al costo nacionalizado (1.1.7.01, RT17).
+    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS.codigo)!, die, "DIE (capitaliza)");
     pushHaber(porCodigo.get(EMBARQUE_CODIGOS.DIE_PASIVO.codigo)!, die, "DIE por pagar (Aduana)");
     pushDebe(
-      porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_EGRESO.codigo)!,
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS.codigo)!,
       te,
-      "Tasa estadística",
+      "Tasa estadística (capitaliza)",
     );
     pushHaber(
       porCodigo.get(EMBARQUE_CODIGOS.TASA_ESTADISTICA_PASIVO.codigo)!,
       te,
       "Tasa estadística por pagar",
     );
-    pushDebe(porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_EGRESO.codigo)!, arancelSim, "Arancel SIM");
+    pushDebe(
+      porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS.codigo)!,
+      arancelSim,
+      "Arancel SIM (capitaliza)",
+    );
     pushHaber(
       porCodigo.get(EMBARQUE_CODIGOS.ARANCEL_SIM_PASIVO.codigo)!,
       arancelSim,
