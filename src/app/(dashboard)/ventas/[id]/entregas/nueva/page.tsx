@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { buttonVariants } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { saldoPendientePorItemVenta } from "@/lib/actions/entregas";
 import { db } from "@/lib/db";
 import { isStockDualEnabled } from "@/lib/features";
@@ -13,20 +15,31 @@ type PageParams = Promise<{ id: string }>;
 
 export const dynamic = "force-dynamic";
 
+function Aviso({ id, children }: { id: string; children: React.ReactNode }) {
+  return (
+    <main className="container mx-auto space-y-4 p-6">
+      <h1 className="text-2xl font-semibold">Nueva entrega</h1>
+      <Card>
+        <CardContent className="py-6 text-sm text-muted-foreground">{children}</CardContent>
+      </Card>
+      <Link
+        href={`/ventas/${id}/entregas`}
+        className={buttonVariants({ variant: "outline", size: "sm" })}
+      >
+        ← Volver a entregas
+      </Link>
+    </main>
+  );
+}
+
 export default async function NuevaEntregaPage({ params }: { params: PageParams }) {
   const { id } = await params;
 
   if (!isStockDualEnabled()) {
     return (
-      <main className="container mx-auto p-6">
-        <h1 className="text-2xl font-semibold">Nueva entrega</h1>
-        <p className="mt-4 text-muted-foreground">
-          Stock dual no habilitado. Setear <code>STOCK_DUAL_ENABLED=true</code>.
-        </p>
-        <Link href={`/ventas/${id}/entregas`} className="mt-4 inline-block text-primary underline">
-          ← Volver
-        </Link>
-      </main>
+      <Aviso id={id}>
+        Stock dual no habilitado. Setear <code>STOCK_DUAL_ENABLED=true</code>.
+      </Aviso>
     );
   }
 
@@ -37,16 +50,10 @@ export default async function NuevaEntregaPage({ params }: { params: PageParams 
   if (!venta) notFound();
   if (venta.estado !== "EMITIDA") {
     return (
-      <main className="container mx-auto p-6">
-        <h1 className="text-2xl font-semibold">Nueva entrega</h1>
-        <p className="mt-4 text-muted-foreground">
-          La venta {venta.numero} debe estar EMITIDA para registrar entregas (estado actual:{" "}
-          {venta.estado}).
-        </p>
-        <Link href={`/ventas/${id}/entregas`} className="mt-4 inline-block text-primary underline">
-          ← Volver
-        </Link>
-      </main>
+      <Aviso id={id}>
+        La venta {venta.numero.trim()} debe estar EMITIDA para registrar entregas (estado actual:{" "}
+        {venta.estado}).
+      </Aviso>
     );
   }
 
@@ -65,23 +72,22 @@ export default async function NuevaEntregaPage({ params }: { params: PageParams 
   const conSaldo = pendientes.filter((p) => p.pendiente > 0);
   if (conSaldo.length === 0) {
     return (
-      <main className="container mx-auto p-6">
-        <h1 className="text-2xl font-semibold">Nueva entrega</h1>
-        <p className="mt-4 text-muted-foreground">
-          No quedan items pendientes de entrega para la venta {venta.numero}.
-        </p>
-        <Link href={`/ventas/${id}/entregas`} className="mt-4 inline-block text-primary underline">
-          ← Volver
-        </Link>
-      </main>
+      <Aviso id={id}>
+        No quedan items pendientes de entrega para la venta {venta.numero.trim()}.
+      </Aviso>
     );
   }
 
   return (
     <main className="container mx-auto space-y-6 p-6">
-      <header>
+      <header className="flex flex-col gap-1">
+        <Link
+          href={`/ventas/${id}/entregas`}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          ← Entregas de la venta {venta.numero.trim()}
+        </Link>
         <h1 className="text-2xl font-semibold">Nueva entrega</h1>
-        <p className="text-sm text-muted-foreground">Venta {venta.numero}</p>
       </header>
       <NuevaEntregaForm
         ventaId={id}

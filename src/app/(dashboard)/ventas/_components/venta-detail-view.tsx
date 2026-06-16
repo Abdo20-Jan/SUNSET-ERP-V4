@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { CancelCircleIcon } from "@hugeicons/core-free-icons";
+import { CancelCircleIcon, TruckDeliveryIcon } from "@hugeicons/core-free-icons";
 
 import { anularVentaAction, type VentaDetalle } from "@/lib/actions/ventas";
 import { fmtDate, fmtMoney, fmtTipoCambio } from "@/lib/format";
@@ -35,6 +35,8 @@ type Props = {
   productosMap: Record<string, { codigo: string; nombre: string }>;
   depositosMap: Record<string, string>;
   asientoNumero: number | null;
+  stockDualOn: boolean;
+  entregasPendientes: number;
 };
 
 const CONDICION_LABELS: Record<string, string> = {
@@ -65,6 +67,8 @@ export function VentaDetailView({
   productosMap,
   depositosMap,
   asientoNumero,
+  stockDualOn,
+  entregasPendientes,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -99,6 +103,15 @@ export function VentaDetailView({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {stockDualOn && venta.estado === "EMITIDA" && (
+            <Button variant="outline" onClick={() => router.push(`/ventas/${venta.id}/entregas`)}>
+              <HugeiconsIcon icon={TruckDeliveryIcon} strokeWidth={2} />
+              Entregas
+              {entregasPendientes > 0 && (
+                <Badge variant="secondary">{entregasPendientes} pend.</Badge>
+              )}
+            </Button>
+          )}
           {puedeAnular && (
             <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={isPending}>
               <HugeiconsIcon icon={CancelCircleIcon} strokeWidth={2} />

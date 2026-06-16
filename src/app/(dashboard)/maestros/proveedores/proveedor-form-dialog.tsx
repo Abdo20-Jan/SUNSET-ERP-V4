@@ -13,7 +13,7 @@ import {
   type CuentaContableOption,
   type ProveedorRow,
 } from "@/lib/actions/proveedores";
-import { ConceptoRG830, TipoProveedor } from "@/generated/prisma/client";
+import { CondicionGanancias, ConceptoRG830, TipoProveedor } from "@/generated/prisma/client";
 import { Button } from "@/components/ui/button";
 import { CuentaCombobox } from "@/components/cuenta-combobox";
 import {
@@ -85,6 +85,15 @@ const CONCEPTO_RG830_LABEL: Record<ConceptoRG830, string> = {
 
 const CONCEPTO_RG830_VALUES = Object.keys(CONCEPTO_RG830_LABEL) as ConceptoRG830[];
 
+const CONDICION_GANANCIAS_LABEL: Record<CondicionGanancias, string> = {
+  INSCRIPTO: "Inscripto",
+  NO_INSCRIPTO: "No inscripto",
+  MONOTRIBUTO: "Monotributista",
+  EXENTO: "Exento",
+};
+
+const CONDICION_GANANCIAS_VALUES = Object.keys(CONDICION_GANANCIAS_LABEL) as CondicionGanancias[];
+
 const formSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio."),
   tipoProveedor: z.enum(TIPO_PROVEEDOR_VALUES as [TipoProveedor, ...TipoProveedor[]]),
@@ -92,6 +101,21 @@ const formSchema = z.object({
     .enum(CONCEPTO_RG830_VALUES as [ConceptoRG830, ...ConceptoRG830[]])
     .nullable()
     .optional(),
+  sujetoRetencionGanancias: z.boolean(),
+  condicionGanancias: z.enum(
+    CONDICION_GANANCIAS_VALUES as [CondicionGanancias, ...CondicionGanancias[]],
+  ),
+  alicuotaRetencionGananciasOverride: z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal(""))
+    .refine(
+      (v) => !v || /^\d+(\.\d{1,4})?$/.test(v),
+      "Alícuota inválida (número, máx. 4 decimales).",
+    ),
+  certificadoExclusionGanancias: z.string().trim().optional().or(z.literal("")),
+  vigenciaCertExclusionGanancias: z.string().trim().optional().or(z.literal("")),
   cuit: z.string().trim().optional().or(z.literal("")),
   pais: z.string().trim().min(2).max(2),
   tipo: z.string().trim().optional().or(z.literal("")),
@@ -117,6 +141,11 @@ function emptyDefaults(): FormValues {
     nombre: "",
     tipoProveedor: "MERCADERIA_LOCAL",
     conceptoRG830: null,
+    sujetoRetencionGanancias: false,
+    condicionGanancias: "INSCRIPTO",
+    alicuotaRetencionGananciasOverride: "",
+    certificadoExclusionGanancias: "",
+    vigenciaCertExclusionGanancias: "",
     cuit: "",
     pais: "AR",
     tipo: "otro",
@@ -136,6 +165,11 @@ function defaultsFromRow(row: ProveedorRow): FormValues {
     nombre: row.nombre,
     tipoProveedor: row.tipoProveedor,
     conceptoRG830: row.conceptoRG830,
+    sujetoRetencionGanancias: row.sujetoRetencionGanancias,
+    condicionGanancias: row.condicionGanancias,
+    alicuotaRetencionGananciasOverride: row.alicuotaRetencionGananciasOverride ?? "",
+    certificadoExclusionGanancias: row.certificadoExclusionGanancias ?? "",
+    vigenciaCertExclusionGanancias: row.vigenciaCertExclusionGanancias ?? "",
     cuit: row.cuit ?? "",
     pais: row.pais,
     tipo: row.tipo,
@@ -193,6 +227,7 @@ export function ProveedorFormDialog({
     control,
     name: "crearCuentaGastoAuto",
   });
+  const sujetoRetencion = useWatch({ control, name: "sujetoRetencionGanancias" });
   const tipoSinGastoAuto =
     tipoProveedor === "MERCADERIA_LOCAL" || tipoProveedor === "MERCADERIA_EXTERIOR";
 
@@ -213,6 +248,23 @@ export function ProveedorFormDialog({
         nombre: values.nombre,
         tipoProveedor: values.tipoProveedor,
         conceptoRG830: values.conceptoRG830 ?? null,
+        sujetoRetencionGanancias: values.sujetoRetencionGanancias,
+        condicionGanancias: values.condicionGanancias,
+        alicuotaRetencionGananciasOverride:
+          values.alicuotaRetencionGananciasOverride &&
+          values.alicuotaRetencionGananciasOverride.trim().length > 0
+            ? values.alicuotaRetencionGananciasOverride.trim()
+            : null,
+        certificadoExclusionGanancias:
+          values.certificadoExclusionGanancias &&
+          values.certificadoExclusionGanancias.trim().length > 0
+            ? values.certificadoExclusionGanancias.trim()
+            : null,
+        vigenciaCertExclusionGanancias:
+          values.vigenciaCertExclusionGanancias &&
+          values.vigenciaCertExclusionGanancias.trim().length > 0
+            ? values.vigenciaCertExclusionGanancias.trim()
+            : null,
         cuit: values.cuit && values.cuit.trim().length > 0 ? values.cuit : undefined,
         pais: values.pais,
         tipo: values.tipo && values.tipo.length > 0 ? values.tipo : undefined,
@@ -337,6 +389,86 @@ export function ProveedorFormDialog({
                 Si Sunset es agente de retención: define la alícuota a aplicar al pagar (RG 830
                 Anexo VIII). Opcional.
               </p>
+            </div>
+
+            <div className="sm:col-span-2 flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+              <label className="flex items-start gap-2 text-sm">
+                <input type="checkbox" className="mt-1" {...register("sujetoRetencionGanancias")} />
+                <span>
+                  <span className="font-medium">Sujeto a retención de Ganancias (RG 830)</span>
+                  <span className="ml-1 block text-xs text-muted-foreground">
+                    Al pagar facturas de este proveedor, el sistema calcula y retiene Ganancias
+                    (paga el neto y deja el pasivo a depositar en ARCA). Requiere concepto RG 830.
+                  </span>
+                </span>
+              </label>
+
+              {sujetoRetencion && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="flex flex-col gap-2">
+                    <Label>Condición frente a Ganancias</Label>
+                    <Controller
+                      control={control}
+                      name="condicionGanancias"
+                      render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {CONDICION_GANANCIAS_VALUES.map((v) => (
+                              <SelectItem key={v} value={v}>
+                                {CONDICION_GANANCIAS_LABEL[v]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Monotributista y Exento no sufren retención.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="alicuotaOverride">Alícuota override (%)</Label>
+                    <Input
+                      id="alicuotaOverride"
+                      inputMode="decimal"
+                      placeholder="Usa parámetro RG 830 si vacío"
+                      aria-invalid={!!errors.alicuotaRetencionGananciasOverride}
+                      {...register("alicuotaRetencionGananciasOverride")}
+                    />
+                    {errors.alicuotaRetencionGananciasOverride && (
+                      <FieldError message={errors.alicuotaRetencionGananciasOverride.message} />
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Sólo si hay certificado de reducción. En blanco usa la alícuota del régimen.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="certExclusion">Certificado de exclusión (Nº)</Label>
+                    <Input
+                      id="certExclusion"
+                      placeholder="Opcional"
+                      {...register("certificadoExclusionGanancias")}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="vigenciaCert">Vigencia exclusión (hasta)</Label>
+                    <Input
+                      id="vigenciaCert"
+                      type="date"
+                      {...register("vigenciaCertExclusionGanancias")}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Mientras esté vigente, no se retiene.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-2">

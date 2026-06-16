@@ -2,7 +2,28 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { toast } from "sonner";
 
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { crearEntregaAction } from "@/lib/actions/entregas";
 
 type Pendiente = {
@@ -35,21 +56,22 @@ export function NuevaEntregaForm({
   const [cantidades, setCantidades] = useState<Record<number, number>>(
     Object.fromEntries(pendientes.map((p) => [p.itemVentaId, p.pendiente])),
   );
-  const [error, setError] = useState<string | null>(null);
+
+  const totalAEntregar = pendientes.reduce((acc, p) => acc + (cantidades[p.itemVentaId] ?? 0), 0);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
 
     const items = pendientes
-      .map((p) => ({
-        itemVentaId: p.itemVentaId,
-        cantidad: cantidades[p.itemVentaId] ?? 0,
-      }))
+      .map((p) => ({ itemVentaId: p.itemVentaId, cantidad: cantidades[p.itemVentaId] ?? 0 }))
       .filter((it) => it.cantidad > 0);
 
     if (items.length === 0) {
-      setError("Debe entregar al menos 1 unidad.");
+      toast.error("Debe entregar al menos 1 unidad.");
+      return;
+    }
+    if (!depositoId) {
+      toast.error("Seleccioná un depósito.");
       return;
     }
 
@@ -62,78 +84,86 @@ export function NuevaEntregaForm({
         items,
       });
       if (!result.ok) {
-        setError(result.error);
+        toast.error(result.error);
         return;
       }
+      toast.success(`Remito ${result.data.numero} creado (BORRADOR). Confirmalo para despachar.`);
       router.push(`/ventas/${ventaId}/entregas`);
       router.refresh();
     });
   };
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-sm font-medium">Depósito</span>
-          <select
-            value={depositoId}
-            onChange={(e) => setDepositoId(e.target.value)}
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2"
-            required
-          >
-            {depositos.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.nombre}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium">Fecha</span>
-          <input
-            type="date"
-            value={fecha}
-            onChange={(e) => setFecha(e.target.value)}
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2"
-            required
-          />
-        </label>
-      </div>
+    <form onSubmit={onSubmit} className="space-y-6">
+      <Card>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs uppercase tracking-wide">Depósito</Label>
+            <Select value={depositoId} onValueChange={(v) => setDepositoId(v ?? "")}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Seleccionar depósito" />
+              </SelectTrigger>
+              <SelectContent>
+                {depositos.map((d) => (
+                  <SelectItem key={d.id} value={d.id}>
+                    {d.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="fecha" className="text-xs uppercase tracking-wide">
+              Fecha
+            </Label>
+            <Input
+              id="fecha"
+              type="date"
+              value={fecha}
+              onChange={(e) => setFecha(e.target.value)}
+              required
+            />
+          </div>
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <Label htmlFor="observacion" className="text-xs uppercase tracking-wide">
+              Observación
+            </Label>
+            <Textarea
+              id="observacion"
+              value={observacion}
+              onChange={(e) => setObservacion(e.target.value)}
+              rows={2}
+            />
+          </div>
+        </CardContent>
+      </Card>
 
-      <label className="block">
-        <span className="text-sm font-medium">Observación</span>
-        <textarea
-          value={observacion}
-          onChange={(e) => setObservacion(e.target.value)}
-          className="mt-1 w-full rounded-md border bg-background px-3 py-2"
-          rows={2}
-        />
-      </label>
-
-      <div>
-        <h2 className="mb-2 text-sm font-medium">Items pendientes</h2>
-        <table className="w-full text-sm">
-          <thead className="text-left text-muted-foreground">
-            <tr>
-              <th className="px-2 py-1">Producto</th>
-              <th className="px-2 py-1 text-right">Vendido</th>
-              <th className="px-2 py-1 text-right">Entregado</th>
-              <th className="px-2 py-1 text-right">Pendiente</th>
-              <th className="px-2 py-1 text-right">A entregar</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Card className="py-0">
+        <Table>
+          <caption className="sr-only">Items pendientes de entrega</caption>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Producto</TableHead>
+              <TableHead className="text-right">Vendido</TableHead>
+              <TableHead className="text-right">Entregado</TableHead>
+              <TableHead className="text-right">Pendiente</TableHead>
+              <TableHead className="text-right">A entregar</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {pendientes.map((p) => (
-              <tr key={p.itemVentaId} className="border-t">
-                <td className="px-2 py-1">
-                  <div className="font-mono text-xs">{p.productoCodigo}</div>
+              <TableRow key={p.itemVentaId}>
+                <TableCell>
+                  <div className="font-mono text-xs text-muted-foreground">{p.productoCodigo}</div>
                   <div>{p.productoNombre}</div>
-                </td>
-                <td className="px-2 py-1 text-right">{p.vendido}</td>
-                <td className="px-2 py-1 text-right">{p.entregado}</td>
-                <td className="px-2 py-1 text-right font-medium">{p.pendiente}</td>
-                <td className="px-2 py-1 text-right">
-                  <input
+                </TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{p.vendido}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums">{p.entregado}</TableCell>
+                <TableCell className="text-right font-mono font-medium tabular-nums">
+                  {p.pendiente}
+                </TableCell>
+                <TableCell className="text-right">
+                  <Input
                     type="number"
                     min={0}
                     max={p.pendiente}
@@ -144,32 +174,25 @@ export function NuevaEntregaForm({
                         [p.itemVentaId]: Math.max(0, Math.min(p.pendiente, Number(e.target.value))),
                       }))
                     }
-                    className="w-20 rounded-md border bg-background px-2 py-1 text-right"
+                    className="ml-auto w-20 text-right"
                   />
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          {pending ? "Guardando..." : "Crear entrega (BORRADOR)"}
-        </button>
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="rounded-md border px-4 py-2 hover:bg-muted"
-        >
+      <div className="flex items-center gap-2">
+        <Button type="submit" disabled={pending || totalAEntregar === 0}>
+          {pending ? "Guardando…" : "Crear entrega (BORRADOR)"}
+        </Button>
+        <Button type="button" variant="outline" onClick={() => router.back()} disabled={pending}>
           Cancelar
-        </button>
+        </Button>
+        <span className="ml-auto text-sm text-muted-foreground">
+          {totalAEntregar} unidad(es) a entregar
+        </span>
       </div>
     </form>
   );

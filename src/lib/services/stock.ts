@@ -912,11 +912,22 @@ export async function recalcularSPDPorProducto(tx: TxClient, productoId: string)
       cur.stock += m.cantidad;
     } else if (m.tipo === MovimientoStockTipo.EGRESO) {
       cur.stock -= m.cantidad;
-    } else if (
-      m.tipo === MovimientoStockTipo.AJUSTE ||
-      m.tipo === MovimientoStockTipo.TRANSFERENCIA
-    ) {
-      // AJUSTE: cantidad signed; TRANSFERENCIA: -X origen / +X destino.
+    } else if (m.tipo === MovimientoStockTipo.AJUSTE) {
+      // AJUSTE: cantidad signed; mantiene el costo medio del depósito.
+      cur.stock += m.cantidad;
+    } else if (m.tipo === MovimientoStockTipo.TRANSFERENCIA) {
+      // cantidad > 0 = entrada al depósito: promedia el costo landed que trae
+      // el movimiento (si no, un depósito alimentado sólo por transferencias
+      // quedaría con costoPromedio 0). cantidad < 0 = salida: resta sin diluir
+      // el promedio. Espeja recalcularStockYCostoPromedio (agregado global).
+      if (m.cantidad > 0) {
+        cur.promedio = calcularNuevoPromedio(
+          cur.stock,
+          cur.promedio,
+          m.cantidad,
+          toDecimal(m.costoUnitario),
+        );
+      }
       cur.stock += m.cantidad;
     }
     porDeposito.set(m.depositoId, cur);

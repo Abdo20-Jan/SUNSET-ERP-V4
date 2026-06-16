@@ -94,17 +94,33 @@ export async function registrarGastoFijoPeriodo(opts: {
     const iibbArs = iibb.times(tc).toDecimalPlaces(2);
     const totalArs = netoArs.plus(ivaArs).plus(iibbArs);
 
+    // Libro ARS-único: las líneas van en pesos; si el gasto es USD, el
+    // principal en moneda origen queda en la metadata de cada línea.
+    const esUsd = gasto.moneda !== Moneda.ARS;
+    const metaUsd = (montoUsd: string) =>
+      esUsd
+        ? {
+            monedaOrigen: Moneda.USD,
+            montoOrigen: montoUsd,
+            tipoCambioOrigen: tc.toFixed(6),
+          }
+        : {};
+
     const lineas: Array<{
       cuentaId: number;
       debe: string;
       haber: string;
       descripcion?: string;
+      monedaOrigen?: Moneda;
+      montoOrigen?: string;
+      tipoCambioOrigen?: string;
     }> = [
       {
         cuentaId: gastoCuentaId,
         debe: netoArs.toFixed(2),
         haber: "0",
         descripcion: `Gasto fijo: ${gasto.descripcion}`,
+        ...metaUsd(neto.toFixed(2)),
       },
     ];
     if (ivaArs.gt(0)) {
@@ -113,6 +129,7 @@ export async function registrarGastoFijoPeriodo(opts: {
         debe: ivaArs.toFixed(2),
         haber: "0",
         descripcion: `IVA crédito fiscal — ${gasto.descripcion}`,
+        ...metaUsd(iva.toFixed(2)),
       });
     }
     if (iibbArs.gt(0)) {
@@ -121,6 +138,7 @@ export async function registrarGastoFijoPeriodo(opts: {
         debe: iibbArs.toFixed(2),
         haber: "0",
         descripcion: `Crédito IIBB — ${gasto.descripcion}`,
+        ...metaUsd(iibb.toFixed(2)),
       });
     }
     lineas.push({
@@ -128,6 +146,7 @@ export async function registrarGastoFijoPeriodo(opts: {
       debe: "0",
       haber: totalArs.toFixed(2),
       descripcion: `Cta. a pagar — ${gasto.proveedor.nombre}`,
+      ...metaUsd(total.toFixed(2)),
     });
 
     const asiento = await crearAsientoManual(
@@ -135,8 +154,8 @@ export async function registrarGastoFijoPeriodo(opts: {
         fecha,
         descripcion: `Gasto fijo ${String(month).padStart(2, "0")}/${year} — ${gasto.descripcion}`,
         origen: AsientoOrigen.MANUAL,
-        moneda: gasto.moneda as Moneda,
-        tipoCambio,
+        moneda: Moneda.ARS,
+        tipoCambio: 1,
         lineas,
       },
       tx,

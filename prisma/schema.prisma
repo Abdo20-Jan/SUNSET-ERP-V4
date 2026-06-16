@@ -32,6 +32,17 @@ enum CuentaCategoria {
   EGRESO
 }
 
+enum Naturaleza {
+  DEUDOR
+  ACREEDOR
+}
+
+enum MonedaCuenta {
+  ARS
+  USD
+  BI
+}
+
 enum PeriodoEstado {
   ABIERTO
   CERRADO
@@ -325,6 +336,28 @@ enum ConceptoRG830 {
   LOCACIONES_SERVICIOS
 }
 
+// Condición del proveedor frente a Ganancias — determina alícuota y si
+// sufre retención. MONOTRIBUTO y EXENTO no sufren retención (v1).
+enum CondicionGanancias {
+  INSCRIPTO
+  NO_INSCRIPTO
+  MONOTRIBUTO
+  EXENTO
+}
+
+// Tipo de retención practicada por Sunset como agente. Extensible a IVA /
+// IIBB / SUSS en el futuro; v1 sólo GANANCIAS.
+enum TipoRetencion {
+  GANANCIAS
+}
+
+// Ciclo de vida de una retención practicada (pasivo a depositar en ARCA).
+enum RetencionEstado {
+  PENDIENTE_ARCA
+  PAGADA_ARCA
+  ANULADA
+}
+
 enum AuditAccion {
   CREATE
   UPDATE
@@ -350,10 +383,11 @@ model User {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  auditLogs     AuditLog[]
-  leads         Lead[]
-  oportunidades Oportunidad[]
-  actividades   Actividad[]
+  auditLogs              AuditLog[]
+  leads                  Lead[]
+  oportunidades          Oportunidad[]
+  actividades            Actividad[]
+  retencionesPracticadas RetencionPracticada[]
 }
 
 // ============================================================
@@ -369,6 +403,18 @@ model CuentaContable {
   nivel       Int
   padreCodigo String?
   activa      Boolean         @default(true)
+
+  // Naturaleza del saldo (DEUDOR/ACREEDOR). Normalmente derivada de la
+  // categoría, pero explícita para soportar cuentas regularizadoras
+  // (Depreciación Acumulada, Devoluciones, Dividendos Declarados, RECPAM).
+  // Nullable durante la transición: null = usar naturaleza por defecto de la
+  // categoría (comportamiento histórico). El backfill la completa.
+  naturaleza Naturaleza?
+  // Moneda funcional de la cuenta para revalúo al cierre. BI = bimonetaria
+  // (acumula valores en distintas monedas, p. ej. mercaderías en tránsito).
+  moneda     MonedaCuenta?
+  // Rubro de Estados Contables (RT9) para agrupar el balance y el ER.
+  rubroEECC  String?
 
   padre CuentaContable?  @relation("CuentaPadre", fields: [padreCodigo], references: [codigo])
   hijos CuentaContable[] @relation("CuentaPadre")
@@ -445,9 +491,9 @@ model LineaAsiento {
   // pasivo con proveedor exterior), montoOrigen guarda el principal en USD
   // — invariante a TC — y debe/haber siguen siendo la valuación en ARS al
   // momento del asiento. Para líneas ARS estos campos quedan en null.
-  monedaOrigen      Moneda?
-  montoOrigen       Decimal? @db.Decimal(18, 2)
-  tipoCambioOrigen  Decimal? @db.Decimal(18, 6)
+  monedaOrigen     Moneda?
+  montoOrigen      Decimal? @db.Decimal(18, 2)
+  tipoCambioOrigen Decimal? @db.Decimal(18, 6)
 
   asiento Asiento        @relation(fields: [asientoId], references: [id], onDelete: Restrict)
   cuenta  CuentaContable @relation(fields: [cuentaId], references: [id])
@@ -562,11 +608,13 @@ model MovimientoTesoreria {
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
 
-  cuentaBancaria CuentaBancaria           @relation(fields: [cuentaBancariaId], references: [id])
-  cuentaContable CuentaContable           @relation(fields: [cuentaContableId], references: [id])
-  asiento        Asiento?                 @relation(fields: [asientoId], references: [id])
-  lineaExtracto  LineaExtractoSugerencia?
-  vepDespacho    VepDespacho?
+  cuentaBancaria     CuentaBancaria           @relation(fields: [cuentaBancariaId], references: [id])
+  cuentaContable     CuentaContable           @relation(fields: [cuentaContableId], references: [id])
+  asiento            Asiento?                 @relation(fields: [asientoId], references: [id])
+  lineaExtracto      LineaExtractoSugerencia?
+  vepDespacho        VepDespacho?
+  // Retención Ganancias practicada en este pago (RG 830), si aplica.
+  retencionGanancias RetencionPracticada?
 
   @@index([fecha])
 }
@@ -1141,34 +1189,34 @@ model ItemCompra {
 // Compra (mercadería con productoId) ni en GastoFijo (templates
 // recurrentes mensuales).
 model Gasto {
-  id               String        @id @default(uuid())
-  numero           String        @unique
-  proveedorId      String
-  fecha            DateTime
-  fechaVencimiento DateTime?
-  condicionPago    CondicionPago @default(CUENTA_CORRIENTE)
-  moneda           Moneda        @default(ARS)
-  tipoCambio       Decimal       @default(1) @db.Decimal(18, 6)
-  facturaNumero    String?
+  id                 String             @id @default(uuid())
+  numero             String             @unique
+  proveedorId        String
+  fecha              DateTime
+  fechaVencimiento   DateTime?
+  condicionPago      CondicionPago      @default(CUENTA_CORRIENTE)
+  moneda             Moneda             @default(ARS)
+  tipoCambio         Decimal            @default(1) @db.Decimal(18, 6)
+  facturaNumero      String?
   // Totales fiscales a nivel factura (no por línea):
-  subtotal         Decimal       @db.Decimal(18, 2)
-  iva              Decimal       @default(0) @db.Decimal(18, 2)
-  iibb             Decimal       @default(0) @db.Decimal(18, 2)
-  otros            Decimal       @default(0) @db.Decimal(18, 2)
+  subtotal           Decimal            @db.Decimal(18, 2)
+  iva                Decimal            @default(0) @db.Decimal(18, 2)
+  iibb               Decimal            @default(0) @db.Decimal(18, 2)
+  otros              Decimal            @default(0) @db.Decimal(18, 2)
   // Clasificación fiscal Ganancias (informativa, no afecta el asiento):
   deducibleGanancias DeduccionGanancias @default(NETO)
-  total            Decimal       @db.Decimal(18, 2)
-  estado           GastoEstado   @default(BORRADOR)
-  asientoId        String?       @unique
+  total              Decimal            @db.Decimal(18, 2)
+  estado             GastoEstado        @default(BORRADOR)
+  asientoId          String?            @unique
   // Vínculo opcional a una Venta cuando este Gasto es la factura de
   // flete de esa venta (transportista + IVA crédito + CxP real). @unique:
   // una venta tiene a lo sumo un gasto de flete. El flete inline de la
   // venta (Venta.flete) NO se contabiliza en el asiento de venta cuando
   // existe este gasto vinculado — lo contabiliza el asiento del Gasto.
-  ventaId          String?       @unique
-  notas            String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  ventaId            String?            @unique
+  notas              String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   proveedor Proveedor    @relation(fields: [proveedorId], references: [id])
   asiento   Asiento?     @relation(fields: [asientoId], references: [id])
@@ -1254,62 +1302,76 @@ model Cliente {
 }
 
 model Proveedor {
-  id                    String         @id @default(uuid())
-  nombre                String
-  cuit                  String?        @unique // opcional para extranjeros (puede ser ID fiscal de su país)
-  tipo                  String         @default("otro")
-  tipoProveedor         TipoProveedor  @default(MERCADERIA_LOCAL)
-  conceptoRG830         ConceptoRG830? // mapping para retención Ganancias
-  pais                  String         @default("AR")
+  id                                 String             @id @default(uuid())
+  nombre                             String
+  cuit                               String?            @unique // opcional para extranjeros (puede ser ID fiscal de su país)
+  tipo                               String             @default("otro")
+  tipoProveedor                      TipoProveedor      @default(MERCADERIA_LOCAL)
+  conceptoRG830                      ConceptoRG830? // mapping para retención Ganancias
+  // --- Retención Impuesto a las Ganancias (RG 830) ---
+  // Sunset actúa como agente de retención al pagar facturas. Estos campos
+  // gobiernan el cálculo automático en el momento del pago. Aditivos y con
+  // default — no afectan proveedores existentes hasta marcarlos sujetos.
+  sujetoRetencionGanancias           Boolean            @default(false)
+  condicionGanancias                 CondicionGanancias @default(INSCRIPTO)
+  // Override de alícuota (%) por certificado de reducción RG 830. Si null,
+  // se usa la alícuota del ParametroRetencion según concepto + condición.
+  alicuotaRetencionGananciasOverride Decimal?           @db.Decimal(8, 4)
+  // Certificado de exclusión/no-retención (RG 830). Mientras la vigencia
+  // sea >= fecha de pago, NO se retiene.
+  certificadoExclusionGanancias      String?
+  vigenciaCertExclusionGanancias     DateTime?
+  pais                               String             @default("AR")
   // Moneda funcional del pasivo con este proveedor. USD = factura nato
   // dolarizada (intercompany, exterior). ARS = default local. Afecta defaults
   // de UI (Compra/Gasto/EmbarqueCosto.moneda) y diferencia cambiaria.
-  monedaOperacion       Moneda         @default(ARS)
-  direccion             String?
-  telefono              String?
-  email                 String?
-  estado                String         @default("activo")
-  cuentaContableId      Int? // pasivo (cta a pagar) — auto-creada por tipoProveedor
-  cuentaGastoContableId Int? // contrapartida de gasto/activo por defecto — auto-fill en embarques/compras
-  diasPagoDefault       Int? // 0 = contado, 30/60/90 = días corridos
-  condicionPagoDefault  CondicionPago  @default(CONTADO)
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
+  monedaOperacion                    Moneda             @default(ARS)
+  direccion                          String?
+  telefono                           String?
+  email                              String?
+  estado                             String             @default("activo")
+  cuentaContableId                   Int? // pasivo (cta a pagar) — auto-creada por tipoProveedor
+  cuentaGastoContableId              Int? // contrapartida de gasto/activo por defecto — auto-fill en embarques/compras
+  diasPagoDefault                    Int? // 0 = contado, 30/60/90 = días corridos
+  condicionPagoDefault               CondicionPago      @default(CONTADO)
+  createdAt                          DateTime           @default(now())
+  updatedAt                          DateTime           @updatedAt
 
-  cuentaContable      CuentaContable?           @relation("ProveedorPasivo", fields: [cuentaContableId], references: [id])
-  cuentaGastoContable CuentaContable?           @relation("ProveedorGasto", fields: [cuentaGastoContableId], references: [id])
-  embarques           Embarque[]
-  compras             Compra[]
-  costosEmbarque      EmbarqueCosto[]
-  pedidosCompra       PedidoCompra[]
-  extractoLineas      LineaExtractoSugerencia[]
-  gastosFijos         GastoFijo[]
-  gastos              Gasto[]
-  simulaciones        SimulacionImportacion[]
+  cuentaContable         CuentaContable?           @relation("ProveedorPasivo", fields: [cuentaContableId], references: [id])
+  cuentaGastoContable    CuentaContable?           @relation("ProveedorGasto", fields: [cuentaGastoContableId], references: [id])
+  embarques              Embarque[]
+  compras                Compra[]
+  costosEmbarque         EmbarqueCosto[]
+  pedidosCompra          PedidoCompra[]
+  extractoLineas         LineaExtractoSugerencia[]
+  gastosFijos            GastoFijo[]
+  gastos                 Gasto[]
+  simulaciones           SimulacionImportacion[]
+  retencionesPracticadas RetencionPracticada[]
 }
 
 model Producto {
-  id            String   @id @default(uuid())
-  codigo        String   @unique
-  nombre        String
-  descripcion   String?
-  marca         String?
-  modelo        String?
-  medida        String?
-  ncm           String?
-  unidad        String   @default("UN")
-  diePorcentaje Decimal  @default(0) @db.Decimal(8, 4)
-  precioVenta   Decimal  @default(0) @db.Decimal(18, 2)
-  costoPromedio Decimal  @default(0) @db.Decimal(18, 2)
-  stockActual   Int      @default(0)
-  stockMinimo   Int      @default(0)
-  activo        Boolean  @default(true)
+  id                     String   @id @default(uuid())
+  codigo                 String   @unique
+  nombre                 String
+  descripcion            String?
+  marca                  String?
+  modelo                 String?
+  medida                 String?
+  ncm                    String?
+  unidad                 String   @default("UN")
+  diePorcentaje          Decimal  @default(0) @db.Decimal(8, 4)
+  precioVenta            Decimal  @default(0) @db.Decimal(18, 2)
+  costoPromedio          Decimal  @default(0) @db.Decimal(18, 2)
+  stockActual            Int      @default(0)
+  stockMinimo            Int      @default(0)
+  activo                 Boolean  @default(true)
   // Datos técnicos provenientes de la lista FOB de fábrica (importación masiva).
   categoria              String? // PCR / TBR / SUV / LTR / UHP
   pesoNetoKg             Decimal? @db.Decimal(10, 3)
   unidadesContenedor40hc Int? // unidades que entran en un contenedor 40 HC
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   itemsEmbarque      ItemEmbarque[]
   itemsCompra        ItemCompra[]
@@ -1515,6 +1577,13 @@ model ItemVenta {
   subtotal       Decimal @db.Decimal(18, 2)
   iva            Decimal @db.Decimal(18, 2)
   total          Decimal @db.Decimal(18, 2)
+  // Snapshot del costoPromedio (ARS) usado para el CMV al EMITIR la venta.
+  // Es la base con la que se debitó CMV y se acreditó 1.1.5.03 MERCADERÍAS A
+  // ENTREGAR (stock dual). La entrega cancela 1.1.5.03 por ESTE valor para que
+  // la cuenta-puente cierre exacto; la diferencia con el costo físico real
+  // (SPD) va a una cuenta de variación de inventario. `0` = venta legacy
+  // (pre-snapshot): la entrega cae al costo SPD (comportamiento previo).
+  costoUnitarioCmv Decimal @default(0) @db.Decimal(18, 2)
   // Depósito desde el cual se reserva/entrega este item. Nullable:
   // cuando es null, cae al default global (`getDepositoPorDefecto`),
   // manteniendo retrocompatibilidad con ventas pre-S3.1.
@@ -1828,6 +1897,82 @@ model AuditLog {
 
   @@index([usuarioId])
   @@index([tabla, registroId])
+}
+
+// ============================================================
+// RETENCIONES PRACTICADAS (Ganancias RG 830) — Sunset agente
+// ============================================================
+//
+// Parámetros fiscales parametrizables (no hardcoded). Una fila por
+// combinación tipo + concepto + condición del proveedor, con vigencia
+// temporal. El cálculo busca la fila activa cuya vigencia contiene la
+// fecha de pago. RG 830 Anexo VIII: la escala puede tener un monto fijo
+// + alícuota marginal sobre el excedente del mínimo no sujeto.
+model ParametroRetencion {
+  id             Int                @id @default(autoincrement())
+  tipo           TipoRetencion      @default(GANANCIAS)
+  regimen        String             @default("RG_830")
+  concepto       ConceptoRG830
+  condicion      CondicionGanancias
+  // Mínimo no sujeto MENSUAL acumulado (proveedor + concepto).
+  minimoNoSujeto Decimal            @db.Decimal(18, 2)
+  // Monto fijo de la escala (0 para alícuota plana, p. ej. bienes 2%).
+  montoFijo      Decimal            @default(0) @db.Decimal(18, 2)
+  // Alícuota en porcentaje (2 = 2%, 28 = 28%).
+  alicuota       Decimal            @db.Decimal(8, 4)
+  vigenciaDesde  DateTime
+  vigenciaHasta  DateTime?
+  activo         Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  // Una sola fila por combinación + vigencia: evita parámetros ambiguos
+  // (dos alícuotas activas para el mismo concepto+condición+fecha).
+  @@unique([tipo, concepto, condicion, vigenciaDesde])
+  @@index([tipo, concepto, condicion, activo])
+}
+
+// Retención efectivamente practicada al pagar una factura. Es la fuente
+// de verdad inmutable y auditable (cálculo congelado vía snapshot). El
+// pasivo a depositar en ARCA es el saldo de la cuenta 2.1.3.07 del
+// asiento de pago; este registro habilita el certificado, el SICORE y la
+// trazabilidad fiscal. Se vincula 1-a-1 con el MovimientoTesoreria.
+model RetencionPracticada {
+  id                     String             @id @default(uuid())
+  tipo                   TipoRetencion      @default(GANANCIAS)
+  regimen                String             @default("RG_830")
+  concepto               ConceptoRG830
+  proveedorId            String
+  movimientoTesoreriaId  String             @unique
+  // Base sujeta (criterio Sunset: total de la factura — neto + IVA + IIBB).
+  base                   Decimal            @db.Decimal(18, 2)
+  // Acumulado del mes (mismo proveedor + concepto) ANTES de este pago.
+  baseAcumuladaMesPrevio Decimal            @default(0) @db.Decimal(18, 2)
+  minimoNoSujeto         Decimal            @db.Decimal(18, 2)
+  alicuota               Decimal            @db.Decimal(8, 4)
+  montoFijo              Decimal            @default(0) @db.Decimal(18, 2)
+  importeRetenido        Decimal            @db.Decimal(18, 2)
+  condicionGanancias     CondicionGanancias
+  fechaRetencion         DateTime
+  fechaVencimientoArca   DateTime
+  estado                 RetencionEstado    @default(PENDIENTE_ARCA)
+  certificadoNumero      String             @unique
+  // Snapshot de los parámetros usados (regla fiscal congelada) + detalle
+  // textual del cálculo, para auditoría aunque cambien parámetros futuros.
+  parametrosSnapshot     Json?
+  detalleCalculo         String?
+  motivoAnulacion        String?
+  createdById            String
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  proveedor           Proveedor           @relation(fields: [proveedorId], references: [id])
+  movimientoTesoreria MovimientoTesoreria @relation(fields: [movimientoTesoreriaId], references: [id], onDelete: Cascade)
+  createdBy           User                @relation(fields: [createdById], references: [id])
+
+  @@index([proveedorId, fechaRetencion])
+  @@index([estado])
+  @@index([concepto, fechaRetencion])
 }
 
 // ============================================================

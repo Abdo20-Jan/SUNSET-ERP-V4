@@ -5,7 +5,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
+import { isRetencionGananciasEnabled } from "@/lib/features";
 import {
   AsientoError,
   contabilizarAsiento,
@@ -14,9 +16,17 @@ import {
   crearAsientoTransferencia,
   type LineaInput,
 } from "@/lib/services/asiento-automatico";
+import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
+import { RETENCION_GANANCIAS_CODIGOS } from "@/lib/services/cuenta-registry";
+import {
+  construirRetencionManualParaPago,
+  registrarRetencionPracticada,
+  resolverRetencionGananciasParaPago,
+} from "@/lib/services/retencion-ganancias-pago";
 import { validarSaldoSuficientePrestamo } from "@/lib/services/prestamo";
 import {
   AsientoOrigen,
+  ConceptoRG830,
   CuentaTipo,
   Moneda,
   MovimientoTesoreriaTipo,
@@ -204,6 +214,16 @@ const crearMovimientoSchema = z
       .max(100)
       .optional()
       .transform((v) => (v && v.length > 0 ? v : null)),
+    // Retención de Ganancias cargada MANUALMENTE en el diálogo de pago: el
+    // usuario ingresa el importe a retener (no se calcula). Cuando viene,
+    // el pago se hace por el NETO y la retención queda como pasivo 2.1.3.07.
+    // Sólo válida en PAGO en ARS a un único proveedor (ver action).
+    retencionGananciasManual: z
+      .object({
+        importeRetenido: z.string().regex(MONEY_RE, "Importe de retención inválido"),
+        concepto: z.nativeEnum(ConceptoRG830),
+      })
+      .optional(),
   })
   .superRefine((data, ctx) => {
     let total = new Decimal(0);
@@ -224,6 +244,36 @@ const crearMovimientoSchema = z
         code: "custom",
         message: "El total del movimiento debe ser mayor a 0",
       });
+    }
+    if (data.retencionGananciasManual) {
+      if (data.tipo !== MovimientoTesoreriaTipo.PAGO) {
+        ctx.addIssue({
+          path: ["retencionGananciasManual"],
+          code: "custom",
+          message: "La retención de Ganancias sólo aplica a pagos",
+        });
+      }
+      if (data.moneda !== Moneda.ARS) {
+        ctx.addIssue({
+          path: ["retencionGananciasManual"],
+          code: "custom",
+          message: "La retención de Ganancias sólo aplica a pagos en ARS",
+        });
+      }
+      const imp = new Decimal(data.retencionGananciasManual.importeRetenido);
+      if (imp.lte(0)) {
+        ctx.addIssue({
+          path: ["retencionGananciasManual", "importeRetenido"],
+          code: "custom",
+          message: "La retención debe ser mayor a 0",
+        });
+      } else if (imp.gte(total)) {
+        ctx.addIssue({
+          path: ["retencionGananciasManual", "importeRetenido"],
+          code: "custom",
+          message: "La retención no puede ser mayor o igual al total del pago",
+        });
+      }
     }
     // Cuentas duplicadas → permitimos (el user puede partir un mismo
     // gasto en 2 líneas con descripciones distintas). Sin chequeo.
@@ -257,10 +307,10 @@ export type CrearMovimientoResult =
 export async function crearMovimientoTesoreriaAction(
   raw: CrearMovimientoInput,
 ): Promise<CrearMovimientoResult> {
-  const session = await auth();
-  if (!session) {
-    return { ok: false, error: "No autorizado." };
-  }
+  // Valida que el user del JWT siga existiendo (redirige a /login si no): el
+  // pago con retención graba RetencionPracticada.createdById (FK obligatoria) y
+  // tras un reseed ese id rompe con P2003 luego de montar medio asiento.
+  const userId = await requireSessionUser();
 
   const parsed = crearMovimientoSchema.safeParse(raw);
   if (!parsed.success) {
@@ -278,7 +328,14 @@ export async function crearMovimientoTesoreriaAction(
     descripcion,
     comprobante,
     referenciaBanco,
+    retencionGananciasManual,
   } = parsed.data;
+
+  // La retención manual también queda detrás de la feature flag (consistente
+  // con el camino automático): si está apagada, no se puede cargar.
+  if (retencionGananciasManual && !isRetencionGananciasEnabled()) {
+    return { ok: false, error: "La retención de Ganancias no está habilitada." };
+  }
 
   const total = lineas.reduce((s, l) => s.plus(new Decimal(l.monto)), new Decimal(0));
   const totalStr = total.toDecimalPlaces(2).toFixed(2);
@@ -358,12 +415,60 @@ export async function crearMovimientoTesoreriaAction(
 
   try {
     const result = await db.$transaction(async (tx) => {
+      // Serializa pagos concurrentes a la MISMA cuenta de proveedor para que
+      // el acumulado mensual RG 830 no se lea en paralelo (bajo READ COMMITTED
+      // dos pagos simultáneos verían el mismo `prev` y aplicarían el mínimo no
+      // sujeto dos veces). Lock por-cuenta; se libera al cerrar la transacción.
+      // Sólo en PAGO con la feature activa — flujo normal no toma lock.
+      if (isRetencionGananciasEnabled() && tipo === MovimientoTesoreriaTipo.PAGO) {
+        // $executeRaw (no $queryRaw): pg_advisory_xact_lock devuelve `void` y
+        // el adapter pg no puede deserializar esa columna en $queryRaw.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${primaryCuentaId}::bigint)`;
+      }
+
+      // Retención de Ganancias (RG 830): si el pago corresponde, se paga el
+      // NETO al banco y la diferencia queda como pasivo a depositar en ARCA.
+      // Se resuelve DENTRO de la transacción para que el acumulado mensual
+      // sea consistente. `null` ⇒ flujo de pago normal (sin cambios).
+      //   - Manual: el usuario cargó el importe → se usa tal cual (cualquier
+      //     proveedor, sin chequear `sujetoRetencionGanancias`).
+      //   - Automático: se calcula desde parámetros + acumulado mensual.
+      const retencionCtx = retencionGananciasManual
+        ? await construirRetencionManualParaPago(
+            {
+              tipo,
+              moneda,
+              lineas,
+              base: total,
+              importeRetenido: new Decimal(retencionGananciasManual.importeRetenido),
+              concepto: retencionGananciasManual.concepto,
+            },
+            tx,
+          )
+        : isRetencionGananciasEnabled()
+          ? await resolverRetencionGananciasParaPago(
+              { tipo, moneda, fecha, lineas, base: total },
+              tx,
+            )
+          : null;
+      if (retencionGananciasManual && !retencionCtx) {
+        throw new AsientoError(
+          "LINEA_INVALIDA",
+          "No se pudo aplicar la retención: el pago debe ser en ARS a un único proveedor identificable (todas las líneas a la misma cuenta del mismo proveedor).",
+        );
+      }
+      const retencionMonto = retencionCtx ? retencionCtx.resultado.importeRetenido : new Decimal(0);
+      const netoBanco = total.minus(retencionMonto);
+      // El movimiento bancario refleja la salida REAL de caja: el neto
+      // cuando hay retención, el total cuando no.
+      const montoMovimiento = retencionCtx ? netoBanco.toDecimalPlaces(2).toFixed(2) : totalStr;
+
       const mov = await tx.movimientoTesoreria.create({
         data: {
           tipo,
           cuentaBancariaId,
           fecha,
-          monto: totalStr,
+          monto: montoMovimiento,
           moneda,
           tipoCambio,
           cuentaContableId: primaryCuentaId,
@@ -377,7 +482,74 @@ export async function crearMovimientoTesoreriaAction(
       let asientoId: string;
       let asientoNumero: number;
 
-      if (lineas.length === 1) {
+      if (retencionCtx) {
+        // Pago con retención Ganancias. Asiento:
+        //   DEBE  [proveedor]  (1 línea por factura, suma = total bruto)
+        //   HABER [banco]      neto (total − retención)
+        //   HABER [2.1.3.07]   retención (pasivo a depositar a ARCA)
+        // El proveedor se cancela por el BRUTO (saldo CxP baja por el total
+        // facturado); la retención es un detalle de financiación.
+        const cuentaRetencionId = await getOrCreateCuenta(
+          tx,
+          RETENCION_GANANCIAS_CODIGOS.RETENCIONES_GANANCIAS_POR_PAGAR,
+        );
+        const retencionStr = retencionMonto.toDecimalPlaces(2).toFixed(2);
+        const netoStr = netoBanco.toDecimalPlaces(2).toFixed(2);
+
+        const asientoLineas: LineaInput[] = lineas.map((l) => ({
+          cuentaId: l.cuentaContableId,
+          debe: l.monto,
+          haber: 0,
+          descripcion: l.descripcion ?? undefined,
+        }));
+        asientoLineas.push({
+          cuentaId: cuentaBancaria.cuentaContableId,
+          debe: 0,
+          haber: netoStr,
+          descripcion: `Pago neto — retención Ganancias ${retencionStr}`,
+        });
+        asientoLineas.push({
+          cuentaId: cuentaRetencionId,
+          debe: 0,
+          haber: retencionStr,
+          descripcion: `Retención Ganancias RG 830 — ${retencionCtx.proveedor.nombre}`,
+        });
+
+        const asiento = await crearAsientoManual(
+          {
+            fecha,
+            descripcion:
+              descripcion ?? `Pago ${moneda} ${totalStr} (ret. Ganancias ${retencionStr})`,
+            origen: AsientoOrigen.TESORERIA,
+            moneda,
+            tipoCambio,
+            lineas: asientoLineas,
+          },
+          tx,
+        );
+        const updMovRet = await tx.movimientoTesoreria.updateMany({
+          where: { id: mov.id, asientoId: null },
+          data: { asientoId: asiento.id },
+        });
+        if (updMovRet.count !== 1) {
+          throw new AsientoError(
+            "CONCURRENCIA",
+            `MovimientoTesoreria ${mov.id} fue contabilizado simultáneamente por otro proceso.`,
+          );
+        }
+        const contabilizado = await contabilizarAsiento(asiento.id, tx);
+        asientoId = contabilizado.id;
+        asientoNumero = contabilizado.numero;
+        // Las N primeras líneas DEBE (orden de `lineas`) son las facturas.
+        await gravarAplicacionesPago(tx, contabilizado.id, lineas);
+        // Registrar la retención practicada + auditoría.
+        await registrarRetencionPracticada(tx, {
+          contexto: retencionCtx,
+          movimientoTesoreriaId: mov.id,
+          fecha,
+          createdById: userId,
+        });
+      } else if (lineas.length === 1) {
         // 1 contrapartida — flujo clásico con split IDCB automático.
         const asiento = await crearAsientoMovimientoTesoreria(mov.id, tx);
         const contabilizado = await contabilizarAsiento(asiento.id, tx);
@@ -390,34 +562,60 @@ export async function crearMovimientoTesoreriaAction(
         }
       } else {
         // N contrapartidas — asiento manual de N+1 líneas.
+        // Libro ARS-único: si el movimiento es USD, cada línea va en pesos
+        // (monto × TC, redondeo por parcela) con el principal USD en su
+        // metadata; el banco cierra con la SUMA exacta de las parcelas ARS
+        // para que la partida no se desbalancee por redondeo.
+        const esUsd = moneda !== Moneda.ARS;
+        const tcDec = new Decimal(tipoCambio);
+        const lineaArs = (monto: string) =>
+          esUsd
+            ? new Decimal(monto).times(tcDec).toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+            : new Decimal(monto);
+        const metaUsd = (montoUsd: string) =>
+          esUsd
+            ? {
+                monedaOrigen: Moneda.USD,
+                montoOrigen: montoUsd,
+                tipoCambioOrigen: tcDec.toFixed(6),
+              }
+            : {};
+        const bancoArs = lineas
+          .reduce((s, l) => s.plus(lineaArs(l.monto)), new Decimal(0))
+          .toFixed(2);
+
         const asientoLineas: LineaInput[] = [];
         if (tipo === MovimientoTesoreriaTipo.COBRO) {
           asientoLineas.push({
             cuentaId: cuentaBancaria.cuentaContableId,
-            debe: totalStr,
+            debe: bancoArs,
             haber: 0,
+            ...metaUsd(totalStr),
           });
           for (const l of lineas) {
             asientoLineas.push({
               cuentaId: l.cuentaContableId,
               debe: 0,
-              haber: l.monto,
+              haber: lineaArs(l.monto).toFixed(2),
               descripcion: l.descripcion ?? undefined,
+              ...metaUsd(l.monto),
             });
           }
         } else {
           for (const l of lineas) {
             asientoLineas.push({
               cuentaId: l.cuentaContableId,
-              debe: l.monto,
+              debe: lineaArs(l.monto).toFixed(2),
               haber: 0,
               descripcion: l.descripcion ?? undefined,
+              ...metaUsd(l.monto),
             });
           }
           asientoLineas.push({
             cuentaId: cuentaBancaria.cuentaContableId,
             debe: 0,
-            haber: totalStr,
+            haber: bancoArs,
+            ...metaUsd(totalStr),
           });
         }
         const asiento = await crearAsientoManual(
@@ -425,8 +623,8 @@ export async function crearMovimientoTesoreriaAction(
             fecha,
             descripcion: descripcion ?? `${tipo} ${moneda} ${totalStr}`,
             origen: AsientoOrigen.TESORERIA,
-            moneda,
-            tipoCambio,
+            moneda: Moneda.ARS,
+            tipoCambio: 1,
             lineas: asientoLineas,
           },
           tx,
@@ -457,12 +655,21 @@ export async function crearMovimientoTesoreriaAction(
     revalidatePath("/tesoreria/cuentas");
     revalidatePath("/tesoreria/movimientos");
     revalidatePath("/tesoreria/prestamos");
+    revalidatePath("/tesoreria/cuentas-a-pagar");
     revalidatePath("/contabilidad/asientos");
 
     return { ok: true, ...result };
   } catch (err) {
     if (err instanceof AsientoError) {
       return { ok: false, error: mapAsientoErrorMessage(err) };
+    }
+    // Colisión de número de certificado de retención (count+1 bajo concurrencia):
+    // el @unique aborta la tx sin datos corruptos — pedir reintento limpio.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return {
+        ok: false,
+        error: "Conflicto de numeración (certificado de retención). Reintentá el pago.",
+      };
     }
     console.error("crearMovimientoTesoreriaAction failed", err);
     return {
@@ -668,37 +875,66 @@ export async function pagarConIntermediarioAction(
       //   DEBE [beneficiario] diferencia  si transferimos demás (anticipo)
       //   HABER [beneficiario] |diferencia|  si transferimos de menos
       //   HABER [banco] montoTransferido
+      // Libro ARS-único: en USD cada línea va en pesos (monto × TC, redondeo
+      // por parcela) con el principal USD en su metadata.
+      const esUsd = data.moneda !== Moneda.ARS;
+      const tcDec = new Decimal(data.tipoCambio);
+      const lineaArs = (monto: string) =>
+        esUsd
+          ? new Decimal(monto).times(tcDec).toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+          : new Decimal(monto);
+      const metaUsd = (montoUsd: string) =>
+        esUsd
+          ? {
+              monedaOrigen: Moneda.USD,
+              montoOrigen: montoUsd,
+              tipoCambioOrigen: tcDec.toFixed(6),
+            }
+          : {};
       const lineas: LineaInput[] = [];
 
       for (const f of data.facturas) {
         lineas.push({
           cuentaId: f.cuentaContableId,
-          debe: f.monto,
+          debe: lineaArs(f.monto).toFixed(2),
           haber: 0,
           descripcion: f.descripcion ?? undefined,
+          ...metaUsd(f.monto),
         });
       }
 
       if (diferencia.gt(0)) {
         lineas.push({
           cuentaId: data.beneficiarioCuentaId,
-          debe: diferencia.toFixed(2),
+          debe: lineaArs(diferencia.toFixed(2)).toFixed(2),
           haber: 0,
           descripcion: "Anticipo / saldo a favor",
+          ...metaUsd(diferencia.toFixed(2)),
         });
       } else if (diferencia.lt(0)) {
         lineas.push({
           cuentaId: data.beneficiarioCuentaId,
           debe: 0,
-          haber: diferencia.abs().toFixed(2),
+          haber: lineaArs(diferencia.abs().toFixed(2)).toFixed(2),
           descripcion: "Saldo pendiente con intermediario",
+          ...metaUsd(diferencia.abs().toFixed(2)),
         });
       }
 
+      // El banco cierra la partida: suma exacta de DEBEs menos HABERs no-banco
+      // (en USD el redondeo por parcela podría no coincidir con total × TC).
+      const bancoArs = lineas
+        .reduce(
+          (s, l) =>
+            s.plus(new Decimal(String(l.debe ?? 0))).minus(new Decimal(String(l.haber ?? 0))),
+          new Decimal(0),
+        )
+        .toFixed(2);
       lineas.push({
         cuentaId: cuentaBancaria.cuentaContableId,
         debe: 0,
-        haber: total.toFixed(2),
+        haber: bancoArs,
+        ...metaUsd(total.toFixed(2)),
       });
 
       const asiento = await crearAsientoManual(
@@ -710,8 +946,8 @@ export async function pagarConIntermediarioAction(
               data.facturas.length === 1 ? "" : "s"
             }`,
           origen: AsientoOrigen.TESORERIA,
-          moneda: data.moneda,
-          tipoCambio: data.tipoCambio,
+          moneda: Moneda.ARS,
+          tipoCambio: 1,
           lineas,
         },
         tx,

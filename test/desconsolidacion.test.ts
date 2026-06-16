@@ -77,6 +77,7 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
       { codigo: "SKU-1", declarada: 100, fc: "10.0000" },
     ],
     estado: "EN_DEPOSITO_FISCAL" | "DESCONSOLIDADO" | "EN_ZONA_PRIMARIA" = "EN_DEPOSITO_FISCAL",
+    conArribo = true,
   ): Promise<Seed> {
     const proveedor = await db.prisma.proveedor.create({ data: { nombre: "Exterior SA" } });
     const depositoFiscal = await db.prisma.deposito.create({
@@ -90,6 +91,29 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
         tipoCambio: TIPO_CAMBIO,
       },
     });
+    // El arribo a zona primaria (debita 1.1.5.04) debe haber corrido antes de
+    // desconsolidar — lo marcamos con un asiento mínimo y el FK del embarque.
+    if (conArribo) {
+      const periodo = await db.prisma.periodoContable.findFirstOrThrow();
+      const arribo = await db.prisma.asiento.create({
+        data: {
+          numero: 1,
+          fecha: FECHA,
+          descripcion: `Arribo ZP ${embarque.codigo}`,
+          estado: "CONTABILIZADO",
+          origen: "COMEX",
+          moneda: "ARS",
+          tipoCambio: "1",
+          totalDebe: "0",
+          totalHaber: "0",
+          periodoId: periodo.id,
+        },
+      });
+      await db.prisma.embarque.update({
+        where: { id: embarque.id },
+        data: { asientoZonaPrimariaId: arribo.id },
+      });
+    }
     const contenedor = await db.prisma.contenedor.create({
       data: {
         embarqueId: embarque.id,
@@ -222,6 +246,39 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
       ]);
     });
 
+    it("alinea el redondeo del traslado por unidad (asiento == costoUnit × cantidad) — Onda A #4", async () => {
+      // FC × TC con sub-centavos: 12.3457 × 1000.5 = 12351.87285 por unidad.
+      // El traslado debe redondear el unitario a 2dp ANTES de multiplicar
+      // (idéntico a la nacionalización: round2(FC×TC)), de modo que el DEBE
+      // 1.1.5.05 del asiento == costoUnitario del MovimientoStock × cantidad.
+      // Sin alinear, el asiento redondea el total (49407.49) y el movimiento el
+      // unitario (12351.87 × 4 = 49407.48) → residuo de 0,01 en 1.1.5.05.
+      const s = await seed([{ codigo: "SKU-RND", declarada: 4, fc: "12.3457" }]);
+      const cont = await db.prisma.contenedor.findUniqueOrThrow({
+        where: { id: s.contenedorId },
+        select: { embarqueId: true },
+      });
+      await db.prisma.embarque.update({
+        where: { id: cont.embarqueId },
+        data: { tipoCambio: "1000.500000" },
+      });
+
+      const out = await desconsolidar({ contenedorId: s.contenedorId, fecha: FECHA }, db.prisma);
+
+      const movs = await db.prisma.movimientoStock.findMany({
+        where: { desconsolidacionId: out.desconsolidacion.id },
+      });
+      expect(movs).toHaveLength(1);
+      const costoUnit = movs[0]!.costoUnitario;
+      expect(costoUnit.toFixed(2)).toBe("12351.87");
+
+      const lineas = await lineasDe(out.asiento!.id);
+      const debe05 = lineas.find((l) => l.codigo === "1.1.5.05")?.debe;
+      // Reconciliación interna: DEBE 1.1.5.05 == costoUnitario × cantidad.
+      expect(debe05).toBe(costoUnit.times(4).toFixed(2));
+      expect(debe05).toBe("49407.48");
+    });
+
     it("sin conferencia explícita asume físico == declarado (sin divergencia)", async () => {
       const s = await seed();
       const out = await desconsolidar({ contenedorId: s.contenedorId, fecha: FECHA }, db.prisma);
@@ -234,7 +291,9 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
 
   describe("con divergencia (gate D9)", () => {
     it("graba físico, crea header y deja AGUARDANDO_INVESTIGACAO sin asiento ni stock", async () => {
-      const s = await seed();
+      // El camino con divergencia NO postea el traslado, así que no requiere
+      // arribo — sembramos sin él para mantener la cuenta de asientos en 0.
+      const s = await seed(undefined, "EN_DEPOSITO_FISCAL", false);
       const out = await desconsolidar(
         {
           contenedorId: s.contenedorId,
@@ -305,6 +364,15 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
       ).rejects.toMatchObject({ code: "YA_DESCONSOLIDADO" });
     });
 
+    it("rechaza desconsolidar sin arribo confirmado (zona primaria) — Onda A #3", async () => {
+      // Sin asientoZonaPrimariaId el traslado 1.1.5.04 → 1.1.5.05 acreditaría
+      // 1.1.5.04 nunca debitada → subcuenta acreedora. Debe bloquearse.
+      const s = await seed(undefined, "EN_DEPOSITO_FISCAL", false);
+      await expect(
+        desconsolidar({ contenedorId: s.contenedorId, fecha: FECHA }, db.prisma),
+      ).rejects.toMatchObject({ code: "ARRIBO_PENDIENTE" });
+    });
+
     it("rechaza FC no cerrado (costoFCUnitario null)", async () => {
       const s = await seed();
       await db.prisma.itemContenedor.update({
@@ -346,7 +414,8 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
       );
       expect(second.desconsolidacion.id).toBe(first.desconsolidacion.id);
       expect(await db.prisma.desconsolidacion.count()).toBe(1);
-      expect(await db.prisma.asiento.count()).toBe(1);
+      // arribo (sembrado) + traslado (1 sólo, idempotente) = 2.
+      expect(await db.prisma.asiento.count()).toBe(2);
     });
   });
 });

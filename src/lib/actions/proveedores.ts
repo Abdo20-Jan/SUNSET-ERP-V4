@@ -11,6 +11,7 @@ import {
   rangoProveedorByTipo,
 } from "@/lib/services/cuenta-auto";
 import {
+  CondicionGanancias,
   ConceptoRG830,
   CuentaCategoria,
   CuentaTipo,
@@ -25,6 +26,11 @@ export type ProveedorRow = {
   tipo: string;
   tipoProveedor: TipoProveedor;
   conceptoRG830: ConceptoRG830 | null;
+  sujetoRetencionGanancias: boolean;
+  condicionGanancias: CondicionGanancias;
+  alicuotaRetencionGananciasOverride: string | null;
+  certificadoExclusionGanancias: string | null;
+  vigenciaCertExclusionGanancias: string | null;
   pais: string;
   direccion: string | null;
   telefono: string | null;
@@ -56,6 +62,11 @@ export async function listarProveedores(): Promise<ProveedorRow[]> {
       tipo: true,
       tipoProveedor: true,
       conceptoRG830: true,
+      sujetoRetencionGanancias: true,
+      condicionGanancias: true,
+      alicuotaRetencionGananciasOverride: true,
+      certificadoExclusionGanancias: true,
+      vigenciaCertExclusionGanancias: true,
       pais: true,
       direccion: true,
       telefono: true,
@@ -75,6 +86,13 @@ export async function listarProveedores(): Promise<ProveedorRow[]> {
     tipo: p.tipo,
     tipoProveedor: p.tipoProveedor,
     conceptoRG830: p.conceptoRG830,
+    sujetoRetencionGanancias: p.sujetoRetencionGanancias,
+    condicionGanancias: p.condicionGanancias,
+    alicuotaRetencionGananciasOverride: p.alicuotaRetencionGananciasOverride?.toString() ?? null,
+    certificadoExclusionGanancias: p.certificadoExclusionGanancias,
+    vigenciaCertExclusionGanancias: p.vigenciaCertExclusionGanancias
+      ? p.vigenciaCertExclusionGanancias.toISOString().slice(0, 10)
+      : null,
     pais: p.pais,
     direccion: p.direccion,
     telefono: p.telefono,
@@ -135,6 +153,28 @@ const proveedorBaseSchema = z.object({
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : "otro")),
   tipoProveedor: z.nativeEnum(TipoProveedor).default(TipoProveedor.MERCADERIA_LOCAL),
   conceptoRG830: z.nativeEnum(ConceptoRG830).optional().nullable(),
+  // --- Retención Ganancias (RG 830) ---
+  sujetoRetencionGanancias: z.boolean().optional().default(false),
+  condicionGanancias: z.nativeEnum(CondicionGanancias).default(CondicionGanancias.INSCRIPTO),
+  alicuotaRetencionGananciasOverride: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null))
+    .refine(
+      (v) => v === null || /^\d+(\.\d{1,4})?$/.test(v),
+      "Alícuota inválida (máx. 4 decimales).",
+    ),
+  certificadoExclusionGanancias: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((v) => (v && v.trim().length > 0 ? v.trim() : null)),
+  vigenciaCertExclusionGanancias: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((v) => (v && v.trim().length > 0 ? new Date(v) : null)),
   pais: z
     .string()
     .optional()

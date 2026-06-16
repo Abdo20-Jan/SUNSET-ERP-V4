@@ -12,7 +12,11 @@ import {
   crearAsientoManual,
   type LineaInput,
 } from "@/lib/services/asiento-automatico";
-import { TIPOS_PROVEEDOR_EXTERIOR } from "@/lib/services/cuentas-a-pagar";
+import {
+  getPagosUsdPorCuenta,
+  pagadoUsdParaFactura,
+  TIPOS_PROVEEDOR_EXTERIOR,
+} from "@/lib/services/cuentas-a-pagar";
 import {
   AsientoOrigen,
   CompraEstado,
@@ -166,9 +170,11 @@ interface FacturaCargada {
  * ingreso) y la suma de pagos DEBE (al TC del banco del día) surge como
  * saldo residual y se concilia con un ajuste manual de fechamento.
  *
- * El MovimientoTesoreria queda en moneda USD (monto=montoUsd, tipoCambio
- * derivado) para que `getSaldosExteriorPorProveedor` detecte el pago y
- * reduzca el saldo USD del proveedor por descripción tokenizada.
+ * La línea DEBE del proveedor lleva monedaOrigen=USD + montoOrigen +
+ * tipoCambioOrigen: el principal USD pagado es metadata de la línea,
+ * invariante a TC. `getSaldosExteriorPorProveedor` descuenta el saldo
+ * USD del proveedor desde esa metadata (con AplicacionPago* como ancla
+ * factura↔pago, y tokens en la descripción como fallback legacy).
  */
 export async function pagarFacturaExteriorAction(
   raw: PagarFacturaExteriorInput,
@@ -235,7 +241,7 @@ export async function pagarFacturaExteriorAction(
       }
 
       // Saldo USD pendiente de la factura: total − pagado USD acumulado.
-      const pagadoUsd = await pagadoUsdDeFactura(tx, factura);
+      const pagadoUsd = await pagadoUsdDeFactura(tx, facturaOrigen, factura);
       const saldoUsd = factura.totalUsd.minus(pagadoUsd);
       if (saldoUsd.lte(0.005)) {
         throw new AsientoError(
@@ -271,15 +277,20 @@ export async function pagarFacturaExteriorAction(
         ? `${descripcionBase} — ${descripcionExtra}`
         : descripcionBase;
 
-      // Asiento de 2 líneas — sin diferencia cambial. Descripción de la
-      // línea DEBE incluye numero + embarqueCodigo como tokens para que
-      // pagadoUsdParaFactura matchee pagos futuros contra esta factura.
+      // Asiento de 2 líneas — sin diferencia cambial. La línea DEBE lleva
+      // el principal USD como metadata (monedaOrigen/montoOrigen) — fuente
+      // canónica del pagado USD, invariante a TC. La descripción mantiene
+      // numero + embarqueCodigo como tokens para el fallback de pagos
+      // legacy sin AplicacionPago* (embarqueFob).
       const lineas: LineaInput[] = [
         {
           cuentaId: factura.cuentaProveedorId,
           debe: montoArs.toFixed(2),
           haber: 0,
           descripcion: `Cancelación ${refFactura}`,
+          monedaOrigen: Moneda.USD,
+          montoOrigen: montoUsd.toFixed(2),
+          tipoCambioOrigen: tcAplicado.toFixed(6),
         },
         {
           cuentaId: cuentaBancaria.cuentaContableId,
@@ -309,13 +320,15 @@ export async function pagarFacturaExteriorAction(
         select: { id: true },
       });
 
+      // Las líneas ya están en ARS (la DEBE lleva el principal USD en su
+      // metadata); el asiento sigue la convención del libro diario en pesos.
       const asiento = await crearAsientoManual(
         {
           fecha,
           descripcion: descripcionAsiento,
           origen: AsientoOrigen.TESORERIA,
-          moneda: Moneda.USD,
-          tipoCambio: tcAplicado.toFixed(6),
+          moneda: Moneda.ARS,
+          tipoCambio: 1,
           lineas,
         },
         tx,
@@ -613,46 +626,22 @@ async function cargarFacturaFobDelEmbarque(
 }
 
 /**
- * Suma los pagos USD ya aplicados a una factura. Espelha la lógica de
- * `pagadoUsdParaFactura` en getSaldosExteriorPorProveedor: match por
- * tokens del numero de factura o del código del embarque en la
- * descripción de la línea DEBE del proveedor en un asiento USD
- * contabilizado vinculado a un MovimientoTesoreria PAGO USD.
- *
- * Mantenemos el mismo algoritmo del servicio de saldos para que el
- * monto descontado acá coincida exactamente con el saldo mostrado en
- * la UI (sin desfase entre validación y vista).
+ * Suma los pagos USD ya aplicados a una factura. Usa el MISMO helper que
+ * `getSaldosExteriorPorProveedor` (montoOrigen + AplicacionPago* como
+ * fuente de verdad, tokens como fallback legacy) para que el monto
+ * descontado acá coincida exactamente con el saldo mostrado en la UI
+ * (sin desfase entre validación y vista).
  */
-async function pagadoUsdDeFactura(tx: TxClient, factura: FacturaCargada): Promise<Decimal> {
-  const lineasPago = await tx.lineaAsiento.findMany({
-    where: {
-      cuentaId: factura.cuentaProveedorId,
-      debe: { gt: 0 },
-      asiento: {
-        estado: "CONTABILIZADO",
-        moneda: Moneda.USD,
-        movimiento: {
-          tipo: MovimientoTesoreriaTipo.PAGO,
-          moneda: Moneda.USD,
-        },
-      },
-    },
-    select: {
-      descripcion: true,
-      asiento: { select: { movimiento: { select: { monto: true } } } },
-    },
+async function pagadoUsdDeFactura(
+  tx: TxClient,
+  origen: "compra" | "embarqueCosto" | "embarqueFob",
+  factura: FacturaCargada,
+): Promise<Decimal> {
+  const pagosPorCuenta = await getPagosUsdPorCuenta(tx, [factura.cuentaProveedorId]);
+  return pagadoUsdParaFactura(pagosPorCuenta.get(factura.cuentaProveedorId), {
+    origen,
+    id: factura.id,
+    numero: factura.numero,
+    embarqueCodigo: factura.embarqueCodigo,
   });
-
-  const numTokens = new Set(factura.numero.split(/[\s—,;]+/).filter((t) => t.length > 0));
-  let pagado = new Decimal(0);
-  for (const l of lineasPago) {
-    const desc = l.descripcion ?? "";
-    const tokens = new Set(desc.split(/[\s—,;]+/).filter((t) => t.length > 0));
-    const matchNumero = numTokens.size > 0 && [...numTokens].every((t) => tokens.has(t));
-    const matchEmb = factura.embarqueCodigo !== null && tokens.has(factura.embarqueCodigo);
-    if ((matchNumero || matchEmb) && l.asiento.movimiento) {
-      pagado = pagado.plus(new Decimal(l.asiento.movimiento.monto.toString()));
-    }
-  }
-  return pagado;
 }

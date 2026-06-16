@@ -7,8 +7,19 @@ import {
   PeriodoEstado,
   CuentaTipo,
   CuentaCategoria,
+  Naturaleza,
   TipoDeposito,
 } from "../src/generated/prisma/client";
+
+// Naturaleza por defecto derivada de la categoría (ACTIVO/EGRESO → DEUDOR;
+// resto → ACREEDOR). Espejo de src/lib/services/cuenta-naturaleza.ts; inline
+// para mantener el seed autocontenido (los scripts de prisma/ no usan el
+// alias @/). Las regularizadoras declaran su naturaleza explícita.
+function naturalezaDefault(categoria: CuentaCategoria): Naturaleza {
+  return categoria === CuentaCategoria.ACTIVO || categoria === CuentaCategoria.EGRESO
+    ? Naturaleza.DEUDOR
+    : Naturaleza.ACREEDOR;
+}
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -239,6 +250,7 @@ async function seedCuentas() {
       nivel: c.nivel,
       padreCodigo,
       activa: true,
+      naturaleza: naturalezaDefault(c.categoria),
     };
     await prisma.cuentaContable.upsert({
       where: { codigo: c.codigo },
@@ -266,6 +278,8 @@ type AnaliticaBaseSeed = {
   codigo: string;
   nombre: string;
   categoria: CuentaCategoria;
+  /** Override para cuentas regularizadoras (naturaleza opuesta a su categoría). */
+  naturaleza?: Naturaleza;
 };
 
 const ANALITICAS_BASE: AnaliticaBaseSeed[] = [
@@ -276,7 +290,8 @@ const ANALITICAS_BASE: AnaliticaBaseSeed[] = [
   { codigo: "3.1.2.02", nombre: "PRIMA DE EMISIÓN",                    categoria: CuentaCategoria.PATRIMONIO },
   { codigo: "3.2.1.01", nombre: "RESULTADOS EJERCICIOS ANTERIORES",    categoria: CuentaCategoria.PATRIMONIO },
   { codigo: "3.2.1.02", nombre: "RESULTADO DEL EJERCICIO",             categoria: CuentaCategoria.PATRIMONIO },
-  { codigo: "3.2.1.03", nombre: "DIVIDENDOS DECLARADOS",               categoria: CuentaCategoria.PATRIMONIO },
+  // Regularizadora del PN: naturaleza DEUDOR (resta del patrimonio).
+  { codigo: "3.2.1.03", nombre: "DIVIDENDOS DECLARADOS",               categoria: CuentaCategoria.PATRIMONIO, naturaleza: Naturaleza.DEUDOR },
   // Reservas (Ley 19.550 — RT 8/9). RESERVA LEGAL es obligatoria: 5%
   // de la utilidad neta hasta alcanzar 20% del capital social.
   { codigo: "3.3.1.01", nombre: "RESERVA LEGAL",                       categoria: CuentaCategoria.PATRIMONIO },
@@ -317,6 +332,7 @@ async function seedAnaliticasBase() {
       nivel: c.codigo.split(".").length,
       padreCodigo,
       activa: true,
+      naturaleza: c.naturaleza ?? naturalezaDefault(c.categoria),
     };
     await prisma.cuentaContable.upsert({
       where: { codigo: c.codigo },

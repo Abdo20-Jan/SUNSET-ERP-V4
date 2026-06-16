@@ -16,6 +16,7 @@ import {
 import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { VENTA_CODIGOS } from "@/lib/services/cuenta-registry";
 import { calcularPercepcionIIBB } from "@/lib/services/percepcion-iibb";
+import { crearEntregaBorradorPorDefecto } from "@/lib/services/entrega-borrador";
 import { aplicarReservaSPD, liberarReservaSPD } from "@/lib/services/stock";
 import {
   getDepositoPorDefecto,
@@ -515,11 +516,15 @@ async function upsertFleteGasto(
   tx: Prisma.TransactionClient,
   ventaId: string,
   ff: NonNullable<z.infer<typeof ventaInputSchema>["fleteFactura"]>,
+  fechaVenta: Date,
 ): Promise<void> {
   const cuentaFleteId = await getOrCreateCuenta(tx, VENTA_CODIGOS.FLETE_GASTO);
   const subtotal = money(ff.subtotal);
   const total = money(toDecimal(ff.subtotal).plus(ff.iva).plus(ff.iibb).plus(ff.otros));
-  const fecha = ff.fechaFactura ? new Date(ff.fechaFactura) : new Date();
+  // Sin fechaFactura, espelha la fecha de la venta — el gasto de flete está
+  // vinculado a la venta y debe caer en el mismo período contable (su asiento
+  // se contabiliza junto con el de la venta en emitirVentaAction).
+  const fecha = ff.fechaFactura ? new Date(ff.fechaFactura) : fechaVenta;
 
   const existente = await tx.gasto.findUnique({
     where: { ventaId },
@@ -732,7 +737,7 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
       // Gasto. Ausente en edición → eliminar el gasto BORRADOR previo (si lo
       // hay) para volver al flete suelto/sin flete.
       if (input.fleteFactura) {
-        await upsertFleteGasto(tx, id, input.fleteFactura);
+        await upsertFleteGasto(tx, id, input.fleteFactura, new Date(input.fecha));
       } else {
         const previo = await tx.gasto.findUnique({
           where: { ventaId: id },
@@ -810,6 +815,7 @@ export async function emitirVentaAction(
         select: {
           asientoId: true,
           numero: true,
+          fecha: true,
           items: {
             select: { productoId: true, cantidad: true, depositoId: true },
           },
@@ -829,6 +835,13 @@ export async function emitirVentaAction(
       if (v.fleteGasto && !v.fleteGasto.asientoId && v.fleteGasto.estado === "BORRADOR") {
         const asientoGasto = await crearAsientoGasto(v.fleteGasto.id, tx);
         await contabilizarAsiento(asientoGasto.id, tx);
+      }
+      // Stock-dual: deja una entrega BORRADOR (100% de los items, por depósito)
+      // pendiente de confirmar. Hace visible el remito en la venta y evita que
+      // la cuenta-puente 1.1.5.03 acumule olvidada. El asiento de baja se genera
+      // recién al CONFIRMAR la entrega.
+      if (isStockDualEnabled()) {
+        await crearEntregaBorradorPorDefecto(tx, ventaId, v.fecha);
       }
       await tx.venta.update({
         where: { id: ventaId },
