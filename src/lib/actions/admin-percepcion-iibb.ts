@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import { anularVentaAction } from "@/lib/actions/ventas";
 import { AuditAccion, Prisma, VentaEstado } from "@/generated/prisma/client";
@@ -76,8 +76,9 @@ export type AnularMasivoResult =
 export async function anularVentasMasivoAction(
   input: z.infer<typeof anularSchema>,
 ): Promise<AnularMasivoResult> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autenticado." };
+  // Valida que el user del JWT siga existiendo (redirige a /login si no): el
+  // AuditLog.usuarioId es FK obligatoria y rompería con P2003 tras un reseed.
+  const userId = await requireSessionUser();
 
   const parsed = anularSchema.safeParse(input);
   if (!parsed.success) {
@@ -105,7 +106,7 @@ export async function anularVentasMasivoAction(
         razon: parsed.data.razon,
         operacion: "anularVentasMasivoAction (recálculo Percepción IIBB)",
       } as Prisma.InputJsonValue,
-      usuarioId: session.user.id,
+      usuarioId: userId,
     },
   });
 

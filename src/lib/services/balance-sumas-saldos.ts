@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { Decimal, sumMoney, toDecimal } from "@/lib/decimal";
 import { AsientoEstado, type CuentaCategoria, type CuentaTipo } from "@/generated/prisma/client";
+import { naturalezaPorDefecto, saldoNatural } from "./cuenta-naturaleza";
 
 export type BalanceLinea = {
   kind: "linea";
@@ -76,14 +77,6 @@ export function pruneBalanceSinSaldo(nodes: BalanceNode[]): BalanceNode[] {
     return isZero(node) ? null : node;
   };
   return nodes.map(prune).filter((n): n is BalanceNode => n !== null);
-}
-
-// Sinal natural: valor positivo representa o saldo na natureza da conta.
-function naturalSaldo(categoria: CuentaCategoria, debe: Decimal, haber: Decimal): Decimal {
-  if (categoria === "ACTIVO" || categoria === "EGRESO") {
-    return debe.minus(haber);
-  }
-  return haber.minus(debe);
 }
 
 export async function getBalanceSumasYSaldos(filter: {
@@ -224,16 +217,17 @@ export async function getBalanceSumasYSaldos(filter: {
     const prev = prevByCuenta.get(c.id);
     const prevDebe = prev?.debe ?? new Decimal(0);
     const prevHaber = prev?.haber ?? new Decimal(0);
-    const saldoInicial = naturalSaldo(c.categoria, prevDebe, prevHaber);
+    // Naturaleza explícita de la cuenta; si falta (cuenta sin backfill), se usa
+    // la naturaleza por defecto de la categoría (comportamiento histórico).
+    const nat = c.naturaleza ?? naturalezaPorDefecto(c.categoria);
+    const saldoInicial = saldoNatural(nat, prevDebe, prevHaber);
 
     // Si no hay líneas previas para esta cuenta, el saldo inicial USD es 0
     // (sólo conocido si la convención USD aplica — con TC, sí).
     const prevUsdKnown = prev ? prev.usdConocido : tc !== null;
     const prevDebeUsd = prev?.debeUsd ?? new Decimal(0);
     const prevHaberUsd = prev?.haberUsd ?? new Decimal(0);
-    const saldoInicialUsd = prevUsdKnown
-      ? naturalSaldo(c.categoria, prevDebeUsd, prevHaberUsd)
-      : null;
+    const saldoInicialUsd = prevUsdKnown ? saldoNatural(nat, prevDebeUsd, prevHaberUsd) : null;
 
     let debePeriodo = new Decimal(0);
     let haberPeriodo = new Decimal(0);
@@ -255,8 +249,7 @@ export async function getBalanceSumasYSaldos(filter: {
           const hec = toDecimal(l.haber);
           debePeriodo = debePeriodo.plus(dec);
           haberPeriodo = haberPeriodo.plus(hec);
-          const signed =
-            c.categoria === "ACTIVO" || c.categoria === "EGRESO" ? dec.minus(hec) : hec.minus(dec);
+          const signed = saldoNatural(nat, dec, hec);
           acumulado = acumulado.plus(signed);
 
           const dUsd = usdPart(dec, l.monedaOrigen, l.montoOrigen);
@@ -269,10 +262,7 @@ export async function getBalanceSumasYSaldos(filter: {
           } else {
             debeUsdPeriodo = debeUsdPeriodo.plus(dUsd);
             haberUsdPeriodo = haberUsdPeriodo.plus(hUsd);
-            const signedUsd =
-              c.categoria === "ACTIVO" || c.categoria === "EGRESO"
-                ? dUsd.minus(hUsd)
-                : hUsd.minus(dUsd);
+            const signedUsd = saldoNatural(nat, dUsd, hUsd);
             acumuladoUsd = acumuladoUsd.plus(signedUsd);
             debeUsdStr = dUsd.toFixed(2);
             haberUsdStr = hUsd.toFixed(2);
@@ -297,19 +287,11 @@ export async function getBalanceSumasYSaldos(filter: {
       }
     }
 
-    const saldoFinal = naturalSaldo(
-      c.categoria,
-      prevDebe.plus(debePeriodo),
-      prevHaber.plus(haberPeriodo),
-    );
+    const saldoFinal = saldoNatural(nat, prevDebe.plus(debePeriodo), prevHaber.plus(haberPeriodo));
 
     const usdFinalKnown = prevUsdKnown && usdConocidoEstaCuenta;
     const saldoFinalUsd = usdFinalKnown
-      ? naturalSaldo(
-          c.categoria,
-          prevDebeUsd.plus(debeUsdPeriodo),
-          prevHaberUsd.plus(haberUsdPeriodo),
-        )
+      ? saldoNatural(nat, prevDebeUsd.plus(debeUsdPeriodo), prevHaberUsd.plus(haberUsdPeriodo))
       : null;
 
     nodeByCodigo.set(c.codigo, {

@@ -218,8 +218,10 @@ export function AsientoForm({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      {/* Libro diario ARS-único: el USD va como metadata de
+                          línea en los flujos automáticos, no como moneda del
+                          asiento manual. */}
                       <SelectItem value="ARS">ARS — Peso argentino</SelectItem>
-                      <SelectItem value="USD">USD — Dólar</SelectItem>
                     </SelectContent>
                   </Select>
                 )}

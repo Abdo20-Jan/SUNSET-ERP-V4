@@ -109,15 +109,8 @@ describe("crearMovimientoTesoreriaAction — retención Ganancias (RG 830)", () 
       conParametro = true,
     } = over;
 
-    await db.prisma.user.create({
-      data: {
-        id: "user-uuid",
-        username: "tester",
-        passwordHash: "x",
-        nombre: "Tester",
-        role: "ADMIN",
-      },
-    });
+    // El User "user-uuid" (ADMIN) lo garantiza db.reset() tras truncar; no
+    // hace falta crearlo acá (lo haría chocar con el upsert del reset).
 
     await db.prisma.periodoContable.create({
       data: {

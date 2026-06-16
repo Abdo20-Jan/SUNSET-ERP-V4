@@ -4,7 +4,7 @@ import Decimal from "decimal.js";
 
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
-import { calcularSaldosCuentasBancarias } from "@/lib/services/cuenta-bancaria";
+import { calcularSaldosCuentasBancariasEnMonedaCuenta } from "@/lib/services/cuenta-bancaria";
 import { calcularSaldosPrestamos } from "@/lib/services/prestamo";
 import {
   AsientoEstado,
@@ -204,20 +204,23 @@ export async function getSaldosBancarios(): Promise<SaldoBancario[]> {
 
   if (cuentas.length === 0) return [];
 
-  const saldos = await calcularSaldosCuentasBancarias(cuentas.map((c) => c.id));
-
-  return cuentas.map((c) => {
+  // El saldo se calcula en la moneda de la cuenta (USD vía metadata de línea).
+  const conMoneda = cuentas.map((c) => {
     const cb = c.cuentasBancarias[0];
-    const moneda = cb?.moneda ?? inferirMonedaPorNombre(c.nombre);
-    return {
-      cuentaId: c.id,
-      codigo: c.codigo,
-      nombre: c.nombre,
-      banco: cb?.banco ?? null,
-      moneda,
-      saldo: saldos.get(c.id) ?? new Decimal(0),
-    };
+    return { cuenta: c, cb, moneda: cb?.moneda ?? inferirMonedaPorNombre(c.nombre) };
   });
+  const saldos = await calcularSaldosCuentasBancariasEnMonedaCuenta(
+    conMoneda.map((c) => ({ cuentaContableId: c.cuenta.id, moneda: c.moneda })),
+  );
+
+  return conMoneda.map(({ cuenta, cb, moneda }) => ({
+    cuentaId: cuenta.id,
+    codigo: cuenta.codigo,
+    nombre: cuenta.nombre,
+    banco: cb?.banco ?? null,
+    moneda,
+    saldo: saldos.get(cuenta.id) ?? new Decimal(0),
+  }));
 }
 
 export async function getUltimosAsientos(): Promise<UltimoAsiento[]> {

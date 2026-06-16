@@ -321,11 +321,17 @@ describe("getSaldosExteriorPorProveedor — pagado USD por montoOrigen/aplicacio
     });
     if (!pago.ok) throw new Error(`pago falló: ${pago.error}`);
 
-    // Simular pago pre-fix: despojar metadata USD y aplicación → queda
-    // sólo el asiento USD 2-líneas con debe en ARS + mov PAGO USD.
+    // Simular pago pre-fix: despojar metadata USD y aplicación, y restaurar
+    // el header legado (asiento.moneda=USD, como quedaron los asientos
+    // históricos antes del libro ARS-único de E3) → queda sólo el asiento
+    // USD 2-líneas con debe en ARS + mov PAGO USD.
     await db.prisma.lineaAsiento.updateMany({
       where: { asientoId: pago.asientoId, debe: { gt: 0 } },
       data: { monedaOrigen: null, montoOrigen: null, tipoCambioOrigen: null },
+    });
+    await db.prisma.asiento.update({
+      where: { id: pago.asientoId },
+      data: { moneda: "USD", tipoCambio: "1147.500000" },
     });
     await db.prisma.aplicacionPagoEmbarqueCosto.deleteMany({
       where: { embarqueCostoId: s.embarqueCostoId },
