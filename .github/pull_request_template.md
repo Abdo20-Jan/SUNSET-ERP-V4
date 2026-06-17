@@ -29,7 +29,7 @@
 - [ ] Sem nova duplicação ≥ 50 linhas
 - [ ] Cálculos com data usam `PeriodoContable` corretamente (memória: `fechaFin` 23:59:59.999 UTC + truncar lookup)
 - [ ] Listagens de pendentes têm cross-check com ledger quando aplicável
-- [ ] Migration: `pnpm db:push` testado em DB local + plano de rollback descrito abaixo
+- [ ] Migration: gerada com `pnpm db:migrate` (não `db push`) e commitada em `prisma/migrations/`; aplicada em prod pela Action `migrate-deploy` ao mergear + plano de rollback descrito abaixo
 
 ## Como testar
 
