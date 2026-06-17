@@ -32,6 +32,11 @@ export {
   getEstadoResultadosByFecha,
 } from "./reportes/estado-resultados";
 export type { EstadoResultadosResult } from "./reportes/estado-resultados";
+export type {
+  EstadoResultadosRT9,
+  SeccionRT9,
+  SeccionRT9Id,
+} from "./reportes/estado-resultados-rt9";
 
 export { getFlujoCaja } from "./reportes/flujo-caja";
 export type {

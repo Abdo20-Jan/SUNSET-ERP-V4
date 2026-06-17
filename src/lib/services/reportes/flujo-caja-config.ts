@@ -4,11 +4,21 @@
  * não há conta contábil dedicada — isso preserva a estrutura completa do relatório
  * conforme PRD (`01-contabilidad/relatorios-financeiros.md`).
  *
- * TODO(#4 reports): os `cuentaCodigos` abaixo ainda usam a numeração PRÉ-rebuild
- * (plano antigo). O remap para os códigos RT9 + a semântica de capitalização das
- * linhas de logística de importação faz parte do PR #4 (relatórios), junto com
- * estado-resultados RT9 e `rubroEECC`. Sem dado real até o replay (#6), o fluxo
- * de caixa fica transitoriamente desalinhado; nenhum teste depende destes códigos.
+ * Numeração RT9 (rebuild #4): os `cuentaCodigos` foram remapeados ao plano v3
+ * (`docs/nuevo-plan-de-cuentas-rt9.md`). Decisões do remap:
+ * - Os custos logísticos de importação (gastos portuários, agente de cargas,
+ *   operador logístico, despachante, frete internacional) CAPITALIZAM a
+ *   `1.1.7.02` (RT17) — já não são contas de egresso `5.4/5.5/5.6/5.7`. Suas
+ *   linhas ficam como template sem conta (`cuentaCodigos: []`); a saída de caixa
+ *   real aparece no `getFlujoCaja` pela contrapartida do proveedor/banco, não
+ *   por este config.
+ * - Os tributos de nacionalização (DIE/Tasa/Arancel) também capitalizam; resta
+ *   apenas a obrigação por pagar (`2.1.5.0x`), que é a que se mapeia aqui.
+ * - Onde o plano v3 consolidou várias contas antigas numa só (ex.: serviços e
+ *   gastos gerais → `5.3.1.05`), uma linha é dona do código e as demais ficam
+ *   `[]` (consolidadas), preservando o ownership único.
+ * Este config segue sem consumidor vivo (o flujo realizado é dirigido por
+ *   movimentos bancários); serve de template para a projeção futura (FC-4).
  *
  * Convenção de mapeamento (ownership único):
  * - Cada `codigo` de conta contábil deve aparecer em NO MÁXIMO um `item` em toda
@@ -57,30 +67,35 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "HONORÁRIOS ABDO",
         items: [
-          { label: "Honorários", cuentaCodigos: ["5.1.1.01", "5.1.1.02"] },
-          { label: "Encargos Trabalhistas (80%)", cuentaCodigos: ["5.1.2.01"] },
+          // Pro-labore de dirección → Sueldos y Cargas Sociales (Adm.).
+          { label: "Honorários", cuentaCodigos: ["5.3.1.04"] },
+          // Cargas sociales consolidadas en 5.3.1.04.
+          { label: "Encargos Trabalhistas (80%)", cuentaCodigos: [] },
         ],
       },
       {
         label: "INFRAESTRUTURA",
         items: [
-          { label: "Escritório / Coworking", cuentaCodigos: ["5.2.1.01"] },
-          { label: "Depósito en garantía", cuentaCodigos: ["5.2.1.04"] },
+          { label: "Escritório / Coworking", cuentaCodigos: ["5.3.1.03"] },
+          // Depósito en garantía: activo no corriente (salida de caja).
+          { label: "Depósito en garantía", cuentaCodigos: ["1.2.3.01"] },
           // Cuota de activación: evento único sem conta dedicada.
           { label: "Cuota de activación", cuentaCodigos: [] },
           {
             label: "Serviços (luz, gás, água)",
-            cuentaCodigos: ["5.2.1.02"],
+            cuentaCodigos: ["5.3.1.05"],
           },
-          { label: "Seguros", cuentaCodigos: ["5.2.1.03"] },
+          // Seguros consolidados en 5.3.1.05 (Servicios y Gastos Generales).
+          { label: "Seguros", cuentaCodigos: [] },
         ],
       },
       {
         label: "SERVICIO TERCERO",
         items: [
-          { label: "Contador", cuentaCodigos: ["5.3.1.03"] },
+          { label: "Contador", cuentaCodigos: ["5.3.1.01"] },
           { label: "Sistema para Facturación", cuentaCodigos: ["5.3.1.02"] },
-          { label: "Comunicações", cuentaCodigos: ["5.3.1.01"] },
+          // Comunicaciones consolidadas en 5.3.1.05 (Servicios y Gastos Grales).
+          { label: "Comunicações", cuentaCodigos: [] },
         ],
       },
     ],
@@ -90,11 +105,14 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
     label: "Gastos Variables con Llegada de Productos",
     direccion: "SALIDA",
     subsecciones: [
+      // Toda esta sección CAPITALIZA a 1.1.7.02 (Mercaderías en Tránsito) bajo
+      // RT17 — ya no hay cuentas de egreso 5.4/5.5/5.6/5.7. Las líneas se
+      // conservan como template; la salida de caja real aparece en el flujo
+      // realizado por la contrapartida del proveedor/banco.
       {
         label: "GASTOS PORTUÁRIOS",
         items: [
-          { label: "Terminal", cuentaCodigos: ["5.4.1.01"] },
-          // Acarreo/Gastos Origen/Gastos Destino: consolidados em 5.4.1.01.
+          { label: "Terminal", cuentaCodigos: [] },
           { label: "Acarreo Nacional", cuentaCodigos: [] },
           { label: "Gastos en Origen", cuentaCodigos: [] },
           { label: "Gastos en Destino", cuentaCodigos: [] },
@@ -103,10 +121,7 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "AGENTE DE CARGAS",
         items: [
-          // Agency Fee é owner canônico de 5.4.1.02 AGENTE DE CARGAS.
-          // Demais 10 subitens são consolidados nessa conta (granularidade
-          // não rastreada no momento; diretoria revisa como total agregado).
-          { label: "Agency Fee", cuentaCodigos: ["5.4.1.02"] },
+          { label: "Agency Fee", cuentaCodigos: [] },
           { label: "Logistic Fee", cuentaCodigos: [] },
           { label: "Gate In", cuentaCodigos: [] },
           { label: "River Plate Toll", cuentaCodigos: [] },
@@ -122,30 +137,28 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "OPERADOR LOGÍSTICO",
         items: [
-          { label: "Transporte desde puerto", cuentaCodigos: ["5.5.1.01"] },
-          { label: "Devolución vacío", cuentaCodigos: ["5.5.1.04"] },
-          // Utilización/Descarga+WMS/Etiquetagem: consolidados em Armazenagem.
+          { label: "Transporte desde puerto", cuentaCodigos: [] },
+          { label: "Devolución vacío", cuentaCodigos: [] },
           { label: "Utilización de Containera", cuentaCodigos: [] },
           { label: "Descarga + WMS IN", cuentaCodigos: [] },
           { label: "Etiquetagem", cuentaCodigos: [] },
-          { label: "Armazenagem", cuentaCodigos: ["5.5.1.05"] },
-          { label: "Carga por Conteiner", cuentaCodigos: ["5.5.1.03"] },
+          { label: "Armazenagem", cuentaCodigos: [] },
+          { label: "Carga por Conteiner", cuentaCodigos: [] },
         ],
       },
       {
         label: "DESPACHANTE",
         items: [
-          // Gasto Operativo / Canal: consolidados em Honorários.
           { label: "Gasto Operativo", cuentaCodigos: [] },
-          { label: "Honorários", cuentaCodigos: ["5.6.1.01", "5.1.1.03"] },
+          { label: "Honorários", cuentaCodigos: [] },
           { label: "Canal", cuentaCodigos: [] },
         ],
       },
       {
         label: "FRETE",
         items: [
-          { label: "Frete Marítimo", cuentaCodigos: ["5.5.1.02"] },
-          { label: "Seguro Marítimo", cuentaCodigos: ["5.5.1.06"] },
+          { label: "Frete Marítimo", cuentaCodigos: [] },
+          { label: "Seguro Marítimo", cuentaCodigos: [] },
         ],
       },
     ],
@@ -158,31 +171,15 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "IMPUESTOS DE IMPORTAÇÃO",
         items: [
-          {
-            label: "Derecho de Importación (16%)",
-            cuentaCodigos: ["5.7.1.01", "2.1.5.01"],
-          },
-          {
-            label: "Tasa Estadística (3%)",
-            cuentaCodigos: ["5.7.1.02", "2.1.5.02"],
-          },
-          {
-            label: "Arancel SIM (0,5%)",
-            cuentaCodigos: ["5.7.1.03", "2.1.5.03"],
-          },
-          { label: "IVA Importación (21%)", cuentaCodigos: ["1.1.4.04"] },
-          {
-            label: "IVA Adicional (20%)",
-            cuentaCodigos: ["1.1.4.05"],
-          },
-          {
-            label: "Percepción IIBB (2,5%)",
-            cuentaCodigos: ["1.1.4.06"],
-          },
-          {
-            label: "Percepción Ganancias (6%)",
-            cuentaCodigos: ["1.1.4.07"],
-          },
+          // DIE/Tasa/Arancel capitalizan (RT17); queda sólo la obligación por
+          // pagar 2.1.5.0x, que es la que mueve caja al cancelarse.
+          { label: "Derecho de Importación (16%)", cuentaCodigos: ["2.1.5.01"] },
+          { label: "Tasa Estadística (3%)", cuentaCodigos: ["2.1.5.02"] },
+          { label: "Arancel SIM (0,5%)", cuentaCodigos: ["2.1.5.03"] },
+          { label: "IVA Importación (21%)", cuentaCodigos: ["1.1.5.1.03"] },
+          { label: "IVA Adicional (20%)", cuentaCodigos: ["1.1.5.1.04"] },
+          { label: "Percepción IIBB (2,5%)", cuentaCodigos: ["1.1.5.2.01"] },
+          { label: "Percepción Ganancias (6%)", cuentaCodigos: ["1.1.5.3.01"] },
         ],
       },
     ],
@@ -195,9 +192,9 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "IMPUESTOS VENTAS",
         items: [
-          { label: "IVA Ventas (21%)", cuentaCodigos: ["2.1.3.01", "2.1.6.01"] },
-          { label: "IIBB Ventas (2,5%)", cuentaCodigos: ["2.1.3.02"] },
-          { label: "Ganancias por Pagar", cuentaCodigos: ["2.1.3.03"] },
+          { label: "IVA Ventas (21%)", cuentaCodigos: ["2.1.3.1.01"] },
+          { label: "IIBB Ventas (2,5%)", cuentaCodigos: ["2.1.3.2.01"] },
+          { label: "Ganancias por Pagar", cuentaCodigos: ["2.1.3.3.01"] },
         ],
       },
     ],
@@ -210,14 +207,9 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "VENTAS",
         items: [
-          {
-            label: "Ventas Neumáticos Nuevos",
-            cuentaCodigos: ["4.1.1.01"],
-          },
-          {
-            label: "Ventas Neumáticos Usados",
-            cuentaCodigos: ["4.1.1.02"],
-          },
+          { label: "Ventas Neumáticos Nuevos", cuentaCodigos: ["4.1.1.01"] },
+          // El plan v3 no separa "usados" (sin cuenta dedicada).
+          { label: "Ventas Neumáticos Usados", cuentaCodigos: [] },
           { label: "Otros Ingresos", cuentaCodigos: ["4.2.1.01", "4.2.1.02"] },
         ],
       },
@@ -232,25 +224,18 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
         label: "RECEBIMENTOS DE CAPITAL",
         items: [
           { label: "Aportes de Capital", cuentaCodigos: ["3.1.1.01", "3.1.1.02"] },
-          {
-            label: "Empréstimos Bancários CP",
-            cuentaCodigos: ["2.1.7.01", "2.1.7.02"],
-          },
-          {
-            label: "Empréstimos Exterior",
-            cuentaCodigos: ["2.1.7.05", "2.1.7.03"],
-          },
+          // Préstamos nacen bajo 2.1.2.x / 2.2.1.x en runtime (sin código
+          // canónico fijo); se exponen por su rama al consolidarse.
+          { label: "Empréstimos Bancários CP", cuentaCodigos: [] },
+          { label: "Empréstimos Exterior", cuentaCodigos: [] },
         ],
       },
       {
         label: "AMORTIZAÇÕES E JUROS",
         items: [
-          { label: "Juros Pagos", cuentaCodigos: ["5.8.2.02"] },
+          { label: "Juros Pagos", cuentaCodigos: ["5.8.1.07"] },
           { label: "Comissões Bancárias", cuentaCodigos: ["5.8.1.01"] },
-          {
-            label: "Gastos Transferência Exterior",
-            cuentaCodigos: ["5.8.1.02"],
-          },
+          { label: "Gastos Transferência Exterior", cuentaCodigos: ["5.8.1.03"] },
         ],
       },
     ],

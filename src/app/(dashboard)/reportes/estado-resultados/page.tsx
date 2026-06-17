@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { fmtMoney, fmtSigno } from "../_components/money";
 import { CuentaTreeTable } from "../_components/cuenta-tree-table";
 import { serializeTreeNode } from "../_components/cuenta-tree-node";
+import { EstadoResultadosCascada } from "../_components/estado-resultados-cascada";
 import { MonedaToggle, type Moneda } from "../_components/moneda-toggle";
 
 type SearchParams = Promise<{
@@ -100,6 +101,13 @@ export default async function EstadoResultadosPage({
           <OcultarSinSaldoToggle />
         </div>
       </div>
+
+      <Card className="py-0">
+        <CardHeader className="border-b py-4">
+          <CardTitle className="text-base">Resultado del Período (RT9)</CardTitle>
+        </CardHeader>
+        <EstadoResultadosCascada rt9={er.rt9} tcParaUsd={tcParaUsd} />
+      </Card>
 
       <Card className="py-0">
         <CardHeader className="border-b py-4">
