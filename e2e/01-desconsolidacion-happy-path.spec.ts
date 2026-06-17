@@ -8,7 +8,7 @@ import { crearPeriodoAbierto, seedContenedorEnDF, TABLAS_COMEX } from "./support
 // Un contenedor EN_DEPOSITO_FISCAL con varios SKUs y FC cerrado se desconsolida
 // sin divergencia: pasa a DESCONSOLIDADO, ingresa stock al depósito fiscal (1
 // MovimientoStock por SKU) y genera el asiento de traslado de subcuenta
-// (DEBE 1.1.5.05 / HABER 1.1.5.04). Ejerce el service de producción
+// (DEBE 1.1.7.04 / HABER 1.1.7.03). Ejerce el service de producción
 // `desconsolidar` contra un Postgres efímero (Testcontainers).
 
 const FECHA = new Date("2025-06-15T12:00:00.000Z");
@@ -98,8 +98,9 @@ test.describe("CENÁRIO 1 · desconsolidación happy path multi-contenedor", () 
         haber: l.haber.toFixed(2),
       })),
     ).toEqual([
-      { codigo: "1.1.5.05", debe: "1200000.00", haber: "0.00" },
-      { codigo: "1.1.5.04", debe: "0.00", haber: "1200000.00" },
+      // Traslado ZPA → depósito fiscal (códigos RT9): DEBE DF / HABER ZPA.
+      { codigo: "1.1.7.04", debe: "1200000.00", haber: "0.00" },
+      { codigo: "1.1.7.03", debe: "0.00", haber: "1200000.00" },
     ]);
   });
 });

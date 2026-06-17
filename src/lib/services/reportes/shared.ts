@@ -148,6 +148,7 @@ export type CuentaTreeNode = {
   tipo: CuentaTipo;
   categoria: CuentaCategoria;
   nivel: number;
+  rubroEECC: string | null; // rubro de exposición EECC (manda sobre el árbol)
   saldoInicial: Decimal; // saldo acumulado anterior a fechaDesde (0 si no hay desde)
   debe: Decimal; // movimientos del período (Debe)
   haber: Decimal; // movimientos del período (Haber)
@@ -229,6 +230,7 @@ export async function buildCuentaTree(
         nivel: true,
         padreCodigo: true,
         naturaleza: true,
+        rubroEECC: true,
       },
     }),
     db.lineaAsiento.groupBy({
@@ -308,6 +310,7 @@ export async function buildCuentaTree(
       tipo: c.tipo,
       categoria: c.categoria,
       nivel: c.nivel,
+      rubroEECC: c.rubroEECC ?? null,
       saldoInicial,
       debe,
       haber,
