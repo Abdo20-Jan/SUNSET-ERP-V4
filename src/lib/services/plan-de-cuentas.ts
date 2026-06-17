@@ -47,6 +47,43 @@ export function naturalezaPorDefecto(categoria: CategoriaCuenta): NaturalezaCuen
   return categoria === "ACTIVO" || categoria === "EGRESO" ? "DEUDOR" : "ACREEDOR";
 }
 
+/** Registro que el seed escribe en `CuentaContable` (1:1 con sus columnas). */
+export type CuentaSeedRecord = {
+  codigo: string;
+  nombre: string;
+  tipo: TipoCuenta;
+  categoria: CategoriaCuenta;
+  nivel: number;
+  padreCodigo: string | null;
+  activa: boolean;
+  naturaleza: NaturalezaCuenta;
+  moneda: MonedaCuenta | null;
+  rubroEECC: string | null;
+};
+
+/**
+ * Proyecta una `CuentaPlan` al registro de `CuentaContable` que siembra el seed:
+ * deriva `nivel` (segmentos del código) y `padreCodigo` (todo antes del último
+ * "."), resuelve `naturaleza` (explícita en regularizadoras, default por
+ * categoría) y normaliza `moneda`/`rubroEECC` a null. `inventariable` NO se
+ * persiste — no es columna; lo usa sólo el guard.
+ */
+export function planEntryToSeedRecord(c: CuentaPlan): CuentaSeedRecord {
+  const i = c.codigo.lastIndexOf(".");
+  return {
+    codigo: c.codigo,
+    nombre: c.nombre,
+    tipo: c.tipo,
+    categoria: c.categoria,
+    nivel: c.codigo.split(".").length,
+    padreCodigo: i === -1 ? null : c.codigo.slice(0, i),
+    activa: true,
+    naturaleza: c.naturaleza ?? naturalezaPorDefecto(c.categoria),
+    moneda: c.moneda ?? null,
+    rubroEECC: c.rubroEECC ?? null,
+  };
+}
+
 function categoriaPorCodigo(codigo: string): CategoriaCuenta {
   return CATEGORIA_POR_DIGITO[codigo[0]] ?? "ACTIVO";
 }

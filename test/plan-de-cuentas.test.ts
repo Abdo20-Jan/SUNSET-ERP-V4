@@ -3,6 +3,7 @@ import {
   type CuentaPlan,
   naturalezaPorDefecto,
   PLAN_RT9,
+  planEntryToSeedRecord,
   validarPlan,
 } from "@/lib/services/plan-de-cuentas";
 
@@ -110,5 +111,60 @@ describe("PLAN_RT9 — el plan v3 real", () => {
   it("tiene el par único de diferencia de cambio (4.3.1.02 ganancia / 5.8.1.02 pérdida)", () => {
     expect(PLAN_RT9.find((c) => c.codigo === "4.3.1.02")).toBeDefined();
     expect(PLAN_RT9.find((c) => c.codigo === "5.8.1.02")).toBeDefined();
+  });
+});
+
+describe("planEntryToSeedRecord — proyección al registro de CuentaContable (seed #3)", () => {
+  it("deriva nivel (segmentos) y padreCodigo (todo antes del último '.')", () => {
+    const r = planEntryToSeedRecord(mk({ codigo: "1.1.5.1.01" }));
+    expect(r.nivel).toBe(5);
+    expect(r.padreCodigo).toBe("1.1.5.1");
+  });
+
+  it("una raíz no tiene padre (padreCodigo null, nivel 1)", () => {
+    const r = planEntryToSeedRecord(mk({ codigo: "1", tipo: "SINTETICA" }));
+    expect(r.nivel).toBe(1);
+    expect(r.padreCodigo).toBeNull();
+  });
+
+  it("resuelve naturaleza por defecto cuando no es explícita (ACTIVO → DEUDOR)", () => {
+    expect(planEntryToSeedRecord(mk({ codigo: "1.1.7.01" })).naturaleza).toBe("DEUDOR");
+  });
+
+  it("preserva la naturaleza explícita de una regularizadora (ACTIVO/ACREEDOR)", () => {
+    const r = planEntryToSeedRecord(
+      mk({ codigo: "1.1.7.09", nombre: "(-) DESVALORIZACIÓN", naturaleza: "ACREEDOR" }),
+    );
+    expect(r.naturaleza).toBe("ACREEDOR");
+  });
+
+  it("normaliza moneda/rubroEECC a null y los preserva cuando vienen seteados", () => {
+    expect(planEntryToSeedRecord(mk({ codigo: "1.1.7.01" })).moneda).toBeNull();
+    expect(planEntryToSeedRecord(mk({ codigo: "1.1.7.01" })).rubroEECC).toBeNull();
+    const usd = planEntryToSeedRecord(
+      mk({
+        codigo: "2.1.8.01",
+        categoria: "PASIVO",
+        moneda: "USD",
+        rubroEECC: "Deudas Comerciales",
+      }),
+    );
+    expect(usd.moneda).toBe("USD");
+    expect(usd.rubroEECC).toBe("Deudas Comerciales");
+  });
+
+  it("no persiste `inventariable` (no es columna; sólo lo usa el guard)", () => {
+    const r = planEntryToSeedRecord(mk({ codigo: "1.1.7.02", inventariable: true }));
+    expect(r).not.toHaveProperty("inventariable");
+  });
+
+  it("todo PLAN_RT9 se proyecta con padreCodigo que existe en el propio plan (sin huérfanas)", () => {
+    const codigos = new Set(PLAN_RT9.map((c) => c.codigo));
+    for (const c of PLAN_RT9) {
+      const r = planEntryToSeedRecord(c);
+      if (r.padreCodigo !== null) {
+        expect(codigos.has(r.padreCodigo), `${r.codigo} → padre ${r.padreCodigo}`).toBe(true);
+      }
+    }
   });
 });
