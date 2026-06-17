@@ -77,7 +77,7 @@ export const VENTA_CODIGOS = {
   },
   MERCADERIAS: {
     codigo: "1.1.7.01",
-    nombre: "MERCADERÍAS NACIONALIZADAS",
+    nombre: "ESTOQUE NACIONALIZADO",
     categoria: CuentaCategoria.ACTIVO,
   },
   // Cuenta provisória del flujo stock dual (W3). Cuando se EMITE una
@@ -164,7 +164,7 @@ export const DIAS_VENCIMIENTO_RETENCION_ARCA = 15;
 export const COMPRA_CODIGOS = {
   MERCADERIAS: {
     codigo: "1.1.7.01",
-    nombre: "MERCADERÍAS NACIONALIZADAS",
+    nombre: "ESTOQUE NACIONALIZADO",
     categoria: CuentaCategoria.ACTIVO,
   },
   IVA_CREDITO: {
@@ -194,12 +194,12 @@ export const EMBARQUE_CODIGOS = {
   // Activos: capitalización + créditos fiscales importación
   MERCADERIAS: {
     codigo: "1.1.7.01",
-    nombre: "MERCADERÍAS NACIONALIZADAS",
+    nombre: "ESTOQUE NACIONALIZADO",
     categoria: CuentaCategoria.ACTIVO,
   },
   MERCADERIAS_EN_TRANSITO: {
     codigo: "1.1.7.02",
-    nombre: "MERCADERÍAS EN TRÁNSITO",
+    nombre: "ESTOQUE A DESPACHAR",
     categoria: CuentaCategoria.ACTIVO,
   },
   IVA_CREDITO_IMPORTACION: {
@@ -284,9 +284,12 @@ export const EMBARQUE_CODIGOS = {
 // Q9) NO viven acá — requieren una categoría ORDEN nueva en el enum
 // CuentaCategoria (cambio de schema).
 export const COMEX_ZPA_CODIGOS = {
+  // Rol del motor: llegada a zona primaria (puerto). Nombre de exposición
+  // renombrado a "MERCADERÍAS EN TRÁNSITO" por pedido del dueño (el código y el
+  // flujo 02→03→04→01 no cambian).
   MERCADERIAS_EN_ZONA_PRIMARIA: {
     codigo: "1.1.7.03",
-    nombre: "MERCADERÍAS EN ZONA PRIMARIA (ZPA)",
+    nombre: "MERCADERÍAS EN TRÁNSITO",
     categoria: CuentaCategoria.ACTIVO,
   },
   MERCADERIAS_EN_DEPOSITO_FISCAL: {
@@ -435,8 +438,8 @@ export const PORCENTAJE_LEY_25413_COMPUTABLE = 0.33;
 // Regla capitaliza-vs-gasto (RT17/NIC2) — el discriminador es el tipoProveedor:
 // los servicios de IMPORTACIÓN (despachante, logística/flete de entrada,
 // almacenaje bonded, gastos portuarios, flete internacional) CAPITALIZAN al
-// costo de la mercadería; su contrapartida de DEBE es 1.1.7.02 Mercaderías en
-// Tránsito, NO un egreso. Los gastos de PERÍODO (serv. profesionales,
+// costo de la mercadería; su contrapartida de DEBE es 1.1.7.02 Estoque a
+// Despachar, NO un egreso. Los gastos de PERÍODO (serv. profesionales,
 // alquileres, IT, marketing, otro) siguen siendo egreso de resultado.
 const CAPITALIZA_IMPORTACION = {
   codigo: "1.1.7.02",
@@ -447,7 +450,7 @@ const CAPITALIZA_IMPORTACION = {
 export const GASTO_POR_TIPO_PROVEEDOR = {
   MERCADERIA_LOCAL: {
     codigo: "1.1.7.01",
-    nombre: "MERCADERÍAS NACIONALIZADAS",
+    nombre: "ESTOQUE NACIONALIZADO",
     categoria: CuentaCategoria.ACTIVO,
   },
   MERCADERIA_EXTERIOR: CAPITALIZA_IMPORTACION,

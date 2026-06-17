@@ -46,7 +46,7 @@ const SINTETICA_DEFAULTS: Record<string, string> = {
   "1.1.6": "OTROS CRÉDITOS",
   "1.1.6.1": "ANTICIPOS",
   "1.1.6.2": "OTROS",
-  "1.1.7": "BIENES DE CAMBIO",
+  "1.1.7": "ESTOQUE",
   // ----- PASIVO -----
   "2.1.2": "DEUDAS BANCARIAS Y FINANCIERAS",
   "2.1.3": "DEUDAS FISCALES",
