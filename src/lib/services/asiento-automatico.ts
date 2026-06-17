@@ -2148,11 +2148,12 @@ export interface AsientoDivergenciaInput {
  * Asiento de regularización de una divergencia formal (D9).
  *
  * Asienta el BRUTO de cada dirección por separado (sin netear faltante
- * contra sobrante entre SKUs) en un ÚNICO asiento compuesto:
- *  - SOBRA (sobraMonto > 0): DEBE subcuenta stock / HABER 4.2.2.01
- *    (ingreso por diferencia de inventario).
- *  - FALTA sin responsable (causa NAO_IDENTIFICADA): DEBE 5.1.1.02
- *    (pérdida/merma) / HABER subcuenta stock.
+ * contra sobrante entre SKUs) en un ÚNICO asiento compuesto. La diferencia de
+ * despacho NO es resultado: es a regularizar con el proveedor (decisión #6):
+ *  - SOBRA (sobraMonto > 0): DEBE subcuenta stock / HABER 2.1.1.08
+ *    (diferencia a regularizar — a pagar; deuda con el proveedor).
+ *  - FALTA sin responsable (causa NAO_IDENTIFICADA): DEBE 1.1.5.07
+ *    (saldo a favor proveedor a regularizar) / HABER subcuenta stock.
  *  - FALTA con responsable: DEBE `cuentaPorCobrarId` / HABER subcuenta stock.
  *
  * Cuando hay faltante Y sobrante a la vez el asiento tiene 4 líneas y la
@@ -2200,11 +2201,13 @@ export async function crearAsientoDivergencia(
     const lineas: LineaInput[] = [];
     const partes: string[] = [];
 
-    // Sobrante (bruto): DEBE stock / HABER ingreso por diferencia.
+    // Sobrante (bruto): DEBE stock / HABER pasivo-puente a regularizar. Los
+    // bultos de más no son ingreso: son deuda con el proveedor (rectificar
+    // factura/proforma + despacho, o devolver). Decisión contador #6.
     if (haySobra) {
-      const ingresoId = await getOrCreateCuenta(
+      const aPagarId = await getOrCreateCuenta(
         inner,
-        COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO,
+        COMEX_ZPA_CODIGOS.DIFERENCIA_DESPACHO_A_PAGAR,
       );
       const valor = sobraMonto.toString();
       lineas.push(
@@ -2215,26 +2218,31 @@ export async function crearAsientoDivergencia(
           descripcion: `Sobra de inventario (${ubicacionLabel})`,
         },
         {
-          cuentaId: ingresoId,
+          cuentaId: aPagarId,
           debe: 0,
           haber: valor,
-          descripcion: `Ingreso por diferencia de inventario (${COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO.codigo})`,
+          descripcion: `Diferencia de despacho a regularizar — a pagar (${COMEX_ZPA_CODIGOS.DIFERENCIA_DESPACHO_A_PAGAR.codigo})`,
         },
       );
       partes.push("sobra");
     }
 
-    // Faltante (bruto): DEBE pérdida o cuenta a cobrar / HABER stock.
+    // Faltante (bruto): DEBE saldo a favor proveedor (sin responsable) o cuenta
+    // a cobrar al responsable / HABER stock. Faltar bultos pagados = saldo a
+    // favor con el proveedor a regularizar, no pérdida directa (decisión #6).
     if (hayFalta) {
       const valor = faltaMonto.toString();
       if (input.causa === DivergenciaCausa.NAO_IDENTIFICADA) {
-        const perdidaId = await getOrCreateCuenta(inner, COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS);
+        const aFavorId = await getOrCreateCuenta(
+          inner,
+          COMEX_ZPA_CODIGOS.DIFERENCIA_DESPACHO_A_FAVOR,
+        );
         lineas.push(
           {
-            cuentaId: perdidaId,
+            cuentaId: aFavorId,
             debe: valor,
             haber: 0,
-            descripcion: `Pérdida logística (${COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS.codigo})`,
+            descripcion: `Diferencia de despacho a regularizar — saldo a favor proveedor (${COMEX_ZPA_CODIGOS.DIFERENCIA_DESPACHO_A_FAVOR.codigo})`,
           },
           {
             cuentaId: subcuentaId,

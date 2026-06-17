@@ -256,6 +256,10 @@ export const PLAN_CUENTAS: readonly CuentaPlan[] = [
   a("1.1.5.04.99", "OTROS GASTOS PAGADOS POR ADELANTADO", { moneda: "BI", rubroEECC: R_OC }),
   s("1.1.5.05", "DEPÓSITOS Y GARANTÍAS RECUPERABLES — CORRIENTE"),
   a("1.1.5.06", "SINIESTROS, RECLAMOS Y RECUPEROS A COBRAR", { moneda: "BI", rubroEECC: R_OC }),
+  a("1.1.5.07", "DIFERENCIAS DE DESPACHO A REGULARIZAR (SALDO A FAVOR PROVEEDOR)", {
+    moneda: "BI",
+    rubroEECC: R_OC,
+  }),
   s("1.1.5.08", "SALDOS DEUDORES DIVERSOS"),
   s("1.1.5.09", "PARTIDAS REGULARIZADORAS DE OTROS CRÉDITOS"),
   a("1.1.5.09.01", "(-) PREVISIÓN PARA OTROS CRÉDITOS DE COBRO DUDOSO", {
@@ -424,6 +428,10 @@ export const PLAN_CUENTAS: readonly CuentaPlan[] = [
     rubroEECC: R_DC,
   }),
   a("2.1.1.07", "FLETES SOBRE VENTAS POR PAGAR", { moneda: "BI", rubroEECC: R_DC }),
+  a("2.1.1.08", "DIFERENCIAS DE DESPACHO A REGULARIZAR (A PAGAR)", {
+    moneda: "BI",
+    rubroEECC: R_DC,
+  }),
   a("2.1.1.09", "(-) NOTAS DE CRÉDITO DE PROVEEDORES A RECIBIR", {
     naturaleza: "DEUDOR",
     moneda: "BI",

@@ -337,10 +337,29 @@ export const COMEX_ZPA_CODIGOS = {
   },
   // D9 — sobra sin responsable. ULTRA: contra-CMV (regularizadora ACREEDOR),
   // no ingreso. Se ACREDITA → reduce el costo de ventas neto.
+  // NOTA: ya NO se usa en el ajuste D9 de despacho (ver DIFERENCIA_DESPACHO_*);
+  // queda para la reconciliación de entrega stock-dual (crearAsientoEntrega).
   INGRESO_POR_DIFERENCIA_INVENTARIO: {
     codigo: "5.2.03",
     nombre: "(-) SOBRANTES DE INVENTARIO",
     categoria: CuentaCategoria.EGRESO,
+  },
+  // D9 despacho — SOBRANTE (físico > declarado): los bultos de más no son
+  // ingreso; son deuda con el proveedor a regularizar (rectificar
+  // factura/proforma + despacho, o devolver). Pasivo-puente hasta la
+  // reclasificación a la CxP del proveedor. Decisión contador #6.
+  DIFERENCIA_DESPACHO_A_PAGAR: {
+    codigo: "2.1.1.08",
+    nombre: "DIFERENCIAS DE DESPACHO A REGULARIZAR (A PAGAR)",
+    categoria: CuentaCategoria.PASIVO,
+  },
+  // D9 despacho — FALTANTE sin responsable (físico < declarado): pagamos por
+  // bultos no recibidos → saldo a favor con el proveedor a regularizar, no
+  // pérdida directa. Activo-puente hasta la reclasificación. Decisión contador #6.
+  DIFERENCIA_DESPACHO_A_FAVOR: {
+    codigo: "1.1.5.07",
+    nombre: "DIFERENCIAS DE DESPACHO A REGULARIZAR (SALDO A FAVOR PROVEEDOR)",
+    categoria: CuentaCategoria.ACTIVO,
   },
 } as const satisfies Record<string, CuentaDef>;
 
