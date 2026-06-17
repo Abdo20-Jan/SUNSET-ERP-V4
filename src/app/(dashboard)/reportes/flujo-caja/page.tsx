@@ -32,7 +32,7 @@ function lastDayUtc(y: number, m: number): Date {
 }
 
 function parseMoneda(value: string | undefined): Moneda {
-  return value === "ARS" ? "ARS" : "USD";
+  return value === "USD" ? "USD" : "ARS";
 }
 
 function mesKeyOf(d: Date): string {

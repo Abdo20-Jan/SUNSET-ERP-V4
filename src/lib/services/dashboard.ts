@@ -4,7 +4,10 @@ import Decimal from "decimal.js";
 
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
-import { calcularSaldosCuentasBancariasEnMonedaCuenta } from "@/lib/services/cuenta-bancaria";
+import {
+  calcularSaldosCuentasBancariasEnMonedaCuenta,
+  getCuentasBancoCajaConMoneda,
+} from "@/lib/services/cuenta-bancaria";
 import { calcularSaldosPrestamos } from "@/lib/services/prestamo";
 import {
   AsientoEstado,
@@ -179,47 +182,23 @@ export async function getKpisSecundarios(): Promise<KpisSecundarios> {
   };
 }
 
-function inferirMonedaPorNombre(nombre: string): Moneda {
-  return /D[ÓO]LAR/i.test(nombre) ? Moneda.USD : Moneda.ARS;
-}
-
 export async function getSaldosBancarios(): Promise<SaldoBancario[]> {
-  const cuentas = await db.cuentaContable.findMany({
-    where: {
-      tipo: CuentaTipo.ANALITICA,
-      activa: true,
-      OR: [{ codigo: { startsWith: "1.1.1." } }, { codigo: { startsWith: "1.1.2." } }],
-    },
-    select: {
-      id: true,
-      codigo: true,
-      nombre: true,
-      cuentasBancarias: {
-        select: { banco: true, moneda: true },
-        take: 1,
-      },
-    },
-    orderBy: { codigo: "asc" },
-  });
-
+  // Fuente única de la moneda de la cuenta (CuentaBancaria.moneda → nombre),
+  // compartida con el flujo de caja para particionar idénticamente.
+  const cuentas = await getCuentasBancoCajaConMoneda();
   if (cuentas.length === 0) return [];
 
-  // El saldo se calcula en la moneda de la cuenta (USD vía metadata de línea).
-  const conMoneda = cuentas.map((c) => {
-    const cb = c.cuentasBancarias[0];
-    return { cuenta: c, cb, moneda: cb?.moneda ?? inferirMonedaPorNombre(c.nombre) };
-  });
   const saldos = await calcularSaldosCuentasBancariasEnMonedaCuenta(
-    conMoneda.map((c) => ({ cuentaContableId: c.cuenta.id, moneda: c.moneda })),
+    cuentas.map((c) => ({ cuentaContableId: c.cuentaContableId, moneda: c.moneda })),
   );
 
-  return conMoneda.map(({ cuenta, cb, moneda }) => ({
-    cuentaId: cuenta.id,
-    codigo: cuenta.codigo,
-    nombre: cuenta.nombre,
-    banco: cb?.banco ?? null,
-    moneda,
-    saldo: saldos.get(cuenta.id) ?? new Decimal(0),
+  return cuentas.map((c) => ({
+    cuentaId: c.cuentaContableId,
+    codigo: c.codigo,
+    nombre: c.nombre,
+    banco: c.banco,
+    moneda: c.moneda,
+    saldo: saldos.get(c.cuentaContableId) ?? new Decimal(0),
   }));
 }
 
