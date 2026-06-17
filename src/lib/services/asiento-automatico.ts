@@ -2098,21 +2098,27 @@ export async function crearAsientoTransferenciaSubcuenta(
 // Comex ZPA — divergencia formal D9 (físico ≠ declarado) (PR 3.1)
 // ============================================================
 
-/** Sentido de la divergencia detectada en la conferencia física. */
-export type TipoDivergencia = "FALTA" | "SOBRA";
 /** Subcuenta donde está contabilizada la mercadería al detectar la divergencia. */
 export type UbicacionMercaderia = "ZONA_PRIMARIA" | "DEPOSITO_FISCAL";
 
 export interface AsientoDivergenciaInput {
-  tipo: TipoDivergencia;
   causa: DivergenciaCausa;
-  /** Monto en ARS del costo de la diferencia. Debe ser > 0. */
-  monto: MoneyInput;
+  /**
+   * Monto BRUTO en ARS del faltante agregado (Σ de los |valorImpactado<0|).
+   * 0 o ausente si no hay faltante. NO se netea contra el sobrante.
+   */
+  faltaMonto?: MoneyInput;
+  /**
+   * Monto BRUTO en ARS del sobrante agregado (Σ de los valorImpactado>0).
+   * 0 o ausente si no hay sobrante. NO se netea contra el faltante.
+   */
+  sobraMonto?: MoneyInput;
   ubicacion: UbicacionMercaderia;
   /**
-   * Cuenta a cobrar al responsable. Obligatoria en FALTA con causa
-   * distinta de NAO_IDENTIFICADA (proveedor/transportista/depositario/
-   * aseguradora). Ignorada en SOBRA o falta sin responsable.
+   * Cuenta a cobrar al responsable. Obligatoria cuando hay faltante
+   * (faltaMonto > 0) y la causa es distinta de NAO_IDENTIFICADA
+   * (proveedor/transportista/depositario/aseguradora). Ignorada si no hay
+   * faltante o si la causa es sin responsable.
    */
   cuentaPorCobrarId?: number;
   fecha: Date;
@@ -2122,20 +2128,47 @@ export interface AsientoDivergenciaInput {
 /**
  * Asiento de regularización de una divergencia formal (D9).
  *
- *  - SOBRA: DEBE subcuenta stock / HABER 4.9.1.01 (ingreso por diferencia).
- *  - FALTA sin responsable (NAO_IDENTIFICADA): DEBE 5.9.2.01 (pérdida) /
- *    HABER subcuenta stock.
+ * Asienta el BRUTO de cada dirección por separado (sin netear faltante
+ * contra sobrante entre SKUs) en un ÚNICO asiento compuesto:
+ *  - SOBRA (sobraMonto > 0): DEBE subcuenta stock / HABER 4.2.2.01
+ *    (ingreso por diferencia de inventario).
+ *  - FALTA sin responsable (causa NAO_IDENTIFICADA): DEBE 5.1.1.02
+ *    (pérdida/merma) / HABER subcuenta stock.
  *  - FALTA con responsable: DEBE `cuentaPorCobrarId` / HABER subcuenta stock.
  *
- * `ubicacion` decide la subcuenta de stock (1.1.5.04 ZPA o 1.1.5.05 DF).
+ * Cuando hay faltante Y sobrante a la vez el asiento tiene 4 líneas y la
+ * subcuenta de stock aparece dos veces (DEBE por el sobrante, HABER por el
+ * faltante); el neto en stock = sobra − falta, pero las cuentas de resultado
+ * reciben el BRUTO. `ubicacion` decide la subcuenta de stock (1.1.7.04 DF o
+ * 1.1.7.03 ZPA).
  */
 export async function crearAsientoDivergencia(
   input: AsientoDivergenciaInput,
   tx?: TxClient,
 ): Promise<Asiento> {
   const run = async (inner: TxClient) => {
-    if (!gtZero(input.monto)) {
-      throw new AsientoError("LINEA_INVALIDA", "El monto de la divergencia debe ser mayor a cero.");
+    const faltaMonto = money(input.faltaMonto ?? 0);
+    const sobraMonto = money(input.sobraMonto ?? 0);
+    const hayFalta = gtZero(faltaMonto);
+    const haySobra = gtZero(sobraMonto);
+    if (!hayFalta && !haySobra) {
+      throw new AsientoError(
+        "LINEA_INVALIDA",
+        "La divergencia no tiene faltante ni sobrante a regularizar (montos <= 0).",
+      );
+    }
+
+    // Validar la cuenta a cobrar ANTES de cualquier escritura: si hay faltante
+    // con responsable y falta el dato, abortar antes de tocar el plan.
+    if (
+      hayFalta &&
+      input.causa !== DivergenciaCausa.NAO_IDENTIFICADA &&
+      input.cuentaPorCobrarId == null
+    ) {
+      throw new AsientoError(
+        "CUENTA_INVALIDA",
+        `Divergencia D9 con responsable (${input.causa}) requiere cuentaPorCobrarId.`,
+      );
     }
 
     const subcuentaDef =
@@ -2143,19 +2176,19 @@ export async function crearAsientoDivergencia(
         ? COMEX_ZPA_CODIGOS.MERCADERIAS_EN_DEPOSITO_FISCAL
         : COMEX_ZPA_CODIGOS.MERCADERIAS_EN_ZONA_PRIMARIA;
     const subcuentaId = await getOrCreateCuenta(inner, subcuentaDef);
-    const valor = money(input.monto).toString();
     const ubicacionLabel = `${subcuentaDef.codigo}`;
 
-    let lineas: LineaInput[];
-    let descripcion: string;
+    const lineas: LineaInput[] = [];
+    const partes: string[] = [];
 
-    if (input.tipo === "SOBRA") {
+    // Sobrante (bruto): DEBE stock / HABER ingreso por diferencia.
+    if (haySobra) {
       const ingresoId = await getOrCreateCuenta(
         inner,
         COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO,
       );
-      descripcion = input.descripcion?.trim() || `Divergencia D9 — sobra (${ubicacionLabel})`;
-      lineas = [
+      const valor = sobraMonto.toString();
+      lineas.push(
         {
           cuentaId: subcuentaId,
           debe: valor,
@@ -2168,50 +2201,57 @@ export async function crearAsientoDivergencia(
           haber: valor,
           descripcion: `Ingreso por diferencia de inventario (${COMEX_ZPA_CODIGOS.INGRESO_POR_DIFERENCIA_INVENTARIO.codigo})`,
         },
-      ];
-    } else if (input.causa === DivergenciaCausa.NAO_IDENTIFICADA) {
-      const perdidaId = await getOrCreateCuenta(inner, COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS);
-      descripcion =
-        input.descripcion?.trim() || `Divergencia D9 — falta sin responsable (${ubicacionLabel})`;
-      lineas = [
-        {
-          cuentaId: perdidaId,
-          debe: valor,
-          haber: 0,
-          descripcion: `Pérdida logística (${COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS.codigo})`,
-        },
-        {
-          cuentaId: subcuentaId,
-          debe: 0,
-          haber: valor,
-          descripcion: `Faltante de inventario (${ubicacionLabel})`,
-        },
-      ];
-    } else {
-      if (input.cuentaPorCobrarId == null) {
-        throw new AsientoError(
-          "CUENTA_INVALIDA",
-          `Divergencia D9 con responsable (${input.causa}) requiere cuentaPorCobrarId.`,
+      );
+      partes.push("sobra");
+    }
+
+    // Faltante (bruto): DEBE pérdida o cuenta a cobrar / HABER stock.
+    if (hayFalta) {
+      const valor = faltaMonto.toString();
+      if (input.causa === DivergenciaCausa.NAO_IDENTIFICADA) {
+        const perdidaId = await getOrCreateCuenta(inner, COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS);
+        lineas.push(
+          {
+            cuentaId: perdidaId,
+            debe: valor,
+            haber: 0,
+            descripcion: `Pérdida logística (${COMEX_ZPA_CODIGOS.PERDIDAS_LOGISTICAS.codigo})`,
+          },
+          {
+            cuentaId: subcuentaId,
+            debe: 0,
+            haber: valor,
+            descripcion: `Faltante de inventario (${ubicacionLabel})`,
+          },
+        );
+      } else {
+        // Garantido non-null por la validación previa; re-check estrecha el tipo.
+        if (input.cuentaPorCobrarId == null) {
+          throw new AsientoError(
+            "CUENTA_INVALIDA",
+            `Divergencia D9 con responsable (${input.causa}) requiere cuentaPorCobrarId.`,
+          );
+        }
+        lineas.push(
+          {
+            cuentaId: input.cuentaPorCobrarId,
+            debe: valor,
+            haber: 0,
+            descripcion: `A cobrar al responsable (${input.causa})`,
+          },
+          {
+            cuentaId: subcuentaId,
+            debe: 0,
+            haber: valor,
+            descripcion: `Faltante de inventario (${ubicacionLabel})`,
+          },
         );
       }
-      descripcion =
-        input.descripcion?.trim() ||
-        `Divergencia D9 — falta a cobrar a ${input.causa} (${ubicacionLabel})`;
-      lineas = [
-        {
-          cuentaId: input.cuentaPorCobrarId,
-          debe: valor,
-          haber: 0,
-          descripcion: `A cobrar al responsable (${input.causa})`,
-        },
-        {
-          cuentaId: subcuentaId,
-          debe: 0,
-          haber: valor,
-          descripcion: `Faltante de inventario (${ubicacionLabel})`,
-        },
-      ];
+      partes.push("falta");
     }
+
+    const descripcion =
+      input.descripcion?.trim() || `Divergencia D9 — ${partes.join(" + ")} (${ubicacionLabel})`;
 
     return crearAsientoEnTx(inner, {
       fecha: input.fecha,

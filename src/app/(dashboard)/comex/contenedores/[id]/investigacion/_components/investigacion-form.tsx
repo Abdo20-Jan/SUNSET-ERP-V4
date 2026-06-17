@@ -311,7 +311,7 @@ function EditableSecciones({
       toast.success(
         r.asientoId
           ? "Investigación concluida + asiento de ajuste generado."
-          : "Investigación concluida (sin ajuste neto).",
+          : "Investigación concluida (sin impacto valorizado).",
       );
       router.push(`/comex/embarques/${contenedor.embarqueId}`);
       router.refresh();
