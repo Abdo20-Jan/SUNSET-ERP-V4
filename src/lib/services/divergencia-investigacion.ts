@@ -268,10 +268,11 @@ export interface ConcluirInvestigacionInput {
 
 /**
  * Cierra la investigación generando el asiento de ajuste D9 según la causa
- * diagnosticada. Agrega los `DivergenciaItem` por dirección neta (Σ
- * valorImpactadoUSD): neto < 0 → FALTA, neto > 0 → SOBRA, neto 0 → sin
- * asiento. Convierte USD→ARS con el `tipoCambio` del embarque. Deja el
- * contenedor en `DESCONSOLIDADO`.
+ * diagnosticada. Agrega los `DivergenciaItem` en BRUTO por dirección (Σ de
+ * los faltantes y Σ de los sobrantes por separado, sin netear entre SKUs) y
+ * genera un único asiento compuesto cuando hay faltante y/o sobrante.
+ * Convierte USD→ARS con el `tipoCambio` del embarque. Deja el contenedor en
+ * `DESCONSOLIDADO`.
  */
 export async function concluirInvestigacion(
   investigacionId: string,
@@ -315,22 +316,27 @@ export async function concluirInvestigacion(
       );
     }
 
-    const netoUSD = inv.items.reduce(
-      (acc, it) => acc.plus(it.valorImpactadoUSD),
+    // BRUTO por dirección, sin netear faltante contra sobrante entre SKUs.
+    const totalFaltaUSD = inv.items.reduce(
+      (acc, it) => (it.valorImpactadoUSD.isNegative() ? acc.plus(it.valorImpactadoUSD.abs()) : acc),
+      new Prisma.Decimal(0),
+    );
+    const totalSobraUSD = inv.items.reduce(
+      (acc, it) => (it.valorImpactadoUSD.greaterThan(0) ? acc.plus(it.valorImpactadoUSD) : acc),
       new Prisma.Decimal(0),
     );
 
     let asiento: Asiento | null = null;
-    if (!netoUSD.isZero()) {
-      const tipo = netoUSD.isNegative() ? "FALTA" : "SOBRA";
-      const montoARS = netoUSD.abs().times(tipoCambio);
+    if (!totalFaltaUSD.isZero() || !totalSobraUSD.isZero()) {
       const ubicacion =
         (inv.desconsolidacion.depositoFiscalId ?? contenedor.depositoFiscalId) != null
           ? "DEPOSITO_FISCAL"
           : "ZONA_PRIMARIA";
 
+      // Si hay faltante con responsable, la cuenta a cobrar es obligatoria
+      // (aunque el neto resulte sobrante: el faltante bruto igual se asienta).
       if (
-        tipo === "FALTA" &&
+        !totalFaltaUSD.isZero() &&
         causa !== DivergenciaCausa.NAO_IDENTIFICADA &&
         input.cuentaPorCobrarId == null
       ) {
@@ -342,9 +348,9 @@ export async function concluirInvestigacion(
 
       asiento = await crearAsientoDivergencia(
         {
-          tipo,
           causa,
-          monto: montoARS.toFixed(2),
+          faltaMonto: totalFaltaUSD.times(tipoCambio).toFixed(2),
+          sobraMonto: totalSobraUSD.times(tipoCambio).toFixed(2),
           ubicacion,
           cuentaPorCobrarId: input.cuentaPorCobrarId,
           fecha: input.fecha,

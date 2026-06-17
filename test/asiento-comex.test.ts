@@ -118,12 +118,12 @@ describe("asientos comex ZPA (PR 3.1)", () => {
   });
 
   describe("crearAsientoDivergencia (D9)", () => {
-    const base = { monto: "750.00", fecha: FECHA } as const;
+    const base = { fecha: FECHA } as const;
 
-    it("SOBRA: DEBE subcuenta DF / HABER 4.9.1.01", async () => {
+    it("SOBRA: DEBE subcuenta DF / HABER 4.2.2.01", async () => {
       const asiento = await tx((t) =>
         crearAsientoDivergencia(
-          { ...base, tipo: "SOBRA", causa: "NAO_IDENTIFICADA", ubicacion: "DEPOSITO_FISCAL" },
+          { ...base, sobraMonto: "750.00", causa: "NAO_IDENTIFICADA", ubicacion: "DEPOSITO_FISCAL" },
           t,
         ),
       );
@@ -133,10 +133,10 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       ]);
     });
 
-    it("FALTA sin responsable: DEBE 5.9.2.01 / HABER subcuenta ZPA", async () => {
+    it("FALTA sin responsable: DEBE 5.1.1.02 / HABER subcuenta ZPA", async () => {
       const asiento = await tx((t) =>
         crearAsientoDivergencia(
-          { ...base, tipo: "FALTA", causa: "NAO_IDENTIFICADA", ubicacion: "ZONA_PRIMARIA" },
+          { ...base, faltaMonto: "750.00", causa: "NAO_IDENTIFICADA", ubicacion: "ZONA_PRIMARIA" },
           t,
         ),
       );
@@ -161,7 +161,7 @@ describe("asientos comex ZPA (PR 3.1)", () => {
         crearAsientoDivergencia(
           {
             ...base,
-            tipo: "FALTA",
+            faltaMonto: "750.00",
             causa: "TRANSPORTE",
             ubicacion: "DEPOSITO_FISCAL",
             cuentaPorCobrarId: porCobrar.id,
@@ -175,26 +175,50 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       ]);
     });
 
+    it("FALTA + SOBRA simultáneos: asiento compuesto de 4 líneas, BRUTO sin netear", async () => {
+      const asiento = await tx((t) =>
+        crearAsientoDivergencia(
+          {
+            ...base,
+            faltaMonto: "300.00",
+            sobraMonto: "500.00",
+            causa: "NAO_IDENTIFICADA",
+            ubicacion: "DEPOSITO_FISCAL",
+          },
+          t,
+        ),
+      );
+      // Sobrante bruto (500) primero, faltante bruto (300) después; el stock
+      // 1.1.7.04 aparece 2× (DEBE por la sobra, HABER por la falta). El
+      // ingreso (500) y la merma (300) reciben el BRUTO, no el neto (200).
+      expect(await lineasDe(asiento.id)).toEqual([
+        { codigo: "1.1.7.04", debe: "500.00", haber: "0.00" },
+        { codigo: "4.2.2.01", debe: "0.00", haber: "500.00" },
+        { codigo: "5.1.1.02", debe: "300.00", haber: "0.00" },
+        { codigo: "1.1.7.04", debe: "0.00", haber: "300.00" },
+      ]);
+    });
+
     it("FALTA con responsable sin cuentaPorCobrarId: error CUENTA_INVALIDA", async () => {
       await expect(
         tx((t) =>
           crearAsientoDivergencia(
-            { ...base, tipo: "FALTA", causa: "FABRICA_ORIGEM", ubicacion: "DEPOSITO_FISCAL" },
+            { ...base, faltaMonto: "750.00", causa: "FABRICA_ORIGEM", ubicacion: "DEPOSITO_FISCAL" },
             t,
           ),
         ),
       ).rejects.toMatchObject({ code: "CUENTA_INVALIDA" });
     });
 
-    it("rechaza monto <= 0", async () => {
+    it("rechaza sin faltante ni sobrante (ambos <= 0)", async () => {
       await expect(
         tx((t) =>
           crearAsientoDivergencia(
             {
-              tipo: "SOBRA",
               causa: "NAO_IDENTIFICADA",
               ubicacion: "ZONA_PRIMARIA",
-              monto: "-10",
+              faltaMonto: "0",
+              sobraMonto: "-10",
               fecha: FECHA,
             },
             t,
@@ -203,10 +227,10 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       ).rejects.toMatchObject({ code: "LINEA_INVALIDA" });
     });
 
-    it("ubicacion ZONA_PRIMARIA usa 1.1.5.04 en SOBRA", async () => {
+    it("ubicacion ZONA_PRIMARIA usa 1.1.7.03 en SOBRA", async () => {
       const asiento = await tx((t) =>
         crearAsientoDivergencia(
-          { ...base, tipo: "SOBRA", causa: "NAO_IDENTIFICADA", ubicacion: "ZONA_PRIMARIA" },
+          { ...base, sobraMonto: "750.00", causa: "NAO_IDENTIFICADA", ubicacion: "ZONA_PRIMARIA" },
           t,
         ),
       );

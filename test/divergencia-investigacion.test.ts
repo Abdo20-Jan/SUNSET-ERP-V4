@@ -129,6 +129,69 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
     };
   }
 
+  /**
+   * Variante con DOS SKUs en el mismo contenedor (declarado 100 c/u, costo FC
+   * 10 USD). Permite probar el "no netear" entre SKUs: uno con falta, otro con
+   * sobra. `abrirInvestigacion` sólo lee ItemContenedor → no necesita ItemEmbarque.
+   */
+  async function seedDosItems(): Promise<{
+    desconsolidacionId: string;
+    contenedorId: string;
+    itemA: number;
+    itemB: number;
+  }> {
+    const proveedor = await db.prisma.proveedor.create({ data: { nombre: "Exterior SA" } });
+    const prodA = await db.prisma.producto.create({
+      data: { codigo: "SKU-A", nombre: "Neumático A" },
+    });
+    const prodB = await db.prisma.producto.create({
+      data: { codigo: "SKU-B", nombre: "Neumático B" },
+    });
+    const depositoFiscal = await db.prisma.deposito.create({
+      data: { nombre: "DF Buenos Aires", tipo: "ZONA_PRIMARIA", subtipo: "DEPOSITO_FISCAL" },
+    });
+    const embarque = await db.prisma.embarque.create({
+      data: { codigo: "EMB-3.3-2", proveedorId: proveedor.id, moneda: "USD", tipoCambio: TIPO_CAMBIO },
+    });
+    const contenedor = await db.prisma.contenedor.create({
+      data: {
+        embarqueId: embarque.id,
+        numeroContenedor: "MSCU0000002",
+        estado: "EN_DEPOSITO_FISCAL",
+        depositoFiscalId: depositoFiscal.id,
+      },
+    });
+    const itemA = await db.prisma.itemContenedor.create({
+      data: {
+        contenedorId: contenedor.id,
+        productoId: prodA.id,
+        cantidadDeclarada: CANTIDAD_DECLARADA,
+        costoFCUnitario: COSTO_FC_UNITARIO,
+      },
+    });
+    const itemB = await db.prisma.itemContenedor.create({
+      data: {
+        contenedorId: contenedor.id,
+        productoId: prodB.id,
+        cantidadDeclarada: CANTIDAD_DECLARADA,
+        costoFCUnitario: COSTO_FC_UNITARIO,
+      },
+    });
+    const desconsolidacion = await db.prisma.desconsolidacion.create({
+      data: {
+        contenedorId: contenedor.id,
+        depositoFiscalId: depositoFiscal.id,
+        cantidadDeclaradaTotal: CANTIDAD_DECLARADA * 2,
+      },
+    });
+    return {
+      desconsolidacionId: desconsolidacion.id,
+      contenedorId: contenedor.id,
+      itemA: itemA.id,
+      itemB: itemB.id,
+    };
+  }
+
   /** Setea la cantidad física conferida (lo que detecta la divergencia). */
   async function setFisica(itemContenedorId: number, cantidadFisica: number) {
     await db.prisma.itemContenedor.update({
@@ -311,7 +374,7 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
   // ---- conclusión: asiento por causa-raíz ------------------------------
 
   describe("concluirInvestigacion — asiento por causa-raíz", () => {
-    it("SOBRA → DEBE 1.1.5.05 / HABER 4.9.1.01 (físico > declarado)", async () => {
+    it("SOBRA → DEBE 1.1.7.04 / HABER 4.2.2.01 (físico > declarado)", async () => {
       const s = await seed();
       await setFisica(s.itemContenedorId, 105); // sobra de 5 → 50 USD → 50 000 ARS
       const inv = await abrirInvestigacion({ desconsolidacionId: s.desconsolidacionId }, db.prisma);
@@ -327,7 +390,7 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       ]);
     });
 
-    it("FALTA NAO_IDENTIFICADA → DEBE 5.9.2.01 / HABER 1.1.5.05", async () => {
+    it("FALTA NAO_IDENTIFICADA → DEBE 5.1.1.02 / HABER 1.1.7.04", async () => {
       const s = await seed();
       await setFisica(s.itemContenedorId, 90); // falta 10 → 100 USD → 100 000 ARS
       const inv = await abrirInvestigacion({ desconsolidacionId: s.desconsolidacionId }, db.prisma);
@@ -343,7 +406,7 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       ]);
     });
 
-    it("FALTA FABRICA_ORIGEM → DEBE cuenta a cobrar / HABER 1.1.5.05", async () => {
+    it("FALTA FABRICA_ORIGEM → DEBE cuenta a cobrar / HABER 1.1.7.04", async () => {
       const s = await seed();
       await setFisica(s.itemContenedorId, 90);
       const inv = await abrirInvestigacion({ desconsolidacionId: s.desconsolidacionId }, db.prisma);
@@ -364,7 +427,7 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       ]);
     });
 
-    it("FALTA SINISTRO_SEGURADO con póliza → DEBE cuenta a cobrar / HABER 1.1.5.05", async () => {
+    it("FALTA SINISTRO_SEGURADO con póliza → DEBE cuenta a cobrar / HABER 1.1.7.04", async () => {
       const s = await seed();
       await setFisica(s.itemContenedorId, 90);
       const inv = await abrirInvestigacion({ desconsolidacionId: s.desconsolidacionId }, db.prisma);
@@ -445,6 +508,52 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       await expect(
         concluirInvestigacion(inv.id, { fecha: FECHA }, db.prisma),
       ).rejects.toMatchObject({ code: "ESTADO_INVALIDO" });
+    });
+
+    it("multi-SKU: falta de un SKU + sobra de otro → asiento BRUTO de 4 líneas (no netea)", async () => {
+      const s = await seedDosItems();
+      await setFisica(s.itemA, 90); // falta 10 → 100 USD → 100 000 ARS
+      await setFisica(s.itemB, 105); // sobra 5 → 50 USD → 50 000 ARS
+      const inv = await abrirInvestigacion({ desconsolidacionId: s.desconsolidacionId }, db.prisma);
+      await diagnosticarCausa(
+        inv.id,
+        { causa: "NAO_IDENTIFICADA", responsavelTipo: "NENHUM" },
+        db.prisma,
+      );
+      const { asiento } = await concluirInvestigacion(inv.id, { fecha: FECHA }, db.prisma);
+      // BRUTO por dirección: ingreso 50 000 y merma 100 000 NO se compensan a
+      // un neto de 50 000. Stock 1.1.7.04 aparece 2× (sobra DEBE / falta HABER).
+      expect(await lineasDe(asiento!.id)).toEqual([
+        { codigo: "1.1.7.04", debe: "50000.00", haber: "0.00" },
+        { codigo: "4.2.2.01", debe: "0.00", haber: "50000.00" },
+        { codigo: "5.1.1.02", debe: "100000.00", haber: "0.00" },
+        { codigo: "1.1.7.04", debe: "0.00", haber: "100000.00" },
+      ]);
+    });
+
+    it("falta == sobra (neto 0) igual genera asiento (no se anulan entre SKUs)", async () => {
+      const s = await seedDosItems();
+      await setFisica(s.itemA, 90); // falta 10 → 100 000 ARS
+      await setFisica(s.itemB, 110); // sobra 10 → 100 000 ARS (neto 0)
+      const inv = await abrirInvestigacion({ desconsolidacionId: s.desconsolidacionId }, db.prisma);
+      await diagnosticarCausa(
+        inv.id,
+        { causa: "NAO_IDENTIFICADA", responsavelTipo: "NENHUM" },
+        db.prisma,
+      );
+      const { investigacion, asiento } = await concluirInvestigacion(
+        inv.id,
+        { fecha: FECHA },
+        db.prisma,
+      );
+      expect(asiento).not.toBeNull();
+      expect(investigacion.asientoAjusteId).toBeTruthy();
+      expect(await lineasDe(asiento!.id)).toEqual([
+        { codigo: "1.1.7.04", debe: "100000.00", haber: "0.00" },
+        { codigo: "4.2.2.01", debe: "0.00", haber: "100000.00" },
+        { codigo: "5.1.1.02", debe: "100000.00", haber: "0.00" },
+        { codigo: "1.1.7.04", debe: "0.00", haber: "100000.00" },
+      ]);
     });
   });
 
