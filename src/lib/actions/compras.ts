@@ -11,7 +11,17 @@ import {
   contabilizarAsiento,
   crearAsientoCompra,
 } from "@/lib/services/asiento-automatico";
-import { CompraEstado, CondicionPago, Moneda, Prisma } from "@/generated/prisma/client";
+import { categoriaCapitalizaEstoque } from "@/lib/services/cuenta-registry";
+import { aplicarIngresoCompra } from "@/lib/services/stock";
+import {
+  CompraEstado,
+  CondicionPago,
+  CuentaCategoria,
+  CuentaTipo,
+  Moneda,
+  Prisma,
+  TipoDeposito,
+} from "@/generated/prisma/client";
 
 export type CompraRow = {
   id: string;
@@ -141,6 +151,7 @@ export type CompraDetalle = {
   estado: CompraEstado;
   asientoId: string | null;
   pedidoCompraId: number | null;
+  depositoId: string | null;
   notas: string | null;
   items: Array<{
     id: number;
@@ -150,6 +161,7 @@ export type CompraDetalle = {
     subtotal: string;
     iva: string;
     total: string;
+    categoriaCuentaId: number | null;
   }>;
 };
 
@@ -176,6 +188,7 @@ export async function obtenerCompraPorId(id: string): Promise<CompraDetalle | nu
     estado: c.estado,
     asientoId: c.asientoId,
     pedidoCompraId: c.pedidoCompraId,
+    depositoId: c.depositoId,
     notas: c.notas,
     items: c.items.map((it) => ({
       id: it.id,
@@ -185,8 +198,66 @@ export async function obtenerCompraPorId(id: string): Promise<CompraDetalle | nu
       subtotal: it.subtotal.toString(),
       iva: it.iva.toString(),
       total: it.total.toString(),
+      categoriaCuentaId: it.categoriaCuentaId,
     })),
   };
+}
+
+export type CategoriaCompraOption = {
+  id: number;
+  codigo: string;
+  nombre: string;
+  /** Nombre de la cuenta padre (rubro) — agrupa el drilldown en la UI. */
+  grupo: string;
+  /** La categoría dispara ingreso de estoque físico (Bien de Cambio nacional). */
+  capitalizaEstoque: boolean;
+};
+
+/**
+ * Categorías de compra/gasto para el drilldown del formulario (E18): cuentas
+ * ANALÍTICAS activas imputables como contrapartida de una compra — Bienes de
+ * Cambio (1.1.7.x) + cuentas de resultado (EGRESO). Marca las que capitalizan
+ * estoque físico. `grupo` = nombre de la cuenta padre, para agrupar el menú.
+ */
+export async function listarCategoriasCompra(): Promise<CategoriaCompraOption[]> {
+  const todas = await db.cuentaContable.findMany({
+    where: { activa: true },
+    select: {
+      id: true,
+      codigo: true,
+      nombre: true,
+      padreCodigo: true,
+      categoria: true,
+      tipo: true,
+    },
+    orderBy: { codigo: "asc" },
+  });
+  const nombrePorCodigo = new Map(todas.map((c) => [c.codigo, c.nombre]));
+  return todas
+    .filter(
+      (c) =>
+        c.tipo === CuentaTipo.ANALITICA &&
+        (c.categoria === CuentaCategoria.EGRESO || c.codigo.startsWith("1.1.7")),
+    )
+    .map((c) => ({
+      id: c.id,
+      codigo: c.codigo,
+      nombre: c.nombre,
+      grupo: (c.padreCodigo ? nombrePorCodigo.get(c.padreCodigo) : null) ?? "Otras",
+      capitalizaEstoque: categoriaCapitalizaEstoque(c.codigo),
+    }));
+}
+
+export type DepositoOption = { id: string; nombre: string };
+
+/** Depósitos NACIONAL activos (destino del estoque físico de una compra). */
+export async function listarDepositosNacionales(): Promise<DepositoOption[]> {
+  const rows = await db.deposito.findMany({
+    where: { activo: true, tipo: TipoDeposito.NACIONAL },
+    orderBy: { nombre: "asc" },
+    select: { id: true, nombre: true },
+  });
+  return rows.map((d) => ({ id: d.id, nombre: d.nombre }));
 }
 
 export async function generarNumeroCompra(): Promise<string> {
@@ -213,6 +284,10 @@ const itemSchema = z.object({
   cantidad: z.number().int().positive("Cantidad > 0"),
   precioUnitario: z.string().regex(moneyRegex, "Precio inválido"),
   ivaPorcentaje: z.string().regex(/^\d+(\.\d{1,2})?$/, "IVA% inválido"),
+  // E18 — categoría contable de la línea (cuenta ANALÍTICA del plan, vía
+  // drilldown). Obligatoria en la UI nueva; el asiento cae al fallback por
+  // tipoProveedor sólo para ítems legacy (null en BD).
+  categoriaCuentaId: z.number().int().positive("Seleccione categoría"),
 });
 
 const compraInputSchema = z
@@ -230,6 +305,13 @@ const compraInputSchema = z
     tipoCambio: z.string().regex(rateRegex, "TC inválido"),
     iibb: z.string().regex(moneyRegex, "IIBB inválido").default("0"),
     otros: z.string().regex(moneyRegex, "Otros inválido").default("0"),
+    // E18 — depósito NACIONAL destino del estoque físico (cabecera). Opcional;
+    // sólo se exige al EMITIR si algún ítem capitaliza Bien de Cambio nacional.
+    depositoId: z
+      .string()
+      .optional()
+      .nullable()
+      .transform((v) => (v && v.trim().length > 0 ? v : null)),
     notas: z
       .string()
       .max(500)
@@ -305,6 +387,7 @@ export async function guardarCompraAction(raw: CompraInput): Promise<CompraActio
         iibb: money(input.iibb),
         otros: money(input.otros),
         total: money(total),
+        depositoId: input.depositoId,
         notas: input.notas,
       };
 
@@ -337,6 +420,7 @@ export async function guardarCompraAction(raw: CompraInput): Promise<CompraActio
           subtotal: money(it.subtotal),
           iva: money(it.iva),
           total: money(it.total),
+          categoriaCuentaId: it.categoriaCuentaId,
         })),
       });
 
@@ -365,14 +449,61 @@ export async function emitirCompraAction(
     const result = await db.$transaction(async (tx) => {
       const c = await tx.compra.findUnique({
         where: { id: compraId },
-        select: { estado: true, asientoId: true, numero: true },
+        select: {
+          estado: true,
+          asientoId: true,
+          numero: true,
+          fecha: true,
+          tipoCambio: true,
+          depositoId: true,
+          items: {
+            select: {
+              id: true,
+              productoId: true,
+              cantidad: true,
+              precioUnitario: true,
+              categoria: { select: { codigo: true } },
+            },
+          },
+        },
       });
       if (!c) throw new AsientoError("DOMINIO_INVALIDO", "Compra no existe.");
       if (c.asientoId) {
         throw new AsientoError("DOMINIO_INVALIDO", `Compra ${c.numero} ya tiene asiento.`);
       }
+
+      // E18 — ítems que capitalizan ESTOQUE FÍSICO (categoría = Bien de Cambio
+      // nacional). Validar el depósito ANTES de crear el asiento (falla cedo).
+      const itemsEstoque = c.items.filter(
+        (it) => it.categoria != null && categoriaCapitalizaEstoque(it.categoria.codigo),
+      );
+      if (itemsEstoque.length > 0 && !c.depositoId) {
+        throw new AsientoError(
+          "DOMINIO_INVALIDO",
+          "Seleccione un depósito NACIONAL de destino: hay ítems que ingresan a estoque.",
+        );
+      }
+
       const asiento = await crearAsientoCompra(compraId, tx);
       const cont = await contabilizarAsiento(asiento.id, tx);
+
+      // El estoque físico sube JUNTO con el asiento, misma transacción. El
+      // costo es ARS histórico = precioUnitario × TC (sin IVA). El depósito se
+      // valida NACIONAL/activo dentro de aplicarIngresoCompra (rollback si no).
+      if (itemsEstoque.length > 0 && c.depositoId) {
+        const tc = toDecimal(c.tipoCambio);
+        await aplicarIngresoCompra(tx, {
+          depositoDestinoId: c.depositoId,
+          fecha: c.fecha,
+          items: itemsEstoque.map((it) => ({
+            itemCompraId: it.id,
+            productoId: it.productoId,
+            cantidad: it.cantidad,
+            costoUnitario: toDecimal(it.precioUnitario).times(tc),
+          })),
+        });
+      }
+
       await tx.compra.update({
         where: { id: compraId },
         data: { estado: CompraEstado.EMITIDA },

@@ -331,6 +331,110 @@ export async function revertirIngresoEmbarque(tx: TxClient, embarqueId: string):
   }
 }
 
+type IngresoCompraItem = {
+  itemCompraId: number;
+  productoId: string;
+  cantidad: number;
+  costoUnitario: Decimal;
+};
+
+/**
+ * Aplica el ingreso de ESTOQUE FÍSICO al EMITIR una Compra cuyos ítems
+ * capitalizan Bien de Cambio nacional (E18). Espeja `aplicarIngresoEmbarque`
+ * pero:
+ *  - exige depósito `tipo=NACIONAL` (el estoque de compra local es vendable
+ *    de inmediato, a diferencia de la importación que entra por el Comex);
+ *  - traza el origen con `itemCompraId` para poder revertir en la anulación.
+ * `costoUnitario` ya viene en ARS (precioUnitario × TC, sin IVA).
+ */
+export async function aplicarIngresoCompra(
+  tx: TxClient,
+  params: {
+    depositoDestinoId: string;
+    fecha: Date;
+    items: readonly IngresoCompraItem[];
+  },
+): Promise<void> {
+  if (params.items.length === 0) return;
+
+  const deposito = await tx.deposito.findUnique({
+    where: { id: params.depositoDestinoId },
+    select: { id: true, activo: true, tipo: true },
+  });
+  if (!deposito) {
+    throw new AsientoError("DOMINIO_INVALIDO", "El depósito de destino de la compra no existe.");
+  }
+  if (!deposito.activo) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      "El depósito de destino de la compra está inactivo.",
+    );
+  }
+  if (deposito.tipo !== TipoDeposito.NACIONAL) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      "El depósito de destino de la compra debe ser NACIONAL (estoque vendable).",
+    );
+  }
+
+  for (const item of params.items) {
+    await tx.movimientoStock.create({
+      data: {
+        productoId: item.productoId,
+        depositoId: params.depositoDestinoId,
+        tipo: MovimientoStockTipo.INGRESO,
+        cantidad: item.cantidad,
+        costoUnitario: money(item.costoUnitario),
+        fecha: params.fecha,
+        itemCompraId: item.itemCompraId,
+      },
+    });
+
+    await aplicarIngresoProducto(
+      tx,
+      item.productoId,
+      params.depositoDestinoId,
+      item.cantidad,
+      item.costoUnitario,
+    );
+    await aplicarIngresoSPD(
+      tx,
+      item.productoId,
+      params.depositoDestinoId,
+      item.cantidad,
+      item.costoUnitario,
+    );
+  }
+}
+
+/**
+ * Revierte los ingresos de estoque generados al emitir una Compra (E18).
+ * Borra los `MovimientoStock` ligados a sus `ItemCompra` y recalcula
+ * `Producto.stockActual`/`costoPromedio` + `StockPorDeposito` desde cero.
+ * Espeja `revertirIngresoEmbarque`. Se invoca desde `anularEnTx`. Idempotente:
+ * si la compra no capitalizó estoque (sin MovimientoStock) no recalcula nada.
+ */
+export async function revertirIngresoCompra(tx: TxClient, compraId: string): Promise<void> {
+  const items = await tx.itemCompra.findMany({
+    where: { compraId },
+    select: { id: true, productoId: true },
+  });
+  if (items.length === 0) return;
+
+  const itemIds = items.map((i) => i.id);
+  const productoIds = Array.from(new Set(items.map((i) => i.productoId)));
+
+  const borrados = await tx.movimientoStock.deleteMany({
+    where: { itemCompraId: { in: itemIds } },
+  });
+  if (borrados.count === 0) return;
+
+  for (const productoId of productoIds) {
+    await recalcularStockYCostoPromedio(tx, productoId);
+    await recalcularSPDPorProducto(tx, productoId);
+  }
+}
+
 /**
  * Replays los `MovimientoStock` del producto en orden cronológico para
  * reconstruir `stockActual` y `costoPromedio` desde cero, contando SÓLO el

@@ -420,17 +420,18 @@ model CuentaContable {
   padre CuentaContable?  @relation("CuentaPadre", fields: [padreCodigo], references: [codigo])
   hijos CuentaContable[] @relation("CuentaPadre")
 
-  lineas              LineaAsiento[]
-  cuentasBancarias    CuentaBancaria[]
-  clientes            Cliente[]
-  proveedores         Proveedor[]               @relation("ProveedorPasivo")
-  proveedoresGasto    Proveedor[]               @relation("ProveedorGasto")
-  prestamos           PrestamoExterno[]
-  movimientos         MovimientoTesoreria[]
-  embarqueCostoLineas EmbarqueCostoLinea[]      @relation("EmbarqueCostoLineaCuentaGasto")
-  extractoLineas      LineaExtractoSugerencia[]
-  gastosFijos         GastoFijo[]
-  lineasGasto         LineaGasto[]              @relation("LineaGastoCuentaGasto")
+  lineas               LineaAsiento[]
+  cuentasBancarias     CuentaBancaria[]
+  clientes             Cliente[]
+  proveedores          Proveedor[]               @relation("ProveedorPasivo")
+  proveedoresGasto     Proveedor[]               @relation("ProveedorGasto")
+  prestamos            PrestamoExterno[]
+  movimientos          MovimientoTesoreria[]
+  embarqueCostoLineas  EmbarqueCostoLinea[]      @relation("EmbarqueCostoLineaCuentaGasto")
+  extractoLineas       LineaExtractoSugerencia[]
+  gastosFijos          GastoFijo[]
+  lineasGasto          LineaGasto[]              @relation("LineaGastoCuentaGasto")
+  itemsCompraCategoria ItemCompra[]              @relation("ItemCompraCategoria")
 }
 
 model PeriodoContable {
@@ -1155,6 +1156,9 @@ model Compra {
   estado           CompraEstado  @default(BORRADOR)
   asientoId        String?       @unique
   pedidoCompraId   Int?
+  // Depósito NACIONAL destino del stock físico al EMITIR (E18). Sólo se usa
+  // cuando algún ítem capitaliza estoque (categoría = Bien de Cambio nacional).
+  depositoId       String?
   notas            String?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -1163,25 +1167,38 @@ model Compra {
   items        ItemCompra[]
   asiento      Asiento?      @relation(fields: [asientoId], references: [id])
   pedidoCompra PedidoCompra? @relation(fields: [pedidoCompraId], references: [id])
+  deposito     Deposito?     @relation(fields: [depositoId], references: [id])
 
   aplicacionesPago AplicacionPagoCompra[]
 
   @@index([fechaVencimiento])
   @@index([proveedorId])
+  @@index([depositoId])
 }
 
 model ItemCompra {
-  id             Int     @id @default(autoincrement())
-  compraId       String
-  productoId     String
-  cantidad       Int
-  precioUnitario Decimal @db.Decimal(18, 2)
-  subtotal       Decimal @db.Decimal(18, 2)
-  iva            Decimal @db.Decimal(18, 2)
-  total          Decimal @db.Decimal(18, 2)
+  id                Int     @id @default(autoincrement())
+  compraId          String
+  productoId        String
+  cantidad          Int
+  precioUnitario    Decimal @db.Decimal(18, 2)
+  subtotal          Decimal @db.Decimal(18, 2)
+  iva               Decimal @db.Decimal(18, 2)
+  total             Decimal @db.Decimal(18, 2)
+  // Categoría contable de la línea (E18): la cuenta ANALÍTICA del plan que se
+  // debita por este ítem. Si la cuenta ∈ ESTOQUE_FISICO_CODIGOS (1.1.7.01,
+  // Bien de Cambio nacional) la línea capitaliza estoque físico al emitir.
+  // Nullable por retrocompat (db push aditivo + ítems legacy); la UI nueva la
+  // exige y `crearAsientoCompra` cae al fallback por tipoProveedor si es null.
+  categoriaCuentaId Int?
 
-  compra   Compra   @relation(fields: [compraId], references: [id], onDelete: Cascade)
-  producto Producto @relation(fields: [productoId], references: [id])
+  compra    Compra          @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  producto  Producto        @relation(fields: [productoId], references: [id])
+  categoria CuentaContable? @relation("ItemCompraCategoria", fields: [categoriaCuentaId], references: [id])
+
+  movimientosStock MovimientoStock[]
+
+  @@index([categoriaCuentaId])
 }
 
 // Gasto local — factura ad-hoc de proveedor con N líneas + IVA/IIBB
@@ -1420,6 +1437,7 @@ model Deposito {
   contenedoresDestino      Contenedor[]       @relation("ContenedorDepositoDestino")
   desconsolidaciones       Desconsolidacion[] @relation("DesconsolidacionDepositoFiscal")
   unidadesInventario       UnidadInventario[]
+  comprasDestino           Compra[]
 }
 
 // ============================================================
@@ -1454,6 +1472,10 @@ model MovimientoStock {
   // FK opcional a la unidad individual (D1-bis). Sólo poblada tras una
   // materialización futura de UnidadInventario; null en el flujo normal.
   unidadInventarioId String?
+  // FK opcional al ítem de compra que originó el ingreso (E18). Sólo seteado
+  // cuando el movimiento viene de emitir una Compra que capitaliza estoque
+  // (categoría = Bien de Cambio nacional). Permite revertir en la anulación.
+  itemCompraId       Int?
 
   producto         Producto          @relation(fields: [productoId], references: [id])
   deposito         Deposito          @relation(fields: [depositoId], references: [id])
@@ -1465,6 +1487,7 @@ model MovimientoStock {
   itemContenedor   ItemContenedor?   @relation(fields: [itemContenedorId], references: [id], onDelete: SetNull)
   desconsolidacion Desconsolidacion? @relation(fields: [desconsolidacionId], references: [id], onDelete: SetNull)
   unidadInventario UnidadInventario? @relation(fields: [unidadInventarioId], references: [id], onDelete: SetNull)
+  itemCompra       ItemCompra?       @relation(fields: [itemCompraId], references: [id], onDelete: SetNull)
 
   @@index([productoId])
   @@index([itemEmbarqueId])
@@ -1475,6 +1498,7 @@ model MovimientoStock {
   @@index([itemContenedorId])
   @@index([desconsolidacionId])
   @@index([unidadInventarioId])
+  @@index([itemCompraId])
 }
 
 model Venta {
@@ -1567,17 +1591,17 @@ model ChequeRecibido {
 }
 
 model ItemVenta {
-  id             Int     @id @default(autoincrement())
-  ventaId        String
-  productoId     String
-  cantidad       Int
+  id               Int     @id @default(autoincrement())
+  ventaId          String
+  productoId       String
+  cantidad         Int
   // Hasta 4 decimales — útil en mayoristas donde redondear el unitario
   // a 2 decimales distorsiona el total final. subtotal/iva/total siguen
   // en 2 decimales (ya redondeado al asentar contabilidad).
-  precioUnitario Decimal @db.Decimal(18, 4)
-  subtotal       Decimal @db.Decimal(18, 2)
-  iva            Decimal @db.Decimal(18, 2)
-  total          Decimal @db.Decimal(18, 2)
+  precioUnitario   Decimal @db.Decimal(18, 4)
+  subtotal         Decimal @db.Decimal(18, 2)
+  iva              Decimal @db.Decimal(18, 2)
+  total            Decimal @db.Decimal(18, 2)
   // Snapshot del costoPromedio (ARS) usado para el CMV al EMITIR la venta.
   // Es la base con la que se debitó CMV y se acreditó 1.1.5.03 MERCADERÍAS A
   // ENTREGAR (stock dual). La entrega cancela 1.1.5.03 por ESTE valor para que
@@ -1588,7 +1612,7 @@ model ItemVenta {
   // Depósito desde el cual se reserva/entrega este item. Nullable:
   // cuando es null, cae al default global (`getDepositoPorDefecto`),
   // manteniendo retrocompatibilidad con ventas pre-S3.1.
-  depositoId     String?
+  depositoId       String?
 
   venta        Venta         @relation(fields: [ventaId], references: [id], onDelete: Cascade)
   producto     Producto      @relation(fields: [productoId], references: [id])

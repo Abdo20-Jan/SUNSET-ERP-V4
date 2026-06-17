@@ -1,5 +1,6 @@
 import "server-only";
 
+import Decimal from "decimal.js";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
@@ -8,7 +9,7 @@ import { isStockDualEnabled } from "@/lib/features";
 import { secureRandomInt } from "@/lib/secure-random";
 import { type CuentaDef, ensureCuentasMap, getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { calcularCostoLandedDespacho } from "@/lib/services/despacho-parcial";
-import { revertirIngresoEmbarque } from "@/lib/services/stock";
+import { revertirIngresoCompra, revertirIngresoEmbarque } from "@/lib/services/stock";
 import {
   COMEX_ZPA_CODIGOS,
   COMPRA_CODIGOS,
@@ -551,6 +552,23 @@ async function anularEnTx(tx: TxClient, asientoId: string): Promise<Asiento> {
     where: { asientoId },
     data: { asientoId: null, estado: "CANCELADA" },
   });
+  // Compras: revertir el ingreso de ESTOQUE FÍSICO (E18) ANTES de desvincular,
+  // igual que los embarques (si no, el costo medio quedaría inflado). Si la
+  // compra ya tiene pagos aplicados, NO revertir en silencio: fallar para no
+  // borrar el stock de mercadería ya pagada (revertir los pagos primero).
+  const comprasAnuladas = await tx.compra.findMany({
+    where: { asientoId },
+    select: { id: true, numero: true, _count: { select: { aplicacionesPago: true } } },
+  });
+  for (const c of comprasAnuladas) {
+    if (c._count.aplicacionesPago > 0) {
+      throw new AsientoError(
+        "ESTADO_INVALIDO",
+        `La compra ${c.numero} tiene pagos aplicados; revierta los pagos antes de anular.`,
+      );
+    }
+    await revertirIngresoCompra(tx, c.id);
+  }
   await tx.compra.updateMany({
     where: { asientoId },
     data: { asientoId: null, estado: "CANCELADA" },
@@ -3590,6 +3608,9 @@ export async function crearAsientoCompra(compraId: string, tx?: TxClient): Promi
             monedaOperacion: true,
           },
         },
+        items: {
+          select: { id: true, subtotal: true, categoriaCuentaId: true },
+        },
       },
     });
     if (!compra) {
@@ -3604,7 +3625,8 @@ export async function crearAsientoCompra(compraId: string, tx?: TxClient): Promi
 
     const porCodigo = await ensureCuentasMap(inner, COMPRA_CODIGOS);
 
-    // Contrapartida (DEBE) — preferencia:
+    // Contrapartida (DEBE) POR DEFECTO para ítems sin categoría explícita
+    // (legacy) — preferencia:
     //   1. proveedor.cuentaGastoContableId (override manual)
     //   2. tipoProveedor → GASTO_POR_TIPO_PROVEEDOR (default por categoría)
     const gastoDef = GASTO_POR_TIPO_PROVEEDOR[compra.proveedor.tipoProveedor];
@@ -3618,11 +3640,9 @@ export async function crearAsientoCompra(compraId: string, tx?: TxClient): Promi
     const otrosSrc = toDecimal(compra.otros);
     const totalSrc = subtotalSrc.plus(ivaSrc).plus(iibbSrc).plus(otrosSrc);
 
-    const subtotal = subtotalSrc.times(tc).toDecimalPlaces(2);
     const iva = ivaSrc.times(tc).toDecimalPlaces(2);
     const iibb = iibbSrc.times(tc).toDecimalPlaces(2);
     const otros = otrosSrc.times(tc).toDecimalPlaces(2);
-    const total = subtotal.plus(iva).plus(iibb).plus(otros);
 
     let proveedorCuentaId = compra.proveedor.cuentaContableId;
     if (!proveedorCuentaId) {
@@ -3635,47 +3655,119 @@ export async function crearAsientoCompra(compraId: string, tx?: TxClient): Promi
       }
     }
 
-    // El pasivo es USD-nato cuando la propia compra está en USD. Persistimos
-    // el principal en USD en la línea HABER del proveedor para que el saldo
-    // USD se mantenga invariante a TC.
+    // E18 — categoría POR ÍTEM: agrupa el subtotal (en moneda origen) por la
+    // cuenta de categoría efectiva (categoriaCuentaId ?? gasto por tipo).
+    const subtotalSrcPorCuenta = new Map<number, Decimal>();
+    for (const item of compra.items) {
+      const cuentaId = item.categoriaCuentaId ?? gastoCuentaId;
+      subtotalSrcPorCuenta.set(
+        cuentaId,
+        (subtotalSrcPorCuenta.get(cuentaId) ?? new Decimal(0)).plus(toDecimal(item.subtotal)),
+      );
+    }
+    // Edge defensivo: compra sin ítems → todo el subtotal al gasto por tipo.
+    if (subtotalSrcPorCuenta.size === 0 && subtotalSrc.gt(0)) {
+      subtotalSrcPorCuenta.set(gastoCuentaId, subtotalSrc);
+    }
+
+    // Validar cada cuenta usada como contrapartida (categoría por ítem o gasto
+    // por tipoProveedor): debe ser ANALÍTICA y activa — no confiar en el front;
+    // una sintética/inactiva rompería el mayor. Resolvemos también su nombre
+    // real para la descripción de la línea.
+    const cuentaIdsUsadas = Array.from(subtotalSrcPorCuenta.keys());
+    const nombrePorCuentaId = new Map<number, string>();
+    if (cuentaIdsUsadas.length > 0) {
+      const cuentas = await inner.cuentaContable.findMany({
+        where: { id: { in: cuentaIdsUsadas } },
+        select: { id: true, tipo: true, activa: true, nombre: true, codigo: true },
+      });
+      const found = new Map(cuentas.map((c) => [c.id, c]));
+      for (const id of cuentaIdsUsadas) {
+        const c = found.get(id);
+        if (!c) {
+          throw new AsientoError("CUENTA_INVALIDA", `La cuenta de categoría ${id} no existe.`);
+        }
+        if (c.tipo !== CuentaTipo.ANALITICA) {
+          throw new AsientoError(
+            "CUENTA_INVALIDA",
+            `La categoría ${c.codigo} no es imputable (debe ser ANALÍTICA).`,
+          );
+        }
+        if (!c.activa) {
+          throw new AsientoError("CUENTA_INVALIDA", `La categoría ${c.codigo} está inactiva.`);
+        }
+        nombrePorCuentaId.set(id, c.nombre);
+      }
+    }
+
+    // El pasivo es USD-nato cuando la compra está en USD: el HABER del proveedor
+    // lleva el principal USD invariante a TC.
     const pasivoEsUsd = compra.moneda === Moneda.USD;
 
-    const lineas: LineaInput[] = [
-      {
-        cuentaId: gastoCuentaId,
-        debe: money(subtotal).toString(),
-        haber: 0,
-        descripcion: `Compra ${compra.numero} — ${gastoDef.nombre.toLowerCase()}`,
-      },
-    ];
+    // Una línea DEBE por categoría (orden determinístico por id). Sumar en
+    // moneda origen por grupo y ×TC UNA vez (alinear redondeo). El HABER se
+    // ancla en el total convertido (totalSrc×TC) — consistente con montoOrigen
+    // — y el residuo de redondeo (≤ unos centavos) se ajusta en la MAYOR línea
+    // DEBE para que Σdebe == haber exactamente.
+    const lineas: LineaInput[] = [];
+    let totalDebe = new Decimal(0);
+    let maxDebeIdx = -1;
+    let maxDebeVal = new Decimal(-1);
+    const pushDebe = (cuentaId: number, monto: Decimal, descripcion: string) => {
+      totalDebe = totalDebe.plus(monto);
+      if (monto.gt(maxDebeVal)) {
+        maxDebeVal = monto;
+        maxDebeIdx = lineas.length;
+      }
+      lineas.push({ cuentaId, debe: monto.toString(), haber: 0, descripcion });
+    };
+
+    const grupos = Array.from(subtotalSrcPorCuenta.entries()).sort((a, b) => a[0] - b[0]);
+    for (const [cuentaId, subSrc] of grupos) {
+      const nombre = nombrePorCuentaId.get(cuentaId) ?? gastoDef.nombre;
+      pushDebe(
+        cuentaId,
+        money(subSrc.times(tc)),
+        `Compra ${compra.numero} — ${nombre.toLowerCase()}`,
+      );
+    }
     if (iva.gt(0)) {
-      lineas.push({
-        cuentaId: porCodigo.get(COMPRA_CODIGOS.IVA_CREDITO.codigo)!,
-        debe: money(iva).toString(),
-        haber: 0,
-        descripcion: `Compra ${compra.numero} — IVA crédito`,
-      });
+      pushDebe(
+        porCodigo.get(COMPRA_CODIGOS.IVA_CREDITO.codigo)!,
+        iva,
+        `Compra ${compra.numero} — IVA crédito`,
+      );
     }
     if (iibb.gt(0)) {
-      lineas.push({
-        cuentaId: porCodigo.get(COMPRA_CODIGOS.IIBB_CREDITO.codigo)!,
-        debe: money(iibb).toString(),
-        haber: 0,
-        descripcion: `Compra ${compra.numero} — IIBB crédito`,
-      });
+      pushDebe(
+        porCodigo.get(COMPRA_CODIGOS.IIBB_CREDITO.codigo)!,
+        iibb,
+        `Compra ${compra.numero} — IIBB crédito`,
+      );
     }
     if (otros.gt(0)) {
-      lineas.push({
-        cuentaId: gastoCuentaId,
-        debe: money(otros).toString(),
-        haber: 0,
-        descripcion: `Compra ${compra.numero} — otros`,
-      });
+      // "otros" (header, sin categoría) → OTROS GASTOS; NO capitaliza estoque.
+      pushDebe(
+        porCodigo.get(COMPRA_CODIGOS.OTROS_GASTOS.codigo)!,
+        otros,
+        `Compra ${compra.numero} — otros`,
+      );
     }
+
+    // Ancla el HABER en el total convertido; ajusta el residuo de redondeo en
+    // la mayor línea DEBE para cuadrar exactamente (sin distorsionar el
+    // principal USD que va en montoOrigen).
+    const haber = money(totalSrc.times(tc));
+    const residuo = haber.minus(totalDebe);
+    if (!residuo.isZero() && maxDebeIdx >= 0) {
+      const ajustada = money(maxDebeVal.plus(residuo));
+      lineas[maxDebeIdx] = { ...lineas[maxDebeIdx], debe: ajustada.toString() };
+    }
+
     lineas.push({
       cuentaId: proveedorCuentaId,
       debe: 0,
-      haber: money(total).toString(),
+      haber: haber.toString(),
       descripcion: `Compra ${compra.numero} — ${compra.proveedor.nombre}${compra.fechaVencimiento ? ` (vence ${compra.fechaVencimiento.toISOString().slice(0, 10)})` : ""}`,
       ...(pasivoEsUsd
         ? {

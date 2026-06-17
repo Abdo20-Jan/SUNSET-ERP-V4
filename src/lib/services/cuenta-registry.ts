@@ -514,3 +514,16 @@ export const GASTO_POR_TIPO_PROVEEDOR = {
     categoria: CuentaCategoria.EGRESO,
   },
 } as const satisfies Record<string, CuentaDef>;
+
+// ----- ESTOQUE FÍSICO POR COMPRA (E18) -----------------------
+// Códigos cuya selección como CATEGORÍA de un ítem de Compra dispara el
+// ingreso de ESTOQUE FÍSICO nacional (MovimientoStock + costoPromedio) al
+// emitir. Hoy sólo Bien de Cambio nacional (1.1.7.01, Estoque nacionalizado).
+// La importación en tránsito (1.1.7.02) NO entra acá: su estoque físico entra
+// por el Comex (Embarque→Despacho) — evita el doble conteo. Se deriva del
+// registry para acompañar cualquier renumeración del plan.
+export const ESTOQUE_FISICO_CODIGOS: readonly string[] = [COMPRA_CODIGOS.MERCADERIAS.codigo];
+
+export function categoriaCapitalizaEstoque(codigo: string): boolean {
+  return ESTOQUE_FISICO_CODIGOS.includes(codigo);
+}
