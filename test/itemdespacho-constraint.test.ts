@@ -2,8 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "./db";
 
 // PR schema ItemDespacho cruzado — verifica los índices UNIQUE PARCIALES +
-// CHECK aplicados en raw SQL (decisión 2026-05-21, Abordagem A+F). También
-// prueba que `createTestDb` los reaplica tras el `db push` (si no, estos
+// CHECK (decisión 2026-05-21, Abordagem A+F). Ahora vienen del baseline
+// 0_init que `createTestDb` aplica vía `migrate deploy` (si no, estos
 // tests darían falso-positivo).
 
 const TABLAS = [
@@ -71,11 +71,24 @@ describe("ItemDespacho — índices parciales + CHECK (esquema cruzado)", () => 
     const contenedor = await db.prisma.contenedor.create({
       data: { embarqueId: embarque.id, numeroContenedor: "MSCU0000001" },
     });
+    // Lotes distintos: prod tiene UNIQUE parcial (contenedor, producto) WHERE
+    // loteFabricacion IS NULL — dos filas del mismo producto sin lote violarían
+    // ItemContenedor_cp_null_idx. Dos lotes representan "dos fuentes" válidas.
     const icA = await db.prisma.itemContenedor.create({
-      data: { contenedorId: contenedor.id, productoId: producto.id, cantidadDeclarada: 60 },
+      data: {
+        contenedorId: contenedor.id,
+        productoId: producto.id,
+        loteFabricacion: "LOTE-A",
+        cantidadDeclarada: 60,
+      },
     });
     const icB = await db.prisma.itemContenedor.create({
-      data: { contenedorId: contenedor.id, productoId: producto.id, cantidadDeclarada: 40 },
+      data: {
+        contenedorId: contenedor.id,
+        productoId: producto.id,
+        loteFabricacion: "LOTE-B",
+        cantidadDeclarada: 40,
+      },
     });
     return {
       despachoId: despacho.id,
