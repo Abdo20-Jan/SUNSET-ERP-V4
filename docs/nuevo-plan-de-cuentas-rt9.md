@@ -77,10 +77,10 @@
 | `1.1.6.2` | OTROS | S | ACTIVO | D | | subgrupo |
 | `1.1.6.2.01` | VALORES A COBRAR (CHEQUES DE TERCEROS) | A | ACTIVO | D | `1.1.4.20` | cuasi-efectivo |
 | `1.1.6.2.02` | GASTOS PAGADOS POR ADELANTADO | A | ACTIVO | D | NUEVA | seguros, alquileres |
-| `1.1.7` | BIENES DE CAMBIO | S | ACTIVO | D | `1.1.5` | estoque movido aquí |
-| `1.1.7.01` | MERCADERÍAS NACIONALIZADAS | A | ACTIVO | D | `1.1.5.01` | vendible (costo landed) |
-| `1.1.7.02` | MERCADERÍAS EN TRÁNSITO | A | ACTIVO | D | `1.1.5.02` | **acumula costo landed** (FOB+flete+seguro+tributos+despachante+portuarios+flete interno) |
-| `1.1.7.03` | MERCADERÍAS EN ZONA PRIMARIA (ZPA) | A | ACTIVO | D | `1.1.5.04` | bonded |
+| `1.1.7` | ESTOQUE | S | ACTIVO | D | `1.1.5` | estoque movido aquí |
+| `1.1.7.01` | ESTOQUE NACIONALIZADO | A | ACTIVO | D | `1.1.5.01` | vendible (costo landed) |
+| `1.1.7.02` | ESTOQUE A DESPACHAR | A | ACTIVO | D | `1.1.5.02` | **acumula costo landed** (FOB+flete+seguro+tributos+despachante+portuarios+flete interno); rol motor = en tránsito |
+| `1.1.7.03` | MERCADERÍAS EN TRÁNSITO | A | ACTIVO | D | `1.1.5.04` | rol motor = zona primaria (ZPA, bonded) |
 | `1.1.7.04` | MERCADERÍAS EN DEPÓSITO FISCAL (DF) | A | ACTIVO | D | `1.1.5.05` | bonded |
 | `1.1.7.05` | MERCADERÍAS A ENTREGAR | A | ACTIVO | D | `1.1.5.03` | puente stock-dual |
 | `1.1.7.09` | (-) DESVALORIZACIÓN DE BIENES DE CAMBIO | A | ACTIVO | A | NUEVA | regularizadora VNR (RT 17) |

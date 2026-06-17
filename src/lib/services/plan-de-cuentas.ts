@@ -134,11 +134,13 @@ export const PLAN_RT9: readonly CuentaPlan[] = [
   s("1.1.6.2", "OTROS"),
   a("1.1.6.2.01", "VALORES A COBRAR (CHEQUES DE TERCEROS)"),
   a("1.1.6.2.02", "GASTOS PAGADOS POR ADELANTADO"),
-  // 1.1.7 Bienes de Cambio (inventariables)
-  s("1.1.7", "BIENES DE CAMBIO"),
-  a("1.1.7.01", "MERCADERÍAS NACIONALIZADAS", { inventariable: true }),
-  a("1.1.7.02", "MERCADERÍAS EN TRÁNSITO", { inventariable: true, moneda: "BI" }),
-  a("1.1.7.03", "MERCADERÍAS EN ZONA PRIMARIA (ZPA)", { inventariable: true }),
+  // 1.1.7 Estoque / Bienes de Cambio (inventariables). NOTA: sólo cambian los
+  // nombres de exposición; el ROL de cada código en el motor es inalterado
+  // (flujo COMEX 02→03→04→01, ver cuenta-registry COMEX_ZPA_CODIGOS).
+  s("1.1.7", "ESTOQUE"),
+  a("1.1.7.01", "ESTOQUE NACIONALIZADO", { inventariable: true }),
+  a("1.1.7.02", "ESTOQUE A DESPACHAR", { inventariable: true, moneda: "BI" }),
+  a("1.1.7.03", "MERCADERÍAS EN TRÁNSITO", { inventariable: true }),
   a("1.1.7.04", "MERCADERÍAS EN DEPÓSITO FISCAL (DF)", { inventariable: true }),
   a("1.1.7.05", "MERCADERÍAS A ENTREGAR", { inventariable: true }),
   a("1.1.7.09", "(-) DESVALORIZACIÓN DE BIENES DE CAMBIO", { naturaleza: "ACREEDOR" }),
