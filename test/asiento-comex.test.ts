@@ -120,7 +120,10 @@ describe("asientos comex ZPA (PR 3.1)", () => {
   describe("crearAsientoDivergencia (D9)", () => {
     const base = { fecha: FECHA } as const;
 
-    it("SOBRA: DEBE subcuenta DF / HABER 5.2.03", async () => {
+    // Sobrante de despacho = bultos recibidos de más → no es ingreso: es deuda
+    // con el proveedor (a regularizar rectificando factura/proforma). HABER al
+    // pasivo-puente 2.1.1.08 (decisión contador #6).
+    it("SOBRA: DEBE subcuenta DF / HABER 2.1.1.08 (diferencia a regularizar — a pagar)", async () => {
       const asiento = await tx((t) =>
         crearAsientoDivergencia(
           {
@@ -134,11 +137,13 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       );
       expect(await lineasDe(asiento.id)).toEqual([
         { codigo: "1.1.7.04", debe: "750.00", haber: "0.00" },
-        { codigo: "5.2.03", debe: "0.00", haber: "750.00" },
+        { codigo: "2.1.1.08", debe: "0.00", haber: "750.00" },
       ]);
     });
 
-    it("FALTA sin responsable: DEBE 5.2.01 / HABER subcuenta ZPA", async () => {
+    // Faltante de despacho sin responsable = pagamos por bultos no recibidos →
+    // saldo a favor con el proveedor (activo-puente 1.1.5.07), no pérdida directa.
+    it("FALTA sin responsable: DEBE 1.1.5.07 (saldo a favor proveedor) / HABER subcuenta ZPA", async () => {
       const asiento = await tx((t) =>
         crearAsientoDivergencia(
           { ...base, faltaMonto: "750.00", causa: "NAO_IDENTIFICADA", ubicacion: "ZONA_PRIMARIA" },
@@ -146,7 +151,7 @@ describe("asientos comex ZPA (PR 3.1)", () => {
         ),
       );
       expect(await lineasDe(asiento.id)).toEqual([
-        { codigo: "5.2.01", debe: "750.00", haber: "0.00" },
+        { codigo: "1.1.5.07", debe: "750.00", haber: "0.00" },
         { codigo: "1.1.7.03", debe: "0.00", haber: "750.00" },
       ]);
     });
@@ -194,12 +199,13 @@ describe("asientos comex ZPA (PR 3.1)", () => {
         ),
       );
       // Sobrante bruto (500) primero, faltante bruto (300) después; el stock
-      // 1.1.7.04 aparece 2× (DEBE por la sobra, HABER por la falta). El
-      // ingreso (500) y la merma (300) reciben el BRUTO, no el neto (200).
+      // 1.1.7.04 aparece 2× (DEBE por la sobra, HABER por la falta). El pasivo a
+      // regularizar (500) y el saldo a favor proveedor (300) reciben el BRUTO,
+      // no el neto (200).
       expect(await lineasDe(asiento.id)).toEqual([
         { codigo: "1.1.7.04", debe: "500.00", haber: "0.00" },
-        { codigo: "5.2.03", debe: "0.00", haber: "500.00" },
-        { codigo: "5.2.01", debe: "300.00", haber: "0.00" },
+        { codigo: "2.1.1.08", debe: "0.00", haber: "500.00" },
+        { codigo: "1.1.5.07", debe: "300.00", haber: "0.00" },
         { codigo: "1.1.7.04", debe: "0.00", haber: "300.00" },
       ]);
     });
