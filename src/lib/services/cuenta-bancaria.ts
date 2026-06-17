@@ -4,7 +4,8 @@ import Decimal from "decimal.js";
 
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
-import { AsientoEstado, Moneda, Prisma } from "@/generated/prisma/client";
+import { PREFIJO_BANCOS, PREFIJO_CAJA } from "@/lib/services/prefijos-plan";
+import { AsientoEstado, CuentaTipo, Moneda, Prisma } from "@/generated/prisma/client";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -119,4 +120,60 @@ export async function calcularSaldosCuentasBancariasEnMonedaCuenta(
   }
 
   return result;
+}
+
+/**
+ * Infiere la moneda de una cuenta banco/caja por su nombre cuando no hay una
+ * `CuentaBancaria` ligada (caso típico de las cajas). Cuentas con "DÓLAR"/
+ * "DOLAR" en el nombre se asumen USD; el resto, ARS.
+ */
+export function inferirMonedaPorNombre(nombre: string): Moneda {
+  return /D[ÓO]LAR/i.test(nombre) ? Moneda.USD : Moneda.ARS;
+}
+
+export type CuentaBancoCajaConMoneda = {
+  cuentaContableId: number;
+  codigo: string;
+  nombre: string;
+  banco: string | null;
+  moneda: Moneda;
+};
+
+/**
+ * Cuentas analíticas activas de banco/caja (códigos 1.1.1.* / 1.1.2.*) con su
+ * MONEDA derivada de la `CuentaBancaria` ligada (`cb?.moneda`), cayendo en
+ * `inferirMonedaPorNombre` cuando no hay ninguna. Es la FUENTE ÚNICA de la
+ * moneda de la cuenta usada tanto por `getSaldosBancarios` como por el flujo
+ * de caja, para que ambos particionen idénticamente a la moneda de la cuenta
+ * (alineado con `calcularSaldosCuentasBancariasEnMonedaCuenta`).
+ */
+export async function getCuentasBancoCajaConMoneda(
+  tx?: TxClient,
+): Promise<CuentaBancoCajaConMoneda[]> {
+  const client = tx ?? db;
+  const cuentas = await client.cuentaContable.findMany({
+    where: {
+      tipo: CuentaTipo.ANALITICA,
+      activa: true,
+      OR: [{ codigo: { startsWith: PREFIJO_CAJA } }, { codigo: { startsWith: PREFIJO_BANCOS } }],
+    },
+    select: {
+      id: true,
+      codigo: true,
+      nombre: true,
+      cuentasBancarias: { select: { banco: true, moneda: true }, take: 1 },
+    },
+    orderBy: { codigo: "asc" },
+  });
+
+  return cuentas.map((c) => {
+    const cb = c.cuentasBancarias[0];
+    return {
+      cuentaContableId: c.id,
+      codigo: c.codigo,
+      nombre: c.nombre,
+      banco: cb?.banco ?? null,
+      moneda: cb?.moneda ?? inferirMonedaPorNombre(c.nombre),
+    };
+  });
 }
