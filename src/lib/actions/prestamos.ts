@@ -321,7 +321,7 @@ export type ContextoAmortizacion = {
   saldoPendiente: string;
 };
 
-const CODIGO_INTERESES_PAGADOS = "5.8.1.07";
+const CODIGO_INTERESES_PAGADOS = "9.1.03";
 
 export async function obtenerContextoAmortizacion(
   prestamoId: string,

@@ -29,25 +29,25 @@ function leaf(p: Partial<LeafResultado> & { codigo: string }): LeafResultado {
 
 describe("clasificarSeccionRT9 — sección por código", () => {
   it("mapea cada rubro RT9 a su sección", () => {
-    expect(clasificarSeccionRT9("4.1.1.01")).toBe("VENTAS");
-    expect(clasificarSeccionRT9("4.1.2.01")).toBe("VENTAS"); // deducciones
-    expect(clasificarSeccionRT9("5.1.1.01")).toBe("CMV");
-    expect(clasificarSeccionRT9("5.2.1.01")).toBe("COMERCIALIZACION");
-    expect(clasificarSeccionRT9("5.3.1.01")).toBe("ADMINISTRACION");
-    expect(clasificarSeccionRT9("4.3.1.01")).toBe("FINANCIEROS");
-    expect(clasificarSeccionRT9("5.8.1.02")).toBe("FINANCIEROS");
-    expect(clasificarSeccionRT9("4.2.1.01")).toBe("OTROS");
-    expect(clasificarSeccionRT9("5.9.1.01")).toBe("OTROS");
-    expect(clasificarSeccionRT9("5.10.1.01")).toBe("GANANCIAS");
+    expect(clasificarSeccionRT9("4.1.01.01")).toBe("VENTAS");
+    expect(clasificarSeccionRT9("4.2.01")).toBe("VENTAS"); // deducciones
+    expect(clasificarSeccionRT9("5.1.01")).toBe("CMV");
+    expect(clasificarSeccionRT9("6.3.01")).toBe("COMERCIALIZACION");
+    expect(clasificarSeccionRT9("7.2.01")).toBe("ADMINISTRACION");
+    expect(clasificarSeccionRT9("9.1.01")).toBe("FINANCIEROS");
+    expect(clasificarSeccionRT9("9.2.02")).toBe("FINANCIEROS");
+    expect(clasificarSeccionRT9("4.3.01")).toBe("OTROS"); // otros ingresos operativos
+    expect(clasificarSeccionRT9("8.2.01")).toBe("OTROS");
+    expect(clasificarSeccionRT9("8.6.01")).toBe("GANANCIAS");
   });
 });
 
 describe("clasificarSeccionRT9 — rubroEECC manda sobre el código", () => {
   it("usa el rubro explícito aunque el código apunte a otra sección", () => {
     // Código sería CMV, pero el rubro fuerza OTROS.
-    expect(clasificarSeccionRT9("5.1.1.01", "Otros Ingresos y Egresos")).toBe("OTROS");
+    expect(clasificarSeccionRT9("5.1.01", "Otros resultados")).toBe("OTROS");
     // Código sin match, sólo el rubro lo clasifica.
-    expect(clasificarSeccionRT9("9.9.9.99", "Resultados Financieros y por Tenencia")).toBe(
+    expect(clasificarSeccionRT9("0.0.0.0", "Resultados financieros y por tenencia")).toBe(
       "FINANCIEROS",
     );
   });
@@ -56,16 +56,16 @@ describe("clasificarSeccionRT9 — rubroEECC manda sobre el código", () => {
 describe("construirEstadoResultadosRT9 — cascada", () => {
   it("encadena Bruto → Operativo → antes de Impuestos → Ejercicio", () => {
     const leaves: LeafResultado[] = [
-      leaf({ codigo: "4.1.1.01", haber: new Decimal(1000) }), // ventas
-      leaf({ codigo: "4.1.2.01", debe: new Decimal(50) }), // (-) devoluciones
-      leaf({ codigo: "5.1.1.01", debe: new Decimal(400) }), // CMV
-      leaf({ codigo: "5.2.1.01", debe: new Decimal(100) }), // comercialización
-      leaf({ codigo: "5.3.1.01", debe: new Decimal(80) }), // administración
-      leaf({ codigo: "4.3.1.02", haber: new Decimal(30) }), // ganancia FX
-      leaf({ codigo: "5.8.1.02", debe: new Decimal(10) }), // pérdida FX
-      leaf({ codigo: "4.2.1.01", haber: new Decimal(20) }), // otros ingresos
-      leaf({ codigo: "5.9.1.01", debe: new Decimal(5) }), // otros egresos
-      leaf({ codigo: "5.10.1.01", debe: new Decimal(70) }), // impuesto ganancias
+      leaf({ codigo: "4.1.01.01", haber: new Decimal(1000) }), // ventas
+      leaf({ codigo: "4.2.01", debe: new Decimal(50) }), // (-) devoluciones
+      leaf({ codigo: "5.1.01", debe: new Decimal(400) }), // CMV
+      leaf({ codigo: "6.3.01", debe: new Decimal(100) }), // comercialización
+      leaf({ codigo: "7.2.01", debe: new Decimal(80) }), // administración
+      leaf({ codigo: "9.2.01", haber: new Decimal(30) }), // ganancia FX
+      leaf({ codigo: "9.2.02", debe: new Decimal(10) }), // pérdida FX
+      leaf({ codigo: "8.1.01", haber: new Decimal(20) }), // otros ingresos
+      leaf({ codigo: "8.2.01", debe: new Decimal(5) }), // otros egresos
+      leaf({ codigo: "8.6.01", debe: new Decimal(70) }), // impuesto ganancias
     ];
 
     const er = construirEstadoResultadosRT9(leaves);
@@ -86,10 +86,10 @@ describe("construirEstadoResultadosRT9 — cascada", () => {
 
   it("el resultado del ejercicio iguala Σ(haber − debe) de todas las cuentas", () => {
     const leaves: LeafResultado[] = [
-      leaf({ codigo: "4.1.1.01", haber: new Decimal(1234.56) }),
-      leaf({ codigo: "5.1.1.01", debe: new Decimal(789.01) }),
-      leaf({ codigo: "5.3.1.01", debe: new Decimal(123.45) }),
-      leaf({ codigo: "4.3.1.02", haber: new Decimal(10) }),
+      leaf({ codigo: "4.1.01.01", haber: new Decimal(1234.56) }),
+      leaf({ codigo: "5.1.01", debe: new Decimal(789.01) }),
+      leaf({ codigo: "7.2.01", debe: new Decimal(123.45) }),
+      leaf({ codigo: "9.2.01", haber: new Decimal(10) }),
     ];
     const er = construirEstadoResultadosRT9(leaves);
     const esperado = leaves.reduce((acc, l) => acc.plus(l.haber).minus(l.debe), new Decimal(0));
@@ -99,8 +99,8 @@ describe("construirEstadoResultadosRT9 — cascada", () => {
   it("respeta el rubroEECC al asignar la sección", () => {
     const leaves: LeafResultado[] = [
       // Código de CMV pero rubro lo manda a Otros → no afecta el Bruto.
-      leaf({ codigo: "5.1.1.01", debe: new Decimal(100), rubroEECC: "Otros Ingresos y Egresos" }),
-      leaf({ codigo: "4.1.1.01", haber: new Decimal(500) }),
+      leaf({ codigo: "5.1.01", debe: new Decimal(100), rubroEECC: "Otros resultados" }),
+      leaf({ codigo: "4.1.01.01", haber: new Decimal(500) }),
     ];
     const er = construirEstadoResultadosRT9(leaves);
     expect(er.resultadoBruto.toFixed(2)).toBe("500.00"); // CMV salió del Bruto

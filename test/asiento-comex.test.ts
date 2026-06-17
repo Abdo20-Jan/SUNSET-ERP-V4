@@ -120,20 +120,25 @@ describe("asientos comex ZPA (PR 3.1)", () => {
   describe("crearAsientoDivergencia (D9)", () => {
     const base = { fecha: FECHA } as const;
 
-    it("SOBRA: DEBE subcuenta DF / HABER 4.2.2.01", async () => {
+    it("SOBRA: DEBE subcuenta DF / HABER 5.2.03", async () => {
       const asiento = await tx((t) =>
         crearAsientoDivergencia(
-          { ...base, sobraMonto: "750.00", causa: "NAO_IDENTIFICADA", ubicacion: "DEPOSITO_FISCAL" },
+          {
+            ...base,
+            sobraMonto: "750.00",
+            causa: "NAO_IDENTIFICADA",
+            ubicacion: "DEPOSITO_FISCAL",
+          },
           t,
         ),
       );
       expect(await lineasDe(asiento.id)).toEqual([
         { codigo: "1.1.7.04", debe: "750.00", haber: "0.00" },
-        { codigo: "4.2.2.01", debe: "0.00", haber: "750.00" },
+        { codigo: "5.2.03", debe: "0.00", haber: "750.00" },
       ]);
     });
 
-    it("FALTA sin responsable: DEBE 5.1.1.02 / HABER subcuenta ZPA", async () => {
+    it("FALTA sin responsable: DEBE 5.2.01 / HABER subcuenta ZPA", async () => {
       const asiento = await tx((t) =>
         crearAsientoDivergencia(
           { ...base, faltaMonto: "750.00", causa: "NAO_IDENTIFICADA", ubicacion: "ZONA_PRIMARIA" },
@@ -141,7 +146,7 @@ describe("asientos comex ZPA (PR 3.1)", () => {
         ),
       );
       expect(await lineasDe(asiento.id)).toEqual([
-        { codigo: "5.1.1.02", debe: "750.00", haber: "0.00" },
+        { codigo: "5.2.01", debe: "750.00", haber: "0.00" },
         { codigo: "1.1.7.03", debe: "0.00", haber: "750.00" },
       ]);
     });
@@ -193,8 +198,8 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       // ingreso (500) y la merma (300) reciben el BRUTO, no el neto (200).
       expect(await lineasDe(asiento.id)).toEqual([
         { codigo: "1.1.7.04", debe: "500.00", haber: "0.00" },
-        { codigo: "4.2.2.01", debe: "0.00", haber: "500.00" },
-        { codigo: "5.1.1.02", debe: "300.00", haber: "0.00" },
+        { codigo: "5.2.03", debe: "0.00", haber: "500.00" },
+        { codigo: "5.2.01", debe: "300.00", haber: "0.00" },
         { codigo: "1.1.7.04", debe: "0.00", haber: "300.00" },
       ]);
     });
@@ -203,7 +208,12 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       await expect(
         tx((t) =>
           crearAsientoDivergencia(
-            { ...base, faltaMonto: "750.00", causa: "FABRICA_ORIGEM", ubicacion: "DEPOSITO_FISCAL" },
+            {
+              ...base,
+              faltaMonto: "750.00",
+              causa: "FABRICA_ORIGEM",
+              ubicacion: "DEPOSITO_FISCAL",
+            },
             t,
           ),
         ),

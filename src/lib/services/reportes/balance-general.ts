@@ -54,8 +54,11 @@ export type BalanceGeneralResult = {
   diferencia: Decimal;
 } & MonedaReporte;
 
-// Código da conta analítica "RESULTADO DEL EJERCICIO" no plano oficial.
-const CODIGO_RESULTADO_EJERCICIO = "3.2.1.02";
+// "RESULTADO DEL EJERCICIO": en el plan ULTRA es la sintética de cierre 3.4
+// (no recibe asientos). El resultado se calcula desde el Estado de Resultados
+// (estado.resultado) y se suma al PN; este código sólo se usa para detectar si
+// ya viene cargado en el árbol (no es el caso con 3.4 → siempre se suma).
+const CODIGO_RESULTADO_EJERCICIO = "3.4";
 
 // Rubros del subledger comercial cuyos saldos de signo invertido SÍ son
 // saldos a favor / anticipos y se reclasifican al lado opuesto del Balance.

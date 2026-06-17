@@ -173,7 +173,8 @@ export async function getResumenEjecutivo(rng: DateRange): Promise<ResumenEjecut
         asiento: { estado: AsientoEstado.CONTABILIZADO },
         cuenta: {
           tipo: CuentaTipo.ANALITICA,
-          OR: [{ codigo: { startsWith: "1.1.1." } }, { codigo: { startsWith: "1.1.2." } }],
+          // Caja (1.1.1.01.*) y Bancos (1.1.1.02.*) — ambos bajo 1.1.1.
+          OR: [{ codigo: { startsWith: "1.1.1." } }],
         },
       },
       _sum: { debe: true, haber: true },
@@ -194,13 +195,13 @@ export async function getResumenEjecutivo(rng: DateRange): Promise<ResumenEjecut
     db.stockPorDeposito.findMany({
       select: { cantidadFisica: true, costoPromedio: true },
     }),
-    // CxC: saldo deudor cuentas 1.1.3.* (ingreso por ventas)
+    // CxC: saldo deudor cuentas 1.1.3.* (créditos por ventas)
     db.lineaAsiento.aggregate({
       where: {
         asiento: { estado: AsientoEstado.CONTABILIZADO },
         cuenta: {
           tipo: CuentaTipo.ANALITICA,
-          codigo: { startsWith: "1.1.4." },
+          codigo: { startsWith: "1.1.3." },
         },
       },
       _sum: { debe: true, haber: true },
@@ -1607,7 +1608,7 @@ export async function getAnalisisFiscal(rng: DateRange): Promise<AnalisisFiscal>
             estado: AsientoEstado.CONTABILIZADO,
             fecha: { gte: desde12m },
           },
-          cuenta: { codigo: { startsWith: "1.1.5." } },
+          cuenta: { codigo: { startsWith: "1.1.4." } },
         },
         select: {
           debe: true,
@@ -1675,9 +1676,9 @@ export async function getAnalisisFiscal(rng: DateRange): Promise<AnalisisFiscal>
     const debe = toDecimal(l.debe);
     const haber = toDecimal(l.haber);
     if (
-      l.cuenta.codigo.startsWith("1.1.5.1.01") ||
-      l.cuenta.codigo.startsWith("1.1.5.1.04") ||
-      l.cuenta.codigo.startsWith("1.1.5.2.03")
+      l.cuenta.codigo.startsWith("1.1.4.1.01") ||
+      l.cuenta.codigo.startsWith("1.1.4.1.04") ||
+      l.cuenta.codigo.startsWith("1.1.4.2.03")
     ) {
       // IVA crédito (sumamos saldo deudor)
       ivaCredMes.set(k, (ivaCredMes.get(k) ?? new Decimal(0)).plus(debe).minus(haber));

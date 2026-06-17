@@ -6,7 +6,7 @@ import { createTestDb, type TestDb } from "./db";
 //
 // Verifica que `crearMovimientoTesoreriaAction`, con la flag prendida y un
 // proveedor sujeto, produzca:
-//   - asiento DEBE proveedor (bruto) / HABER banco (neto) / HABER 2.1.3.07 (ret.)
+//   - asiento DEBE proveedor (bruto) / HABER banco (neto) / HABER 2.1.4.3.02 (ret.)
 //   - MovimientoTesoreria.monto = neto (salida real de caja)
 //   - RetencionPracticada con snapshot + certificado + AuditLog
 //   - proveedor cancelado por el BRUTO (AplicacionPago = bruto)
@@ -217,7 +217,7 @@ describe("crearMovimientoTesoreriaAction — retención Ganancias (RG 830)", () 
   // Caso central — retención aplica
   // ============================================================
 
-  it("paga con retención: bruto a proveedor, neto a banco, retención a 2.1.3.07", async () => {
+  it("paga con retención: bruto a proveedor, neto a banco, retención a 2.1.4.3.02", async () => {
     process.env.RETENCION_GANANCIAS_ENABLED = "true";
     const s = await seed();
 
@@ -245,7 +245,7 @@ describe("crearMovimientoTesoreriaAction — retención Ganancias (RG 830)", () 
 
     const debeProv = lineas.find((l) => l.cuenta.codigo === "2.1.1.10");
     const haberBanco = lineas.find((l) => l.cuenta.codigo === "1.1.2.01");
-    const haberRet = lineas.find((l) => l.cuenta.codigo === "2.1.3.3.02");
+    const haberRet = lineas.find((l) => l.cuenta.codigo === "2.1.4.3.02");
 
     expect(Number(debeProv?.debe)).toBeCloseTo(300000, 2);
     expect(Number(haberBanco?.haber)).toBeCloseTo(298480, 2);
@@ -418,9 +418,9 @@ describe("crearMovimientoTesoreriaAction — retención Ganancias (RG 830)", () 
       where: { id: res.movimientoId },
     });
     expect(Number(mov.monto)).toBeCloseTo(300000, 2);
-    // no se creó la cuenta 2.1.3.07
+    // no se creó la cuenta 2.1.4.3.02
     const cuentaRet = await db.prisma.cuentaContable.findUnique({
-      where: { codigo: "2.1.3.3.02" },
+      where: { codigo: "2.1.4.3.02" },
     });
     expect(cuentaRet).toBeNull();
   });
@@ -470,7 +470,7 @@ describe("crearMovimientoTesoreriaAction — retención Ganancias (RG 830)", () 
     });
     expect(ret.estado).toBe("ANULADA");
     expect(ret.motivoAnulacion).toMatch(/anulación automática/i);
-    // El asiento quedó ANULADO → la línea 2.1.3.07 sale del saldo CONTABILIZADO.
+    // El asiento quedó ANULADO → la línea 2.1.4.3.02 sale del saldo CONTABILIZADO.
     const asiento = await db.prisma.asiento.findUniqueOrThrow({ where: { id: asientoId } });
     expect(asiento.estado).toBe("ANULADO");
   });

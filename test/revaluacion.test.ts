@@ -261,7 +261,7 @@ describe("MOEDA balance/ER — revaluación de posiciones USD al TC de cierre", 
     const estoque = await mkCuenta("1.1.7.01", "MERCADERIAS", "ACTIVO");
     const proveedor = await mkCuenta("2.1.8.01", "PROVEEDORES DEL EXTERIOR", "PASIVO");
     const banco = await mkCuenta("1.1.2.01", "BANCO ARS", "ACTIVO");
-    const perdidaFx = await mkCuenta("5.8.1.02", "PERDIDA POR DIFERENCIA DE CAMBIO", "EGRESO");
+    const perdidaFx = await mkCuenta("9.2.02", "PERDIDA POR DIFERENCIA DE CAMBIO", "EGRESO");
     await mkCotizacion("2025-12-31", 1400);
 
     // No realizada: estoque +60.000 / proveedor −60.000 → total 0 (se anulan).

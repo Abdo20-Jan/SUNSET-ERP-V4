@@ -194,7 +194,7 @@ export async function seedContenedorEnDF(
       depositoDestinoId: depDestinoId,
     },
   });
-  // Arribo a zona primaria (debita 1.1.5.04) — precondición del traslado de la
+  // Arribo a zona primaria (debita 1.1.7.03) — precondición del traslado de la
   // desconsolidación (guard Onda A #3). Asiento mínimo + FK del embarque. Se
   // omite (conArribo:false) en los flujos de divergencia, que no postean asiento
   // y asertan asiento.count()===0.

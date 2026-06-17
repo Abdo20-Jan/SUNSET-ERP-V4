@@ -45,10 +45,10 @@ import {
   type VentaInput,
 } from "@/lib/actions/ventas";
 
-const FLETE_GASTO_CODIGO = "5.2.1.01";
-const FLETE_POR_PAGAR_CODIGO = "2.1.1.05";
-const IVA_CREDITO_CODIGO = "1.1.5.1.01";
-const PROVEEDOR_FALLBACK_CODIGO = "2.1.1.01";
+const FLETE_GASTO_CODIGO = "6.3.01";
+const FLETE_POR_PAGAR_CODIGO = "2.1.1.07";
+const IVA_CREDITO_CODIGO = "1.1.4.1.01";
+const PROVEEDOR_FALLBACK_CODIGO = "2.1.1.01.01";
 
 describe("Venta — flete como factura de gasto", () => {
   let db: TestDb;

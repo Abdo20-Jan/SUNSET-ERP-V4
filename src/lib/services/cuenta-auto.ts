@@ -35,46 +35,60 @@ function deriveNivel(codigo: string): number {
 // Son rúbricas de uso común; si la SINTETICA ya existe en seed con otro
 // nombre se respeta el existente (find-then-create).
 const SINTETICA_DEFAULTS: Record<string, string> = {
+  // Plan ULTRA (9 clases). El seed crea todas las sintéticas; esto es la red de
+  // seguridad para auto-creación lazy cuando la DB quedó atrás del registry.
   // ----- ACTIVO -----
-  "1.1.3": "INVERSIONES",
-  "1.1.4": "CRÉDITOS POR VENTAS",
-  "1.1.5": "CRÉDITOS FISCALES",
-  "1.1.5.1": "IVA — CRÉDITO FISCAL Y PERCEPCIONES",
-  "1.1.5.2": "INGRESOS BRUTOS — PERCEPCIONES",
-  "1.1.5.3": "GANANCIAS — PERCEPCIONES Y PAGOS A CUENTA",
-  "1.1.5.4": "ADUANA",
-  "1.1.6": "OTROS CRÉDITOS",
-  "1.1.6.1": "ANTICIPOS",
-  "1.1.6.2": "OTROS",
-  "1.1.7": "ESTOQUE",
+  "1.1.1": "CAJA Y BANCOS",
+  "1.1.1.01": "CAJA Y FONDOS FIJOS",
+  "1.1.1.02": "BANCOS",
+  "1.1.1.03": "VALORES A DEPOSITAR",
+  "1.1.2": "INVERSIONES FINANCIERAS CORRIENTES",
+  "1.1.3": "CUENTAS POR COBRAR A CLIENTES",
+  "1.1.3.01": "DEUDORES POR VENTAS NACIONALES",
+  "1.1.3.02": "DEUDORES POR VENTAS DEL EXTERIOR",
+  "1.1.4": "CRÉDITOS IMPOSITIVOS Y ADUANEROS",
+  "1.1.4.1": "IMPUESTO AL VALOR AGREGADO",
+  "1.1.4.2": "INGRESOS BRUTOS",
+  "1.1.4.3": "IMPUESTO A LAS GANANCIAS",
+  "1.1.4.4": "CRÉDITOS ADUANEROS",
+  "1.1.5": "OTRAS CUENTAS POR COBRAR",
+  "1.1.7": "BIENES DE CAMBIO",
   // ----- PASIVO -----
-  "2.1.2": "DEUDAS BANCARIAS Y FINANCIERAS",
-  "2.1.3": "DEUDAS FISCALES",
-  "2.1.3.1": "IVA",
-  "2.1.3.2": "INGRESOS BRUTOS",
-  "2.1.3.3": "GANANCIAS",
-  "2.1.3.4": "RETENCIONES Y OTROS",
-  "2.1.7": "ANTICIPOS DE CLIENTES",
-  "2.1.8": "PROVEEDORES DEL EXTERIOR",
-  // ----- INGRESOS -----
-  "4.2": "OTROS INGRESOS",
-  "4.2.2": "RESULTADOS POR TENENCIA DE INVENTARIO",
-  "4.3": "RESULTADOS FINANCIEROS Y POR TENENCIA",
-  "4.3.1": "RESULTADOS FINANCIEROS POSITIVOS",
-  // ----- EGRESOS -----
+  "2.1.1": "CUENTAS POR PAGAR COMERCIALES",
+  "2.1.1.01": "PROVEEDORES NACIONALES",
+  "2.1.1.02": "PROVEEDORES DEL EXTERIOR",
+  "2.1.2": "ANTICIPOS DE CLIENTES",
+  "2.1.4": "CARGAS FISCALES",
+  "2.1.4.1": "IVA",
+  "2.1.4.2": "INGRESOS BRUTOS",
+  "2.1.4.3": "IMPUESTO A LAS GANANCIAS",
+  "2.1.4.4": "IMPUESTOS ADUANEROS A PAGAR",
+  "2.1.4.5": "OTROS IMPUESTOS Y TASAS",
+  "2.1.5": "DEUDAS FINANCIERAS",
+  "2.1.5.01": "PRÉSTAMOS BANCARIOS — CORTO PLAZO",
+  "2.2.2": "DEUDAS FINANCIERAS NO CORRIENTES",
+  "2.2.2.01": "PRÉSTAMOS BANCARIOS — LARGO PLAZO",
+  // ----- COSTO / GASTOS / RESULTADOS -----
   "5.1": "COSTO DE MERCADERÍAS VENDIDAS",
-  "5.1.1": "COSTO DE VENTAS",
-  "5.2": "GASTOS DE COMERCIALIZACIÓN",
-  "5.2.1": "GASTOS DE COMERCIALIZACIÓN",
-  "5.2.2": "MARKETING POR PROVEEDOR",
-  "5.3": "GASTOS DE ADMINISTRACIÓN",
-  "5.3.1": "GASTOS DE ADMINISTRACIÓN",
-  "5.3.2": "SERVICIOS PROFESIONALES POR PROVEEDOR",
-  "5.3.3": "IT / SOFTWARE POR PROVEEDOR",
-  "5.8": "RESULTADOS FINANCIEROS Y POR TENENCIA",
-  "5.8.1": "RESULTADOS FINANCIEROS NEGATIVOS",
-  "5.10": "IMPUESTO A LAS GANANCIAS",
-  "5.10.1": "IMPUESTO A LAS GANANCIAS",
+  "5.2": "DIFERENCIAS DE INVENTARIO",
+  "6.3": "FLETES Y DISTRIBUCIÓN",
+  "6.4": "PUBLICIDAD Y MARKETING",
+  "6.4.09": "MARKETING POR PROVEEDOR",
+  "6.5": "IMPUESTOS SOBRE VENTAS",
+  "7.2": "HONORARIOS PROFESIONALES",
+  "7.2.09": "HONORARIOS PROFESIONALES POR PROVEEDOR",
+  "7.3": "SISTEMAS Y TECNOLOGÍA",
+  "7.3.09": "IT / SOFTWARE POR PROVEEDOR",
+  "7.4": "ALQUILERES",
+  "7.4.09": "ALQUILERES POR PROVEEDOR",
+  "7.9": "OTROS GASTOS DE ADMINISTRACIÓN",
+  "7.9.09": "OTROS GASTOS DE ADMINISTRACIÓN POR PROVEEDOR",
+  "8.6": "IMPUESTO A LAS GANANCIAS",
+  "9.1": "INTERESES",
+  "9.2": "DIFERENCIAS DE CAMBIO",
+  "9.5": "COMISIONES Y GASTOS BANCARIOS",
+  "9.6": "IMPUESTOS FINANCIEROS",
+  "9.8": "OTROS RESULTADOS FINANCIEROS",
 };
 
 /**
@@ -183,83 +197,87 @@ import type { TipoCanal, TipoProveedor } from "@/generated/prisma/client";
  * de `2.1.1 DEUDAS COMERCIALES`).
  */
 const RANGES = {
-  // Cliente — por canal
-  CLIENTE_MAYORISTA: { padre: "1.1.4", min: 10, max: 19, categoria: CuentaCategoria.ACTIVO },
-  CLIENTE_MINORISTA: { padre: "1.1.4", min: 20, max: 29, categoria: CuentaCategoria.ACTIVO },
+  // Cliente — por canal, bajo 1.1.3.01 (nacional) / 1.1.3.02 (exterior).
+  CLIENTE_MAYORISTA: { padre: "1.1.3.01", min: 10, max: 19, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_MINORISTA: { padre: "1.1.3.01", min: 20, max: 29, categoria: CuentaCategoria.ACTIVO },
   CLIENTE_REVENDEDOR_GOMERIA: {
-    padre: "1.1.4",
+    padre: "1.1.3.01",
     min: 30,
     max: 39,
     categoria: CuentaCategoria.ACTIVO,
   },
-  CLIENTE_TRANSPORTISTA: { padre: "1.1.4", min: 40, max: 49, categoria: CuentaCategoria.ACTIVO },
-  CLIENTE_GRANDE_CUENTA: { padre: "1.1.4", min: 50, max: 59, categoria: CuentaCategoria.ACTIVO },
-  CLIENTE_EXTERIOR: { padre: "1.1.4", min: 60, max: 69, categoria: CuentaCategoria.ACTIVO },
-  CLIENTE_CONSUMIDOR_FINAL: { padre: "1.1.4", min: 99, max: 99, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_TRANSPORTISTA: { padre: "1.1.3.01", min: 40, max: 49, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_GRANDE_CUENTA: { padre: "1.1.3.01", min: 50, max: 59, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_EXTERIOR: { padre: "1.1.3.02", min: 10, max: 69, categoria: CuentaCategoria.ACTIVO },
+  CLIENTE_CONSUMIDOR_FINAL: {
+    padre: "1.1.3.01",
+    min: 90,
+    max: 98,
+    categoria: CuentaCategoria.ACTIVO,
+  },
 
-  // Proveedor nacional — por tipo, bajo 2.1.1
+  // Proveedor nacional — por tipo, bajo 2.1.1.01.
   PROVEEDOR_MERCADERIA_LOCAL: {
-    padre: "2.1.1",
+    padre: "2.1.1.01",
     min: 10,
     max: 14,
     categoria: CuentaCategoria.PASIVO,
   },
-  PROVEEDOR_DESPACHANTE: { padre: "2.1.1", min: 15, max: 19, categoria: CuentaCategoria.PASIVO },
-  PROVEEDOR_LOGISTICA: { padre: "2.1.1", min: 20, max: 24, categoria: CuentaCategoria.PASIVO },
-  PROVEEDOR_ALMACENAJE: { padre: "2.1.1", min: 25, max: 29, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_DESPACHANTE: { padre: "2.1.1.01", min: 15, max: 19, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_LOGISTICA: { padre: "2.1.1.01", min: 20, max: 24, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_ALMACENAJE: { padre: "2.1.1.01", min: 25, max: 29, categoria: CuentaCategoria.PASIVO },
   PROVEEDOR_SERVICIOS_PROFESIONALES: {
-    padre: "2.1.1",
+    padre: "2.1.1.01",
     min: 30,
     max: 34,
     categoria: CuentaCategoria.PASIVO,
   },
-  PROVEEDOR_ALQUILERES: { padre: "2.1.1", min: 35, max: 39, categoria: CuentaCategoria.PASIVO },
-  PROVEEDOR_IT_SOFTWARE: { padre: "2.1.1", min: 40, max: 44, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_ALQUILERES: { padre: "2.1.1.01", min: 35, max: 39, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_IT_SOFTWARE: { padre: "2.1.1.01", min: 40, max: 44, categoria: CuentaCategoria.PASIVO },
   PROVEEDOR_GASTOS_PORTUARIOS: {
-    padre: "2.1.1",
+    padre: "2.1.1.01",
     min: 45,
     max: 49,
     categoria: CuentaCategoria.PASIVO,
   },
-  PROVEEDOR_MARKETING: { padre: "2.1.1", min: 50, max: 54, categoria: CuentaCategoria.PASIVO },
-  PROVEEDOR_OTRO: { padre: "2.1.1", min: 55, max: 99, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_MARKETING: { padre: "2.1.1.01", min: 50, max: 54, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_OTRO: { padre: "2.1.1.01", min: 55, max: 99, categoria: CuentaCategoria.PASIVO },
 
-  // Proveedor extranjero — bajo 2.1.8 PROVEEDORES DEL EXTERIOR
+  // Proveedor extranjero — bajo 2.1.1.02 PROVEEDORES DEL EXTERIOR.
   PROVEEDOR_MERCADERIA_EXTERIOR: {
-    padre: "2.1.8",
+    padre: "2.1.1.02",
     min: 10,
     max: 49,
     categoria: CuentaCategoria.PASIVO,
   },
   PROVEEDOR_SERVICIOS_EXTERIOR: {
-    padre: "2.1.8",
+    padre: "2.1.1.02",
     min: 50,
     max: 99,
     categoria: CuentaCategoria.PASIVO,
   },
 
   // Cuenta de gasto POR PROVEEDOR (contrapartida del DEBE en facturas) — sólo
-  // gastos de PERÍODO. Los servicios de IMPORTACIÓN (despachante, portuarios,
-  // logística, almacenaje bonded, flete internacional) capitalizan al stock
-  // (1.1.7.x, RT17) vía GASTO_POR_TIPO_PROVEEDOR y NO crean cuenta de resultado
-  // (rangoGastoByTipo → null). MERCADERIA_LOCAL/EXTERIOR tampoco se desagregan
-  // (stock compartido 1.1.7.01 / 1.1.7.02).
+  // gastos de PERÍODO, bajo sintéticas dedicadas .09. Los servicios de
+  // IMPORTACIÓN capitalizan al stock (1.1.7.02, RT17) vía
+  // GASTO_POR_TIPO_PROVEEDOR y NO crean cuenta de resultado (rangoGastoByTipo
+  // → null). MERCADERIA_LOCAL/EXTERIOR tampoco se desagregan.
   GASTO_SERVICIOS_PROFESIONALES: {
-    padre: "5.3.2",
+    padre: "7.2.09",
     min: 10,
     max: 29,
     categoria: CuentaCategoria.EGRESO,
   },
-  GASTO_ALQUILERES: { padre: "5.3.1", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
-  GASTO_IT_SOFTWARE: { padre: "5.3.3", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
-  GASTO_MARKETING: { padre: "5.2.2", min: 10, max: 49, categoria: CuentaCategoria.EGRESO },
-  GASTO_OTRO: { padre: "5.3.1", min: 50, max: 89, categoria: CuentaCategoria.EGRESO },
+  GASTO_ALQUILERES: { padre: "7.4.09", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
+  GASTO_IT_SOFTWARE: { padre: "7.3.09", min: 10, max: 29, categoria: CuentaCategoria.EGRESO },
+  GASTO_MARKETING: { padre: "6.4.09", min: 10, max: 49, categoria: CuentaCategoria.EGRESO },
+  GASTO_OTRO: { padre: "7.9.09", min: 10, max: 89, categoria: CuentaCategoria.EGRESO },
 
-  // Bancos / cajas / préstamos — sin desagregación por tipo
-  CAJA: { padre: "1.1.1", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
-  BANCO: { padre: "1.1.2", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
-  PRESTAMO_CP: { padre: "2.1.2", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
-  PRESTAMO_LP: { padre: "2.2.1", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
+  // Bancos / cajas / préstamos — sin desagregación por tipo.
+  CAJA: { padre: "1.1.1.01", min: 10, max: 90, categoria: CuentaCategoria.ACTIVO },
+  BANCO: { padre: "1.1.1.02", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
+  PRESTAMO_CP: { padre: "2.1.5.01", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
+  PRESTAMO_LP: { padre: "2.2.2.01", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
 } as const;
 
 export type RangoCuentaAuto = keyof typeof RANGES;
@@ -325,9 +343,12 @@ export async function crearCuentaParaEntidad(
       nombre: nombre.toUpperCase().slice(0, 80),
       tipo: CuentaTipo.ANALITICA,
       categoria: cfg.categoria,
-      nivel: 4,
+      // Derivado del código (los padres ULTRA varían de nivel: 1.1.1.01 caja=5,
+      // 2.1.1.01 proveedor=4, 1.1.3.01 cliente=4).
+      nivel: deriveNivel(codigo),
       padreCodigo: cfg.padre,
       activa: true,
+      naturaleza: naturalezaPorDefecto(cfg.categoria),
     },
     select: { id: true, codigo: true, nombre: true },
   });

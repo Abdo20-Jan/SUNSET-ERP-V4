@@ -18,20 +18,26 @@ import {
 } from "@/generated/prisma/client";
 
 const SUGGESTED_CUENTA_DEFAULTS: Record<string, { nombre: string; categoria: CuentaCategoria }> = {
-  "5.8.1.01": { nombre: "COMISIONES BANCARIAS", categoria: CuentaCategoria.EGRESO },
-  "5.8.1.04": { nombre: "IMPUESTO DE SELLOS", categoria: CuentaCategoria.EGRESO },
-  "5.8.1.05": {
-    nombre: "IMPUESTO LEY 25413 (NO COMPUTABLE)",
+  "9.5.01": { nombre: "COMISIONES Y GASTOS BANCARIOS", categoria: CuentaCategoria.EGRESO },
+  "9.6.02": {
+    nombre: "IMPUESTO DE SELLOS SOBRE OPERACIONES FINANCIERAS",
     categoria: CuentaCategoria.EGRESO,
   },
-  "5.8.1.07": { nombre: "INTERESES PAGADOS", categoria: CuentaCategoria.EGRESO },
-  "1.1.5.1.01": {
+  "9.6.01": {
+    nombre: "IMPUESTO LEY 25.413 (PORCIÓN NO COMPUTABLE)",
+    categoria: CuentaCategoria.EGRESO,
+  },
+  "9.1.03": { nombre: "INTERESES PERDIDOS — PRÉSTAMOS", categoria: CuentaCategoria.EGRESO },
+  "1.1.4.1.01": {
     nombre: "IVA CRÉDITO FISCAL — COMPRAS LOCALES",
     categoria: CuentaCategoria.ACTIVO,
   },
-  "1.1.5.1.02": { nombre: "PERCEPCIÓN IVA RG 2408 (BANCARIA)", categoria: CuentaCategoria.ACTIVO },
-  "1.1.5.2.03": { nombre: "PERCEPCIÓN IIBB BANCARIA (SIRCREB)", categoria: CuentaCategoria.ACTIVO },
-  "1.1.3.01": { nombre: "INVERSIONES EN FONDOS COMUNES", categoria: CuentaCategoria.ACTIVO },
+  "1.1.4.1.06": { nombre: "IVA PERCEPCIÓN RG 2408 (BANCARIA)", categoria: CuentaCategoria.ACTIVO },
+  "1.1.4.2.03": {
+    nombre: "IIBB RECAUDACIONES BANCARIAS — SIRCREB",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+  "1.1.2.01": { nombre: "FONDOS COMUNES DE INVERSIÓN", categoria: CuentaCategoria.ACTIVO },
 };
 
 function normalizarCuit(raw: string | null): string | null {
