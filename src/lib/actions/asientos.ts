@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import {
   AsientoError,
@@ -108,9 +109,11 @@ export async function contabilizarAsientoAction(
 }
 
 export async function anularAsientoAction(asientoId: string): Promise<AsientoStateActionResult> {
-  const session = await auth();
-  if (!session) {
-    return { ok: false, error: "No autorizado." };
+  // Anular un asiento manual es una corrección contable administrativa: exige
+  // ADMIN. requireAdmin revalida el rol contra la DB.
+  const guard = await requireAdmin();
+  if (!guard.ok) {
+    return { ok: false, error: guard.error };
   }
 
   // Bloquear anulación directa de asientos que son de Zona Primaria o de
@@ -351,9 +354,10 @@ export type MoverAsientosResult =
 export async function moverAsientosDePeriodoAction(
   raw: MoverAsientosInput,
 ): Promise<MoverAsientosResult> {
-  const session = await auth();
-  if (!session) {
-    return { ok: false, error: "No autorizado." };
+  // Mover asientos entre períodos es una corrección contable administrativa.
+  const guard = await requireAdmin();
+  if (!guard.ok) {
+    return { ok: false, error: guard.error };
   }
 
   const parsed = moverInputSchema.safeParse(raw);
@@ -422,9 +426,11 @@ export type CambiarFechaResult =
 export async function cambiarFechaAsientosAction(
   raw: CambiarFechaInput,
 ): Promise<CambiarFechaResult> {
-  const session = await auth();
-  if (!session) {
-    return { ok: false, error: "No autorizado." };
+  // Cambiar la fecha de un asiento lo reasigna de período: corrección contable
+  // administrativa.
+  const guard = await requireAdmin();
+  if (!guard.ok) {
+    return { ok: false, error: guard.error };
   }
 
   const parsed = cambiarFechaInputSchema.safeParse(raw);
@@ -528,9 +534,11 @@ function sameDay(a: Date, b: Date): boolean {
 export async function autoCorrigirFechaAsientosAction(
   raw: AutoCorrigirFechaInput,
 ): Promise<AutoCorrigirFechaResult> {
-  const session = await auth();
-  if (!session) {
-    return { ok: false, error: "No autorizado." };
+  // Autocorregir la fecha contra la fuente reasigna período: corrección contable
+  // administrativa.
+  const guard = await requireAdmin();
+  if (!guard.ok) {
+    return { ok: false, error: guard.error };
   }
 
   const parsed = autoCorrigirInputSchema.safeParse(raw);

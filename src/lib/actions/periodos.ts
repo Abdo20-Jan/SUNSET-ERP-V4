@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import { AsientoEstado, PeriodoEstado } from "@/generated/prisma/client";
 
@@ -11,9 +11,11 @@ export type PeriodoActionResult =
   | { ok: false; error: string };
 
 export async function cerrarPeriodo(periodoId: number): Promise<PeriodoActionResult> {
-  const session = await auth();
-  if (!session) {
-    return { ok: false, error: "No autorizado." };
+  // Cerrar/reabrir un período contable es una operación administrativa: exige
+  // ADMIN (no sólo sesión). requireAdmin revalida el rol contra la DB.
+  const guard = await requireAdmin();
+  if (!guard.ok) {
+    return { ok: false, error: guard.error };
   }
 
   const periodo = await db.periodoContable.findUnique({
@@ -55,9 +57,11 @@ export async function cerrarPeriodo(periodoId: number): Promise<PeriodoActionRes
 }
 
 export async function reabrirPeriodo(periodoId: number): Promise<PeriodoActionResult> {
-  const session = await auth();
-  if (!session) {
-    return { ok: false, error: "No autorizado." };
+  // Cerrar/reabrir un período contable es una operación administrativa: exige
+  // ADMIN (no sólo sesión). requireAdmin revalida el rol contra la DB.
+  const guard = await requireAdmin();
+  if (!guard.ok) {
+    return { ok: false, error: guard.error };
   }
 
   const periodo = await db.periodoContable.findUnique({

@@ -6,12 +6,19 @@ export const authConfig = {
   callbacks: {
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user;
-      const isOnLogin = nextUrl.pathname.startsWith("/login");
-      if (isOnLogin) {
+      const { pathname } = nextUrl;
+      if (pathname.startsWith("/login")) {
         if (isLoggedIn) return Response.redirect(new URL("/dashboard", nextUrl));
         return true;
       }
-      return isLoggedIn;
+      // Sin sesión → false: NextAuth redirige a la página de login (pages.signIn).
+      if (!isLoggedIn) return false;
+      // Gate de rol: /admin sólo para ADMIN. El rol viaja en el JWT, así que
+      // está disponible en el edge sin tocar la base.
+      if (pathname.startsWith("/admin") && auth?.user?.role !== "ADMIN") {
+        return Response.redirect(new URL("/dashboard", nextUrl));
+      }
+      return true;
     },
     jwt({ token, user, trigger, session }) {
       if (user) {
