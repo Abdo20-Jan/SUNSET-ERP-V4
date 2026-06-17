@@ -12,6 +12,8 @@ import { revertirIngresoEmbarque } from "@/lib/services/stock";
 import {
   COMEX_ZPA_CODIGOS,
   COMPRA_CODIGOS,
+  cuentaCmvPorCategoria,
+  cuentaVentaLocalPorCategoria,
   DIFERENCIA_CAMBIO_CODIGOS,
   EMBARQUE_CODIGOS,
   EXTRACTO_BANCARIO_CODIGOS,
@@ -810,11 +812,11 @@ export async function crearAsientoMovimientoTesoreria(
         : {};
 
     // Caso especial — Impuesto Ley 25413 (Imp. al cheque/IDCB):
-    // 33% va como crédito fiscal pago a cuenta de Ganancias (1.1.5.3.02),
-    // 67% como gasto (5.8.1.05). Aplica sólo en PAGO y cuando la
-    // contrapartida elegida es la cuenta del impuesto.
+    // 33% va como crédito fiscal pago a cuenta de Ganancias (1.1.4.3.02),
+    // 67% como gasto (9.6.01, Impuestos financieros). Aplica sólo en PAGO y
+    // cuando la contrapartida elegida es la cuenta del impuesto.
     const esImpuestoLey25413 =
-      mov.tipo === MovimientoTesoreriaTipo.PAGO && mov.cuentaContable?.codigo === "5.8.1.05";
+      mov.tipo === MovimientoTesoreriaTipo.PAGO && mov.cuentaContable?.codigo === "9.6.01";
 
     // Caso Fase 2 — Pago USD contra proveedor USD-nato con saldo pendiente:
     // generar asiento ARS misto con diferencia cambiaria automática.
@@ -3104,7 +3106,8 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
           select: {
             id: true,
             cantidad: true,
-            producto: { select: { costoPromedio: true } },
+            subtotal: true,
+            producto: { select: { costoPromedio: true, categoria: true } },
           },
         },
         chequesRecibidos: {
@@ -3173,6 +3176,68 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
       });
     }
 
+    // ----- Split de Ventas/CMV por categoría de producto (ULTRA) -----
+    // Agrupa las líneas por la cuenta destino (helper por Producto.categoria) y
+    // reparte el monto convertido con el residual de redondeo al grupo de mayor
+    // importe, de modo que la suma de los splits coincida EXACTO con el total
+    // único (subtotal de Ventas / totalCosto de CMV) y el asiento cierre.
+    type Dec = ReturnType<typeof toDecimal>;
+    type VentaItem = NonNullable<typeof venta>["items"][number];
+    type SplitLinea = { codigo: string; def: CuentaDef; monto: Dec };
+    const repartirPorCuenta = (
+      selDef: (cat?: string | null) => CuentaDef,
+      montoSrcDeItem: (it: VentaItem) => Dec,
+      factor: Dec,
+      totalDestino: Dec,
+    ): SplitLinea[] => {
+      const acumSrc = new Map<string, { def: CuentaDef; src: Dec }>();
+      for (const it of venta.items) {
+        const def = selDef(it.producto.categoria);
+        const prev = acumSrc.get(def.codigo);
+        const src = montoSrcDeItem(it);
+        if (prev) prev.src = prev.src.plus(src);
+        else acumSrc.set(def.codigo, { def, src });
+      }
+      const splits: SplitLinea[] = [...acumSrc.entries()].map(([codigo, g]) => ({
+        codigo,
+        def: g.def,
+        monto: g.src.times(factor).toDecimalPlaces(2),
+      }));
+      if (splits.length === 0) return splits;
+      // Residual de redondeo → al grupo de mayor importe, para alinear la
+      // granularidad con el total único (ver feedback redondeo helper vs asiento).
+      const suma = splits.reduce((a, s) => a.plus(s.monto), toDecimal(0));
+      const residual = totalDestino.minus(suma);
+      if (!residual.isZero()) {
+        let idxMax = 0;
+        for (let i = 1; i < splits.length; i++) {
+          if (splits[i].monto.gt(splits[idxMax].monto)) idxMax = i;
+        }
+        splits[idxMax].monto = splits[idxMax].monto.plus(residual);
+      }
+      return splits;
+    };
+
+    const ventasSplit = repartirPorCuenta(
+      cuentaVentaLocalPorCategoria,
+      (it) => toDecimal(it.subtotal),
+      tc,
+      subtotal,
+    );
+    const cmvSplit = repartirPorCuenta(
+      cuentaCmvPorCategoria,
+      (it) => toDecimal(it.producto.costoPromedio).times(it.cantidad),
+      toDecimal(1), // costoPromedio ya está en ARS — sin conversión por TC.
+      totalCosto,
+    );
+
+    // Crea lazy las cuentas hoja del split que no estén en el registry base.
+    for (const s of [...ventasSplit, ...cmvSplit]) {
+      if (!porCodigo.has(s.codigo)) {
+        porCodigo.set(s.codigo, await getOrCreateCuenta(inner, s.def));
+      }
+    }
+
     // Provisión Impuesto Ganancias sobre la utilidad bruta
     // (subtotal - costo - flete - IIBB embutido). Flete e IIBB
     // jurisdiccional reducen la utilidad gravable (gastos deducibles).
@@ -3223,12 +3288,16 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
         descripcion: `Venta ${venta.numero} — anticipo (cheques exceden total facturado)`,
       });
     }
-    lineas.push({
-      cuentaId: porCodigo.get(VENTA_CODIGOS.VENTAS.codigo)!,
-      debe: 0,
-      haber: money(subtotal).toString(),
-      descripcion: `Venta ${venta.numero} — ingreso neto`,
-    });
+    // Ingreso neto desagregado por tipo de neumático (4.1.01.0x). La suma de los
+    // splits == subtotal (residual de redondeo absorbido en repartirPorCuenta).
+    for (const s of ventasSplit) {
+      lineas.push({
+        cuentaId: porCodigo.get(s.codigo)!,
+        debe: 0,
+        haber: money(s.monto).toString(),
+        descripcion: `Venta ${venta.numero} — ingreso neto (${s.codigo})`,
+      });
+    }
     if (iva.gt(0)) {
       lineas.push({
         cuentaId: porCodigo.get(VENTA_CODIGOS.IVA_DEBITO.codigo)!,
@@ -3282,12 +3351,16 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
       const cuentaContrapartidaCodigo = isStockDualEnabled()
         ? VENTA_CODIGOS.MERCADERIAS_A_ENTREGAR.codigo
         : VENTA_CODIGOS.MERCADERIAS.codigo;
-      lineas.push({
-        cuentaId: porCodigo.get(VENTA_CODIGOS.CMV.codigo)!,
-        debe: money(totalCosto).toString(),
-        haber: 0,
-        descripcion: `Venta ${venta.numero} — CMV (costo a promedio)`,
-      });
+      // CMV desagregado por tipo de neumático (5.1.0x). La suma == totalCosto;
+      // la contrapartida de inventario es única (no se desagrega por tipo).
+      for (const s of cmvSplit) {
+        lineas.push({
+          cuentaId: porCodigo.get(s.codigo)!,
+          debe: money(s.monto).toString(),
+          haber: 0,
+          descripcion: `Venta ${venta.numero} — CMV (costo a promedio) (${s.codigo})`,
+        });
+      }
       lineas.push({
         cuentaId: porCodigo.get(cuentaContrapartidaCodigo)!,
         debe: 0,

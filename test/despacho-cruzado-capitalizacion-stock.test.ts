@@ -267,9 +267,9 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
     expect(debePorCuenta.has("5.7.2.99")).toBe(false);
 
     // Pasivos aduaneros por pagar PERMANECEN (la obligación a pagar).
-    expect(haberPorCuenta.get("2.1.5.01")).toBeCloseTo(100000, 2); // DIE por pagar
-    expect(haberPorCuenta.get("2.1.5.02")).toBeCloseTo(10000, 2); // Tasa por pagar
-    expect(haberPorCuenta.get("2.1.5.03")).toBeCloseTo(20000, 2); // Arancel por pagar
+    expect(haberPorCuenta.get("2.1.4.4.01")).toBeCloseTo(100000, 2); // DIE por pagar
+    expect(haberPorCuenta.get("2.1.4.4.02")).toBeCloseTo(10000, 2); // Tasa por pagar
+    expect(haberPorCuenta.get("2.1.4.4.03")).toBeCloseTo(20000, 2); // Arancel por pagar
 
     // Factura DESPACHO: HABER al proveedor (CxP) por el total ARS.
     const provCodigo = (
@@ -278,10 +278,10 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
     expect(haberPorCuenta.get(provCodigo)).toBeCloseTo(40000, 2); // 40 × 1000
 
     // IVA/IIBB/Ganancias de aduana siguen como crédito fiscal (no capitalizan).
-    expect(debePorCuenta.get("1.1.5.1.03")).toBeCloseTo(5000, 2); // IVA importación
-    expect(debePorCuenta.get("1.1.5.1.04")).toBeCloseTo(3000, 2); // IVA adicional
-    expect(debePorCuenta.get("1.1.5.2.01")).toBeCloseTo(1000, 2); // IIBB importación
-    expect(debePorCuenta.get("1.1.5.3.01")).toBeCloseTo(2000, 2); // Ganancias
+    expect(debePorCuenta.get("1.1.4.1.03")).toBeCloseTo(5000, 2); // IVA importación
+    expect(debePorCuenta.get("1.1.4.1.04")).toBeCloseTo(3000, 2); // IVA adicional
+    expect(debePorCuenta.get("1.1.4.2.01")).toBeCloseTo(1000, 2); // IIBB importación
+    expect(debePorCuenta.get("1.1.4.3.01")).toBeCloseTo(2000, 2); // Ganancias
 
     // Asiento balanceado.
     const totalDebe = lineas.reduce((acc, l) => acc + Number(l.debe), 0);
@@ -474,9 +474,9 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
     expect(haberPorCuenta.get("1.1.7.04")).toBe("17008398.00");
 
     // Pasivos aduaneros por separado (cada uno round2(tributo×TCdsp)).
-    expect(haberPorCuenta.get("2.1.5.01")).toBe("2474665.88"); // DIE
-    expect(haberPorCuenta.get("2.1.5.02")).toBe("464004.23"); // Tasa
-    expect(haberPorCuenta.get("2.1.5.03")).toBe("13995.00"); // Arancel
+    expect(haberPorCuenta.get("2.1.4.4.01")).toBe("2474665.88"); // DIE
+    expect(haberPorCuenta.get("2.1.4.4.02")).toBe("464004.23"); // Tasa
+    expect(haberPorCuenta.get("2.1.4.4.03")).toBe("13995.00"); // Arancel
   });
 
   it("TC decimal + factura DESPACHO en USD con TC ≠ embarque: balancea y capitaliza", async () => {
@@ -498,9 +498,8 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
     // Factura USD con TC factura distinto (1410.75) — fuerza otro half-up.
     await db.prisma.embarqueCosto.create({
       data: {
-        embarqueId: (
-          await db.prisma.despacho.findUniqueOrThrow({ where: { id: s.despachoId } })
-        ).embarqueId,
+        embarqueId: (await db.prisma.despacho.findUniqueOrThrow({ where: { id: s.despachoId } }))
+          .embarqueId,
         proveedorId: provDesp.id,
         despachoId: s.despachoId,
         moneda: "USD",

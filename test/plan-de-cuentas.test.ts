@@ -42,14 +42,13 @@ describe("validarPlan — guard de consistencia del plan RT9", () => {
     expect(validarPlan(plan).some((p) => p.regla === "R2_CATEGORIA")).toBe(true);
   });
 
-  it("R3: código bajo 5.x marcado inventariable", () => {
+  it("R3: cuenta de resultado (5-9) marcada inventariable", () => {
     const plan: CuentaPlan[] = [
       mk({ codigo: "5", tipo: "SINTETICA", categoria: "EGRESO" }),
       mk({ codigo: "5.1", tipo: "SINTETICA", categoria: "EGRESO" }),
-      mk({ codigo: "5.1.1", tipo: "SINTETICA", categoria: "EGRESO" }),
-      mk({ codigo: "5.1.1.01", categoria: "EGRESO", inventariable: true }),
+      mk({ codigo: "5.1.01", categoria: "EGRESO", inventariable: true }),
     ];
-    expect(validarPlan(plan).some((p) => p.regla === "R3_INVENTARIABLE_5X")).toBe(true);
+    expect(validarPlan(plan).some((p) => p.regla === "R3_INVENTARIABLE_RESULTADO")).toBe(true);
   });
 
   it("R4: regularizadora '(-)' sin naturaleza explícita", () => {
@@ -108,9 +107,9 @@ describe("PLAN_RT9 — el plan v3 real", () => {
     expect(PLAN_RT9.some((c) => c.codigo.startsWith("5.") && c.inventariable)).toBe(false);
   });
 
-  it("tiene el par único de diferencia de cambio (4.3.1.02 ganancia / 5.8.1.02 pérdida)", () => {
-    expect(PLAN_RT9.find((c) => c.codigo === "4.3.1.02")).toBeDefined();
-    expect(PLAN_RT9.find((c) => c.codigo === "5.8.1.02")).toBeDefined();
+  it("tiene la diferencia de cambio realizada en la clase 9 (9.2.01 ganancia / 9.2.02 pérdida)", () => {
+    expect(PLAN_RT9.find((c) => c.codigo === "9.2.01")).toBeDefined();
+    expect(PLAN_RT9.find((c) => c.codigo === "9.2.02")).toBeDefined();
   });
 });
 

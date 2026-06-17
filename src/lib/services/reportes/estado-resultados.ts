@@ -99,9 +99,10 @@ async function buildEstadoResultadosRT9(
     const esGanancia = difCambioNoRealizada.gte(0);
     // Contribución haber−debe = difCambioNoRealizada (con signo).
     leaves.push({
-      codigo: esGanancia ? "4.3.1.02" : "5.8.1.02",
+      // Diferencia de cambio NO realizada (revaluación al cierre), clase 9.2.
+      codigo: esGanancia ? "9.2.03" : "9.2.04",
       categoria: esGanancia ? "INGRESO" : "EGRESO",
-      rubroEECC: "Resultados Financieros y por Tenencia",
+      rubroEECC: "Resultados financieros y por tenencia",
       debe: esGanancia ? new Decimal(0) : difCambioNoRealizada.abs(),
       haber: esGanancia ? difCambioNoRealizada : new Decimal(0),
     });

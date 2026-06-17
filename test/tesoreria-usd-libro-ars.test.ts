@@ -112,7 +112,7 @@ describe("E3 — tesorería USD graba el libro en ARS", () => {
       "ACTIVO",
     );
     const cuentaGasto = await mkCuenta("5.2.1.01", "COMISIONES BANCARIAS", "EGRESO");
-    const cuentaImpuesto = await mkCuenta("5.8.1.05", "IMPUESTO LEY 25413", "EGRESO");
+    const cuentaImpuesto = await mkCuenta("9.6.01", "IMPUESTO LEY 25413", "EGRESO");
     const cuentaProveedorA = await mkCuenta("2.1.1.10", "PROVEEDOR A", "PASIVO");
     const cuentaProveedorB = await mkCuenta("2.1.1.11", "PROVEEDOR B", "PASIVO");
 
@@ -189,7 +189,7 @@ describe("E3 — tesorería USD graba el libro en ARS", () => {
 
     const banco = lineas.find((l) => l.cuentaId === s.cuentaBancoContableId);
     const gasto = lineas.find((l) => l.cuentaId === s.cuentaImpuestoId);
-    const credito = lineas.find((l) => l.cuenta.codigo === "1.1.5.3.02");
+    const credito = lineas.find((l) => l.cuenta.codigo === "1.1.4.3.02");
 
     // 100 USD × TC 1000 = 100.000 ARS → crédito 33.000, gasto 67.000.
     expect(Number(banco?.haber)).toBeCloseTo(100_000, 2);
@@ -224,7 +224,7 @@ describe("E3 — tesorería USD graba el libro en ARS", () => {
       100,
       2,
     );
-    expect(Number(lineas.find((l) => l.cuenta.codigo === "1.1.5.3.02")?.debe)).toBeCloseTo(33, 2);
+    expect(Number(lineas.find((l) => l.cuenta.codigo === "1.1.4.3.02")?.debe)).toBeCloseTo(33, 2);
     expect(Number(lineas.find((l) => l.cuentaId === s.cuentaImpuestoId)?.debe)).toBeCloseTo(67, 2);
     expect(mov.asiento?.moneda).toBe("ARS");
   });

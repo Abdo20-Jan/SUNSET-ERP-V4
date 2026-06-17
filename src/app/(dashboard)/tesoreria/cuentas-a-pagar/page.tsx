@@ -66,9 +66,9 @@ export default async function CuentasAPagarPage() {
     getSaldosExteriorPorProveedor(),
   ]);
 
-  // Filtrar 2.1.5.99 de la sección Aduana genérica — el saldo pendiente
+  // Filtrar 2.1.4.4.99 de la sección Aduana genérica — el saldo pendiente
   // de refuerzo se gestiona en la sección VEP con flujo dedicado.
-  const aduanaSinRefuerzo = data.aduana.filter((r) => r.cuentaCodigo !== "2.1.5.99");
+  const aduanaSinRefuerzo = data.aduana.filter((r) => r.cuentaCodigo !== "2.1.4.4.99");
 
   // Retenciones de Ganancias practicadas pendientes de depósito en ARCA —
   // recordatorio del VEP (sólo si la feature está activa).

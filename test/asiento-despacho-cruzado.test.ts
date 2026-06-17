@@ -203,7 +203,7 @@ describe("contabilización despacho cruzado (PR 4.5)", () => {
     // El DIE YA NO va a egreso 5.7.1.01 (capitalizado en 1.1.5.01); el HABER
     // del pasivo aduanero (2.1.5.01) permanece como obligación a pagar.
     expect(debePorCuenta.has("5.7.1.01")).toBe(false);
-    expect(haberPorCuenta.get("2.1.5.01")).toBe("100000.00");
+    expect(haberPorCuenta.get("2.1.4.4.01")).toBe("100000.00");
     const totalDebe = lineas.reduce((s2, l) => s2 + Number(l.debe), 0);
     const totalHaber = lineas.reduce((s2, l) => s2 + Number(l.haber), 0);
     expect(totalDebe).toBeCloseTo(totalHaber, 2); // asiento balanceado

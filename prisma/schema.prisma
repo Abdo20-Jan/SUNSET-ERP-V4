@@ -41,6 +41,7 @@ enum MonedaCuenta {
   ARS
   USD
   BI
+  ME
 }
 
 enum PeriodoEstado {

@@ -915,10 +915,10 @@ export function MovimientoForm({
             contrapartidaSeleccionada &&
             ("cuentaContableCodigo" in contrapartidaSeleccionada
               ? contrapartidaSeleccionada.cuentaContableCodigo
-              : contrapartidaSeleccionada.codigo) === "5.8.1.05" && (
+              : contrapartidaSeleccionada.codigo) === "9.6.01" && (
               <div className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-200">
                 <strong>Imp. Ley 25413 (IDCB)</strong> — el sistema dividirá automáticamente: 67%
-                como gasto (5.8.1.06) y 33% como crédito pago a cuenta de Ganancias (1.1.4.12).
+                como gasto (9.6.01) y 33% como crédito pago a cuenta de Ganancias (1.1.4.3.02).
               </div>
             )}
           {retencionEfectiva && (
@@ -1035,10 +1035,10 @@ function AsientoPreview({
   const valorFmt = totalCalculado > 0 ? totalCalculado.toFixed(2) : "—";
 
   // Caso especial: 1 sola línea + cuenta 5.8.1.06 + tipo PAGO.
-  // El backend divide 33% a 1.1.4.12 (crédito Ganancias) + 67% a gasto.
+  // El backend divide 33% a 1.1.4.3.02 (crédito Ganancias) + 67% a gasto (9.6.01).
   const unicaLineaCodigo =
     lineas.length === 1 && lineas[0]?.cuenta ? lineas[0].cuenta.codigo : null;
-  const esImpuestoLey25413 = tipo === "PAGO" && unicaLineaCodigo === "5.8.1.05";
+  const esImpuestoLey25413 = tipo === "PAGO" && unicaLineaCodigo === "9.6.01";
 
   let rows: Array<{
     role: string;
@@ -1062,8 +1062,8 @@ function AsientoPreview({
         role: "DEBE",
         cuenta: null,
         cuentaOverride: {
-          codigo: "1.1.5.3.02",
-          nombre: "CRÉDITO LEY 25413 PAGO A CUENTA GANANCIAS (33%)",
+          codigo: "1.1.4.3.02",
+          nombre: "IMPUESTO LEY 25.413 COMPUTABLE (33%)",
         },
         debe: credito.toFixed(2),
         haber: "—",
@@ -1085,7 +1085,7 @@ function AsientoPreview({
     ];
   } else if (tipo === "PAGO" && retencion) {
     // Pago con retención Ganancias: proveedor por el bruto, banco por el neto,
-    // y el pasivo 2.1.3.07 por la retención.
+    // y el pasivo 2.1.4.3.02 (SICORE) por la retención.
     rows = [
       ...lineas.map((l) => {
         const m = Number(l.monto);
@@ -1095,7 +1095,7 @@ function AsientoPreview({
       {
         role: "HABER",
         cuenta: null,
-        cuentaOverride: { codigo: "2.1.3.3.02", nombre: "RETENCIONES GANANCIAS A PAGAR" },
+        cuentaOverride: { codigo: "2.1.4.3.02", nombre: "RETENCIONES GANANCIAS A PAGAR (SICORE)" },
         debe: "—",
         haber: retencion.importeRetenido,
       },
