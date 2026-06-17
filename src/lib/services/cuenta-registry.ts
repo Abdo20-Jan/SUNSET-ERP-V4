@@ -85,17 +85,6 @@ export const VENTA_CODIGOS = {
     nombre: "MERCADERÍAS A ENTREGAR",
     categoria: CuentaCategoria.ACTIVO,
   },
-  // Provisión Impuesto a las Ganancias por venta (clase 8 — Otros Resultados).
-  PROVISION_GANANCIAS_GASTO: {
-    codigo: "8.6.01",
-    nombre: "IMPUESTO A LAS GANANCIAS — CORRIENTE",
-    categoria: CuentaCategoria.EGRESO,
-  },
-  PROVISION_GANANCIAS_PASIVO: {
-    codigo: "2.1.4.3.01",
-    nombre: "IMPUESTO A LAS GANANCIAS A PAGAR (PROVISIÓN)",
-    categoria: CuentaCategoria.PASIVO,
-  },
   // Cheques de terceros recibidos como cobro — quedan en cartera (Valores a
   // depositar) hasta acreditarse. DEBE al recibir, HABER al acreditar.
   VALORES_A_COBRAR: {
@@ -120,9 +109,6 @@ export const VENTA_CODIGOS = {
     categoria: CuentaCategoria.PASIVO,
   },
 } as const satisfies Record<string, CuentaDef>;
-
-// Tasa de Impuesto a las Ganancias (Ley 27.430). 35% (no PyME). Editable acá.
-export const TASA_PROVISION_GANANCIAS = 0.35;
 
 /**
  * Split de Ventas locales por tipo de neumático (Producto.categoria → folha

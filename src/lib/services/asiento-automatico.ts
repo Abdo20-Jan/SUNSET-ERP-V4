@@ -21,7 +21,6 @@ import {
   GASTO_POR_TIPO_PROVEEDOR,
   PORCENTAJE_LEY_25413_COMPUTABLE,
   TRANSFERENCIA_CODIGOS,
-  TASA_PROVISION_GANANCIAS,
   VENTA_CODIGOS,
 } from "@/lib/services/cuenta-registry";
 import {
@@ -3256,14 +3255,6 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
       }
     }
 
-    // Provisión Impuesto Ganancias sobre la utilidad bruta
-    // (subtotal - costo - flete - IIBB embutido). Flete e IIBB
-    // jurisdiccional reducen la utilidad gravable (gastos deducibles).
-    const utilidadBruta = subtotal.minus(totalCosto).minus(flete).minus(percepcionIIBB);
-    const provisionGanancias = utilidadBruta.gt(0)
-      ? utilidadBruta.times(TASA_PROVISION_GANANCIAS).toDecimalPlaces(2)
-      : toDecimal(0);
-
     const clienteCuentaId =
       venta.cliente.cuentaContableId ?? porCodigo.get(VENTA_CODIGOS.CLIENTE_FALLBACK.codigo)!;
 
@@ -3409,22 +3400,6 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
         debe: 0,
         haber: money(flete).toString(),
         descripcion: `Venta ${venta.numero} — flete por pagar`,
-      });
-    }
-
-    // Provisión Impuesto Ganancias sobre utilidad bruta.
-    if (provisionGanancias.gt(0)) {
-      lineas.push({
-        cuentaId: porCodigo.get(VENTA_CODIGOS.PROVISION_GANANCIAS_GASTO.codigo)!,
-        debe: money(provisionGanancias).toString(),
-        haber: 0,
-        descripcion: `Venta ${venta.numero} — provisión Ganancias ${(TASA_PROVISION_GANANCIAS * 100).toFixed(0)}%`,
-      });
-      lineas.push({
-        cuentaId: porCodigo.get(VENTA_CODIGOS.PROVISION_GANANCIAS_PASIVO.codigo)!,
-        debe: 0,
-        haber: money(provisionGanancias).toString(),
-        descripcion: `Venta ${venta.numero} — Ganancias por pagar (devengado)`,
       });
     }
 
