@@ -4,7 +4,13 @@ import { db } from "@/lib/db";
 import { Decimal, eqMoney, sumMoney } from "@/lib/decimal";
 
 import { PREFIJO_CLIENTES, PREFIJOS_PROVEEDORES } from "@/lib/services/prefijos-plan";
-import { getEstadoResultados, getEstadoResultadosByFecha } from "./estado-resultados";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
+import {
+  getEstadoResultados,
+  getEstadoResultadosByFecha,
+  type MonedaReporte,
+} from "./estado-resultados";
+import { calcularRevaluacionUsd } from "./revaluacion";
 import { buildCuentaTree, type CuentaTreeNode } from "./shared";
 
 export type BalanceGeneralContexto =
@@ -46,7 +52,7 @@ export type BalanceGeneralResult = {
   totalPatrimonioAjustado: Decimal;
   cuadra: boolean;
   diferencia: Decimal;
-};
+} & MonedaReporte;
 
 // Código da conta analítica "RESULTADO DEL EJERCICIO" no plano oficial.
 const CODIGO_RESULTADO_EJERCICIO = "3.2.1.02";
@@ -245,6 +251,10 @@ function extraerHojasConRubro(
   return out;
 }
 
+// NOTA: la UI usa getBalanceGeneralByFecha. La revaluación se computa acumulada
+// hasta `periodo.fechaFin`; el árbol por período agrega sólo los movimientos del
+// período (sin saldo de apertura). Para una foto patrimonial usar la variante
+// por fecha.
 export async function getBalanceGeneral(periodoId: number): Promise<BalanceGeneralResult | null> {
   const periodo = await db.periodoContable.findUnique({
     where: { id: periodoId },
@@ -258,8 +268,12 @@ export async function getBalanceGeneral(periodoId: number): Promise<BalanceGener
   });
   if (!periodo) return null;
 
+  const tcRow = await getCotizacionParaFecha(periodo.fechaFin);
+  const tipoCambioCierre = tcRow?.valor ?? null;
+  const rev = await calcularRevaluacionUsd(periodo.fechaFin, tipoCambioCierre);
+
   const [tree, estado] = await Promise.all([
-    buildCuentaTree(["ACTIVO", "PASIVO", "PATRIMONIO"], { periodoId }),
+    buildCuentaTree(["ACTIVO", "PASIVO", "PATRIMONIO"], { periodoId }, rev.porCuenta),
     getEstadoResultados(periodoId),
   ]);
 
@@ -275,6 +289,17 @@ export async function getBalanceGeneral(periodoId: number): Promise<BalanceGener
     },
     tree,
     resultadoEjercicio: estado?.resultado ?? new Decimal(0),
+    moneda: {
+      difCambioNoRealizada: rev.total,
+      tipoCambioCierre,
+      fechaCotizacionCierre: tcRow?.fecha ?? null,
+      advertencias:
+        tipoCambioCierre === null && rev.hayPosiciones
+          ? [
+              "No hay cotización para la fecha de cierre; las posiciones en moneda extranjera no se revaluaron.",
+            ]
+          : [],
+    },
   });
 }
 
@@ -282,8 +307,12 @@ export async function getBalanceGeneralByFecha(filter: {
   fechaDesde?: Date;
   fechaHasta?: Date;
 }): Promise<BalanceGeneralResult> {
+  const tcRow = await getCotizacionParaFecha(filter.fechaHasta ?? new Date());
+  const tipoCambioCierre = tcRow?.valor ?? null;
+  const rev = await calcularRevaluacionUsd(filter.fechaHasta, tipoCambioCierre);
+
   const [tree, estado] = await Promise.all([
-    buildCuentaTree(["ACTIVO", "PASIVO", "PATRIMONIO"], filter),
+    buildCuentaTree(["ACTIVO", "PASIVO", "PATRIMONIO"], filter, rev.porCuenta),
     getEstadoResultadosByFecha(filter),
   ]);
 
@@ -302,6 +331,17 @@ export async function getBalanceGeneralByFecha(filter: {
     },
     tree,
     resultadoEjercicio: estado.resultado,
+    moneda: {
+      difCambioNoRealizada: rev.total,
+      tipoCambioCierre,
+      fechaCotizacionCierre: tcRow?.fecha ?? null,
+      advertencias:
+        tipoCambioCierre === null && rev.hayPosiciones
+          ? [
+              "No hay cotización para la fecha de cierre; las posiciones en moneda extranjera no se revaluaron.",
+            ]
+          : [],
+    },
   });
 }
 
@@ -310,11 +350,13 @@ function ensamblar({
   contexto,
   tree,
   resultadoEjercicio,
+  moneda,
 }: {
   periodo: BalanceGeneralResult["periodo"];
   contexto: BalanceGeneralContexto;
   tree: Awaited<ReturnType<typeof buildCuentaTree>>;
   resultadoEjercicio: Decimal;
+  moneda: MonedaReporte;
 }): BalanceGeneralResult {
   // Reclasificación por signo del subledger comercial (sólo presentación):
   // saldos a favor de proveedores → Activo; anticipos de clientes → Pasivo.
@@ -364,6 +406,7 @@ function ensamblar({
     totalPatrimonioAjustado: totalPatrimonioAjustado.toDecimalPlaces(2),
     cuadra: eqMoney(totalActivo, somaPasivoPatrimonio),
     diferencia,
+    ...moneda,
   };
 }
 

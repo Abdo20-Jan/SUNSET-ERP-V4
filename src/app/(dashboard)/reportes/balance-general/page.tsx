@@ -105,6 +105,24 @@ export default async function BalanceGeneralPage({ searchParams }: { searchParam
           <MonedaToggle current={moneda} tcInfo={tcInfo} />
           <OcultarSinSaldoToggle />
         </div>
+        {bg.tipoCambioCierre ? (
+          <p className="text-xs text-muted-foreground">
+            Posiciones en USD revaluadas al TC de cierre {bg.tipoCambioCierre.toFixed(2)}
+            {bg.fechaCotizacionCierre
+              ? ` (cotización del ${bg.fechaCotizacionCierre.toISOString().slice(0, 10)})`
+              : ""}
+            {bg.difCambioNoRealizada.isZero()
+              ? ""
+              : ` · Diferencia de cambio no realizada: ${fmtMoney(convertirAUsd(bg.difCambioNoRealizada.toFixed(2), tcParaUsd))}`}
+          </p>
+        ) : null}
+        {bg.advertencias.length > 0 ? (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200">
+            {bg.advertencias.map((a) => (
+              <p key={a}>⚠ {a}</p>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <Card className="py-0">

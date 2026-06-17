@@ -31,7 +31,7 @@ export {
   getEstadoResultados,
   getEstadoResultadosByFecha,
 } from "./reportes/estado-resultados";
-export type { EstadoResultadosResult } from "./reportes/estado-resultados";
+export type { EstadoResultadosResult, MonedaReporte } from "./reportes/estado-resultados";
 export type {
   EstadoResultadosRT9,
   SeccionRT9,
