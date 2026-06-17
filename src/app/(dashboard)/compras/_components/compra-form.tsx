@@ -18,12 +18,15 @@ import {
 import {
   emitirCompraAction,
   guardarCompraAction,
+  type CategoriaCompraOption,
   type CompraDetalle,
+  type DepositoOption,
   type ProductoParaCompra,
   type ProveedorParaCompra,
 } from "@/lib/actions/compras";
 import { fmtMoney } from "@/lib/format";
 import { useCmdShortcut } from "@/lib/hooks/use-cmd-shortcut";
+import { CategoriaCompraCombobox } from "@/components/categoria-compra-combobox";
 import { ProductoCombobox, type ProductoOption } from "@/components/producto-combobox";
 import { ProveedorCombobox, type ProveedorOption } from "@/components/proveedor-combobox";
 import { Button } from "@/components/ui/button";
@@ -62,6 +65,9 @@ const CONDICION_LABELS: Record<(typeof CONDICION_VALUES)[number], string> = {
   OTRO: "Otro",
 };
 
+// Sentinel para "sin depósito" en el Select (no acepta value="").
+const NONE_DEPOSITO = "__none__";
+
 const formSchema = z
   .object({
     numero: z.string().min(1, "Número requerido").max(32),
@@ -73,6 +79,7 @@ const formSchema = z
     tipoCambio: z.string().regex(rateRegex, "TC inválido"),
     iibb: z.string().regex(moneyRegex, "IIBB inválido"),
     otros: z.string().regex(moneyRegex, "Otros inválido"),
+    depositoId: z.string().optional(),
     notas: z.string().max(500).optional(),
     items: z
       .array(
@@ -81,6 +88,7 @@ const formSchema = z
           cantidad: z.coerce.number().int().positive("Cantidad > 0"),
           precioUnitario: z.string().regex(moneyRegex, "Precio inválido"),
           ivaPorcentaje: z.string().regex(/^\d+(\.\d{1,2})?$/, "IVA% inválido"),
+          categoriaCuentaId: z.coerce.number().int().positive("Seleccione categoría"),
         }),
       )
       .min(1, "Agregue al menos un ítem"),
@@ -114,6 +122,8 @@ type Props = {
   initialData?: CompraDetalle;
   proveedores: ProveedorParaCompra[];
   productos: ProductoParaCompra[];
+  categorias: CategoriaCompraOption[];
+  depositos: DepositoOption[];
   /** Default para campo `fecha` en modo create. "" si modo retroactivo activo en User. */
   defaultFecha?: string;
 };
@@ -136,6 +146,8 @@ export function CompraForm({
   initialData,
   proveedores,
   productos,
+  categorias,
+  depositos,
   defaultFecha,
 }: Props) {
   const router = useRouter();
@@ -168,6 +180,7 @@ export function CompraForm({
         tipoCambio: initialData!.tipoCambio,
         iibb: initialData!.iibb,
         otros: initialData!.otros,
+        depositoId: initialData!.depositoId ?? "",
         notas: initialData!.notas ?? "",
         items: initialData!.items.map((it) => {
           const sub = new Decimal(it.subtotal);
@@ -180,6 +193,7 @@ export function CompraForm({
             cantidad: it.cantidad,
             precioUnitario: it.precioUnitario,
             ivaPorcentaje: pct,
+            categoriaCuentaId: it.categoriaCuentaId ?? 0,
           };
         }),
       }
@@ -193,6 +207,7 @@ export function CompraForm({
         tipoCambio: "1",
         iibb: "0",
         otros: "0",
+        depositoId: "",
         notas: "",
         items: [
           {
@@ -200,6 +215,7 @@ export function CompraForm({
             cantidad: 1,
             precioUnitario: "0",
             ivaPorcentaje: "21",
+            categoriaCuentaId: 0,
           },
         ],
       };
@@ -224,6 +240,17 @@ export function CompraForm({
   const items = useWatch({ control, name: "items" }) ?? [];
   const iibb = useWatch({ control, name: "iibb" }) ?? "0";
   const otros = useWatch({ control, name: "otros" }) ?? "0";
+  const depositoId = useWatch({ control, name: "depositoId" }) ?? "";
+
+  // E18 — ítems con categoría que capitaliza estoque físico exigen depósito.
+  const categoriasQueCapitalizan = useMemo(
+    () => new Set(categorias.filter((c) => c.capitalizaEstoque).map((c) => c.id)),
+    [categorias],
+  );
+  const algunaCapitaliza = items.some((it) =>
+    categoriasQueCapitalizan.has(Number(it?.categoriaCuentaId ?? 0)),
+  );
+  const faltaDeposito = algunaCapitaliza && (!depositoId || depositoId.trim() === "");
 
   useEffect(() => {
     if (moneda === "ARS") {
@@ -294,6 +321,7 @@ export function CompraForm({
         cantidad: 1,
         precioUnitario: "0",
         ivaPorcentaje: "21",
+        categoriaCuentaId: 0,
       },
       { shouldFocus: false },
     );
@@ -314,12 +342,15 @@ export function CompraForm({
       tipoCambio: values.tipoCambio,
       iibb: values.iibb,
       otros: values.otros,
+      depositoId:
+        values.depositoId && values.depositoId.trim() !== "" ? values.depositoId : undefined,
       notas: values.notas,
       items: values.items.map((it) => ({
         productoId: it.productoId,
         cantidad: Number(it.cantidad),
         precioUnitario: it.precioUnitario,
         ivaPorcentaje: it.ivaPorcentaje,
+        categoriaCuentaId: Number(it.categoriaCuentaId),
       })),
     };
   }
@@ -481,6 +512,38 @@ export function CompraForm({
           <Field label="Otros" error={errors.otros?.message}>
             <Input {...register("otros")} inputMode="decimal" />
           </Field>
+
+          <Field
+            label="Depósito (estoque)"
+            hint={
+              algunaCapitaliza
+                ? "Requerido: hay ítems que ingresan a estoque"
+                : "Sólo si la compra ingresa a estoque (Bien de Cambio)"
+            }
+          >
+            <Controller
+              control={control}
+              name="depositoId"
+              render={({ field }) => (
+                <Select
+                  value={field.value && field.value !== "" ? field.value : NONE_DEPOSITO}
+                  onValueChange={(v) => field.onChange(v === NONE_DEPOSITO ? "" : v)}
+                >
+                  <SelectTrigger className={faltaDeposito ? "w-full border-amber-500" : "w-full"}>
+                    <SelectValue placeholder="— ninguno —" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE_DEPOSITO}>— ninguno —</SelectItem>
+                    {depositos.map((d) => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.nombre}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </Field>
         </CardContent>
       </Card>
 
@@ -511,6 +574,7 @@ export function CompraForm({
                 control={control}
                 productos={productoOptions}
                 productosFull={productos}
+                categorias={categorias}
                 onProductoChange={onProductoChange}
                 onRemove={() => remove(index)}
                 canRemove={fields.length > 1}
@@ -519,6 +583,7 @@ export function CompraForm({
                 errorCantidad={errors.items?.[index]?.cantidad?.message}
                 errorPrecio={errors.items?.[index]?.precioUnitario?.message}
                 errorIva={errors.items?.[index]?.ivaPorcentaje?.message}
+                errorCategoria={errors.items?.[index]?.categoriaCuentaId?.message}
               />
             ))}
           </div>
@@ -544,6 +609,16 @@ export function CompraForm({
           <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="mt-0.5 size-4 shrink-0" />
           <span>
             <strong>Verifique IVA:</strong> {ivaWarning}
+          </span>
+        </div>
+      )}
+
+      {faltaDeposito && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <strong>Falta depósito:</strong> hay ítems con categoría de Bien de Cambio que ingresan
+            a estoque. Seleccione un depósito NACIONAL de destino antes de emitir.
           </span>
         </div>
       )}
@@ -633,6 +708,7 @@ type ItemRowProps = {
   control: Control<FormValues>;
   productos: ProductoOption[];
   productosFull: ProductoParaCompra[];
+  categorias: CategoriaCompraOption[];
   onProductoChange: (index: number, id: string) => void;
   onRemove: () => void;
   canRemove: boolean;
@@ -641,6 +717,7 @@ type ItemRowProps = {
   errorCantidad?: string;
   errorPrecio?: string;
   errorIva?: string;
+  errorCategoria?: string;
 };
 
 function ItemRow({
@@ -648,6 +725,7 @@ function ItemRow({
   control,
   productos,
   productosFull,
+  categorias,
   onProductoChange,
   onRemove,
   canRemove,
@@ -656,6 +734,7 @@ function ItemRow({
   errorCantidad,
   errorPrecio,
   errorIva,
+  errorCategoria,
 }: ItemRowProps) {
   const cantidad = useWatch({ control, name: `items.${index}.cantidad` });
   const precio = useWatch({
@@ -664,6 +743,8 @@ function ItemRow({
   });
   const ivaPct = useWatch({ control, name: `items.${index}.ivaPorcentaje` });
   const productoId = useWatch({ control, name: `items.${index}.productoId` });
+  const categoriaCuentaId = useWatch({ control, name: `items.${index}.categoriaCuentaId` });
+  const categoriaSel = categorias.find((c) => c.id === Number(categoriaCuentaId ?? 0));
 
   const subtotal = useMemo(() => {
     const qty = Number(cantidad ?? 0) || 0;
@@ -739,6 +820,30 @@ function ItemRow({
         >
           <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
         </Button>
+      </div>
+
+      <div className="md:col-span-12">
+        <Label className="text-xs uppercase tracking-wide">Categoría contable</Label>
+        <Controller
+          control={control}
+          name={`items.${index}.categoriaCuentaId` as const}
+          render={({ field }) => (
+            <CategoriaCompraCombobox
+              value={field.value ? Number(field.value) : null}
+              onChange={(id) => field.onChange(id)}
+              categorias={categorias}
+            />
+          )}
+        />
+        {errorCategoria ? (
+          <p className="mt-1 text-xs text-destructive">{errorCategoria}</p>
+        ) : categoriaSel ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {categoriaSel.capitalizaEstoque
+              ? "Ingresa a estoque físico (Bien de Cambio)."
+              : "No mueve estoque (gasto / otro activo)."}
+          </p>
+        ) : null}
       </div>
     </div>
   );

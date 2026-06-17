@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 
 import { db } from "@/lib/db";
 import {
+  listarCategoriasCompra,
+  listarDepositosNacionales,
   listarProductosParaCompra,
   listarProveedoresParaCompra,
   obtenerCompraPorId,
@@ -21,9 +23,11 @@ export default async function CompraDetailPage({ params }: { params: PageParams 
   if (!compra) notFound();
 
   if (compra.estado === "BORRADOR") {
-    const [proveedores, productos] = await Promise.all([
+    const [proveedores, productos, categorias, depositos] = await Promise.all([
       listarProveedoresParaCompra(),
       listarProductosParaCompra(),
+      listarCategoriasCompra(),
+      listarDepositosNacionales(),
     ]);
     return (
       <CompraForm
@@ -31,6 +35,8 @@ export default async function CompraDetailPage({ params }: { params: PageParams 
         initialData={compra}
         proveedores={proveedores}
         productos={productos}
+        categorias={categorias}
+        depositos={depositos}
       />
     );
   }
