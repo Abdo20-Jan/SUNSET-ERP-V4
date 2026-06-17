@@ -3,6 +3,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { Decimal, sumMoney, toDecimal } from "@/lib/decimal";
 import { getCuentasBancoCajaConMoneda } from "@/lib/services/cuenta-bancaria";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { PREFIJOS_BANCO_CAJA } from "@/lib/services/prefijos-plan";
 import {
   AsientoEstado,
@@ -11,7 +12,7 @@ import {
   Moneda,
 } from "@/generated/prisma/client";
 
-import { listarMeses, mesKey } from "./shared";
+import { convertirMoneda, listarMeses, mesKey } from "./shared";
 
 export type FlujoOrigen = "REALIZADO" | "PROYECTADO";
 
@@ -27,6 +28,7 @@ export type FlujoCelula = {
  *     asiento — ej. cliente cobrado, préstamo recibido, ingreso operativo)
  *   - Negativo: salida de cash (la cuenta fue DEBE — ej. proveedor pagado,
  *     gasto, percepción fiscal, pago préstamo)
+ * Los importes están en la MONEDA DE PRESENTACIÓN (convertidos al TC de cierre).
  */
 export type FlujoNode = {
   cuentaId: number;
@@ -41,7 +43,13 @@ export type FlujoNode = {
 };
 
 export type FlujoCajaResult = {
+  // Moneda de presentación del reporte (alias `moneda` por compatibilidad de UI).
   moneda: Moneda;
+  monedaPresentacion: Moneda;
+  // TC de cierre usado para convertir (última Cotizacion con fecha <= hasta).
+  // null si no hay ninguna cotización cargada.
+  tipoCambioCierre: Decimal | null;
+  fechaCotizacionCierre: Date | null;
   desde: Date;
   hasta: Date;
   meses: string[];
@@ -53,9 +61,7 @@ export type FlujoCajaResult = {
   contrapartidas: FlujoNode[];
   // Asientos puros de transferencia entre cuentas propias (≥2 líneas en
   // banco/caja, 0 contrapartidas externas). Cada banco aparece con su
-  // movimiento neto signado. En una transferencia de la MISMA moneda el total
-  // por mes es 0 (las piernas se cancelan); en una transferencia cross-moneda
-  // sólo aparece la pierna de la moneda del reporte (compra/venta de divisa).
+  // movimiento neto signado, convertido a la moneda de presentación.
   transferencias: FlujoNode[];
   totales: {
     totalIngresosPorMes: Record<string, Decimal>;
@@ -81,16 +87,18 @@ type LineaMoneda = {
 };
 
 /**
- * Valor de una línea EN LA MONEDA `M` del reporte, como par `{debeM, haberM}`
- * de MAGNITUDES no-negativas (el signo se deriva luego de `debeM − haberM`).
+ * Valor de una línea EN SU MONEDA NATIVA `M`, como par `{debeM, haberM}` de
+ * MAGNITUDES no-negativas (el signo se deriva luego de `debeM − haberM`).
+ * Para una cuenta banco/caja `M` = la moneda de la cuenta; para una
+ * contrapartida `M` = USD si la línea trae `monedaOrigen=USD`, si no ARS.
  * Espelha `calcularSaldosCuentasBancariasEnMonedaCuenta`:
  *   - M=ARS: `debe`/`haber` crudos (el ledger es en pesos).
  *   - M=USD con `monedaOrigen=USD`: el lado con valor toma `montoOrigen` (el
  *     principal USD invariante a TC); el otro lado queda en 0.
  *   - M=USD legado (`monedaOrigen=null` y `asiento.moneda=USD`): `debe`/`haber`
  *     crudos, que en ese caso ya estaban grabados en USD.
- *   - resto (línea ARS bajo un reporte USD): `{0,0}` → fuera del flujo USD,
- *     no hay TC para inferir el principal.
+ *   - resto (línea ARS sin metadata sobre una cuenta USD): `{0,0}` → no hay TC
+ *     para inferir el principal USD.
  */
 function valorEnMoneda(
   linea: LineaMoneda,
@@ -114,14 +122,21 @@ function valorEnMoneda(
 }
 
 /**
- * Flujo de Caja real: itera los asientos que tocan alguna cuenta banco/caja
- * DE LA MONEDA `moneda` (la moneda de la cuenta, derivada de la CuentaBancaria
- * ligada — NO `asiento.moneda`, que es la cabeza del asiento y siempre es ARS
- * desde E3). El valor de cada línea se toma en la moneda del reporte vía
- * `valorEnMoneda` (montoOrigen para USD). El flujo se atribuye a cada cuenta
- * contrapartida para el DETALLE, pero los totales/saldo se calculan sobre el
- * LADO BANCO para que cuadren con `calcularSaldosCuentasBancariasEnMonedaCuenta`
- * por moneda incluso con asientos cross-moneda (pago exterior, compra divisa).
+ * Flujo de Caja real CONSOLIDADO + CONVERTIDO. Itera los asientos que tocan
+ * alguna cuenta banco/caja (de CUALQUIER moneda) y presenta todo en
+ * `monedaPresentacion` (USD por defecto en la UI), convirtiendo "todo al TC de
+ * cierre" = la última `Cotizacion` con `fecha <= hasta`. Las cuentas en la
+ * moneda de presentación quedan a su valor nativo; las de otra moneda se
+ * convierten a ese único TC (decisión del dueño 2026-06-17: sin línea de
+ * diferencia de cambio en el flujo — todo a la misma tasa).
+ *
+ * El valor nativo de cada línea sale de `valorEnMoneda` (montoOrigen para USD)
+ * y luego se convierte con `convertirMoneda`. Los totales/saldo se calculan
+ * sobre el LADO BANCO para que el saldo acumulado cuadre con
+ * `calcularSaldosCuentasBancariasEnMonedaCuenta` (por cuenta, en su moneda
+ * nativa) convertido al TC de cierre. El detalle por contrapartida es
+ * cualitativo; si no cuadra con el banco en un mes (asiento mixto), se emite
+ * advertencia.
  *
  * Sign convention por cuenta contrapartida:
  *   cashFlow = haberM − debeM (HABER → cash entró; DEBE → cash salió).
@@ -129,18 +144,33 @@ function valorEnMoneda(
 export async function getFlujoCaja(
   desde: Date,
   hasta: Date,
-  moneda: Moneda,
+  monedaPresentacion: Moneda,
 ): Promise<FlujoCajaResult> {
   const meses = listarMeses(desde, hasta);
   const advertencias: string[] = [];
 
-  // Cuentas banco/caja de la moneda pedida (fuente única compartida con
-  // getSaldosBancarios → particiona por CuentaBancaria.moneda, igual a la
-  // función-âncora del invariante de aceitação).
+  // Todas las cuentas banco/caja con su moneda nativa (fuente única compartida
+  // con getSaldosBancarios → CuentaBancaria.moneda, igual a la función-âncora).
   const cuentasBC = await getCuentasBancoCajaConMoneda();
-  const bancoCajaIdsM = new Set(
-    cuentasBC.filter((c) => c.moneda === moneda).map((c) => c.cuentaContableId),
+  const monedaPorCuenta = new Map<number, Moneda>(
+    cuentasBC.map((c) => [c.cuentaContableId, c.moneda]),
   );
+
+  // TC de cierre: última Cotizacion con fecha <= hasta (null si no hay ninguna).
+  const tcRow = await getCotizacionParaFecha(hasta);
+  const tipoCambioCierre = tcRow?.valor ?? null;
+  const fechaCotizacionCierre = tcRow?.fecha ?? null;
+  let requiereTc = false;
+
+  // Convierte un valor NATIVO de `monedaNativa` a la moneda de presentación.
+  const aPresentacion = (valorNativo: Decimal, monedaNativa: Moneda): Decimal => {
+    if (monedaNativa === monedaPresentacion) return valorNativo;
+    if (tipoCambioCierre === null) {
+      requiereTc = true;
+      return new Decimal(0);
+    }
+    return convertirMoneda(valorNativo, monedaNativa, tipoCambioCierre, monedaPresentacion);
+  };
 
   const totalesVacios = (): FlujoCajaResult["totales"] => {
     const ceros: Record<string, Decimal> = {};
@@ -154,10 +184,13 @@ export async function getFlujoCaja(
     };
   };
 
-  if (bancoCajaIdsM.size === 0) {
-    advertencias.push(`No hay cuentas de banco/caja en ${moneda}.`);
+  if (monedaPorCuenta.size === 0) {
+    advertencias.push("No hay cuentas de banco/caja configuradas.");
     return {
-      moneda,
+      moneda: monedaPresentacion,
+      monedaPresentacion,
+      tipoCambioCierre,
+      fechaCotizacionCierre,
       desde,
       hasta,
       meses,
@@ -168,17 +201,19 @@ export async function getFlujoCaja(
     };
   }
 
-  const bancoCajaIdArray = Array.from(bancoCajaIdsM);
+  const bancoCajaIdArray = Array.from(monedaPorCuenta.keys());
 
-  // 1) Saldo inicial: líneas de las cuentas banco/caja de la moneda con
+  // 1) Saldo inicial (full precision): líneas de las cuentas banco/caja con
   //    asientos contabilizados ANTES de `desde`. Vía findMany (no aggregate)
-  //    porque USD necesita montoOrigen línea a línea.
+  //    porque USD necesita montoOrigen línea a línea y cada cuenta tiene su
+  //    propia moneda nativa.
   const lineasIniciales = await db.lineaAsiento.findMany({
     where: {
       cuentaId: { in: bancoCajaIdArray },
       asiento: { estado: AsientoEstado.CONTABILIZADO, fecha: { lt: desde } },
     },
     select: {
+      cuentaId: true,
       debe: true,
       haber: true,
       monedaOrigen: true,
@@ -186,8 +221,9 @@ export async function getFlujoCaja(
       asiento: { select: { moneda: true } },
     },
   });
-  let saldoInicial = new Decimal(0);
+  let saldoInicialRaw = new Decimal(0);
   for (const l of lineasIniciales) {
+    const nativa = monedaPorCuenta.get(l.cuentaId) ?? Moneda.ARS;
     const { debeM, haberM } = valorEnMoneda(
       {
         debe: toDecimal(l.debe),
@@ -195,14 +231,13 @@ export async function getFlujoCaja(
         monedaOrigen: l.monedaOrigen,
         montoOrigen: l.montoOrigen != null ? toDecimal(l.montoOrigen) : null,
       },
-      moneda,
+      nativa,
       l.asiento.moneda,
     );
-    saldoInicial = saldoInicial.plus(debeM).minus(haberM);
+    saldoInicialRaw = saldoInicialRaw.plus(aPresentacion(debeM.minus(haberM), nativa));
   }
-  saldoInicial = saldoInicial.toDecimalPlaces(2);
 
-  // 2) Asientos del período que tocan ALGUNA cuenta banco/caja de la moneda.
+  // 2) Asientos del período que tocan ALGUNA cuenta banco/caja.
   const asientos = await db.asiento.findMany({
     where: {
       estado: AsientoEstado.CONTABILIZADO,
@@ -227,78 +262,88 @@ export async function getFlujoCaja(
   });
 
   // 3) Atribuir flujo. El DETALLE (árbol) sale de las contrapartidas; los
-  //    TOTALES/saldo salen del lado banco (cuentaId ∈ bancoCajaIdsM) en la
-  //    moneda del reporte — eso es lo que cuadra con la âncora.
+  //    TOTALES/saldo salen del lado banco (cuentaId ∈ banco/caja) en la moneda
+  //    de presentación — eso es lo que cuadra con la âncora.
   const flujoPorCuenta = new Map<number, Map<string, Decimal>>();
   const transferenciasPorBanco = new Map<number, Map<string, Decimal>>();
   const ingresosBancoPorMes = new Map<string, Decimal>();
   const egresosBancoPorMes = new Map<string, Decimal>();
   const contrapartidaNetaPorMes = new Map<string, Decimal>();
 
+  const acumular = (mapa: Map<string, Decimal>, mes: string, valor: Decimal): void => {
+    mapa.set(mes, (mapa.get(mes) ?? new Decimal(0)).plus(valor));
+  };
+
+  type MoneyInput = Parameters<typeof toDecimal>[0];
+  const valorNativoLinea = (
+    l: {
+      debe: MoneyInput;
+      haber: MoneyInput;
+      monedaOrigen: Moneda | null;
+      montoOrigen: MoneyInput | null;
+    },
+    nativa: Moneda,
+    asientoMoneda: Moneda,
+  ): Decimal => {
+    const { debeM, haberM } = valorEnMoneda(
+      {
+        debe: toDecimal(l.debe),
+        haber: toDecimal(l.haber),
+        monedaOrigen: l.monedaOrigen,
+        montoOrigen: l.montoOrigen != null ? toDecimal(l.montoOrigen) : null,
+      },
+      nativa,
+      asientoMoneda,
+    );
+    return debeM.minus(haberM);
+  };
+
   for (const a of asientos) {
     const mes = mesKey(a.fecha);
-    const lineasM = a.lineas.map((l) => {
-      const { debeM, haberM } = valorEnMoneda(
-        {
-          debe: toDecimal(l.debe),
-          haber: toDecimal(l.haber),
-          monedaOrigen: l.monedaOrigen,
-          montoOrigen: l.montoOrigen != null ? toDecimal(l.montoOrigen) : null,
-        },
-        moneda,
-        a.moneda,
-      );
-      return { cuentaId: l.cuentaId, codigo: l.cuenta.codigo, debeM, haberM };
-    });
 
-    // Lado banco (base del invariante): Δ = debeM − haberM de las líneas cuyo
-    // cuentaId está en las cuentas banco/caja de la moneda.
-    for (const l of lineasM) {
-      if (!bancoCajaIdsM.has(l.cuentaId)) continue;
-      const delta = l.debeM.minus(l.haberM);
-      // Mismo umbral sub-centavo que el lado contrapartida, para no contar un
-      // delta que la contrapartida descartaría (evita advertencias espurias).
-      if (delta.abs().lt(0.01)) continue;
-      if (delta.gt(0)) {
-        ingresosBancoPorMes.set(mes, (ingresosBancoPorMes.get(mes) ?? new Decimal(0)).plus(delta));
-      } else {
-        egresosBancoPorMes.set(mes, (egresosBancoPorMes.get(mes) ?? new Decimal(0)).plus(delta));
-      }
+    // Lado banco (base del invariante): Δ_P = valor nativo (debeM − haberM)
+    // convertido al TC de cierre. SIN corte sub-centavo (FC-2): se acumula en
+    // precisión plena y se redondea sólo al final, para no perder dinero ni
+    // descuadrar contra la âncora.
+    for (const l of a.lineas) {
+      const nativa = monedaPorCuenta.get(l.cuentaId);
+      if (nativa === undefined) continue; // no es banco/caja
+      const deltaP = aPresentacion(valorNativoLinea(l, nativa, a.moneda), nativa);
+      if (deltaP.gt(0)) acumular(ingresosBancoPorMes, mes, deltaP);
+      else if (deltaP.lt(0)) acumular(egresosBancoPorMes, mes, deltaP);
     }
 
-    // Detalle: clasificar banco-vs-contrapartida por CÓDIGO (cualquier moneda,
-    // para seguir detectando transferencias cross-moneda como tales).
-    const bancoLines = lineasM.filter((l) => esBancoCaja(l.codigo));
-    const otrasLines = lineasM.filter((l) => !esBancoCaja(l.codigo));
+    // Detalle: clasificar banco-vs-contrapartida por CÓDIGO (para seguir
+    // detectando transferencias entre cuentas propias como tales).
+    const bancoLines = a.lineas.filter((l) => esBancoCaja(l.cuenta.codigo));
+    const otrasLines = a.lineas.filter((l) => !esBancoCaja(l.cuenta.codigo));
 
     if (otrasLines.length === 0 && bancoLines.length >= 2) {
-      // Transferencia entre cuentas propias.
+      // Transferencia entre cuentas propias: cada pierna en moneda de presentación.
       for (const b of bancoLines) {
-        const flow = b.debeM.minus(b.haberM);
-        if (flow.abs().lt(0.01)) continue;
+        const nativa = monedaPorCuenta.get(b.cuentaId) ?? Moneda.ARS;
+        const flowP = aPresentacion(valorNativoLinea(b, nativa, a.moneda), nativa);
         let porMes = transferenciasPorBanco.get(b.cuentaId);
         if (!porMes) {
           porMes = new Map();
           transferenciasPorBanco.set(b.cuentaId, porMes);
         }
-        porMes.set(mes, (porMes.get(mes) ?? new Decimal(0)).plus(flow));
+        porMes.set(mes, (porMes.get(mes) ?? new Decimal(0)).plus(flowP));
       }
       continue;
     }
 
     for (const l of otrasLines) {
-      const flow = l.haberM.minus(l.debeM);
-      if (flow.abs().lt(0.01)) continue;
-      contrapartidaNetaPorMes.set(
-        mes,
-        (contrapartidaNetaPorMes.get(mes) ?? new Decimal(0)).plus(flow),
-      );
+      const nativaCP = l.monedaOrigen === Moneda.USD ? Moneda.USD : Moneda.ARS;
+      // cashFlow contrapartida = haberM − debeM = −(debeM − haberM) nativo.
+      const flowP = aPresentacion(valorNativoLinea(l, nativaCP, a.moneda).negated(), nativaCP);
+      acumular(contrapartidaNetaPorMes, mes, flowP);
       let porMes = flujoPorCuenta.get(l.cuentaId);
       if (!porMes) {
         porMes = new Map();
         flujoPorCuenta.set(l.cuentaId, porMes);
       }
-      porMes.set(mes, (porMes.get(mes) ?? new Decimal(0)).plus(flow));
+      porMes.set(mes, (porMes.get(mes) ?? new Decimal(0)).plus(flowP));
     }
   }
 
@@ -366,7 +411,8 @@ export async function getFlujoCaja(
         })
       : [];
 
-  // 5) Construir tree (cuentas contrapartida).
+  // 5) Construir tree (cuentas contrapartida). Las celdas de las analíticas se
+  //    redondean a 2 decimales para exhibición.
   const todasCuentasFlujo = [...cuentasFlujo, ...ancestros].sort((a, b) =>
     a.codigo.localeCompare(b.codigo),
   );
@@ -414,7 +460,8 @@ export async function getFlujoCaja(
     contrapartidasRoots.push(node);
   }
 
-  // Roll-up bottom-up
+  // Roll-up bottom-up: el subtotal sintético es la SUMA de las celdas (ya
+  // redondeadas) de sus hijos → coincide exactamente con lo exhibido (FC-2).
   const rollUp = (node: FlujoNode): void => {
     if (node.tipo === "SINTETICA" && node.children.length > 0) {
       for (const ch of node.children) rollUp(ch);
@@ -423,10 +470,7 @@ export async function getFlujoCaja(
           (acc, ch) => acc.plus(ch.valoresPorMes[m]?.monto ?? new Decimal(0)),
           new Decimal(0),
         );
-        node.valoresPorMes[m] = {
-          monto: sumChildren.toDecimalPlaces(2),
-          origen: "REALIZADO",
-        };
+        node.valoresPorMes[m] = { monto: sumChildren, origen: "REALIZADO" };
       }
       node.totalPeriodo = sumMoney(node.children.map((ch) => ch.totalPeriodo));
     } else {
@@ -468,38 +512,43 @@ export async function getFlujoCaja(
   });
 
   // 7) Totales por mes — calculados sobre el LADO BANCO (Δ de las cuentas
-  //    banco/caja de la moneda), de modo que saldoAcumulado cuadre con
-  //    calcularSaldosCuentasBancariasEnMonedaCuenta cuando `hasta` cubre todo
-  //    el historial. Si el detalle por contrapartida no cuadra con el banco
-  //    en un mes (pago/transferencia cross-moneda), se emite advertencia.
+  //    banco/caja convertido al TC de cierre). El saldo acumulado se lleva en
+  //    precisión plena (running sum) y se redondea al exhibir, de modo que el
+  //    saldo final cuadre con Σ saldos de banco convertidos al TC de cierre.
   const totalIngresosPorMes: Record<string, Decimal> = {};
   const totalEgresosPorMes: Record<string, Decimal> = {};
   const saldoMensalPorMes: Record<string, Decimal> = {};
   const saldoAcumuladoPorMes: Record<string, Decimal> = {};
 
-  let acum = saldoInicial;
+  let acumRaw = saldoInicialRaw;
   for (const m of meses) {
-    const ingresos = (ingresosBancoPorMes.get(m) ?? new Decimal(0)).toDecimalPlaces(2);
-    const egresos = (egresosBancoPorMes.get(m) ?? new Decimal(0)).toDecimalPlaces(2);
-    totalIngresosPorMes[m] = ingresos;
-    totalEgresosPorMes[m] = egresos;
-    const saldo = ingresos.plus(egresos); // egresos ya negativo
-    saldoMensalPorMes[m] = saldo.toDecimalPlaces(2);
-    acum = acum.plus(saldo);
-    saldoAcumuladoPorMes[m] = acum.toDecimalPlaces(2);
+    const ingresosRaw = ingresosBancoPorMes.get(m) ?? new Decimal(0);
+    const egresosRaw = egresosBancoPorMes.get(m) ?? new Decimal(0);
+    const saldoRaw = ingresosRaw.plus(egresosRaw); // egresos ya negativo
+    acumRaw = acumRaw.plus(saldoRaw);
+
+    totalIngresosPorMes[m] = ingresosRaw.toDecimalPlaces(2);
+    totalEgresosPorMes[m] = egresosRaw.toDecimalPlaces(2);
+    saldoMensalPorMes[m] = saldoRaw.toDecimalPlaces(2);
+    saldoAcumuladoPorMes[m] = acumRaw.toDecimalPlaces(2);
 
     const contraNeta = contrapartidaNetaPorMes.get(m) ?? new Decimal(0);
-    if (contraNeta.minus(saldo).abs().gte(0.01)) {
+    if (contraNeta.minus(saldoRaw).abs().gte(0.01)) {
       advertencias.push(
-        `${m}: el detalle por contrapartida (${contraNeta.toFixed(2)}) no cuadra con el movimiento de bancos (${saldo.toFixed(2)}) — hay pagos o transferencias en otra moneda.`,
+        `${m}: el detalle por contrapartida (${contraNeta.toFixed(2)}) no cuadra con el movimiento de bancos (${saldoRaw.toFixed(2)}) — hay pagos o transferencias en otra moneda.`,
       );
     }
   }
 
+  if (requiereTc) {
+    advertencias.push(
+      `No hay cotización con fecha ≤ ${hasta.toISOString().slice(0, 10)}; las cuentas en una moneda distinta de ${monedaPresentacion} quedaron fuera del reporte.`,
+    );
+  }
+
   // Poda defensiva: remove nós sem movimento (totalPeriodo 0 e todos os
-  // meses 0), preservando pais com filhos movimentados. Cobre casos como
-  // un banco em `transferencias` sin transferencias en el período. Não
-  // altera os totales (calculados arriba sobre o lado banco).
+  // meses 0), preservando pais com filhos movimentados. Não altera os totales
+  // (calculados arriba sobre o lado banco).
   const sinMovimiento = (node: FlujoNode): boolean =>
     node.totalPeriodo.isZero() && Object.values(node.valoresPorMes).every((c) => c.monto.isZero());
   const prunearFlujo = (nodes: FlujoNode[]): FlujoNode[] => {
@@ -512,7 +561,10 @@ export async function getFlujoCaja(
   };
 
   return {
-    moneda,
+    moneda: monedaPresentacion,
+    monedaPresentacion,
+    tipoCambioCierre,
+    fechaCotizacionCierre,
     desde,
     hasta,
     meses,
@@ -522,7 +574,7 @@ export async function getFlujoCaja(
       totalIngresosPorMes,
       totalEgresosPorMes,
       saldoMensalPorMes,
-      saldoInicial,
+      saldoInicial: saldoInicialRaw.toDecimalPlaces(2),
       saldoAcumuladoPorMes,
     },
     advertencias,

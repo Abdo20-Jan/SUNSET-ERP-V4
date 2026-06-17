@@ -32,7 +32,8 @@ function lastDayUtc(y: number, m: number): Date {
 }
 
 function parseMoneda(value: string | undefined): Moneda {
-  return value === "USD" ? "USD" : "ARS";
+  // Moneda de presentación: USD por defecto (política 2026-06-17), ARS opcional.
+  return value === "ARS" ? "ARS" : "USD";
 }
 
 function mesKeyOf(d: Date): string {
@@ -106,15 +107,25 @@ export default async function FlujoCajaPage({ searchParams }: { searchParams: Se
     saldoAcumuladoPorMes: mapValues(flujo.totales.saldoAcumuladoPorMes),
   };
 
+  const tcNota =
+    flujo.tipoCambioCierre !== null
+      ? `Consolidado y convertido a ${moneda} al TC de cierre ${flujo.tipoCambioCierre.toFixed(2)}` +
+        (flujo.fechaCotizacionCierre
+          ? ` (cotización del ${flujo.fechaCotizacionCierre.toISOString().slice(0, 10)})`
+          : "")
+      : `Sin cotización cargada: las cuentas en una moneda distinta de ${moneda} no se incluyen.`;
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
         <h1 className="text-[15px] font-semibold tracking-tight">Flujo de Caja</h1>
         <p className="text-sm text-muted-foreground">
-          Movimientos reales de bancos y cajas, agrupados por la cuenta contrapartida (proveedores,
-          clientes, préstamos, impuestos, gastos, créditos fiscales, etc). El saldo acumulado iguala
-          al saldo contable de bancos.
+          Movimientos reales de bancos y cajas (todas las monedas, consolidadas), agrupados por la
+          cuenta contrapartida (proveedores, clientes, préstamos, impuestos, gastos, créditos
+          fiscales, etc). El saldo acumulado iguala al saldo contable de bancos convertido al TC de
+          cierre.
         </p>
+        <p className="text-xs text-muted-foreground">{tcNota}</p>
       </div>
 
       <FlujoFilters desde={mesKeyOf(desdeFinal)} hasta={mesKeyOf(hastaFinal)} moneda={moneda} />
