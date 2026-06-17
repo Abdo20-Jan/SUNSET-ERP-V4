@@ -4,11 +4,16 @@ name: migrate-deploy
 # `main` (merge). Substitui o `prisma db push --url $PROD_URL` manual que se
 # rodava à mão depois de cada PR de schema (a pegadinha P2022 ColumnNotFound).
 #
-# Secret: reusa `DATABASE_URL_PROD` (repo-level, o MESMO que `validar-stock.yml`
-# já usa para rodar Prisma contra prod). Esse secret DEVE ser a connection string
-# DIRETA do Railway (sem pooler) — `migrate deploy` usa advisory locks/DDL que o
-# PgBouncer em transaction-pooling não suporta. O prod atual não usa pooler, então
-# o secret já é direto; nenhum secret novo precisa ser criado.
+# Secret: reusa `DATABASE_URL_PROD` (o MESMO que `validar-stock.yml` já usa, SEM
+# declarar environment — esse é o escopo onde o secret está acessível e provado).
+# DEVE ser a connection string DIRETA do Railway (sem pooler) — `migrate deploy`
+# usa advisory locks/DDL que o PgBouncer em transaction-pooling não suporta. O
+# prod atual não usa pooler, então o secret já é direto.
+#
+# NOTA (2026-06-17): NÃO declarar `environment:` aqui — a 1ª versão usava
+# `environment: production` e o `secrets.DATABASE_URL_PROD` resolveu VAZIO
+# ("Connection url is empty"). O `validar-stock` (sem environment) acessa o
+# mesmo secret e funciona; espelhamos esse escopo.
 #
 # PRÉ-REQUISITO DE BASELINING (one-time, banco de prod já existente): antes do
 # PRIMEIRO merge que introduz `prisma/migrations/`, é OBRIGATÓRIO rodar
@@ -23,6 +28,8 @@ on:
     branches: [main]
     paths:
       - "prisma/migrations/**"
+  # Permite re-rodar/testar manualmente (ex.: após corrigir um deploy falho).
+  workflow_dispatch:
 
 # Nunca rodar dois `migrate deploy` em paralelo, e NUNCA cancelar um em voo
 # (cancelar uma migração no meio corrompe o estado de _prisma_migrations).
@@ -38,7 +45,6 @@ jobs:
     name: migrate deploy (production)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
