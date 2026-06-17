@@ -67,33 +67,33 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "HONORÁRIOS ABDO",
         items: [
-          // Pro-labore de dirección → Sueldos y Cargas Sociales (Adm.).
-          { label: "Honorários", cuentaCodigos: ["5.3.1.04"] },
-          // Cargas sociales consolidadas en 5.3.1.04.
+          // Pro-labore de dirección → Sueldos y Jornales (Administración).
+          { label: "Honorários", cuentaCodigos: ["7.1.01"] },
+          // Cargas sociales consolidadas en 7.1.03.
           { label: "Encargos Trabalhistas (80%)", cuentaCodigos: [] },
         ],
       },
       {
         label: "INFRAESTRUTURA",
         items: [
-          { label: "Escritório / Coworking", cuentaCodigos: ["5.3.1.03"] },
-          // Depósito en garantía: activo no corriente (salida de caja).
-          { label: "Depósito en garantía", cuentaCodigos: ["1.2.3.01"] },
+          { label: "Escritório / Coworking", cuentaCodigos: ["7.4.01"] },
+          // Depósito en garantía: sin cuenta analítica dedicada en ULTRA (template).
+          { label: "Depósito en garantía", cuentaCodigos: [] },
           // Cuota de activación: evento único sem conta dedicada.
           { label: "Cuota de activación", cuentaCodigos: [] },
           {
             label: "Serviços (luz, gás, água)",
-            cuentaCodigos: ["5.3.1.05"],
+            cuentaCodigos: ["7.5.99"],
           },
-          // Seguros consolidados en 5.3.1.05 (Servicios y Gastos Generales).
+          // Seguros → 7.6 (consolidados en el template).
           { label: "Seguros", cuentaCodigos: [] },
         ],
       },
       {
         label: "SERVICIO TERCERO",
         items: [
-          { label: "Contador", cuentaCodigos: ["5.3.1.01"] },
-          { label: "Sistema para Facturación", cuentaCodigos: ["5.3.1.02"] },
+          { label: "Contador", cuentaCodigos: ["7.2.01"] },
+          { label: "Sistema para Facturación", cuentaCodigos: ["7.3.01"] },
           // Comunicaciones consolidadas en 5.3.1.05 (Servicios y Gastos Grales).
           { label: "Comunicações", cuentaCodigos: [] },
         ],
@@ -173,13 +173,13 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
         items: [
           // DIE/Tasa/Arancel capitalizan (RT17); queda sólo la obligación por
           // pagar 2.1.5.0x, que es la que mueve caja al cancelarse.
-          { label: "Derecho de Importación (16%)", cuentaCodigos: ["2.1.5.01"] },
-          { label: "Tasa Estadística (3%)", cuentaCodigos: ["2.1.5.02"] },
-          { label: "Arancel SIM (0,5%)", cuentaCodigos: ["2.1.5.03"] },
-          { label: "IVA Importación (21%)", cuentaCodigos: ["1.1.5.1.03"] },
-          { label: "IVA Adicional (20%)", cuentaCodigos: ["1.1.5.1.04"] },
-          { label: "Percepción IIBB (2,5%)", cuentaCodigos: ["1.1.5.2.01"] },
-          { label: "Percepción Ganancias (6%)", cuentaCodigos: ["1.1.5.3.01"] },
+          { label: "Derecho de Importación (16%)", cuentaCodigos: ["2.1.4.4.01"] },
+          { label: "Tasa Estadística (3%)", cuentaCodigos: ["2.1.4.4.02"] },
+          { label: "Arancel SIM (0,5%)", cuentaCodigos: ["2.1.4.4.03"] },
+          { label: "IVA Importación (21%)", cuentaCodigos: ["1.1.4.1.03"] },
+          { label: "IVA Adicional (20%)", cuentaCodigos: ["1.1.4.1.04"] },
+          { label: "Percepción IIBB (2,5%)", cuentaCodigos: ["1.1.4.2.01"] },
+          { label: "Percepción Ganancias (6%)", cuentaCodigos: ["1.1.4.3.01"] },
         ],
       },
     ],
@@ -192,9 +192,9 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "IMPUESTOS VENTAS",
         items: [
-          { label: "IVA Ventas (21%)", cuentaCodigos: ["2.1.3.1.01"] },
-          { label: "IIBB Ventas (2,5%)", cuentaCodigos: ["2.1.3.2.01"] },
-          { label: "Ganancias por Pagar", cuentaCodigos: ["2.1.3.3.01"] },
+          { label: "IVA Ventas (21%)", cuentaCodigos: ["2.1.4.1.01"] },
+          { label: "IIBB Ventas (2,5%)", cuentaCodigos: ["2.1.4.2.01"] },
+          { label: "Ganancias por Pagar", cuentaCodigos: ["2.1.4.3.01"] },
         ],
       },
     ],
@@ -207,10 +207,13 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "VENTAS",
         items: [
-          { label: "Ventas Neumáticos Nuevos", cuentaCodigos: ["4.1.1.01"] },
-          // El plan v3 no separa "usados" (sin cuenta dedicada).
+          {
+            label: "Ventas Neumáticos Nuevos",
+            cuentaCodigos: ["4.1.01.01", "4.1.01.02", "4.1.01.03", "4.1.01.04", "4.1.01.09"],
+          },
+          // El plan ULTRA no separa "usados" (sin cuenta dedicada).
           { label: "Ventas Neumáticos Usados", cuentaCodigos: [] },
-          { label: "Otros Ingresos", cuentaCodigos: ["4.2.1.01", "4.2.1.02"] },
+          { label: "Otros Ingresos", cuentaCodigos: ["4.3.02", "4.3.99"] },
         ],
       },
     ],
@@ -223,8 +226,8 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "RECEBIMENTOS DE CAPITAL",
         items: [
-          { label: "Aportes de Capital", cuentaCodigos: ["3.1.1.01", "3.1.1.02"] },
-          // Préstamos nacen bajo 2.1.2.x / 2.2.1.x en runtime (sin código
+          { label: "Aportes de Capital", cuentaCodigos: ["3.1.01", "3.1.02"] },
+          // Préstamos nacen bajo 2.1.5.01.x / 2.2.2.01.x en runtime (sin código
           // canónico fijo); se exponen por su rama al consolidarse.
           { label: "Empréstimos Bancários CP", cuentaCodigos: [] },
           { label: "Empréstimos Exterior", cuentaCodigos: [] },
@@ -233,9 +236,9 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "AMORTIZAÇÕES E JUROS",
         items: [
-          { label: "Juros Pagos", cuentaCodigos: ["5.8.1.07"] },
-          { label: "Comissões Bancárias", cuentaCodigos: ["5.8.1.01"] },
-          { label: "Gastos Transferência Exterior", cuentaCodigos: ["5.8.1.03"] },
+          { label: "Juros Pagos", cuentaCodigos: ["9.1.03"] },
+          { label: "Comissões Bancárias", cuentaCodigos: ["9.5.01"] },
+          { label: "Gastos Transferência Exterior", cuentaCodigos: ["9.5.02"] },
         ],
       },
     ],

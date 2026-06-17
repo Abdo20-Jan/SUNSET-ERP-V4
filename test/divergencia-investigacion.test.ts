@@ -151,7 +151,12 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       data: { nombre: "DF Buenos Aires", tipo: "ZONA_PRIMARIA", subtipo: "DEPOSITO_FISCAL" },
     });
     const embarque = await db.prisma.embarque.create({
-      data: { codigo: "EMB-3.3-2", proveedorId: proveedor.id, moneda: "USD", tipoCambio: TIPO_CAMBIO },
+      data: {
+        codigo: "EMB-3.3-2",
+        proveedorId: proveedor.id,
+        moneda: "USD",
+        tipoCambio: TIPO_CAMBIO,
+      },
     });
     const contenedor = await db.prisma.contenedor.create({
       data: {
@@ -374,7 +379,7 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
   // ---- conclusión: asiento por causa-raíz ------------------------------
 
   describe("concluirInvestigacion — asiento por causa-raíz", () => {
-    it("SOBRA → DEBE 1.1.7.04 / HABER 4.2.2.01 (físico > declarado)", async () => {
+    it("SOBRA → DEBE 1.1.7.04 / HABER 5.2.03 (físico > declarado)", async () => {
       const s = await seed();
       await setFisica(s.itemContenedorId, 105); // sobra de 5 → 50 USD → 50 000 ARS
       const inv = await abrirInvestigacion({ desconsolidacionId: s.desconsolidacionId }, db.prisma);
@@ -386,11 +391,11 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       const { asiento } = await concluirInvestigacion(inv.id, { fecha: FECHA }, db.prisma);
       expect(await lineasDe(asiento!.id)).toEqual([
         { codigo: "1.1.7.04", debe: "50000.00", haber: "0.00" },
-        { codigo: "4.2.2.01", debe: "0.00", haber: "50000.00" },
+        { codigo: "5.2.03", debe: "0.00", haber: "50000.00" },
       ]);
     });
 
-    it("FALTA NAO_IDENTIFICADA → DEBE 5.1.1.02 / HABER 1.1.7.04", async () => {
+    it("FALTA NAO_IDENTIFICADA → DEBE 5.2.01 / HABER 1.1.7.04", async () => {
       const s = await seed();
       await setFisica(s.itemContenedorId, 90); // falta 10 → 100 USD → 100 000 ARS
       const inv = await abrirInvestigacion({ desconsolidacionId: s.desconsolidacionId }, db.prisma);
@@ -401,7 +406,7 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       );
       const { asiento } = await concluirInvestigacion(inv.id, { fecha: FECHA }, db.prisma);
       expect(await lineasDe(asiento!.id)).toEqual([
-        { codigo: "5.1.1.02", debe: "100000.00", haber: "0.00" },
+        { codigo: "5.2.01", debe: "100000.00", haber: "0.00" },
         { codigo: "1.1.7.04", debe: "0.00", haber: "100000.00" },
       ]);
     });
@@ -525,8 +530,8 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       // un neto de 50 000. Stock 1.1.7.04 aparece 2× (sobra DEBE / falta HABER).
       expect(await lineasDe(asiento!.id)).toEqual([
         { codigo: "1.1.7.04", debe: "50000.00", haber: "0.00" },
-        { codigo: "4.2.2.01", debe: "0.00", haber: "50000.00" },
-        { codigo: "5.1.1.02", debe: "100000.00", haber: "0.00" },
+        { codigo: "5.2.03", debe: "0.00", haber: "50000.00" },
+        { codigo: "5.2.01", debe: "100000.00", haber: "0.00" },
         { codigo: "1.1.7.04", debe: "0.00", haber: "100000.00" },
       ]);
     });
@@ -550,8 +555,8 @@ describe("divergencia-investigacion (PR 3.3, D9)", () => {
       expect(investigacion.asientoAjusteId).toBeTruthy();
       expect(await lineasDe(asiento!.id)).toEqual([
         { codigo: "1.1.7.04", debe: "100000.00", haber: "0.00" },
-        { codigo: "4.2.2.01", debe: "0.00", haber: "100000.00" },
-        { codigo: "5.1.1.02", debe: "100000.00", haber: "0.00" },
+        { codigo: "5.2.03", debe: "0.00", haber: "100000.00" },
+        { codigo: "5.2.01", debe: "100000.00", haber: "0.00" },
         { codigo: "1.1.7.04", debe: "0.00", haber: "100000.00" },
       ]);
     });

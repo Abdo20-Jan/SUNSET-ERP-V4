@@ -93,15 +93,25 @@ async function seed(prisma: PrismaClient): Promise<Seed> {
       nivel: 4,
     },
   });
-  // Sintética padre para auto-create de diferencia cambio
+  // Sintética padre para auto-create de diferencia de cambio (ULTRA clase 9).
+  // 9.2.01 ganancia / 9.2.02 pérdida cuelgan de 9.2 → 9. ensurePadreSintetica
+  // crearía la cadena igual, pero las sembramos para documentar el árbol.
   await prisma.cuentaContable.createMany({
     data: [
-      { codigo: "4", nombre: "INGRESOS", tipo: "SINTETICA", categoria: "INGRESO", nivel: 1 },
-      { codigo: "4.5", nombre: "DIF CAMBIO", tipo: "SINTETICA", categoria: "INGRESO", nivel: 2 },
-      { codigo: "4.5.1", nombre: "GANANCIA", tipo: "SINTETICA", categoria: "INGRESO", nivel: 3 },
-      { codigo: "5", nombre: "EGRESOS", tipo: "SINTETICA", categoria: "EGRESO", nivel: 1 },
-      { codigo: "5.5", nombre: "FINANCIEROS", tipo: "SINTETICA", categoria: "EGRESO", nivel: 2 },
-      { codigo: "5.5.3", nombre: "PERDIDA", tipo: "SINTETICA", categoria: "EGRESO", nivel: 3 },
+      {
+        codigo: "9",
+        nombre: "RESULTADOS FINANCIEROS Y POR TENENCIA",
+        tipo: "SINTETICA",
+        categoria: "INGRESO",
+        nivel: 1,
+      },
+      {
+        codigo: "9.2",
+        nombre: "DIFERENCIAS DE CAMBIO",
+        tipo: "SINTETICA",
+        categoria: "INGRESO",
+        nivel: 2,
+      },
     ],
   });
 
@@ -299,7 +309,7 @@ describe("Fase 2 — Diferencia cambiaria automática en pago USD", () => {
     expect(banco?.haber.toString()).toBe("35480307.5");
 
     // Línea diferencia: HABER ganancia = spread
-    const dif = lineas.find((l) => l.cuenta.codigo === "4.3.1.02");
+    const dif = lineas.find((l) => l.cuenta.codigo === "9.2.01");
     expect(dif).toBeDefined();
     expect(dif?.haber.toString()).toBe("1053996.25");
   });
@@ -321,7 +331,7 @@ describe("Fase 2 — Diferencia cambiaria automática en pago USD", () => {
       include: { cuenta: { select: { codigo: true } } },
     });
 
-    const dif = lineas.find((l) => l.cuenta.codigo === "5.8.1.02");
+    const dif = lineas.find((l) => l.cuenta.codigo === "9.2.02");
     expect(dif).toBeDefined();
     expect(dif?.debe.toString()).toBe("1000000");
   });

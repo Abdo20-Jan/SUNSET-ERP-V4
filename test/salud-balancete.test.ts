@@ -37,7 +37,7 @@ describe("detectarAnomaliasBalancete", () => {
     // Proveedor PASIVO/ACREEDOR con debe>haber → invertido pero reclasificable.
     const anomalias = detectarAnomaliasBalancete([
       cuenta({
-        codigo: "2.1.1.20",
+        codigo: "2.1.1.01.20",
         categoria: "PASIVO",
         naturaleza: "ACREEDOR",
         debe: new Decimal(82),
@@ -48,7 +48,7 @@ describe("detectarAnomaliasBalancete", () => {
 
   it("NO marca un cliente (1.1.3.x) con saldo acreedor (anticipo comercial)", () => {
     const anomalias = detectarAnomaliasBalancete([
-      cuenta({ codigo: "1.1.4.10", haber: new Decimal(300) }),
+      cuenta({ codigo: "1.1.3.10", haber: new Decimal(300) }),
     ]);
     expect(anomalias).toHaveLength(0);
   });

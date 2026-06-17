@@ -228,8 +228,8 @@ describe("MOEDA flujo — consolidado + convertido al TC de cierre", () => {
   }
 
   it("1) consolida USD: banco ARS (÷TC) + banco USD (nativo)", async () => {
-    const bancoArs = await mkBanco("1.1.2.01", "BANCO NACION ARS", "ARS");
-    const bancoUsd = await mkBanco("1.1.2.02", "BANCO USD", "USD");
+    const bancoArs = await mkBanco("1.1.1.02.01", "BANCO NACION ARS", "ARS");
+    const bancoUsd = await mkBanco("1.1.1.02.02", "BANCO USD", "USD");
     const cliente = await mkCuenta("1.1.4.01", "CLIENTE A", "ACTIVO");
     const proveedor = await mkCuenta("2.1.1.20", "PROVEEDOR EXTERIOR", "PASIVO");
     await mkCotizacion("2025-12-31", 1200);
@@ -275,8 +275,8 @@ describe("MOEDA flujo — consolidado + convertido al TC de cierre", () => {
   });
 
   it("2) consolida ARS: banco USD (×TC) + banco ARS (nativo)", async () => {
-    const bancoArs = await mkBanco("1.1.2.01", "BANCO NACION ARS", "ARS");
-    const bancoUsd = await mkBanco("1.1.2.02", "BANCO USD", "USD");
+    const bancoArs = await mkBanco("1.1.1.02.01", "BANCO NACION ARS", "ARS");
+    const bancoUsd = await mkBanco("1.1.1.02.02", "BANCO USD", "USD");
     const cliente = await mkCuenta("1.1.4.01", "CLIENTE A", "ACTIVO");
     const proveedor = await mkCuenta("2.1.1.20", "PROVEEDOR EXTERIOR", "PASIVO");
     await mkCotizacion("2025-12-31", 1200);
@@ -319,7 +319,7 @@ describe("MOEDA flujo — consolidado + convertido al TC de cierre", () => {
   });
 
   it("3) TC de cierre = última Cotizacion con fecha ≤ hasta", async () => {
-    const bancoArs = await mkBanco("1.1.2.01", "BANCO NACION ARS", "ARS");
+    const bancoArs = await mkBanco("1.1.1.02.01", "BANCO NACION ARS", "ARS");
     const cliente = await mkCuenta("1.1.4.01", "CLIENTE A", "ACTIVO");
     await mkCotizacion("2025-06-30", 1000); // anterior
     await mkCotizacion("2025-12-31", 1200); // vigente al cierre (la que debe usar)
@@ -337,8 +337,8 @@ describe("MOEDA flujo — consolidado + convertido al TC de cierre", () => {
   });
 
   it("4) sin cotización: advertencia + cuenta en otra moneda queda fuera", async () => {
-    const bancoArs = await mkBanco("1.1.2.01", "BANCO NACION ARS", "ARS");
-    const bancoUsd = await mkBanco("1.1.2.02", "BANCO USD", "USD");
+    const bancoArs = await mkBanco("1.1.1.02.01", "BANCO NACION ARS", "ARS");
+    const bancoUsd = await mkBanco("1.1.1.02.02", "BANCO USD", "USD");
     const cliente = await mkCuenta("1.1.4.01", "CLIENTE A", "ACTIVO");
     const proveedor = await mkCuenta("2.1.1.20", "PROVEEDOR EXTERIOR", "PASIVO");
     // (sin mkCotizacion → no hay TC)
@@ -373,7 +373,7 @@ describe("MOEDA flujo — consolidado + convertido al TC de cierre", () => {
   });
 
   it("5) FC-2 sub-centavo: muchos movimientos chicos no pierden dinero", async () => {
-    const bancoArs = await mkBanco("1.1.2.01", "BANCO NACION ARS", "ARS");
+    const bancoArs = await mkBanco("1.1.1.02.01", "BANCO NACION ARS", "ARS");
     const cliente = await mkCuenta("1.1.4.01", "CLIENTE A", "ACTIVO");
     await mkCotizacion("2025-12-31", 1000);
 
@@ -392,8 +392,8 @@ describe("MOEDA flujo — consolidado + convertido al TC de cierre", () => {
   });
 
   it("6) reconciliación consolidada con asientos mixtos (invariante clave)", async () => {
-    const bancoArs = await mkBanco("1.1.2.01", "BANCO NACION ARS", "ARS");
-    const bancoUsd = await mkBanco("1.1.2.02", "BANCO USD", "USD");
+    const bancoArs = await mkBanco("1.1.1.02.01", "BANCO NACION ARS", "ARS");
+    const bancoUsd = await mkBanco("1.1.1.02.02", "BANCO USD", "USD");
     const cliente = await mkCuenta("1.1.4.01", "CLIENTE A", "ACTIVO");
     const proveedorLocal = await mkCuenta("2.1.1.10", "PROVEEDOR LOCAL", "PASIVO");
     const proveedorExt = await mkCuenta("2.1.1.20", "PROVEEDOR EXTERIOR", "PASIVO");
@@ -454,7 +454,7 @@ describe("MOEDA flujo — consolidado + convertido al TC de cierre", () => {
   });
 
   it("7) asiento mixto (banco USD / contrapartida ARS): saldo por lado banco + advertencia", async () => {
-    const bancoUsd = await mkBanco("1.1.2.02", "BANCO USD", "USD");
+    const bancoUsd = await mkBanco("1.1.1.02.02", "BANCO USD", "USD");
     const gasto = await mkCuenta("5.2.1.01", "COMISIONES", "EGRESO");
     await mkCotizacion("2025-12-31", 1200); // ≠ 1000 del booking → descuadre
 
@@ -482,8 +482,8 @@ describe("MOEDA flujo — consolidado + convertido al TC de cierre", () => {
   });
 
   it("8) transferencia misma moneda: neta 0 en saldo, aparece en transferencias", async () => {
-    const banco1 = await mkBanco("1.1.2.01", "BANCO NACION ARS", "ARS");
-    const banco2 = await mkBanco("1.1.2.03", "BANCO GALICIA ARS", "ARS");
+    const banco1 = await mkBanco("1.1.1.02.01", "BANCO NACION ARS", "ARS");
+    const banco2 = await mkBanco("1.1.1.02.03", "BANCO GALICIA ARS", "ARS");
     await mkCotizacion("2025-12-31", 1200);
 
     await mkAsiento([
@@ -497,7 +497,7 @@ describe("MOEDA flujo — consolidado + convertido al TC de cierre", () => {
   });
 
   it("9) fallback legado USD (asiento.moneda=USD, debe/haber en USD crudo)", async () => {
-    const bancoUsd = await mkBanco("1.1.2.02", "BANCO USD", "USD");
+    const bancoUsd = await mkBanco("1.1.1.02.02", "BANCO USD", "USD");
     const cliente = await mkCuenta("1.1.4.01", "CLIENTE USD", "ACTIVO");
     await mkCotizacion("2025-12-31", 1200);
 
@@ -518,7 +518,7 @@ describe("MOEDA flujo — consolidado + convertido al TC de cierre", () => {
   });
 
   it("10) FC-2 rollup: subtotal sintético == suma de las analíticas", async () => {
-    const bancoArs = await mkBanco("1.1.2.01", "BANCO NACION ARS", "ARS");
+    const bancoArs = await mkBanco("1.1.1.02.01", "BANCO NACION ARS", "ARS");
     await mkSintetica("5", "EGRESOS", "EGRESO", 1);
     await mkSintetica("5.2", "GASTOS", "EGRESO", 2, "5");
     await mkSintetica("5.2.1", "GASTOS GENERALES", "EGRESO", 3, "5.2");

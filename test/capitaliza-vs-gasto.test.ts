@@ -10,7 +10,7 @@ import { GASTO_POR_TIPO_PROVEEDOR } from "@/lib/services/cuenta-registry";
 // portuarios, flete internacional) CAPITALIZAN al costo de la mercadería
 // (1.1.7.02 Mercaderías en Tránsito) y NO crean cuenta de resultado por
 // proveedor. Los gastos de PERÍODO (serv. profesionales, alquileres, IT,
-// marketing, otro) siguen siendo egreso de resultado (5.x).
+// marketing, otro) siguen siendo egreso de resultado (clases 6/7 en ULTRA).
 
 const IMPORTACION: TipoProveedor[] = [
   "DESPACHANTE",
@@ -42,18 +42,21 @@ describe("capitaliza-vs-gasto — contrapartida del DEBE por tipo de proveedor",
     }
   });
 
-  it("gastos de período siguen siendo egreso (5.x) y conservan rango por proveedor", () => {
+  it("gastos de período son egreso de resultado (clases 6/7) y conservan rango por proveedor", () => {
     for (const tipo of PERIODO) {
       const def = GASTO_POR_TIPO_PROVEEDOR[tipo];
       expect(def.categoria).toBe("EGRESO");
-      expect(def.codigo.startsWith("5.")).toBe(true);
+      // ULTRA: comercialización (6) o administración (7), nunca costo (5) ni activo (1).
+      expect(/^[67]\./.test(def.codigo)).toBe(true);
       expect(rangoGastoByTipo(tipo)).not.toBeNull();
     }
   });
 
-  it("ningún destino capitalizable cae en una cuenta 5.x (no se expensa un costo de importación)", () => {
+  it("ningún destino capitalizable cae en una cuenta de resultado (no se expensa un costo de importación)", () => {
     for (const tipo of IMPORTACION) {
-      expect(GASTO_POR_TIPO_PROVEEDOR[tipo].codigo.startsWith("5.")).toBe(false);
+      const codigo = GASTO_POR_TIPO_PROVEEDOR[tipo].codigo;
+      // Capitaliza al activo (1.x); nunca clase de resultado 5/6/7.
+      expect(/^[567]\./.test(codigo)).toBe(false);
     }
   });
 });

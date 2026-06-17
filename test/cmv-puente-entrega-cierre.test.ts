@@ -160,8 +160,8 @@ describe("ponte 1.1.5.03 — la entrega cierra contra el costo de la venta (Onda
     // 1.1.5.01 acreditada por el egreso físico real (SPD): 10·1200 = 12.000.
     expect(await haber("1.1.7.01")).toBeCloseTo(12_000, 2);
     // Diferencia (2.000) como PÉRDIDA de inventario (DEBE 5.9.2.01).
-    expect(await debe("5.1.1.02")).toBeCloseTo(2_000, 2);
-    expect(await haber("4.2.2.01")).toBeCloseTo(0, 2);
+    expect(await debe("5.2.01")).toBeCloseTo(2_000, 2);
+    expect(await haber("5.2.03")).toBeCloseTo(0, 2);
   });
 
   it("costo SPD MENOR que el de la venta: ingreso por diferencia y 1.1.5.03 cierra", async () => {
@@ -172,8 +172,8 @@ describe("ponte 1.1.5.03 — la entrega cierra contra el costo de la venta (Onda
     // 1.1.5.01 por el egreso real: 10·1000 = 10.000.
     expect(await haber("1.1.7.01")).toBeCloseTo(10_000, 2);
     // Diferencia (2.000) como INGRESO por diferencia de inventario (HABER 4.9.1.01).
-    expect(await haber("4.2.2.01")).toBeCloseTo(2_000, 2);
-    expect(await debe("5.1.1.02")).toBeCloseTo(0, 2);
+    expect(await haber("5.2.03")).toBeCloseTo(2_000, 2);
+    expect(await debe("5.2.01")).toBeCloseTo(0, 2);
   });
 
   it("venta legacy (snapshot 0): la entrega cae al SPD, sin variación (control)", async () => {
@@ -231,7 +231,7 @@ describe("ponte 1.1.5.03 — la entrega cierra contra el costo de la venta (Onda
     // DEBE 1.1.5.03 = 10·1200 = 12.000, HABER 1.1.5.01 = 12.000, sin variación.
     expect(await debe("1.1.7.05")).toBeCloseTo(12_000, 2);
     expect(await haber("1.1.7.01")).toBeCloseTo(12_000, 2);
-    expect(await debe("5.1.1.02")).toBeCloseTo(0, 2);
-    expect(await haber("4.2.2.01")).toBeCloseTo(0, 2);
+    expect(await debe("5.2.01")).toBeCloseTo(0, 2);
+    expect(await haber("5.2.03")).toBeCloseTo(0, 2);
   });
 });

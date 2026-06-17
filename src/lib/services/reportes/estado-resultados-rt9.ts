@@ -46,56 +46,61 @@ type SeccionDef = {
   prefijos: string[];
 };
 
-// Orden de exposición RT9 (de arriba hacia abajo en el estado).
+// Orden de exposición ULTRA (9 clases, de arriba hacia abajo en el estado).
+// `rubroEECC` casa con los rubros del catálogo (plan-de-cuentas.ts); los
+// `prefijos` son el fallback cuando una cuenta no declara rubro.
 const SECCIONES: readonly SeccionDef[] = [
   {
     id: "VENTAS",
     label: "Ventas Netas",
     tipo: "ingreso",
-    rubroEECC: "Ventas",
-    prefijos: ["4.1"],
+    rubroEECC: "Ventas netas",
+    // 4.1 ventas + 4.2 deducciones (devoluciones/bonificaciones, contra-ingreso).
+    prefijos: ["4.1", "4.2"],
   },
   {
     id: "CMV",
-    label: "Costo de Mercaderías Vendidas",
+    label: "Costo de Ventas",
     tipo: "egreso",
-    rubroEECC: "Costo de Mercaderías Vendidas",
-    prefijos: ["5.1"],
+    rubroEECC: "Costo de ventas",
+    prefijos: ["5"],
   },
   {
     id: "COMERCIALIZACION",
     label: "Gastos de Comercialización",
     tipo: "egreso",
-    rubroEECC: "Gastos de Comercialización",
-    prefijos: ["5.2"],
+    rubroEECC: "Gastos de comercialización",
+    prefijos: ["6"],
   },
   {
     id: "ADMINISTRACION",
     label: "Gastos de Administración",
     tipo: "egreso",
-    rubroEECC: "Gastos de Administración",
-    prefijos: ["5.3"],
+    rubroEECC: "Gastos de administración",
+    prefijos: ["7"],
   },
   {
     id: "FINANCIEROS",
     label: "Resultados Financieros y por Tenencia",
     tipo: "mixto",
-    rubroEECC: "Resultados Financieros y por Tenencia",
-    prefijos: ["4.3", "5.8"],
+    rubroEECC: "Resultados financieros y por tenencia",
+    prefijos: ["9"],
   },
   {
     id: "OTROS",
-    label: "Otros Ingresos y Egresos",
+    label: "Otros Resultados",
     tipo: "mixto",
-    rubroEECC: "Otros Ingresos y Egresos",
-    prefijos: ["4.2", "5.9"],
+    rubroEECC: "Otros resultados",
+    // Otros ingresos operativos (4.3) + otros resultados no operativos (8.1-8.5).
+    // EXCLUYE 8.6 (Impuesto a las Ganancias → sección propia).
+    prefijos: ["4.3", "8.1", "8.2", "8.3", "8.4", "8.5"],
   },
   {
     id: "GANANCIAS",
     label: "Impuesto a las Ganancias",
     tipo: "egreso",
-    rubroEECC: "Impuesto a las Ganancias",
-    prefijos: ["5.10"],
+    rubroEECC: "Impuesto a las ganancias",
+    prefijos: ["8.6"],
   },
 ];
 
