@@ -96,11 +96,14 @@ describe("actions despacho cruzado / borrador (PR 4.4a)", () => {
     const contenedor = await db.prisma.contenedor.create({
       data: { embarqueId: embarque.id, numeroContenedor: "MSCU0000001", estado: "DESCONSOLIDADO" },
     });
+    // Lotes distintos: evita violar ItemContenedor_cp_null_idx (UNIQUE parcial
+    // de prod sobre (contenedor, producto) WHERE loteFabricacion IS NULL).
     const icA = await db.prisma.itemContenedor.create({
       data: {
         contenedorId: contenedor.id,
         itemEmbarqueId: ie.id,
         productoId: prod.id,
+        loteFabricacion: "LOTE-A",
         cantidadDeclarada: 60,
         cantidadFisica: 60,
         cantidadDisponible: 60,
@@ -112,6 +115,7 @@ describe("actions despacho cruzado / borrador (PR 4.4a)", () => {
         contenedorId: contenedor.id,
         itemEmbarqueId: ie.id,
         productoId: prod.id,
+        loteFabricacion: "LOTE-B",
         cantidadDeclarada: 40,
         cantidadFisica: 40,
         cantidadDisponible: 40,
