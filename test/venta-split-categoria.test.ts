@@ -282,4 +282,51 @@ describe("Venta — split Ventas/CMV por categoría (ULTRA)", () => {
     const { td, th } = await balanceaAsiento(asiento.id);
     expect(td).toBeCloseTo(th, 2);
   });
+
+  it("NO provisiona Impuesto a las Ganancias por venta (se calcula al cierre, no por operación)", async () => {
+    // Decisión 2026-06-17: el ERP es razón gerencial; el Impuesto a las Ganancias
+    // se determina al cierre (lucro neto del ejercicio × escala 25/30/35), no por
+    // operación. Provisionar 35% fijo sobre la utilidad bruta de cada venta crea
+    // un pasivo falso (2.1.4.3.01) y distorsiona la rentabilidad — el asiento de
+    // venta NO debe tocar 8.6.01 ni 2.1.4.3.01.
+    const cli = await db.prisma.cliente.create({ data: { nombre: `Cli ${seq}` } });
+    const prod = await db.prisma.producto.create({
+      data: { codigo: `TBR-${seq}`, nombre: "TBR", categoria: "TBR", costoPromedio: "100" },
+    });
+    const venta = await db.prisma.venta.create({
+      data: {
+        numero: `V-${seq}`,
+        clienteId: cli.id,
+        fecha: FECHA,
+        moneda: "ARS",
+        tipoCambio: "1",
+        subtotal: "2000",
+        iva: "0",
+        total: "2000",
+        estado: "EMITIDA",
+        items: {
+          create: [
+            {
+              productoId: prod.id,
+              cantidad: 2,
+              precioUnitario: "1000",
+              subtotal: "2000",
+              iva: "0",
+              total: "2000",
+            },
+          ],
+        },
+      },
+      select: { id: true },
+    });
+
+    const asiento = await crearAsientoVenta(venta.id, db.prisma);
+
+    // Venta rentable (utilidad bruta 1800): el motor viejo habría provisionado
+    // 0.35·1800 = 630. Ahora NO hay línea de provisión.
+    expect(await debe("8.6.01")).toBeCloseTo(0, 2);
+    expect(await haber("2.1.4.3.01")).toBeCloseTo(0, 2);
+    const { td, th } = await balanceaAsiento(asiento.id);
+    expect(td).toBeCloseTo(th, 2);
+  });
 });
