@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { requireSessionUser } from "@/lib/auth-guard";
+import { requireAdmin } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import { anularVentaAction } from "@/lib/actions/ventas";
 import { AuditAccion, Prisma, VentaEstado } from "@/generated/prisma/client";
@@ -76,9 +76,15 @@ export type AnularMasivoResult =
 export async function anularVentasMasivoAction(
   input: z.infer<typeof anularSchema>,
 ): Promise<AnularMasivoResult> {
-  // Valida que el user del JWT siga existiendo (redirige a /login si no): el
-  // AuditLog.usuarioId es FK obligatoria y rompería con P2003 tras un reseed.
-  const userId = await requireSessionUser();
+  // Recálculo masivo de Percepción IIBB: operación administrativa bajo /admin.
+  // requireAdmin revalida el rol contra la DB y, de paso, confirma que el user
+  // del JWT siga existiendo (AuditLog.usuarioId es FK obligatoria → evita P2003
+  // tras un reseed) antes de cualquier escritura.
+  const guard = await requireAdmin();
+  if (!guard.ok) {
+    return { ok: false, error: guard.error };
+  }
+  const userId = guard.userId;
 
   const parsed = anularSchema.safeParse(input);
   if (!parsed.success) {
