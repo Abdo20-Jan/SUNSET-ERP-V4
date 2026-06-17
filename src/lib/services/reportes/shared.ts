@@ -193,6 +193,11 @@ export type ReporteFilter = { periodoId: number } | { fechaDesde?: Date; fechaHa
 export async function buildCuentaTree(
   categorias: CuentaCategoria[],
   filter: ReporteFilter,
+  // Ajuste de revaluación por cuenta (revBruta en términos deudores, ARS): se
+  // suma al saldo final de la cuenta ANALITICA antes del roll-up, aplicando la
+  // naturaleza. Sólo presentación (no toca debe/haber ni el saldo inicial).
+  // Sin el parámetro, identidad: el comportamiento vigente no cambia.
+  ajusteRevaluacion?: Map<number, Decimal>,
 ): Promise<BuildTreeResult> {
   const asientoWhere =
     "periodoId" in filter
@@ -303,6 +308,12 @@ export async function buildCuentaTree(
 
     const saldoMov = c.tipo === "ANALITICA" ? saldoNatural(nat, debe, haber) : new Decimal(0);
 
+    // Revaluación (sólo presentación): revBruta viene en términos deudores; se
+    // signa por naturaleza igual que el saldo, y se suma al saldo final.
+    const revBruta = ajusteRevaluacion?.get(c.id) ?? new Decimal(0);
+    const revNat =
+      c.tipo === "ANALITICA" ? (nat === "DEUDOR" ? revBruta : revBruta.negated()) : new Decimal(0);
+
     byCodigo.set(c.codigo, {
       id: c.id,
       codigo: c.codigo,
@@ -314,7 +325,7 @@ export async function buildCuentaTree(
       saldoInicial,
       debe,
       haber,
-      saldo: saldoInicial.plus(saldoMov),
+      saldo: saldoInicial.plus(saldoMov).plus(revNat),
       children: [],
     });
     padreByCodigo.set(c.codigo, c.padreCodigo ?? null);
