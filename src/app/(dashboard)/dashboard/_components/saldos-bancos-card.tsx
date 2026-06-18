@@ -17,10 +17,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { fmtMoney } from "@/lib/format";
+import { convertirMonto, fmtMoney } from "@/lib/format";
 import type { SaldoBancario } from "@/lib/services/dashboard";
 
-export function SaldosBancosCard({ saldos }: { saldos: SaldoBancario[] }) {
+export function SaldosBancosCard({
+  saldos,
+  moneda,
+  tc,
+}: {
+  saldos: SaldoBancario[];
+  moneda: "ARS" | "USD";
+  tc: string | null;
+}) {
   return (
     <Card>
       <CardHeader className="border-b">
@@ -46,7 +54,7 @@ export function SaldosBancosCard({ saldos }: { saldos: SaldoBancario[] }) {
               <TableRow>
                 <TableHead className="pl-6">Cuenta</TableHead>
                 <TableHead>Moneda</TableHead>
-                <TableHead className="pr-6 text-right">Saldo</TableHead>
+                <TableHead className="pr-6 text-right">Saldo ({moneda})</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -65,7 +73,7 @@ export function SaldosBancosCard({ saldos }: { saldos: SaldoBancario[] }) {
                     <Badge variant="outline">{s.moneda}</Badge>
                   </TableCell>
                   <TableCell className="pr-6 text-right tabular-nums">
-                    {fmtMoney(s.saldo.toString())}
+                    {fmtMoney(convertirMonto(s.saldo.toString(), s.moneda, moneda, tc))}
                   </TableCell>
                 </TableRow>
               ))}

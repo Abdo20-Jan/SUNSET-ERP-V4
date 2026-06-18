@@ -55,6 +55,32 @@ export function convertirAUsd(valueArs: string, tc: string | null | undefined): 
   return (n / tcN).toFixed(2);
 }
 
+/**
+ * Convierte un monto desde su moneda NATIVA a la moneda de presentación, usando
+ * el TC de cierre ("ARS por USD"). A diferencia de `convertirAUsd`, es
+ * native-aware: preserva lo que ya está en la moneda destino ("1 a 1") y sólo
+ * convierte lo que está en otra moneda. Pensado para el dashboard, donde cada
+ * saldo bancario / préstamo viene en su moneda nativa (mixta).
+ * Si no hay TC válido (null/0/NaN) o el valor no es finito, devuelve el valor
+ * original sin tocar (degradación segura).
+ */
+export function convertirMonto(
+  valorNativo: string,
+  monedaNativa: "ARS" | "USD",
+  monedaDestino: "ARS" | "USD",
+  tc: string | null | undefined,
+): string {
+  if (monedaNativa === monedaDestino) return valorNativo;
+  const n = Number.parseFloat(valorNativo);
+  if (!Number.isFinite(n)) return valorNativo;
+  if (!tc) return valorNativo;
+  const tcN = Number.parseFloat(tc);
+  if (!Number.isFinite(tcN) || tcN <= 0) return valorNativo;
+  // monedaNativa ≠ monedaDestino: o bien USD→ARS (×TC) o ARS→USD (÷TC).
+  const convertido = monedaNativa === "USD" ? n * tcN : n / tcN;
+  return convertido.toFixed(2);
+}
+
 export function fmtSigno(value: string): "positive" | "negative" | "zero" {
   const n = Number.parseFloat(value);
   if (!Number.isFinite(n) || n === 0) return "zero";

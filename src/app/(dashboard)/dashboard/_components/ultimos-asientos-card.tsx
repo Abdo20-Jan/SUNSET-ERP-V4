@@ -16,10 +16,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { convertirMonto, fmtDate, fmtMoney } from "@/lib/format";
 import type { UltimoAsiento } from "@/lib/services/dashboard";
 
-export function UltimosAsientosCard({ asientos }: { asientos: UltimoAsiento[] }) {
+export function UltimosAsientosCard({
+  asientos,
+  moneda,
+  tc,
+}: {
+  asientos: UltimoAsiento[];
+  moneda: "ARS" | "USD";
+  tc: string | null;
+}) {
   return (
     <Card>
       <CardHeader className="border-b">
@@ -44,7 +52,7 @@ export function UltimosAsientosCard({ asientos }: { asientos: UltimoAsiento[] })
                 <TableHead className="pl-6">Fecha</TableHead>
                 <TableHead>N°</TableHead>
                 <TableHead>Descripción</TableHead>
-                <TableHead className="pr-6 text-right">Total</TableHead>
+                <TableHead className="pr-6 text-right">Total ({moneda})</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -63,7 +71,7 @@ export function UltimosAsientosCard({ asientos }: { asientos: UltimoAsiento[] })
                     {a.descripcion}
                   </TableCell>
                   <TableCell className="pr-6 text-right tabular-nums">
-                    {fmtMoney(a.total.toString())}
+                    {fmtMoney(convertirMonto(a.total.toString(), "ARS", moneda, tc))}
                   </TableCell>
                 </TableRow>
               ))}

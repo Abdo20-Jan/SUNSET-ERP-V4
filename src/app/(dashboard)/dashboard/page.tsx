@@ -11,7 +11,8 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import { auth } from "@/lib/auth";
-import { fmtInt, fmtMoney } from "@/lib/format";
+import { convertirMonto, fmtInt, fmtMoney } from "@/lib/format";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import {
   getAlertasDashboard,
   getEmbarquesRecientes,
@@ -26,6 +27,8 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/layout/page-header";
 
+import { MonedaToggle, type Moneda } from "../reportes/_components/moneda-toggle";
+
 import { AlertasCard } from "./_components/alertas-card";
 import { EmbarquesRecientesCard } from "./_components/embarques-recientes-card";
 import { IngresosEgresosChartLazy } from "./_components/ingresos-egresos-chart-lazy";
@@ -36,6 +39,9 @@ import { SecondaryStat } from "./_components/secondary-stat";
 import { UltimosAsientosCard } from "./_components/ultimos-asientos-card";
 
 export const dynamic = "force-dynamic";
+
+/** Conversión ARS→moneda de presentación (los agregados del ledger son ARS). */
+type Pres = { moneda: Moneda; tc: string | null };
 
 function CardSkeleton({ rows = 3 }: { rows?: number }) {
   return (
@@ -78,27 +84,28 @@ async function AlertasSection() {
   return <AlertasCard alertas={alertas} />;
 }
 
-async function KpisPrincipales() {
+async function KpisPrincipales({ moneda, tc }: Pres) {
   const kpis = await getKpisPrincipales();
+  const enPres = (v: string) => fmtMoney(convertirMonto(v, "ARS", moneda, tc));
   return (
     <>
       <KpiCard
         label="Saldo Bancos + Caja"
-        value={fmtMoney(kpis.saldoBancosCaja.toString())}
+        value={enPres(kpis.saldoBancosCaja.toString())}
         icon={Coins01Icon}
         accent={kpis.saldoBancosCaja.gte(0) ? "positive" : "negative"}
         hint="Cuentas 1.1.1.* y 1.1.2.*"
       />
       <KpiCard
         label="Total Pasivo"
-        value={fmtMoney(kpis.totalPasivo.toString())}
+        value={enPres(kpis.totalPasivo.toString())}
         icon={CreditCardIcon}
         accent="warning"
         hint="Categoría PASIVO"
       />
       <KpiCard
         label="Resultado del Ejercicio"
-        value={fmtMoney(kpis.resultadoEjercicio.toString())}
+        value={enPres(kpis.resultadoEjercicio.toString())}
         icon={ChartLineData01Icon}
         accent={kpis.resultadoEjercicio.gte(0) ? "positive" : "negative"}
         hint="Ingresos − Egresos (histórico)"
@@ -114,24 +121,31 @@ async function KpisPrincipales() {
   );
 }
 
-async function IngresosEgresosSection() {
-  const data = await getIngresosEgresosUltimos6m();
-  return <IngresosEgresosChartLazy data={data} />;
+async function IngresosEgresosSection({ moneda, tc }: Pres) {
+  const raw = await getIngresosEgresosUltimos6m();
+  const conv = (n: number) => Number(convertirMonto(n.toString(), "ARS", moneda, tc));
+  const data = raw.map((d) => ({
+    ...d,
+    ingresos: conv(d.ingresos),
+    egresos: conv(d.egresos),
+    resultado: conv(d.resultado),
+  }));
+  return <IngresosEgresosChartLazy data={data} moneda={moneda} />;
 }
 
-async function SaldosSection() {
+async function SaldosSection({ moneda, tc }: Pres) {
   const saldos = await getSaldosBancarios();
-  return <SaldosBancosCard saldos={saldos} />;
+  return <SaldosBancosCard saldos={saldos} moneda={moneda} tc={tc} />;
 }
 
-async function PrestamosSection() {
+async function PrestamosSection({ moneda, tc }: Pres) {
   const prestamos = await getPrestamosActivos();
-  return <PrestamosActivosCard prestamos={prestamos} />;
+  return <PrestamosActivosCard prestamos={prestamos} moneda={moneda} tc={tc} />;
 }
 
-async function AsientosSection() {
+async function AsientosSection({ moneda, tc }: Pres) {
   const asientos = await getUltimosAsientos();
-  return <UltimosAsientosCard asientos={asientos} />;
+  return <UltimosAsientosCard asientos={asientos} moneda={moneda} tc={tc} />;
 }
 
 async function EmbarquesSection() {
@@ -167,14 +181,40 @@ async function KpisSecundariosSection() {
   );
 }
 
-export default async function DashboardPage() {
-  const session = await auth();
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ moneda?: string }>;
+}) {
+  const [params, session, cotizacion] = await Promise.all([
+    searchParams,
+    auth(),
+    getCotizacionParaFecha(new Date()),
+  ]);
+
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    params.moneda === "ARS" ? "ARS" : params.moneda === "USD" ? "USD" : monedaPreferida;
+
+  // El dashboard tiene valores nativos mixtos (saldos/préstamos en su moneda),
+  // por eso el TC se pasa SIEMPRE que haya cotización (no gated en USD): para
+  // presentación en ARS, las posiciones USD igual necesitan ×TC. `convertirMonto`
+  // decide por moneda nativa↔destino.
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   return (
     <div className="flex flex-col gap-3">
       <PageHeader
         title="Dashboard"
         description={`${session?.user.nombre ?? "Bienvenido"} · indicadores derivados de asientos contabilizados`}
+        actions={<MonedaToggle current={moneda} tcInfo={tcInfo} />}
       />
 
       <Suspense fallback={<CardSkeleton rows={2} />}>
@@ -192,26 +232,26 @@ export default async function DashboardPage() {
             </>
           }
         >
-          <KpisPrincipales />
+          <KpisPrincipales moneda={moneda} tc={tc} />
         </Suspense>
       </section>
 
       <Suspense fallback={<CardSkeleton rows={6} />}>
-        <IngresosEgresosSection />
+        <IngresosEgresosSection moneda={moneda} tc={tc} />
       </Suspense>
 
       <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <div className="flex flex-col gap-3">
           <Suspense fallback={<CardSkeleton rows={4} />}>
-            <SaldosSection />
+            <SaldosSection moneda={moneda} tc={tc} />
           </Suspense>
           <Suspense fallback={<CardSkeleton rows={3} />}>
-            <PrestamosSection />
+            <PrestamosSection moneda={moneda} tc={tc} />
           </Suspense>
         </div>
         <div className="flex flex-col gap-3">
           <Suspense fallback={<CardSkeleton rows={4} />}>
-            <AsientosSection />
+            <AsientosSection moneda={moneda} tc={tc} />
           </Suspense>
           <Suspense fallback={<CardSkeleton rows={3} />}>
             <EmbarquesSection />

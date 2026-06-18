@@ -17,10 +17,29 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { fmtMoney, fmtTipoCambio } from "@/lib/format";
+import { convertirMonto, fmtMoney, fmtTipoCambio } from "@/lib/format";
 import type { PrestamoActivo } from "@/lib/services/dashboard";
 
-export function PrestamosActivosCard({ prestamos }: { prestamos: PrestamoActivo[] }) {
+/**
+ * Saldo deudor vigente en la moneda de presentación. Si el préstamo es en USD
+ * usa el saldo USD nativo (invariante a TC); si es ARS usa el saldo ARS. En
+ * ambos casos `convertirMonto` preserva lo que ya está en la moneda destino.
+ */
+function saldoEnPresentacion(p: PrestamoActivo, moneda: "ARS" | "USD", tc: string | null): string {
+  return p.saldoUsd !== null
+    ? convertirMonto(p.saldoUsd.toString(), "USD", moneda, tc)
+    : convertirMonto(p.saldoPendiente.toString(), "ARS", moneda, tc);
+}
+
+export function PrestamosActivosCard({
+  prestamos,
+  moneda,
+  tc,
+}: {
+  prestamos: PrestamoActivo[];
+  moneda: "ARS" | "USD";
+  tc: string | null;
+}) {
   return (
     <Card>
       <CardHeader className="border-b">
@@ -46,7 +65,7 @@ export function PrestamosActivosCard({ prestamos }: { prestamos: PrestamoActivo[
                 <TableHead>Mon.</TableHead>
                 <TableHead className="text-right">Principal</TableHead>
                 <TableHead className="text-right">TC</TableHead>
-                <TableHead className="pr-6 text-right">Equiv. ARS</TableHead>
+                <TableHead className="pr-6 text-right">Saldo ({moneda})</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -63,7 +82,7 @@ export function PrestamosActivosCard({ prestamos }: { prestamos: PrestamoActivo[
                     {fmtTipoCambio(p.tipoCambio.toString())}
                   </TableCell>
                   <TableCell className="pr-6 text-right tabular-nums">
-                    {fmtMoney(p.equivalenteARS.toString())}
+                    {fmtMoney(saldoEnPresentacion(p, moneda, tc))}
                   </TableCell>
                 </TableRow>
               ))}
