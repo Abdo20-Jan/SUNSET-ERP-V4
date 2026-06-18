@@ -909,10 +909,12 @@ export async function pagarConIntermediarioAction(
       });
 
       // Construir asiento manual:
-      //   DEBE [cada factura proveedor]   por su monto
+      //   DEBE [cada factura proveedor]   por su monto (al TC factura si hay
+      //                                    saldo USD pendiente — Fase 2)
       //   DEBE [beneficiario] diferencia  si transferimos demás (anticipo)
       //   HABER [beneficiario] |diferencia|  si transferimos de menos
       //   HABER [banco] montoTransferido
+      //   DEBE/HABER [diferencia cambiaria] spread neto de las facturas Fase 2
       // Libro ARS-único: en USD cada línea va en pesos (monto × TC, redondeo
       // por parcela) con el principal USD en su metadata.
       const esUsd = data.moneda !== Moneda.ARS;
@@ -931,13 +933,49 @@ export async function pagarConIntermediarioAction(
           : {};
       const lineas: LineaInput[] = [];
 
+      // Cada factura USD con saldo pendiente cancela el pasivo al TC de la
+      // factura (FIFO ponderado) y el spread vs el TC del pago se acumula en
+      // una única línea de diferencia cambiaria realizada (Fase 2). El
+      // beneficiario (anticipo / saldo pendiente) NO lleva Fase 2: es creación
+      // de saldo, se valúa al TC del pago. Las facturas se insertan PRIMERO
+      // para que gravarAplicacionesPago (mapea las N primeras líneas DEBE) las
+      // ligue correctamente, aun con la línea de diferencia-pérdida (DEBE) al
+      // final.
+      let spreadNeto = new Decimal(0);
+      // USD ya consumido por cuenta dentro de ESTE pago: evita que dos facturas
+      // a la misma cuenta de proveedor consuman dos veces las mismas líneas (el
+      // FIFO sólo ve asientos ya contabilizados).
+      const usdConsumidoPorCuenta = new Map<number, Decimal>();
       for (const f of data.facturas) {
+        let debeArs = lineaArs(f.monto);
+        let meta = metaUsd(f.monto);
+        if (esUsd) {
+          const usdLinea = new Decimal(f.monto);
+          const yaConsumido = usdConsumidoPorCuenta.get(f.cuentaContableId) ?? new Decimal(0);
+          const perna = await calcularPernaPagoUsd(
+            tx,
+            f.cuentaContableId,
+            usdLinea,
+            tcDec,
+            yaConsumido,
+          );
+          if (perna.esFase2) {
+            debeArs = perna.debeArs;
+            meta = {
+              monedaOrigen: Moneda.USD,
+              montoOrigen: f.monto,
+              tipoCambioOrigen: perna.tcOrigen.toFixed(6),
+            };
+            spreadNeto = spreadNeto.plus(perna.spread);
+            usdConsumidoPorCuenta.set(f.cuentaContableId, yaConsumido.plus(usdLinea));
+          }
+        }
         lineas.push({
           cuentaId: f.cuentaContableId,
-          debe: lineaArs(f.monto).toFixed(2),
+          debe: debeArs.toFixed(2),
           haber: 0,
           descripcion: f.descripcion ?? undefined,
-          ...metaUsd(f.monto),
+          ...meta,
         });
       }
 
@@ -959,14 +997,18 @@ export async function pagarConIntermediarioAction(
         });
       }
 
-      // El banco cierra la partida: suma exacta de DEBEs menos HABERs no-banco
-      // (en USD el redondeo por parcela podría no coincidir con total × TC).
+      // El banco cierra por el desembolso real al TC del pago. Σ(debe − haber)
+      // de las contrapartidas incluye el spread Fase 2 (facturas al TC factura);
+      // se lo resta para que el HABER del banco sea montoTransferido × TC y el
+      // spread quede en la línea de diferencia. Sin Fase 2 (ARS o sin saldo),
+      // spreadNeto = 0 → idéntico al cierre por suma exacta anterior.
       const bancoArs = lineas
         .reduce(
           (s, l) =>
             s.plus(new Decimal(String(l.debe ?? 0))).minus(new Decimal(String(l.haber ?? 0))),
           new Decimal(0),
         )
+        .minus(spreadNeto)
         .toFixed(2);
       lineas.push({
         cuentaId: cuentaBancaria.cuentaContableId,
@@ -974,6 +1016,10 @@ export async function pagarConIntermediarioAction(
         haber: bancoArs,
         ...metaUsd(total.toFixed(2)),
       });
+
+      // Diferencia cambiaria consolidada (neta) de las facturas Fase 2.
+      const difLinea = await construirLineaDiferenciaCambiaria(tx, spreadNeto);
+      if (difLinea) lineas.push(difLinea);
 
       const asiento = await crearAsientoManual(
         {
