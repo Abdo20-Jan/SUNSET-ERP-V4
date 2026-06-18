@@ -781,6 +781,107 @@ export async function calcularDiferenciaCambiariaPago(
   };
 }
 
+export type PernaPagoUsd = {
+  /** ARS a debitar en la cuenta: al TC factura (FIFO ponderado) si hay saldo
+   *  USD pendiente; al TC del pago en caso contrario. */
+  debeArs: import("decimal.js").Decimal;
+  /** TC para la metadata (tipoCambioOrigen) de la línea. */
+  tcOrigen: import("decimal.js").Decimal;
+  /** arsFactura − arsPago: > 0 ganancia, < 0 pérdida, 0 si no aplica Fase 2. */
+  spread: import("decimal.js").Decimal;
+  esFase2: boolean;
+};
+
+/**
+ * Decide, para UNA pierna de pago USD contra una cuenta (proveedor/préstamo),
+ * si aplica Fase 2 (diferencia cambiaria realizada). Reusa el FIFO ponderado
+ * de `calcularDiferenciaCambiariaPago`:
+ *  - sin saldo USD pendiente (usdConsumido = 0): pierna normal, debe = USD×TC
+ *    del pago, sin diferencia.
+ *  - saldo exacto (usdConsumido = usdLinea): debe = arsFactura (al TC factura),
+ *    spread = arsFactura − arsPago.
+ *  - saldo parcial (0 < usdConsumido < usdLinea): error de dominio (pago
+ *    parcial no soportado, igual que el caso de 1 contrapartida).
+ *
+ * `usdYaConsumido` permite encadenar varias piernas que cancelan la MISMA
+ * cuenta dentro de un único pago (multi-contrapartida): como el FIFO lee sólo
+ * líneas CONTABILIZADAS y nada se persiste durante el armado del asiento, sin
+ * este desplazamiento dos piernas a la misma cuenta consumirían dos veces las
+ * facturas más antiguas. Esta pierna ve el tramo (usdYaConsumido,
+ * usdYaConsumido + usdLinea] del saldo pendiente.
+ */
+export async function calcularPernaPagoUsd(
+  tx: TxClient,
+  cuentaId: number,
+  usdLinea: import("decimal.js").Decimal,
+  tcPago: import("decimal.js").Decimal,
+  usdYaConsumido: import("decimal.js").Decimal = toDecimal(0),
+): Promise<PernaPagoUsd> {
+  const arsPago = usdLinea.times(tcPago).toDecimalPlaces(2);
+  // Tramo de esta pierna = FIFO(hasta ya+linea) − FIFO(hasta ya). Con
+  // usdYaConsumido = 0 (caso de 1 contrapartida) `prev` es nulo y el tramo es
+  // el FIFO directo — comportamiento idéntico al anterior.
+  const fifoHasta = await calcularDiferenciaCambiariaPago(
+    tx,
+    cuentaId,
+    usdYaConsumido.plus(usdLinea),
+  );
+  const fifoPrev = usdYaConsumido.gt(0)
+    ? await calcularDiferenciaCambiariaPago(tx, cuentaId, usdYaConsumido)
+    : null;
+  const usdConsumido = fifoHasta.usdConsumido.minus(fifoPrev?.usdConsumido ?? toDecimal(0));
+  const arsFactura = fifoHasta.arsFactura.minus(fifoPrev?.arsFactura ?? toDecimal(0));
+  if (usdConsumido.lte(0)) {
+    return { debeArs: arsPago, tcOrigen: tcPago, spread: toDecimal(0), esFase2: false };
+  }
+  if (usdConsumido.lt(usdLinea)) {
+    throw new AsientoError(
+      "DOMINIO_INVALIDO",
+      `Pago USD ${usdLinea.toFixed(2)} excede el saldo USD pendiente de la cuenta (${usdConsumido.toFixed(2)}). Ajustá el monto o pagá en cuotas.`,
+    );
+  }
+  return {
+    debeArs: arsFactura,
+    tcOrigen: arsFactura.dividedBy(usdConsumido),
+    spread: arsFactura.minus(arsPago),
+    esFase2: true,
+  };
+}
+
+/**
+ * Construye la línea de diferencia cambiaria realizada consolidada para un
+ * asiento de pago. `spreadNeto` es la suma neteada de los spreads de las
+ * piernas (ganancia compensa pérdida en una sola línea, consistente con el
+ * caso de 1 contrapartida):
+ *  - > 0: ganancia → HABER en 9.2.01.
+ *  - < 0: pérdida → DEBE en 9.2.02.
+ *  - |spreadNeto| ≤ 0.005: sin línea (corte de redondeo).
+ */
+export async function construirLineaDiferenciaCambiaria(
+  tx: TxClient,
+  spreadNeto: import("decimal.js").Decimal,
+  descripcion?: string,
+): Promise<LineaInput | null> {
+  if (spreadNeto.abs().lte(0.005)) return null;
+  const cuentaDif = await getOrCreateCuenta(
+    tx,
+    spreadNeto.gt(0) ? DIFERENCIA_CAMBIO_CODIGOS.GANANCIA : DIFERENCIA_CAMBIO_CODIGOS.PERDIDA,
+  );
+  return spreadNeto.gt(0)
+    ? {
+        cuentaId: cuentaDif,
+        debe: 0,
+        haber: money(spreadNeto).toString(),
+        descripcion: descripcion ?? "Ganancia diferencia cambiaria realizada",
+      }
+    : {
+        cuentaId: cuentaDif,
+        debe: money(spreadNeto.abs()).toString(),
+        haber: 0,
+        descripcion: descripcion ?? "Pérdida diferencia cambiaria realizada",
+      };
+}
+
 export async function crearAsientoMovimientoTesoreria(
   movimientoId: string,
   tx?: TxClient,
@@ -839,46 +940,26 @@ export async function crearAsientoMovimientoTesoreria(
     // generar asiento ARS misto con diferencia cambiaria automática.
     // Detección: tipo=PAGO + mov.moneda=USD + contrapartida tiene saldo USD
     // pendiente (líneas con monedaOrigen=USD aún no completamente pagadas).
-    let esFase2 = false;
-    let fifo: DiferenciaCambiariaResult | null = null;
-    if (
-      mov.tipo === MovimientoTesoreriaTipo.PAGO &&
-      mov.moneda === Moneda.USD &&
-      !esImpuestoLey25413
-    ) {
-      fifo = await calcularDiferenciaCambiariaPago(inner, contrapartidaId, usdPago);
-      // Sólo activa Fase 2 si hay saldo USD pendiente y consume al menos
-      // una parte del pago. Si usdConsumido < usdPago el resto es anticipo
-      // — limitamos por ahora y forzamos pago exacto o menor.
-      if (fifo.usdConsumido.gt(0)) {
-        if (fifo.usdConsumido.lt(usdPago)) {
-          throw new AsientoError(
-            "DOMINIO_INVALIDO",
-            `Pago USD ${usdPago.toFixed(2)} excede el saldo USD pendiente de la cuenta (${fifo.usdConsumido.toFixed(2)}). Ajustá el monto o pagá en cuotas.`,
-          );
-        }
-        esFase2 = true;
-      }
-    }
+    const perna =
+      mov.tipo === MovimientoTesoreriaTipo.PAGO && mov.moneda === Moneda.USD && !esImpuestoLey25413
+        ? await calcularPernaPagoUsd(inner, contrapartidaId, usdPago, tcPago)
+        : null;
 
     let lineas: LineaInput[];
 
-    if (esFase2 && fifo) {
-      // Fase 2: asiento ARS misto con 3 líneas (proveedor con monto factura,
-      // banco con monto pago, diferencia cambiaria).
-      const arsFactura = fifo.arsFactura;
-      const tcFacturaPond = fifo.tcPonderado;
+    if (perna?.esFase2) {
+      // Fase 2: asiento ARS misto (proveedor al TC factura, banco al TC pago,
+      // diferencia cambiaria automática si hay spread).
       const arsPago = usdPago.times(tcPago).toDecimalPlaces(2);
-      const spread = arsFactura.minus(arsPago); // > 0 = ganancia; < 0 = pérdida
 
       const proveedorLinea: LineaInput = {
         cuentaId: contrapartidaId,
-        debe: money(arsFactura).toString(),
+        debe: money(perna.debeArs).toString(),
         haber: 0,
         descripcion: `Pago factura USD ${usdPago.toFixed(2)} (cancela pasivo al TC factura)`,
         monedaOrigen: Moneda.USD,
         montoOrigen: money(usdPago).toString(),
-        tipoCambioOrigen: tcFacturaPond.toFixed(6),
+        tipoCambioOrigen: perna.tcOrigen.toFixed(6),
       };
       const bancoLinea: LineaInput = {
         cuentaId: bancoCuentaId,
@@ -896,29 +977,14 @@ export async function crearAsientoMovimientoTesoreria(
 
       lineas = [proveedorLinea, bancoLinea];
 
-      if (!spread.abs().lte(0.005)) {
-        const cuentaDif = await getOrCreateCuenta(
-          inner,
-          spread.gt(0) ? DIFERENCIA_CAMBIO_CODIGOS.GANANCIA : DIFERENCIA_CAMBIO_CODIGOS.PERDIDA,
-        );
-        if (spread.gt(0)) {
-          // TC factura > TC pago: pagamos menos pesos → ganancia
-          lineas.push({
-            cuentaId: cuentaDif,
-            debe: 0,
-            haber: money(spread).toString(),
-            descripcion: `Ganancia diferencia cambiaria (TC fact ${tcFacturaPond.toFixed(4)} → TC pago ${tcPago.toFixed(4)})`,
-          });
-        } else {
-          // TC factura < TC pago: pagamos más pesos → pérdida
-          lineas.push({
-            cuentaId: cuentaDif,
-            debe: money(spread.abs()).toString(),
-            haber: 0,
-            descripcion: `Pérdida diferencia cambiaria (TC fact ${tcFacturaPond.toFixed(4)} → TC pago ${tcPago.toFixed(4)})`,
-          });
-        }
-      }
+      const difLinea = await construirLineaDiferenciaCambiaria(
+        inner,
+        perna.spread,
+        perna.spread.gt(0)
+          ? `Ganancia diferencia cambiaria (TC fact ${perna.tcOrigen.toFixed(4)} → TC pago ${tcPago.toFixed(4)})`
+          : `Pérdida diferencia cambiaria (TC fact ${perna.tcOrigen.toFixed(4)} → TC pago ${tcPago.toFixed(4)})`,
+      );
+      if (difLinea) lineas.push(difLinea);
     } else if (esImpuestoLey25413) {
       const creditoCuentaId = await getOrCreateCuenta(
         inner,
