@@ -20,7 +20,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const retroBanner = modoRetroactivo ? (
     <div className="border-b border-amber-300 bg-amber-100 px-4 py-1.5 text-center text-xs text-amber-900">
       Modo retroactivo activo · las fechas no se autocompletan ·{" "}
-      <Link href="/perfil" className="underline hover:text-amber-950">ajustar en perfil</Link>
+      <Link href="/perfil" className="underline hover:text-amber-950">
+        ajustar en perfil
+      </Link>
     </div>
   ) : null;
 
