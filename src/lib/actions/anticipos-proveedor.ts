@@ -16,6 +16,7 @@ import {
 import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { ANTICIPO_PROVEEDOR_ROOTS, COMPRA_CODIGOS } from "@/lib/services/cuenta-registry";
 import {
+  type AsientoEstado,
   AsientoOrigen,
   CuentaTipo,
   EstadoAnticipo,
@@ -531,4 +532,202 @@ export async function anularAnticipoProveedorAction(raw: {
     console.error("anularAnticipoProveedorAction failed", err);
     return { ok: false, error: "Error inesperado al anular el anticipo." };
   }
+}
+
+// ============================================================
+// Listados (para la UI: form de registro, tabla y sheet de detalle)
+// ============================================================
+
+export type ProveedorAnticipoOption = {
+  id: string;
+  nombre: string;
+  /** Cuenta de pasivo (cta. a pagar) del proveedor — la misma que cancela la aplicación. */
+  cuentaContableId: number | null;
+};
+
+/**
+ * Proveedores seleccionables como destino de un anticipo (form de registro).
+ * NO se filtra por tipo: el alcance "local/ARS" lo garantiza la cuenta bancaria
+ * ARS exigida al registrar (la action rechaza cuentas en otra moneda).
+ */
+export async function listarProveedoresParaAnticipo(): Promise<ProveedorAnticipoOption[]> {
+  const rows = await db.proveedor.findMany({
+    where: { estado: "activo" },
+    orderBy: { nombre: "asc" },
+    select: { id: true, nombre: true, cuentaContableId: true },
+  });
+  return rows;
+}
+
+export type AnticipoRow = {
+  id: string;
+  numero: string;
+  fecha: string;
+  moneda: Moneda;
+  montoArs: string;
+  saldoAplicadoArs: string;
+  saldoPendienteArs: string;
+  estado: EstadoAnticipo;
+  descripcion: string | null;
+  proveedor: { id: string; nombre: string };
+  cuentaContable: { id: number; codigo: string; nombre: string };
+  cuentaBancaria: { id: string; banco: string; numero: string | null; moneda: Moneda };
+  asiento: { id: string; numero: number; estado: AsientoEstado } | null;
+};
+
+/**
+ * Todos los anticipos, ordenados por fecha desc, con el saldo pendiente ya
+ * calculado (montoArs − saldoAplicadoArs). Serializa los Decimal a string para
+ * cruzar la frontera server→client sin perder precisión (mismo patrón que
+ * `listarPrestamosConSaldo`).
+ */
+export async function listarAnticiposProveedor(): Promise<AnticipoRow[]> {
+  const anticipos = await db.anticipoProveedor.findMany({
+    orderBy: { fecha: "desc" },
+    include: {
+      proveedor: { select: { id: true, nombre: true } },
+      cuentaContable: { select: { id: true, codigo: true, nombre: true } },
+      cuentaBancaria: { select: { id: true, banco: true, numero: true, moneda: true } },
+      asiento: { select: { id: true, numero: true, estado: true } },
+    },
+  });
+
+  return anticipos.map((a) => {
+    const saldoPendiente = new Decimal(a.montoArs).minus(a.saldoAplicadoArs);
+    return {
+      id: a.id,
+      numero: a.numero,
+      fecha: a.fecha.toISOString(),
+      moneda: a.moneda,
+      montoArs: a.montoArs.toFixed(2),
+      saldoAplicadoArs: a.saldoAplicadoArs.toFixed(2),
+      saldoPendienteArs: saldoPendiente.toFixed(2),
+      estado: a.estado,
+      descripcion: a.descripcion,
+      proveedor: a.proveedor,
+      cuentaContable: a.cuentaContable,
+      cuentaBancaria: a.cuentaBancaria,
+      asiento: a.asiento
+        ? { id: a.asiento.id, numero: a.asiento.numero, estado: a.asiento.estado }
+        : null,
+    };
+  });
+}
+
+export type FacturaAplicableOption = {
+  tipo: "compra" | "gasto";
+  id: string;
+  numero: string;
+  fecha: string;
+  total: string;
+};
+
+/**
+ * Facturas (Compra/Gasto) del proveedor contra las que se puede aplicar un
+ * anticipo (decisión #4, PR #2). Compras EMITIDA|RECIBIDA + Gastos CONTABILIZADO
+ * (mismos estados que valida `aplicarAnticipoProveedorAction`). Lista unificada
+ * ordenada por fecha desc — sólo puebla el select; el saldo lo valida el backend.
+ */
+export async function listarFacturasAplicablesProveedor(
+  proveedorId: string,
+): Promise<FacturaAplicableOption[]> {
+  const [compras, gastos] = await Promise.all([
+    db.compra.findMany({
+      where: { proveedorId, estado: { in: ["EMITIDA", "RECIBIDA"] } },
+      select: { id: true, numero: true, fecha: true, total: true },
+    }),
+    db.gasto.findMany({
+      where: { proveedorId, estado: "CONTABILIZADO" },
+      select: { id: true, numero: true, fecha: true, total: true },
+    }),
+  ]);
+
+  const facturas: FacturaAplicableOption[] = [
+    ...compras.map((c) => ({
+      tipo: "compra" as const,
+      id: c.id,
+      numero: c.numero,
+      fecha: c.fecha.toISOString(),
+      total: c.total.toFixed(2),
+    })),
+    ...gastos.map((g) => ({
+      tipo: "gasto" as const,
+      id: g.id,
+      numero: g.numero,
+      fecha: g.fecha.toISOString(),
+      total: g.total.toFixed(2),
+    })),
+  ];
+
+  facturas.sort((a, b) => b.fecha.localeCompare(a.fecha));
+  return facturas;
+}
+
+export type AplicacionAnticipoRow = {
+  id: number;
+  fecha: string;
+  montoArs: string;
+  factura: { tipo: "compra" | "gasto"; numero: string } | null;
+  asientoNumero: number | null;
+};
+
+export type AnticipoDetalle = AnticipoRow & {
+  aplicaciones: AplicacionAnticipoRow[];
+};
+
+/**
+ * Detalle del anticipo + sus aplicaciones (para el Sheet). Reusa la forma de
+ * `AnticipoRow` y agrega las aplicaciones con el número de la factura cancelada.
+ */
+export async function getAnticipoDetalle(anticipoId: string): Promise<AnticipoDetalle | null> {
+  const a = await db.anticipoProveedor.findUnique({
+    where: { id: anticipoId },
+    include: {
+      proveedor: { select: { id: true, nombre: true } },
+      cuentaContable: { select: { id: true, codigo: true, nombre: true } },
+      cuentaBancaria: { select: { id: true, banco: true, numero: true, moneda: true } },
+      asiento: { select: { id: true, numero: true, estado: true } },
+      aplicaciones: {
+        orderBy: { id: "asc" },
+        include: {
+          compra: { select: { numero: true } },
+          gasto: { select: { numero: true } },
+          asiento: { select: { numero: true } },
+        },
+      },
+    },
+  });
+
+  if (!a) return null;
+
+  const saldoPendiente = new Decimal(a.montoArs).minus(a.saldoAplicadoArs);
+
+  return {
+    id: a.id,
+    numero: a.numero,
+    fecha: a.fecha.toISOString(),
+    moneda: a.moneda,
+    montoArs: a.montoArs.toFixed(2),
+    saldoAplicadoArs: a.saldoAplicadoArs.toFixed(2),
+    saldoPendienteArs: saldoPendiente.toFixed(2),
+    estado: a.estado,
+    descripcion: a.descripcion,
+    proveedor: a.proveedor,
+    cuentaContable: a.cuentaContable,
+    cuentaBancaria: a.cuentaBancaria,
+    asiento: a.asiento
+      ? { id: a.asiento.id, numero: a.asiento.numero, estado: a.asiento.estado }
+      : null,
+    aplicaciones: a.aplicaciones.map((ap) => ({
+      id: ap.id,
+      fecha: ap.createdAt.toISOString(),
+      montoArs: ap.montoArs.toFixed(2),
+      factura: ap.compra
+        ? { tipo: "compra" as const, numero: ap.compra.numero }
+        : ap.gasto
+          ? { tipo: "gasto" as const, numero: ap.gasto.numero }
+          : null,
+      asientoNumero: ap.asiento?.numero ?? null,
+    })),
+  };
 }

@@ -4,6 +4,7 @@ import {
   ArrowDataTransferHorizontalIcon,
   BankIcon,
   ChartLineData01Icon,
+  Coins01Icon,
   CreditCardIcon,
   DocumentValidationIcon,
   ExchangeIcon,
@@ -51,6 +52,13 @@ const SECTIONS = [
     icon: BankIcon,
     title: "Préstamos",
     description: "Préstamos del exterior: alta, saldo pendiente y amortizaciones",
+  },
+  {
+    href: "/tesoreria/anticipos",
+    icon: Coins01Icon,
+    title: "Anticipos a proveedor",
+    description:
+      "Adelantos a proveedores locales (bienes/servicios), saldo y aplicación a facturas",
   },
   {
     href: "/tesoreria/cuentas-a-pagar",
