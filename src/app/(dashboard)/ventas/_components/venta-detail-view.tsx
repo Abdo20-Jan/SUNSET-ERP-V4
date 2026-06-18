@@ -7,7 +7,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { CancelCircleIcon, TruckDeliveryIcon } from "@hugeicons/core-free-icons";
 
 import { anularVentaAction, type VentaDetalle } from "@/lib/actions/ventas";
-import { fmtDate, fmtMoney, fmtTipoCambio } from "@/lib/format";
+import { fmtDate, fmtMontoPres, fmtTipoCambio } from "@/lib/format";
+import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -37,6 +38,9 @@ type Props = {
   asientoNumero: number | null;
   stockDualOn: boolean;
   entregasPendientes: number;
+  moneda: Moneda;
+  tc: string | null;
+  tcInfo: { valor: string; fecha: string; fuente: string | null } | null;
 };
 
 const CONDICION_LABELS: Record<string, string> = {
@@ -69,6 +73,9 @@ export function VentaDetailView({
   asientoNumero,
   stockDualOn,
   entregasPendientes,
+  moneda,
+  tc,
+  tcInfo,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -102,7 +109,8 @@ export function VentaDetailView({
             {CONDICION_LABELS[venta.condicionPago] ?? venta.condicionPago}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
           {stockDualOn && venta.estado === "EMITIDA" && (
             <Button variant="outline" onClick={() => router.push(`/ventas/${venta.id}/entregas`)}>
               <HugeiconsIcon icon={TruckDeliveryIcon} strokeWidth={2} />
@@ -122,17 +130,33 @@ export function VentaDetailView({
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
-        <Stat label="Subtotal" value={`${fmtMoney(venta.subtotal)} ${venta.moneda}`} />
-        <Stat label="IVA" value={`${fmtMoney(venta.iva)} ${venta.moneda}`} />
+        <Stat
+          label="Subtotal"
+          value={`${fmtMontoPres(venta.subtotal, venta.moneda, moneda, tc)} ${moneda}`}
+        />
+        <Stat
+          label="IVA"
+          value={`${fmtMontoPres(venta.iva, venta.moneda, moneda, tc)} ${moneda}`}
+        />
         <Stat
           label="IIBB + Otros"
-          value={`${fmtMoney(
+          value={`${fmtMontoPres(
             (Number(venta.iibb) + Number(venta.otros)).toFixed(2),
-          )} ${venta.moneda}`}
+            venta.moneda,
+            moneda,
+            tc,
+          )} ${moneda}`}
         />
-        <Stat label="Total" value={`${fmtMoney(venta.total)} ${venta.moneda}`} emphasis />
+        <Stat
+          label="Total"
+          value={`${fmtMontoPres(venta.total, venta.moneda, moneda, tc)} ${moneda}`}
+          emphasis
+        />
         {Number(venta.flete) > 0 ? (
-          <Stat label="Flete (gasto)" value={`-${fmtMoney(venta.flete)} ${venta.moneda}`} />
+          <Stat
+            label="Flete (gasto)"
+            value={`-${fmtMontoPres(venta.flete, venta.moneda, moneda, tc)} ${moneda}`}
+          />
         ) : null}
       </div>
 
@@ -198,16 +222,16 @@ export function VentaDetailView({
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">{it.cantidad}</TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(it.precioUnitario)}
+                    {fmtMontoPres(it.precioUnitario, venta.moneda, moneda, tc)}
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(it.subtotal)}
+                    {fmtMontoPres(it.subtotal, venta.moneda, moneda, tc)}
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(it.iva)}
+                    {fmtMontoPres(it.iva, venta.moneda, moneda, tc)}
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(it.total)}
+                    {fmtMontoPres(it.total, venta.moneda, moneda, tc)}
                   </TableCell>
                 </TableRow>
               );
