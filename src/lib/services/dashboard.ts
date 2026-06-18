@@ -19,7 +19,14 @@ import {
 } from "@/generated/prisma/client";
 
 export type KpisPrincipales = {
-  saldoBancosCaja: Decimal;
+  /**
+   * Saldo de Caja y Bancos descompuesto por moneda NATIVA (ARS y USD), tomado
+   * de la MISMA fuente que el card `getSaldosBancarios` (cuentas 1.1.1.01/02
+   * activas, saldo en moneda de la cuenta). La presentación convierte cada
+   * parte native-aware al TC de cierre, de modo que el KPI reconcilia con el
+   * card. El USD nativo es invariante al TC (no se valúa al TC histórico).
+   */
+  saldoBancosCaja: { ars: Decimal; usd: Decimal };
   totalPasivo: Decimal;
   resultadoEjercicio: Decimal;
   asientosContabilizados: number;
@@ -98,17 +105,10 @@ export type Alerta = {
 };
 
 export async function getKpisPrincipales(): Promise<KpisPrincipales> {
-  const [bancosCaja, pasivo, ingresos, egresos, asientosCount] = await Promise.all([
-    db.lineaAsiento.aggregate({
-      where: {
-        asiento: { estado: AsientoEstado.CONTABILIZADO },
-        cuenta: {
-          tipo: CuentaTipo.ANALITICA,
-          OR: [{ codigo: { startsWith: "1.1.1." } }, { codigo: { startsWith: "1.1.2." } }],
-        },
-      },
-      _sum: { debe: true, haber: true },
-    }),
+  const [saldosBancarios, pasivo, ingresos, egresos, asientosCount] = await Promise.all([
+    // Misma fuente que el card `getSaldosBancarios` (Caja y Bancos 1.1.1.01/02
+    // activas, saldo en moneda nativa) para que el KPI reconcilie con la tabla.
+    getSaldosBancarios(),
     db.lineaAsiento.aggregate({
       where: {
         asiento: { estado: AsientoEstado.CONTABILIZADO },
@@ -144,9 +144,16 @@ export async function getKpisPrincipales(): Promise<KpisPrincipales> {
     }),
   ]);
 
-  const saldoBancosCaja = toDecimal(bancosCaja._sum.debe ?? 0)
-    .minus(toDecimal(bancosCaja._sum.haber ?? 0))
-    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  // Descompone el saldo por moneda nativa (ARS/USD); la presentación convierte
+  // cada parte native-aware al TC de cierre. El USD nativo es invariante al TC.
+  const saldoBancosCaja = saldosBancarios.reduce(
+    (acc, s) => {
+      if (s.moneda === Moneda.USD) acc.usd = acc.usd.plus(s.saldo);
+      else acc.ars = acc.ars.plus(s.saldo);
+      return acc;
+    },
+    { ars: new Decimal(0), usd: new Decimal(0) },
+  );
 
   const totalPasivo = toDecimal(pasivo._sum.haber ?? 0)
     .minus(toDecimal(pasivo._sum.debe ?? 0))
