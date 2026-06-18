@@ -41,10 +41,10 @@ export function AppTopnav({ user }: { user: { nombre: string; username: string; 
       </div>
       {crumbs.length > 0 ? (
         <nav aria-label="breadcrumb" className="flex h-8 items-center gap-1 border-t border-border/60 px-3 text-[12px]">
-          {crumbs.map((c, idx) => {
-            const isLast = idx === crumbs.length - 1;
+          {crumbs.map((c, i) => {
+            const isLast = i === crumbs.length - 1;
             return (
-              <span key={`${c.label}-${idx}`} className="flex items-center gap-1">
+              <span key={`${c.label}-${c.href ?? ""}`} className="flex items-center gap-1">
                 {c.href && !isLast ? (
                   <Link href={c.href} className="text-muted-foreground transition-colors hover:text-foreground">
                     {c.label}
