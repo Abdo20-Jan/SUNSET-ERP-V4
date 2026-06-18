@@ -167,7 +167,13 @@ export default async function BiPage({ searchParams }: { searchParams: SearchPar
               </div>
             }
           >
-            <TesoreriaTab desde={desde} hasta={hasta} tc={tcParaUsd} />
+            <TesoreriaTab
+              desde={desde}
+              hasta={hasta}
+              tc={tcParaUsd}
+              moneda={moneda}
+              tcCierre={cotizacion ? cotizacion.valor.toString() : null}
+            />
           </Suspense>
         ) : null}
 
