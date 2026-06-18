@@ -11,7 +11,9 @@ import { CENTERS } from "@/components/layout/nav-config";
 export function NavDrawer() {
   return (
     <Sheet>
-      <SheetTrigger render={<Button variant="ghost" size="icon-sm" className="md:hidden" aria-label="Menú" />}>
+      <SheetTrigger
+        render={<Button variant="ghost" size="icon-sm" className="md:hidden" aria-label="Menú" />}
+      >
         <HugeiconsIcon icon={Menu01Icon} strokeWidth={2} />
       </SheetTrigger>
       <SheetContent side="left" className="w-72 p-0">
@@ -25,15 +27,17 @@ export function NavDrawer() {
                 <HugeiconsIcon icon={center.icon} className="size-4" />
                 {center.label}
               </p>
-              {center.sections.flatMap((s) => s.items).map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="rounded-md px-3 py-1.5 text-[13px] text-foreground transition-colors hover:bg-accent"
-                >
-                  {item.label}
-                </Link>
-              ))}
+              {center.sections
+                .flatMap((s) => s.items)
+                .map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="rounded-md px-3 py-1.5 text-[13px] text-foreground transition-colors hover:bg-accent"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
             </div>
           ))}
         </nav>

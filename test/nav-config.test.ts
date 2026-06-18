@@ -5,8 +5,14 @@ describe("nav-config", () => {
   it("tiene los 7 centers de barra + Configuración", () => {
     const ids = CENTERS.map((c) => c.id);
     expect(ids).toEqual([
-      "inicio", "comercial", "abastecimiento", "comex",
-      "inventario", "finanzas", "contabilidad", "configuracion",
+      "inicio",
+      "comercial",
+      "abastecimiento",
+      "comex",
+      "inventario",
+      "finanzas",
+      "contabilidad",
+      "configuracion",
     ]);
     expect(CENTERS.filter((c) => !c.inUserMenu).map((c) => c.id)).toHaveLength(7);
     expect(CENTERS.find((c) => c.id === "configuracion")?.inUserMenu).toBe(true);

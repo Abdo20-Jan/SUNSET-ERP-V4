@@ -16,8 +16,14 @@ import {
 } from "@hugeicons/core-free-icons";
 
 export type CenterId =
-  | "inicio" | "comercial" | "abastecimiento" | "comex"
-  | "inventario" | "finanzas" | "contabilidad" | "configuracion";
+  | "inicio"
+  | "comercial"
+  | "abastecimiento"
+  | "comex"
+  | "inventario"
+  | "finanzas"
+  | "contabilidad"
+  | "configuracion";
 
 export type NavItem = { label: string; href: string; icon: typeof DashboardSquare01Icon };
 export type NavSection = { label: string; items: readonly NavItem[] };
@@ -110,9 +116,7 @@ export const CENTERS: readonly NavCenter[] = [
       },
       {
         label: "Gestión",
-        items: [
-          { label: "Proveedores", href: "/comex/proveedores", icon: TruckDeliveryIcon },
-        ],
+        items: [{ label: "Proveedores", href: "/comex/proveedores", icon: TruckDeliveryIcon }],
       },
     ],
   },
@@ -159,8 +163,16 @@ export const CENTERS: readonly NavCenter[] = [
         label: "Cuentas corrientes",
         items: [
           { label: "Cuentas a pagar", href: "/tesoreria/cuentas-a-pagar", icon: ReceiptDollarIcon },
-          { label: "Cuentas a cobrar", href: "/tesoreria/cuentas-a-cobrar", icon: ReceiptDollarIcon },
-          { label: "Saldos por proveedor", href: "/tesoreria/saldos-proveedores", icon: TruckDeliveryIcon },
+          {
+            label: "Cuentas a cobrar",
+            href: "/tesoreria/cuentas-a-cobrar",
+            icon: ReceiptDollarIcon,
+          },
+          {
+            label: "Saldos por proveedor",
+            href: "/tesoreria/saldos-proveedores",
+            icon: TruckDeliveryIcon,
+          },
         ],
       },
       {
@@ -171,7 +183,9 @@ export const CENTERS: readonly NavCenter[] = [
         ],
       },
     ],
-    crossLinks: [{ label: "Cotizaciones", href: "/maestros/cotizaciones", icon: ChartLineData01Icon }],
+    crossLinks: [
+      { label: "Cotizaciones", href: "/maestros/cotizaciones", icon: ChartLineData01Icon },
+    ],
   },
   {
     id: "contabilidad",
@@ -191,12 +205,24 @@ export const CENTERS: readonly NavCenter[] = [
       {
         label: "Reportes",
         items: [
-          { label: "Balance General", href: "/reportes/balance-general", icon: ChartLineData01Icon },
-          { label: "Estado de Resultados", href: "/reportes/estado-resultados", icon: ChartLineData01Icon },
+          {
+            label: "Balance General",
+            href: "/reportes/balance-general",
+            icon: ChartLineData01Icon,
+          },
+          {
+            label: "Estado de Resultados",
+            href: "/reportes/estado-resultados",
+            icon: ChartLineData01Icon,
+          },
           { label: "Flujo de Caja", href: "/reportes/flujo-caja", icon: ChartLineData01Icon },
           { label: "Libro Diario", href: "/reportes/libro-diario", icon: Invoice01Icon },
           { label: "Libro Mayor", href: "/reportes/libro-mayor", icon: Invoice01Icon },
-          { label: "Balance de sumas y saldos", href: "/contabilidad/reportes/balance", icon: ChartLineData01Icon },
+          {
+            label: "Balance de sumas y saldos",
+            href: "/contabilidad/reportes/balance",
+            icon: ChartLineData01Icon,
+          },
         ],
       },
     ],
@@ -217,7 +243,11 @@ export const CENTERS: readonly NavCenter[] = [
           { label: "Productos", href: "/maestros/productos", icon: PackageIcon },
           { label: "Depósitos", href: "/maestros/depositos", icon: PackageIcon },
           { label: "Cotizaciones", href: "/maestros/cotizaciones", icon: ChartLineData01Icon },
-          { label: "Jurisdicciones IIBB", href: "/maestros/jurisdicciones-iibb", icon: Invoice01Icon },
+          {
+            label: "Jurisdicciones IIBB",
+            href: "/maestros/jurisdicciones-iibb",
+            icon: Invoice01Icon,
+          },
         ],
       },
       {

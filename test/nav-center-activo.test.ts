@@ -45,11 +45,12 @@ describe("getCenterActivo", () => {
         if (!ent.isDirectory()) continue;
         const name = ent.name;
         if (name.startsWith("@")) continue; // parallel routes
-        const seg = name.startsWith("(") && name.endsWith(")")
-          ? null // route group: no agrega segmento
-          : name.startsWith("[")
-            ? "1" // dinámico → placeholder
-            : name;
+        const seg =
+          name.startsWith("(") && name.endsWith(")")
+            ? null // route group: no agrega segmento
+            : name.startsWith("[")
+              ? "1" // dinámico → placeholder
+              : name;
         const next = seg === null ? urlSegs : [...urlSegs, seg];
         const hasPage = readdirSync(join(dir, name)).some((f) => /^page\.(tsx|ts|jsx|js)$/.test(f));
         if (hasPage && (seg !== null || urlSegs.length > 0)) rutas.push(`/${next.join("/")}`);

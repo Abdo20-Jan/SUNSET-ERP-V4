@@ -29,7 +29,10 @@ function getInitials(nombre: string) {
 export function TopnavUserMenu({
   user,
   config,
-}: { user: { nombre: string; username: string; role: string }; config: NavCenter }) {
+}: {
+  user: { nombre: string; username: string; role: string };
+  config: NavCenter;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger

@@ -27,7 +27,9 @@ export function AppTopnav({ user }: { user: { nombre: string; username: string; 
             <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <HugeiconsIcon icon={TireIcon} className="size-3.5" />
             </span>
-            <span className="hidden text-[13px] font-semibold tracking-tight sm:inline">Sunset</span>
+            <span className="hidden text-[13px] font-semibold tracking-tight sm:inline">
+              Sunset
+            </span>
           </Link>
           <nav className="ml-1 hidden items-center gap-0.5 md:flex" aria-label="Centers">
             {barCenters.map((center) => (
@@ -40,13 +42,19 @@ export function AppTopnav({ user }: { user: { nombre: string; username: string; 
         </div>
       </div>
       {crumbs.length > 0 ? (
-        <nav aria-label="breadcrumb" className="flex h-8 items-center gap-1 border-t border-border/60 px-3 text-[12px]">
+        <nav
+          aria-label="breadcrumb"
+          className="flex h-8 items-center gap-1 border-t border-border/60 px-3 text-[12px]"
+        >
           {crumbs.map((c, i) => {
             const isLast = i === crumbs.length - 1;
             return (
               <span key={`${c.label}-${c.href ?? ""}`} className="flex items-center gap-1">
                 {c.href && !isLast ? (
-                  <Link href={c.href} className="text-muted-foreground transition-colors hover:text-foreground">
+                  <Link
+                    href={c.href}
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
                     {c.label}
                   </Link>
                 ) : (
@@ -58,7 +66,11 @@ export function AppTopnav({ user }: { user: { nombre: string; username: string; 
                   </span>
                 )}
                 {!isLast ? (
-                  <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} className="size-3 text-muted-foreground/50" />
+                  <HugeiconsIcon
+                    icon={ArrowRight01Icon}
+                    strokeWidth={2}
+                    className="size-3 text-muted-foreground/50"
+                  />
                 ) : null}
               </span>
             );
