@@ -87,14 +87,20 @@ async function AlertasSection() {
 async function KpisPrincipales({ moneda, tc }: Pres) {
   const kpis = await getKpisPrincipales();
   const enPres = (v: string) => fmtMoney(convertirMonto(v, "ARS", moneda, tc));
+  // Saldo Bancos + Caja: cada parte (ARS/USD nativo) se convierte native-aware
+  // al TC de cierre y se suman → reconcilia con la tabla de Saldos por Banco.
+  const bc = kpis.saldoBancosCaja;
+  const saldoBancos =
+    Number(convertirMonto(bc.ars.toString(), "ARS", moneda, tc)) +
+    Number(convertirMonto(bc.usd.toString(), "USD", moneda, tc));
   return (
     <>
       <KpiCard
         label="Saldo Bancos + Caja"
-        value={enPres(kpis.saldoBancosCaja.toString())}
+        value={fmtMoney(saldoBancos.toFixed(2))}
         icon={Coins01Icon}
-        accent={kpis.saldoBancosCaja.gte(0) ? "positive" : "negative"}
-        hint="Cuentas 1.1.1.* y 1.1.2.*"
+        accent={saldoBancos >= 0 ? "positive" : "negative"}
+        hint="Caja y Bancos · igual a la tabla"
       />
       <KpiCard
         label="Total Pasivo"
