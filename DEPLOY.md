@@ -116,3 +116,29 @@ Para adições **não-destrutivas** a Vercel não precisa de redeploy (o cliente
 
 - Vercel: *Deployments → Promote to Production* na build anterior.
 - Banco: o Railway mantém backups diários (Postgres → *Backups*). Restore para snapshot anterior se uma migration corromper dados.
+
+## 7. Backups lógicos próprios (pg_dump portável)
+
+Além dos backups nativos do Railway, mantemos uma cópia **lógica e portável** (`pg_dump`), restaurável em qualquer Postgres 18.
+
+> ⚠️ **Versão do `pg_dump`**: o servidor de prod roda **Postgres 18**. Um `pg_dump` local mais antigo (ex.: Homebrew 16) aborta com `server version mismatch`. Por isso sempre dumpamos via a imagem `postgres:18-alpine` (Docker) — sem instalar nada no host.
+
+**Manual (sob demanda — rode SEMPRE antes de qualquer operação de risco em prod):**
+
+```bash
+# lê DATABASE_URL de .env.local (ou passe via env). Requer Docker rodando.
+pnpm db:backup:prod
+# → ~/sunset-backups/sunset-prod-AAAAMMDD-HHMMSS.sql.gz  (valida + poda > 30 dias)
+```
+
+**Automático (diário):** a GitHub Action `.github/workflows/backup-prod.yml` roda o mesmo `pg_dump` às 03:00 UTC e guarda o `.sql.gz` como *artifact* (retenção 30 dias). Usa o secret `DATABASE_URL_PROD` (o mesmo de `migrate-deploy`). Dá para disparar à mão em *Actions → backup-prod → Run workflow*.
+
+**Restaurar** (num Postgres 18 descartável para inspecionar — **nunca** direto em prod):
+
+```bash
+docker run -d --name pg-restore -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=restore -p 55433:5432 postgres:18-alpine
+gunzip -c sunset-prod-AAAAMMDD-HHMMSS.sql.gz | docker exec -i pg-restore psql -U postgres -d restore
+docker exec pg-restore psql -U postgres -d restore -tA -c 'SELECT count(*) FROM "CuentaContable";'
+docker rm -f pg-restore
+```
