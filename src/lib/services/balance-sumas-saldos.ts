@@ -1,6 +1,11 @@
 import { db } from "@/lib/db";
 import { Decimal, sumMoney, toDecimal } from "@/lib/decimal";
-import { AsientoEstado, type CuentaCategoria, type CuentaTipo } from "@/generated/prisma/client";
+import {
+  AsientoEstado,
+  type CuentaCategoria,
+  type CuentaTipo,
+  Moneda,
+} from "@/generated/prisma/client";
 import { naturalezaPorDefecto, saldoNatural } from "./cuenta-naturaleza";
 
 export type BalanceLinea = {
@@ -62,11 +67,21 @@ export type BalanceResult = {
  * Puramente de exibição: não afeta a verificação Debe = Haber.
  */
 export function pruneBalanceSinSaldo(nodes: BalanceNode[]): BalanceNode[] {
+  // Una cuenta está "vacía" si TODOS sus importes ARS y USD son 0. Un campo
+  // USD null (sin TC, o cuenta sin USD conocido) no cuenta como saldo → no
+  // impide la poda (sin TC, la poda vuelve al criterio ARS-only). Así una
+  // posición con saldo SÓLO en USD (ARS 0 por TCs históricos que se cancelan)
+  // NO se poda indebidamente.
+  const usdZero = (v: string | null): boolean => v === null || Number.parseFloat(v) === 0;
   const isZero = (n: BalanceNode): boolean =>
     Number.parseFloat(n.saldoInicial) === 0 &&
     Number.parseFloat(n.debe) === 0 &&
     Number.parseFloat(n.haber) === 0 &&
-    Number.parseFloat(n.saldoFinal) === 0;
+    Number.parseFloat(n.saldoFinal) === 0 &&
+    usdZero(n.saldoInicialUsd) &&
+    usdZero(n.debeUsd) &&
+    usdZero(n.haberUsd) &&
+    usdZero(n.saldoFinalUsd);
 
   const prune = (node: BalanceNode): BalanceNode | null => {
     if (node.children) {
@@ -104,33 +119,98 @@ export async function getBalanceSumasYSaldos(filter: {
     return n.isFinite() && n.gt(0) ? n : null;
   })();
 
-  const [cuentas, lineasPrev, lineasPeriodo] = await Promise.all([
+  // Agregados previos por cuenta (saldo inicial). Se calcula con groupBy SQL
+  // (agregación en la base, sin materializar todas las líneas previas). Para el
+  // USD se necesitan tres agregados: montoOrigen es el principal SIN signo y el
+  // lado (debe/haber) lo determina, por eso uno suma ARS total y dos suman el
+  // USD por lado (sólo líneas USD-natas con montoOrigen). El componente USD de
+  // una cuenta = montoOrigen (USD-nato, invariante al TC) + ARS-nata÷TC.
+  type PrevAgg = {
+    debe: Decimal;
+    haber: Decimal;
+    debeUsd: Decimal;
+    haberUsd: Decimal;
+    usdConocido: boolean;
+  };
+  const cargarSaldoInicial = async (): Promise<Map<number, PrevAgg>> => {
+    const prevByCuenta = new Map<number, PrevAgg>();
+    if (!filter.fechaDesde) return prevByCuenta;
+    const prevWhere = {
+      asiento: { estado: AsientoEstado.CONTABILIZADO, fecha: { lt: filter.fechaDesde } },
+    };
+    const [gArs, gUsdDebe, gUsdHaber] = await Promise.all([
+      db.lineaAsiento.groupBy({
+        by: ["cuentaId"],
+        where: prevWhere,
+        _sum: { debe: true, haber: true },
+      }),
+      db.lineaAsiento.groupBy({
+        by: ["cuentaId"],
+        where: {
+          ...prevWhere,
+          monedaOrigen: Moneda.USD,
+          montoOrigen: { not: null },
+          debe: { gt: 0 },
+        },
+        _sum: { montoOrigen: true, debe: true },
+      }),
+      db.lineaAsiento.groupBy({
+        by: ["cuentaId"],
+        where: {
+          ...prevWhere,
+          monedaOrigen: Moneda.USD,
+          montoOrigen: { not: null },
+          haber: { gt: 0 },
+        },
+        _sum: { montoOrigen: true, haber: true },
+      }),
+    ]);
+    // Por cuenta, el USD-nato (con montoOrigen) de cada lado.
+    const usdDebeByC = new Map<number, { monto: Decimal; ars: Decimal }>();
+    for (const g of gUsdDebe) {
+      usdDebeByC.set(g.cuentaId, {
+        monto: toDecimal(g._sum.montoOrigen ?? 0),
+        ars: toDecimal(g._sum.debe ?? 0),
+      });
+    }
+    const usdHaberByC = new Map<number, { monto: Decimal; ars: Decimal }>();
+    for (const g of gUsdHaber) {
+      usdHaberByC.set(g.cuentaId, {
+        monto: toDecimal(g._sum.montoOrigen ?? 0),
+        ars: toDecimal(g._sum.haber ?? 0),
+      });
+    }
+    const cero = { monto: new Decimal(0), ars: new Decimal(0) };
+    for (const g of gArs) {
+      const prevDebe = toDecimal(g._sum.debe ?? 0);
+      const prevHaber = toDecimal(g._sum.haber ?? 0);
+      const ud = usdDebeByC.get(g.cuentaId) ?? cero;
+      const uh = usdHaberByC.get(g.cuentaId) ?? cero;
+      // debe/haber ARS de las líneas ARS-natas (las USD-natas aportan vía monto).
+      const arsNataDebe = prevDebe.minus(ud.ars);
+      const arsNataHaber = prevHaber.minus(uh.ars);
+      // Con TC toda línea ARS-nata se expresa ÷TC. Sin TC sólo hay USD conocido
+      // si la cuenta no tiene movimiento ARS-nato (es 100% USD-nata).
+      const usdConocido = tc !== null || (arsNataDebe.isZero() && arsNataHaber.isZero());
+      let debeUsd = ud.monto;
+      let haberUsd = uh.monto;
+      if (tc) {
+        debeUsd = debeUsd.plus(arsNataDebe.div(tc));
+        haberUsd = haberUsd.plus(arsNataHaber.div(tc));
+      }
+      prevByCuenta.set(g.cuentaId, {
+        debe: prevDebe,
+        haber: prevHaber,
+        debeUsd,
+        haberUsd,
+        usdConocido,
+      });
+    }
+    return prevByCuenta;
+  };
+
+  const [cuentas, lineasPeriodo, prevByCuenta] = await Promise.all([
     db.cuentaContable.findMany({ orderBy: { codigo: "asc" } }),
-    filter.fechaDesde
-      ? db.lineaAsiento.findMany({
-          where: {
-            asiento: {
-              estado: AsientoEstado.CONTABILIZADO,
-              fecha: { lt: filter.fechaDesde },
-            },
-          },
-          select: {
-            cuentaId: true,
-            debe: true,
-            haber: true,
-            monedaOrigen: true,
-            montoOrigen: true,
-          },
-        })
-      : Promise.resolve(
-          [] as Array<{
-            cuentaId: number;
-            debe: import("@/generated/prisma/client").Prisma.Decimal;
-            haber: import("@/generated/prisma/client").Prisma.Decimal;
-            monedaOrigen: "ARS" | "USD" | null;
-            montoOrigen: import("@/generated/prisma/client").Prisma.Decimal | null;
-          }>,
-        ),
     db.lineaAsiento.findMany({
       where: {
         asiento: {
@@ -157,53 +237,24 @@ export async function getBalanceSumasYSaldos(filter: {
         },
       },
     }),
+    cargarSaldoInicial(),
   ]);
 
-  // Calcula el "componente USD" de una línea: si es USD-nata usa montoOrigen;
-  // si no, y hay TC, divide ARS÷TC. Si no hay TC y la línea no es USD-nata,
-  // devuelve null (la cuenta no podrá emitir USD para esa línea).
+  // Calcula el "componente USD" de una línea. Si es USD-nata, montoOrigen es el
+  // principal (sin signo) y la línea es unilateral: el monto pertenece SÓLO al
+  // lado con valuación ARS (el otro lado es 0). Si es ARS-nata y hay TC, divide
+  // ARS÷TC. Sin TC y ARS-nata → null (la cuenta no puede emitir USD esa línea).
   const usdPart = (
     ars: Decimal,
     monedaOrigen: "ARS" | "USD" | null,
     montoOrigen: import("@/generated/prisma/client").Prisma.Decimal | null,
   ): Decimal | null => {
-    if (monedaOrigen === "USD" && montoOrigen) return toDecimal(montoOrigen);
+    if (monedaOrigen === "USD" && montoOrigen) {
+      return ars.gt(0) ? toDecimal(montoOrigen) : new Decimal(0);
+    }
     if (tc) return ars.div(tc);
     return null;
   };
-
-  // Agregados previos por cuenta (saldo inicial).
-  type PrevAgg = {
-    debe: Decimal;
-    haber: Decimal;
-    debeUsd: Decimal;
-    haberUsd: Decimal;
-    usdConocido: boolean;
-  };
-  const prevByCuenta = new Map<number, PrevAgg>();
-  for (const l of lineasPrev) {
-    const agg = prevByCuenta.get(l.cuentaId) ?? {
-      debe: new Decimal(0),
-      haber: new Decimal(0),
-      debeUsd: new Decimal(0),
-      haberUsd: new Decimal(0),
-      usdConocido: tc !== null, // con TC, todas las líneas se pueden expresar en USD
-    };
-    const dec = toDecimal(l.debe);
-    const hec = toDecimal(l.haber);
-    agg.debe = agg.debe.plus(dec);
-    agg.haber = agg.haber.plus(hec);
-    const dUsd = usdPart(dec, l.monedaOrigen, l.montoOrigen);
-    const hUsd = usdPart(hec, l.monedaOrigen, l.montoOrigen);
-    if (dUsd === null || hUsd === null) {
-      // Sin TC, alguna línea ARS-nata no puede expresarse en USD → cuenta sin USD.
-      agg.usdConocido = false;
-    } else {
-      agg.debeUsd = agg.debeUsd.plus(dUsd);
-      agg.haberUsd = agg.haberUsd.plus(hUsd);
-    }
-    prevByCuenta.set(l.cuentaId, agg);
-  }
 
   const lineasByCuenta = new Map<number, typeof lineasPeriodo>();
   for (const l of lineasPeriodo) {
@@ -222,9 +273,8 @@ export async function getBalanceSumasYSaldos(filter: {
     const nat = c.naturaleza ?? naturalezaPorDefecto(c.categoria);
     const saldoInicial = saldoNatural(nat, prevDebe, prevHaber);
 
-    // Si no hay líneas previas para esta cuenta, el saldo inicial USD es 0
-    // (sólo conocido si la convención USD aplica — con TC, sí).
-    const prevUsdKnown = prev ? prev.usdConocido : tc !== null;
+    // Sin líneas previas, el saldo inicial es 0 en ARS y USD → conocido.
+    const prevUsdKnown = prev ? prev.usdConocido : true;
     const prevDebeUsd = prev?.debeUsd ?? new Decimal(0);
     const prevHaberUsd = prev?.haberUsd ?? new Decimal(0);
     const saldoInicialUsd = prevUsdKnown ? saldoNatural(nat, prevDebeUsd, prevHaberUsd) : null;
@@ -233,9 +283,10 @@ export async function getBalanceSumasYSaldos(filter: {
     let haberPeriodo = new Decimal(0);
     let debeUsdPeriodo = new Decimal(0);
     let haberUsdPeriodo = new Decimal(0);
-    // En analíticas, si alguna línea ARS-nata aparece sin TC, marcamos como
-    // "USD desconocido" para esta cuenta (no podemos sumar USD honesto).
-    let usdConocidoEstaCuenta = tc !== null;
+    // USD conocido por defecto; una línea ARS-nata sin TC (usdPart → null) lo
+    // vuelve desconocido. Las posiciones 100% USD-natas siguen con USD conocido
+    // aunque no haya TC (su montoOrigen es invariante).
+    let usdConocidoEstaCuenta = true;
     let lineasOut: BalanceLinea[] | undefined;
 
     if (c.tipo === "ANALITICA") {
