@@ -5,6 +5,7 @@ import Decimal from "decimal.js";
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
 import { calcularSaldosCuentasBancariasEnMonedaCuenta } from "@/lib/services/cuenta-bancaria";
+import { getSaldosBancarios } from "@/lib/services/dashboard";
 import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
 import {
   AsientoEstado,
@@ -125,7 +126,14 @@ export type ResumenEjecutivo = {
     margenBruto: Money;
     margenBrutoPct: number;
     resultadoEjercicio: Money;
-    saldoBancosCaja: Money;
+    /**
+     * Saldo de Caja + Bancos descompuesto por moneda NATIVA (ARS/USD). Deriva
+     * de la MISMA fuente que el card del dashboard (`getSaldosBancarios`:
+     * cuentas activas 1.1.1.01/02, saldo en moneda de la cuenta) para que el
+     * KPI del BI reconcilie 1:1 con el dashboard. El USD nativo es invariante
+     * al TC; la presentación lo convierte native-aware al TC de cierre.
+     */
+    saldoBancosCaja: { ars: Money; usd: Money };
     stockValorado: Money;
     cxc: Money;
     cxp: Money;
@@ -156,7 +164,7 @@ export async function getResumenEjecutivo(rng: DateRange): Promise<ResumenEjecut
   const [
     factPeriodo,
     factPrevio,
-    bancosCaja,
+    saldosBancarios,
     resultado,
     stockSnap,
     cxc,
@@ -168,17 +176,11 @@ export async function getResumenEjecutivo(rng: DateRange): Promise<ResumenEjecut
   ] = await Promise.all([
     sumarFacturacionARS(rng),
     sumarFacturacionARS(prev),
-    db.lineaAsiento.aggregate({
-      where: {
-        asiento: { estado: AsientoEstado.CONTABILIZADO },
-        cuenta: {
-          tipo: CuentaTipo.ANALITICA,
-          // Caja (1.1.1.01.*) y Bancos (1.1.1.02.*) — ambos bajo 1.1.1.
-          OR: [{ codigo: { startsWith: "1.1.1." } }],
-        },
-      },
-      _sum: { debe: true, haber: true },
-    }),
+    // Misma fuente que el card del dashboard (`getSaldosBancarios`: cuentas
+    // activas 1.1.1.01/02, saldo en moneda nativa) para que el KPI del BI
+    // reconcilie con el dashboard. Excluye 1.1.1.03 (cheques), 1.1.2.*
+    // (inversiones) y cuentas inactivas, a diferencia del agregado anterior.
+    getSaldosBancarios(),
     db.lineaAsiento.aggregate({
       where: {
         asiento: {
@@ -253,8 +255,15 @@ export async function getResumenEjecutivo(rng: DateRange): Promise<ResumenEjecut
     `,
   ]);
 
-  const saldoBancosCaja = toDecimal(bancosCaja._sum.debe ?? 0).minus(
-    toDecimal(bancosCaja._sum.haber ?? 0),
+  // Descompone el saldo del card por moneda nativa (ARS/USD). La presentación
+  // convierte cada parte native-aware al TC de cierre; el USD es invariante.
+  const bancos = saldosBancarios.reduce(
+    (acc, s) => {
+      if (s.moneda === Moneda.USD) acc.usd = acc.usd.plus(s.saldo);
+      else acc.ars = acc.ars.plus(s.saldo);
+      return acc;
+    },
+    { ars: new Decimal(0), usd: new Decimal(0) },
   );
   const totalIngresos = toDecimal(resultado._sum.haber ?? 0).minus(
     toDecimal(resultado._sum.debe ?? 0),
@@ -371,7 +380,7 @@ export async function getResumenEjecutivo(rng: DateRange): Promise<ResumenEjecut
         ? Number(factPeriodo.total.minus(cmv).div(factPeriodo.total).toFixed(4))
         : 0,
       resultadoEjercicio: num(resultadoNeto),
-      saldoBancosCaja: num(saldoBancosCaja),
+      saldoBancosCaja: { ars: num(bancos.ars), usd: num(bancos.usd) },
       stockValorado: num(stockValorado),
       cxc: num(cxcSaldo),
       cxp: num(cxpSaldo),
