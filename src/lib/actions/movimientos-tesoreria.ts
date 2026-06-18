@@ -10,6 +10,8 @@ import { db } from "@/lib/db";
 import { isRetencionGananciasEnabled } from "@/lib/features";
 import {
   AsientoError,
+  calcularPernaPagoUsd,
+  construirLineaDiferenciaCambiaria,
   contabilizarAsiento,
   crearAsientoManual,
   crearAsientoMovimientoTesoreria,
@@ -602,13 +604,46 @@ export async function crearMovimientoTesoreriaAction(
             });
           }
         } else {
+          // PAGO: para movimiento USD, cada pierna con saldo USD pendiente
+          // cancela el pasivo al TC de la factura (FIFO ponderado) y el spread
+          // contra el TC del pago se acumula en una única línea de diferencia
+          // cambiaria realizada (Fase 2). El banco cierra por el desembolso
+          // real (Σ monto × TC pago), sin tocar por la diferencia.
+          let spreadNeto = new Decimal(0);
+          // USD ya consumido por cuenta dentro de ESTE pago: evita que dos
+          // piernas a la misma cuenta de proveedor consuman dos veces las
+          // mismas facturas (el FIFO sólo ve líneas ya contabilizadas).
+          const usdConsumidoPorCuenta = new Map<number, Decimal>();
           for (const l of lineas) {
+            let debeArs = lineaArs(l.monto);
+            let meta = metaUsd(l.monto);
+            if (esUsd) {
+              const usdLinea = new Decimal(l.monto);
+              const yaConsumido = usdConsumidoPorCuenta.get(l.cuentaContableId) ?? new Decimal(0);
+              const perna = await calcularPernaPagoUsd(
+                tx,
+                l.cuentaContableId,
+                usdLinea,
+                tcDec,
+                yaConsumido,
+              );
+              if (perna.esFase2) {
+                debeArs = perna.debeArs;
+                meta = {
+                  monedaOrigen: Moneda.USD,
+                  montoOrigen: l.monto,
+                  tipoCambioOrigen: perna.tcOrigen.toFixed(6),
+                };
+                spreadNeto = spreadNeto.plus(perna.spread);
+                usdConsumidoPorCuenta.set(l.cuentaContableId, yaConsumido.plus(usdLinea));
+              }
+            }
             asientoLineas.push({
               cuentaId: l.cuentaContableId,
-              debe: lineaArs(l.monto).toFixed(2),
+              debe: debeArs.toFixed(2),
               haber: 0,
               descripcion: l.descripcion ?? undefined,
-              ...metaUsd(l.monto),
+              ...meta,
             });
           }
           asientoLineas.push({
@@ -617,6 +652,9 @@ export async function crearMovimientoTesoreriaAction(
             haber: bancoArs,
             ...metaUsd(totalStr),
           });
+          // Diferencia cambiaria consolidada (neta) de las piernas Fase 2.
+          const difLinea = await construirLineaDiferenciaCambiaria(tx, spreadNeto);
+          if (difLinea) asientoLineas.push(difLinea);
         }
         const asiento = await crearAsientoManual(
           {
