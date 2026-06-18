@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fmtInt, fmtMoney, convertirAUsd } from "@/lib/format";
+import { fmtInt, fmtMoney, convertirAUsd, convertirMonto } from "@/lib/format";
 import { getAnalisisTesoreria } from "@/lib/services/bi";
 
 import { KpiCard } from "../../dashboard/_components/kpi-card";
@@ -34,23 +34,38 @@ export async function TesoreriaTab({
   desde,
   hasta,
   tc,
+  moneda,
+  tcCierre,
 }: {
   desde?: Date | null;
   hasta?: Date | null;
   tc?: string | null;
+  /** Moneda de presentación (default USD). Sólo para Bancos+Caja / detalle, native-aware. */
+  moneda?: "ARS" | "USD";
+  /** TC de cierre NO gateado (presente también en vista ARS) para revaluar el USD nativo. */
+  tcCierre?: string | null;
 }) {
   const r = await getAnalisisTesoreria({ desde, hasta });
   const money = (n: number) => fmtMoney(convertirAUsd(n.toString(), tc ?? null));
   const symbol = tc ? "USD " : "$ ";
+
+  // Bancos + Caja y el detalle por banco vienen en moneda NATIVA → se convierten
+  // a la moneda de presentación con el TC de cierre (USD nativo invariante).
+  // Reconcilia 1:1 con el card del dashboard y el KPI del Resumen.
+  const monedaPres: "ARS" | "USD" = moneda ?? "USD";
+  const bc = r.kpis.bancosCaja; // { ars, usd }
+  const saldoBancos =
+    Number(convertirMonto(bc.ars.toString(), "ARS", monedaPres, tcCierre ?? null)) +
+    Number(convertirMonto(bc.usd.toString(), "USD", monedaPres, tcCierre ?? null));
 
   return (
     <div className="flex flex-col gap-3">
       <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <KpiCard
           label="Bancos + Caja"
-          value={`${symbol}${money(r.kpis.bancosCaja)}`}
+          value={`${symbol}${fmtMoney(saldoBancos.toFixed(2))}`}
           icon={BankIcon}
-          accent={r.kpis.bancosCaja >= 0 ? "positive" : "negative"}
+          accent={saldoBancos >= 0 ? "positive" : "negative"}
         />
         <KpiCard
           label="Cuentas a cobrar"
@@ -86,20 +101,28 @@ export async function TesoreriaTab({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {r.saldosPorBanco.map((s, i) => (
-                <TableRow key={`${s.banco}-${i}`}>
-                  <TableCell>{s.banco}</TableCell>
-                  <TableCell className="text-[11px] text-muted-foreground">{s.moneda}</TableCell>
-                  <TableCell
-                    className={`text-right font-mono tabular-nums ${
-                      s.saldo < 0 ? "text-rose-700 dark:text-rose-400" : ""
-                    }`}
-                  >
-                    {symbol}
-                    {money(s.saldo)}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {r.saldosPorBanco.map((s, i) => {
+                // El saldo viene en la moneda NATIVA de la cuenta (s.moneda):
+                // se convierte a la presentación con el TC de cierre (USD nativo
+                // invariante), en vez del ÷tc ciego anterior.
+                const saldoLinea = Number(
+                  convertirMonto(s.saldo.toString(), s.moneda, monedaPres, tcCierre ?? null),
+                );
+                return (
+                  <TableRow key={`${s.banco}-${i}`}>
+                    <TableCell>{s.banco}</TableCell>
+                    <TableCell className="text-[11px] text-muted-foreground">{s.moneda}</TableCell>
+                    <TableCell
+                      className={`text-right font-mono tabular-nums ${
+                        saldoLinea < 0 ? "text-rose-700 dark:text-rose-400" : ""
+                      }`}
+                    >
+                      {symbol}
+                      {fmtMoney(saldoLinea.toFixed(2))}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </CardContent>

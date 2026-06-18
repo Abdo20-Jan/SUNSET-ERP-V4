@@ -4,7 +4,6 @@ import Decimal from "decimal.js";
 
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
-import { calcularSaldosCuentasBancariasEnMonedaCuenta } from "@/lib/services/cuenta-bancaria";
 import { getSaldosBancarios } from "@/lib/services/dashboard";
 import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
 import {
@@ -1132,7 +1131,14 @@ export async function getAnalisisBonded(): Promise<AnalisisBonded | null> {
 
 export type AnalisisTesoreria = {
   kpis: {
-    bancosCaja: Money;
+    /**
+     * Saldo de Bancos + Caja partido por moneda NATIVA — reconcilia 1:1 con el
+     * card del dashboard y el KPI del Resumen (misma fuente: `getSaldosBancarios`).
+     * El componente USD es invariante al TC. Excluye 1.1.1.03 (cheques),
+     * 1.1.2.* (inversiones) y cuentas inactivas. La presentación (USD/ARS) se
+     * resuelve en el tab vía `convertirMonto` al TC de cierre.
+     */
+    bancosCaja: { ars: Money; usd: Money };
     cxc: Money;
     cxp: Money;
     chequesCartera: Money;
@@ -1156,15 +1162,14 @@ const AGING_RANGES = [
 
 export async function getAnalisisTesoreria(rng: DateRange): Promise<AnalisisTesoreria> {
   const ahora = new Date();
-  const [cuentasBanco, chequesAll, ventasAbiertas, comprasAbiertas, movimientosRng] =
+  const [saldosBancarios, chequesAll, ventasAbiertas, comprasAbiertas, movimientosRng] =
     await Promise.all([
-      db.cuentaBancaria.findMany({
-        select: {
-          banco: true,
-          moneda: true,
-          cuentaContableId: true,
-        },
-      }),
+      // Misma fuente que el card del dashboard (`getSaldosBancarios`: cuentas
+      // activas 1.1.1.01/02, saldo en moneda nativa) para que el KPI y el
+      // detalle por banco reconcilien con el dashboard/Resumen. Excluye
+      // 1.1.1.03 (cheques), 1.1.2.* (inversiones) y cuentas inactivas. Es
+      // date-agnostic (todo CONTABILIZADO), igual que el KPI anterior.
+      getSaldosBancarios(),
       db.chequeRecibido.findMany({
         where: {
           estado: {
@@ -1214,18 +1219,22 @@ export async function getAnalisisTesoreria(rng: DateRange): Promise<AnalisisTeso
       }),
     ]);
 
-  // Saldos bancarios — en la moneda de cada cuenta (USD vía metadata de línea).
-  const porCuenta = new Map(cuentasBanco.map((c) => [c.cuentaContableId, c.moneda]));
-  const saldoPorCuenta = await calcularSaldosCuentasBancariasEnMonedaCuenta(
-    Array.from(porCuenta, ([cuentaContableId, moneda]) => ({ cuentaContableId, moneda })),
+  // Saldos bancarios — en la moneda NATIVA de cada cuenta (USD invariante al TC).
+  // El KPI se parte por moneda; el detalle por banco usa el nombre de la cuenta
+  // cuando no hay CuentaBancaria asociada (caja).
+  const bancos = saldosBancarios.reduce(
+    (acc, s) => {
+      if (s.moneda === Moneda.USD) acc.usd = acc.usd.plus(s.saldo);
+      else acc.ars = acc.ars.plus(s.saldo);
+      return acc;
+    },
+    { ars: new Decimal(0), usd: new Decimal(0) },
   );
-  const saldosPorBanco = cuentasBanco.map((c) => ({
-    banco: c.banco,
-    moneda: c.moneda,
-    saldo: num(saldoPorCuenta.get(c.cuentaContableId) ?? 0),
+  const saldosPorBanco = saldosBancarios.map((s) => ({
+    banco: s.banco ?? s.nombre,
+    moneda: s.moneda,
+    saldo: num(s.saldo),
   }));
-
-  const bancosCajaTotal = saldosPorBanco.reduce((acc, s) => acc + s.saldo, 0);
 
   // Aging CxC / CxP basado en fechaVencimiento (default 30 días si null).
   function diasAtraso(fechaEmision: Date, fechaVenc: Date | null) {
@@ -1311,7 +1320,7 @@ export async function getAnalisisTesoreria(rng: DateRange): Promise<AnalisisTeso
 
   return {
     kpis: {
-      bancosCaja: bancosCajaTotal,
+      bancosCaja: { ars: num(bancos.ars), usd: num(bancos.usd) },
       cxc: num(cxcTotal),
       cxp: num(cxpTotal),
       chequesCartera: num(chequesCartera),
