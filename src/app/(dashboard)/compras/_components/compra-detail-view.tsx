@@ -7,7 +7,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { CancelCircleIcon } from "@hugeicons/core-free-icons";
 
 import { anularCompraAction, type CompraDetalle } from "@/lib/actions/compras";
-import { fmtDate, fmtMoney, fmtTipoCambio } from "@/lib/format";
+import { fmtDate, fmtMontoPres, fmtTipoCambio } from "@/lib/format";
+import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -34,6 +35,9 @@ type Props = {
   proveedorNombre: string;
   productosMap: Record<string, { codigo: string; nombre: string }>;
   asientoNumero: number | null;
+  moneda: Moneda;
+  tc: string | null;
+  tcInfo: { valor: string; fecha: string; fuente: string | null } | null;
 };
 
 const CONDICION_LABELS: Record<string, string> = {
@@ -60,7 +64,15 @@ function estadoVariant(
   }
 }
 
-export function CompraDetailView({ compra, proveedorNombre, productosMap, asientoNumero }: Props) {
+export function CompraDetailView({
+  compra,
+  proveedorNombre,
+  productosMap,
+  asientoNumero,
+  moneda,
+  tc,
+  tcInfo,
+}: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -93,7 +105,8 @@ export function CompraDetailView({ compra, proveedorNombre, productosMap, asient
             {CONDICION_LABELS[compra.condicionPago] ?? compra.condicionPago}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
           {puedeAnular && (
             <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={isPending}>
               <HugeiconsIcon icon={CancelCircleIcon} strokeWidth={2} />
@@ -104,15 +117,28 @@ export function CompraDetailView({ compra, proveedorNombre, productosMap, asient
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Subtotal" value={`${fmtMoney(compra.subtotal)} ${compra.moneda}`} />
-        <Stat label="IVA" value={`${fmtMoney(compra.iva)} ${compra.moneda}`} />
+        <Stat
+          label="Subtotal"
+          value={`${fmtMontoPres(compra.subtotal, compra.moneda, moneda, tc)} ${moneda}`}
+        />
+        <Stat
+          label="IVA"
+          value={`${fmtMontoPres(compra.iva, compra.moneda, moneda, tc)} ${moneda}`}
+        />
         <Stat
           label="IIBB + Otros"
-          value={`${fmtMoney(
+          value={`${fmtMontoPres(
             (Number(compra.iibb) + Number(compra.otros)).toFixed(2),
-          )} ${compra.moneda}`}
+            compra.moneda,
+            moneda,
+            tc,
+          )} ${moneda}`}
         />
-        <Stat label="Total" value={`${fmtMoney(compra.total)} ${compra.moneda}`} emphasis />
+        <Stat
+          label="Total"
+          value={`${fmtMontoPres(compra.total, compra.moneda, moneda, tc)} ${moneda}`}
+          emphasis
+        />
       </div>
 
       <Card>
@@ -169,16 +195,16 @@ export function CompraDetailView({ compra, proveedorNombre, productosMap, asient
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">{it.cantidad}</TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(it.precioUnitario)}
+                    {fmtMontoPres(it.precioUnitario, compra.moneda, moneda, tc)}
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(it.subtotal)}
+                    {fmtMontoPres(it.subtotal, compra.moneda, moneda, tc)}
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(it.iva)}
+                    {fmtMontoPres(it.iva, compra.moneda, moneda, tc)}
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(it.total)}
+                    {fmtMontoPres(it.total, compra.moneda, moneda, tc)}
                   </TableCell>
                 </TableRow>
               );

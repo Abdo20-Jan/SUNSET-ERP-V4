@@ -4,7 +4,8 @@ import Link from "next/link";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 
 import type { PedidoCompraRow } from "@/lib/actions/pedidos-compra";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMontoPres } from "@/lib/format";
+import type { Moneda } from "../../../reportes/_components/moneda-toggle";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -32,7 +33,15 @@ function estadoVariant(
   }
 }
 
-export function PedidosCompraTable({ data }: { data: PedidoCompraRow[] }) {
+export function PedidosCompraTable({
+  data,
+  moneda,
+  tc,
+}: {
+  data: PedidoCompraRow[];
+  moneda: Moneda;
+  tc: string | null;
+}) {
   const columns: ColumnDef<PedidoCompraRow>[] = [
     {
       id: "numero",
@@ -82,7 +91,7 @@ export function PedidosCompraTable({ data }: { data: PedidoCompraRow[] }) {
       header: () => <span className="block text-right">Total est.</span>,
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm tabular-nums">
-          {fmtMoney(row.original.total)} {row.original.moneda}
+          {fmtMontoPres(row.original.total, row.original.moneda, moneda, tc)} {moneda}
         </span>
       ),
     },

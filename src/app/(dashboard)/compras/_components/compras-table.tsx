@@ -4,7 +4,8 @@ import Link from "next/link";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 
 import type { CompraRow } from "@/lib/actions/compras";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMontoPres } from "@/lib/format";
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
 import { DateBadge } from "@/components/ui/date-badge";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -32,7 +33,15 @@ function estadoVariant(
   }
 }
 
-export function ComprasTable({ data }: { data: CompraRow[] }) {
+export function ComprasTable({
+  data,
+  moneda,
+  tc,
+}: {
+  data: CompraRow[];
+  moneda: Moneda;
+  tc: string | null;
+}) {
   const columns: ColumnDef<CompraRow>[] = [
     {
       id: "numero",
@@ -74,7 +83,7 @@ export function ComprasTable({ data }: { data: CompraRow[] }) {
             row.original.estado === "CANCELADA" && "line-through opacity-60",
           )}
         >
-          {fmtMoney(row.original.total)} {row.original.moneda}
+          {fmtMontoPres(row.original.total, row.original.moneda, moneda, tc)} {moneda}
         </span>
       ),
     },

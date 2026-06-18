@@ -81,6 +81,23 @@ export function convertirMonto(
   return convertido.toFixed(2);
 }
 
+/**
+ * Formatea un monto convirtiéndolo desde su moneda NATIVA a la moneda de
+ * presentación (TC de cierre, vía `convertirMonto`) y lo formatea con
+ * `fmtMoney` — SIN sufijo de moneda. El sufijo de la moneda de presentación
+ * se anexa en el call-site donde corresponda (las columnas de ítem no lo
+ * llevan; los totales/stats sí). Pensado para las pantallas de documentos
+ * (compras/ventas) cuyos valores vienen en moneda nativa mixta.
+ */
+export function fmtMontoPres(
+  valorNativo: string,
+  monedaNativa: "ARS" | "USD",
+  monedaPres: "ARS" | "USD",
+  tc: string | null | undefined,
+): string {
+  return fmtMoney(convertirMonto(valorNativo, monedaNativa, monedaPres, tc));
+}
+
 export function fmtSigno(value: string): "positive" | "negative" | "zero" {
   const n = Number.parseFloat(value);
   if (!Number.isFinite(n) || n === 0) return "zero";
