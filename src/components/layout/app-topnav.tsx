@@ -10,6 +10,7 @@ import { getCenterActivo, getBreadcrumb } from "@/lib/nav/center-activo";
 import { CenterMegaMenu } from "@/components/layout/center-mega-menu";
 import { TopnavUserMenu } from "@/components/layout/topnav-user-menu";
 import { NavDrawer } from "@/components/layout/nav-drawer";
+import { Menubar } from "@/components/ui/menubar";
 
 export function AppTopnav({ user }: { user: { nombre: string; username: string; role: string } }) {
   const pathname = usePathname();
@@ -31,11 +32,11 @@ export function AppTopnav({ user }: { user: { nombre: string; username: string; 
               Sunset
             </span>
           </Link>
-          <nav className="ml-1 hidden items-center gap-0.5 md:flex" aria-label="Centers">
+          <Menubar className="ml-1 hidden md:flex" aria-label="Centers">
             {barCenters.map((center) => (
               <CenterMegaMenu key={center.id} center={center} active={center.id === activeId} />
             ))}
-          </nav>
+          </Menubar>
         </div>
         <div className="flex items-center gap-2">
           <TopnavUserMenu user={user} config={config} />
