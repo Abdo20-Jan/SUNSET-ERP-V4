@@ -1454,11 +1454,14 @@ export async function crearAsientoEmbarque(
         iibbArs,
         `${facturaLabel} — IIBB crédito`,
       );
-      // "Otros" se imputa al primer gasto de la factura (cuenta analítica
-      // del primer line) por falta de una cuenta dedicada. Si quiere
-      // separar, abra una línea propia para otros.
+      // "Otros" (header, sin concepto) → cuenta dedicada OTROS GASTOS (7.9.99),
+      // no la primera línea de gasto (decisión #9; igual que crearAsientoCompra).
       if (otrosArs.gt(0) && factura.lineas.length > 0) {
-        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros`);
+        pushDebe(
+          porCodigo.get(EMBARQUE_CODIGOS.OTROS_GASTOS.codigo)!,
+          otrosArs,
+          `${facturaLabel} — otros`,
+        );
       }
 
       const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
@@ -1705,7 +1708,11 @@ export async function crearAsientoZonaPrimaria(
         `${facturaLabel} — IIBB crédito (ZP)`,
       );
       if (otrosArs.gt(0) && factura.lineas.length > 0) {
-        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros (ZP)`);
+        pushDebe(
+          porCodigo.get(EMBARQUE_CODIGOS.OTROS_GASTOS.codigo)!,
+          otrosArs,
+          `${facturaLabel} — otros (ZP)`,
+        );
       }
 
       const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
@@ -1957,7 +1964,11 @@ export async function crearAsientoArriboComex(
       );
       // `otros` se mantiene como gasto (no capitalizable) para balancear.
       if (otrosArs.gt(0)) {
-        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros (ZP)`);
+        pushDebe(
+          porCodigo.get(EMBARQUE_CODIGOS.OTROS_GASTOS.codigo)!,
+          otrosArs,
+          `${facturaLabel} — otros (ZP)`,
+        );
       }
 
       const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
@@ -2649,7 +2660,11 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
         `${facturaLabel} — IIBB crédito`,
       );
       if (otrosArs.gt(0) && factura.lineas.length > 0) {
-        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros`);
+        pushDebe(
+          porCodigo.get(EMBARQUE_CODIGOS.OTROS_GASTOS.codigo)!,
+          otrosArs,
+          `${facturaLabel} — otros`,
+        );
       }
       const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
       if (totalFacturaArs.gt(0)) {
@@ -3013,7 +3028,11 @@ export async function crearAsientoDespachoCruzado(
         `${facturaLabel} — IIBB crédito`,
       );
       if (otrosArs.gt(0) && factura.lineas.length > 0) {
-        pushDebe(factura.lineas[0].cuentaContableGastoId, otrosArs, `${facturaLabel} — otros`);
+        pushDebe(
+          porCodigo.get(EMBARQUE_CODIGOS.OTROS_GASTOS.codigo)!,
+          otrosArs,
+          `${facturaLabel} — otros`,
+        );
       }
       const totalFacturaArs = subtotalFacturaArs.plus(ivaArs).plus(iibbArs).plus(otrosArs);
       if (totalFacturaArs.gt(0)) {
@@ -3897,8 +3916,9 @@ export async function crearAsientoGasto(gastoId: string, tx?: TxClient): Promise
       });
     }
     if (otrosArs.gt(0)) {
+      // "Otros" (header) → cuenta dedicada OTROS GASTOS (7.9.99), decisión #9.
       lineas.push({
-        cuentaId: gasto.lineas[0].cuentaContableGastoId,
+        cuentaId: porCodigo.get(COMPRA_CODIGOS.OTROS_GASTOS.codigo)!,
         debe: money(otrosArs).toString(),
         haber: 0,
         descripcion: `${facturaLabel} — otros`,
@@ -4060,10 +4080,9 @@ export async function crearAsientoEmbarqueCosto(
       });
     }
     if (otrosArs.gt(0)) {
-      // "Otros" se imputa al primer gasto de la factura (consistente con
-      // crearAsientoEmbarque legacy bundling).
+      // "Otros" (header) → cuenta dedicada OTROS GASTOS (7.9.99), decisión #9.
       lineas.push({
-        cuentaId: costo.lineas[0].cuentaContableGastoId,
+        cuentaId: porCodigo.get(EMBARQUE_CODIGOS.OTROS_GASTOS.codigo)!,
         debe: money(otrosArs).toString(),
         haber: 0,
         descripcion: `${facturaLabel} — otros`,

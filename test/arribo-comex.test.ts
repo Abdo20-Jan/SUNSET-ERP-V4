@@ -332,4 +332,52 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
     const movs = await db.prisma.movimientoStock.count();
     expect(movs).toBeGreaterThan(0);
   });
+
+  // Decisión #9: el "otros" del header de la factura de costo NO se imputa a la
+  // primera línea de gasto; va a la cuenta dedicada OTROS GASTOS (7.9.99).
+  it("'otros' de la factura de costo va a 7.9.99, no a la primera línea de gasto", async () => {
+    const ctaPasivo = await db.prisma.cuentaContable.create({
+      data: { codigo: "2.1.1.01.05", nombre: "Despachante", tipo: "ANALITICA", categoria: "PASIVO", nivel: 5 },
+    });
+    const ctaGasto = await db.prisma.cuentaContable.create({
+      data: { codigo: "6.3.50", nombre: "Gasto portuario", tipo: "ANALITICA", categoria: "EGRESO", nivel: 3 },
+    });
+    const provExt = await db.prisma.proveedor.create({ data: { nombre: "Exterior SA" } });
+    const provLocal = await db.prisma.proveedor.create({
+      data: { nombre: "Despachante SA", cuentaContableId: ctaPasivo.id },
+    });
+    const embarque = await db.prisma.embarque.create({
+      data: {
+        codigo: "EMB-OTROS",
+        proveedorId: provExt.id,
+        moneda: "USD",
+        tipoCambio: "1000.000000",
+        fobTotal: "1000.00",
+      },
+    });
+    const costo = await db.prisma.embarqueCosto.create({
+      data: {
+        embarqueId: embarque.id,
+        proveedorId: provLocal.id,
+        moneda: "ARS",
+        tipoCambio: "1",
+        momento: "ZONA_PRIMARIA",
+        estado: "BORRADOR",
+        fechaFactura: new Date(FECHA_ISO),
+        otros: "300.00",
+        lineas: {
+          create: [
+            { tipo: "GASTOS_PORTUARIOS", cuentaContableGastoId: ctaGasto.id, subtotal: "1000.00" },
+          ],
+        },
+      },
+    });
+
+    const asiento = await crearAsientoEmbarqueCosto(costo.id, db.prisma);
+    const { debe } = await lineasPorCuenta(asiento.id);
+
+    // "otros" (300) en la cuenta dedicada; la línea de gasto sólo su subtotal (1000).
+    expect(debe.get("7.9.99")).toBeCloseTo(300, 2);
+    expect(debe.get("6.3.50")).toBeCloseTo(1000, 2);
+  });
 });

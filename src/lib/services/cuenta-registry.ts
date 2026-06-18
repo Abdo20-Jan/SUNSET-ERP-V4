@@ -310,6 +310,13 @@ export const EMBARQUE_CODIGOS = {
     nombre: "PROVEEDORES DEL EXTERIOR (GENÉRICO)",
     categoria: CuentaCategoria.PASIVO,
   },
+  // "Otros" del header de una factura (sin categoría/concepto) → cuenta dedicada,
+  // no la primera línea de gasto (decisión #9). Mismo código que COMPRA_CODIGOS.
+  OTROS_GASTOS: {
+    codigo: "7.9.99",
+    nombre: "OTROS GASTOS ADMINISTRATIVOS DIVERSOS",
+    categoria: CuentaCategoria.EGRESO,
+  },
 } as const satisfies Record<string, CuentaDef>;
 
 // ----- COMEX ZPA / DESCONSOLIDACIÓN -------------------------
