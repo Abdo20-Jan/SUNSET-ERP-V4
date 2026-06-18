@@ -212,4 +212,49 @@ describe("Gasto.deducibleGanancias — persistencia + invariante de asiento", ()
     expect(total).toEqual(neto);
     expect(noDeducible).toEqual(neto);
   });
+
+  // Decisión #9: el "otros" del header de la factura NO se imputa a la primera
+  // línea de gasto (ensucia esa cuenta específica); va a una cuenta dedicada
+  // OTROS GASTOS (7.9.99), igual que crearAsientoCompra.
+  it("'otros' del header va a la cuenta dedicada 7.9.99, no a la primera línea de gasto", async () => {
+    const pasivo = await seedCuenta("2.1.1.01", "PASIVO");
+    const gastoCta = await seedCuenta("5.1.1.01", "EGRESO");
+    const prov = await seedProveedor(pasivo.id);
+    await seedPeriodo();
+
+    const input: GastoInput = {
+      numero: `G-2026-${(++gastoSeq).toString().padStart(4, "0")}`,
+      proveedorId: prov.id,
+      fecha: "2026-05-10",
+      condicionPago: "CUENTA_CORRIENTE",
+      moneda: "ARS",
+      tipoCambio: "1",
+      otros: "200.00",
+      lineas: [
+        { cuentaContableGastoId: gastoCta.id, descripcion: "Servicio", subtotal: "1000.00" },
+      ],
+    };
+    const res = await guardarGastoAction(input);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const cont = await contabilizarGastoAction(res.id);
+    expect(cont.ok).toBe(true);
+
+    const g = await db.prisma.gasto.findUniqueOrThrow({
+      where: { id: res.id },
+      select: { asientoId: true },
+    });
+    const lineas = await db.prisma.lineaAsiento.findMany({
+      where: { asientoId: g.asientoId! },
+      include: { cuenta: { select: { codigo: true } } },
+    });
+    const debePorCodigo = (codigo: string) =>
+      lineas
+        .filter((l) => l.cuenta.codigo === codigo)
+        .reduce((acc, l) => acc + Number(l.debe), 0);
+
+    // "otros" (200) en la cuenta dedicada; la línea de gasto sólo su subtotal (1000).
+    expect(debePorCodigo("7.9.99")).toBeCloseTo(200, 2);
+    expect(debePorCodigo("5.1.1.01")).toBeCloseTo(1000, 2);
+  });
 });
