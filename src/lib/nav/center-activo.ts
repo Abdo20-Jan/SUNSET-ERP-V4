@@ -55,9 +55,17 @@ export function getBreadcrumb(pathname: string): Crumb[] {
   crumbs.push({ label: center.label, href: onHub ? undefined : center.overviewHref });
   if (onHub) return crumbs;
 
+  // If the center label differs from the hub nav item label, add a hub crumb
+  // (e.g. center "Finanzas" → hub item "Tesorería" at /tesoreria)
+  const hubItem = findNavItemByLongestHref(center.overviewHref);
+  if (hubItem && hubItem.label !== center.label) {
+    // We're not on the hub, add it as a waypoint
+    crumbs.push({ label: hubItem.label, href: center.overviewHref });
+  }
+
   const moduleItem = findNavItemByLongestHref(pathname);
   let consumed = center.overviewHref;
-  if (moduleItem && moduleItem.label !== center.label) {
+  if (moduleItem && moduleItem.href !== center.overviewHref) {
     const onModule = pathname === moduleItem.href;
     crumbs.push({ label: moduleItem.label, href: onModule ? undefined : moduleItem.href });
     consumed = moduleItem.href;
