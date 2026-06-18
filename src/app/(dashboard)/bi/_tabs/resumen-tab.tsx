@@ -10,7 +10,7 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { fmtMoney, fmtInt, convertirAUsd } from "@/lib/format";
+import { fmtMoney, fmtInt, convertirAUsd, convertirMonto } from "@/lib/format";
 import { getResumenEjecutivo } from "@/lib/services/bi";
 
 import { KpiCard } from "../../dashboard/_components/kpi-card";
@@ -30,15 +30,33 @@ export async function ResumenTab({
   desde,
   hasta,
   tc,
+  moneda,
+  tcCierre,
 }: {
   desde?: Date | null;
   hasta?: Date | null;
   tc?: string | null;
+  /** Moneda de presentación (toggle). Default "USD". */
+  moneda?: "ARS" | "USD";
+  /**
+   * TC de cierre SIN gatear por vista (presente también en vista ARS), para
+   * convertir el saldo USD nativo de Bancos/Caja al TC de cierre por
+   * revaluación. `tc` (gateado a USD) sigue rigiendo los demás KPIs ARS.
+   */
+  tcCierre?: string | null;
 }) {
   const r = await getResumenEjecutivo({ desde, hasta });
   const k = r.kpis;
   const money = (n: number) => fmtMoney(convertirAUsd(n.toString(), tc ?? null));
   const symbol = tc ? "USD " : "$ ";
+  const monedaPres: "ARS" | "USD" = moneda ?? "USD";
+  // Saldo Bancos + Caja: cada parte (ARS/USD nativo) se convierte native-aware
+  // al TC de cierre y se suma → reconcilia con el card del dashboard y con la
+  // tabla de Saldos por Banco. El USD nativo no se re-divide.
+  const bc = k.saldoBancosCaja;
+  const saldoBancos =
+    Number(convertirMonto(bc.ars.toString(), "ARS", monedaPres, tcCierre ?? null)) +
+    Number(convertirMonto(bc.usd.toString(), "USD", monedaPres, tcCierre ?? null));
 
   return (
     <div className="flex flex-col gap-3">
@@ -94,10 +112,10 @@ export async function ResumenTab({
         />
         <KpiCard
           label="Saldo Bancos + Caja"
-          value={`${symbol}${money(k.saldoBancosCaja)}`}
+          value={`${symbol}${fmtMoney(saldoBancos.toFixed(2))}`}
           icon={Coins01Icon}
-          accent={k.saldoBancosCaja >= 0 ? "positive" : "negative"}
-          hint="Cuentas 1.1.1.* y 1.1.2.*"
+          accent={saldoBancos >= 0 ? "positive" : "negative"}
+          hint="Caja y Bancos · igual al dashboard"
         />
         <KpiCard
           label="Stock valorado"
