@@ -1186,7 +1186,12 @@ function PrestamoContextBanner({
   onChangeModo: (modo: ModoAmortizacion) => void;
 }) {
   const tieneIntereses = !!contexto.cuentaIntereses;
-  const saldoFmt = Number(contexto.saldoPendiente).toLocaleString("es-AR", {
+  // Préstamo USD-nato → mostrar el saldo en USD (invariante a TC); ARS → en ARS.
+  const saldoEnUsd = contexto.saldoPendienteUsd != null;
+  const saldoMoneda = saldoEnUsd ? "USD" : "ARS";
+  const saldoFmt = Number(
+    saldoEnUsd ? contexto.saldoPendienteUsd : contexto.saldoPendiente,
+  ).toLocaleString("es-AR", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -1208,7 +1213,9 @@ function PrestamoContextBanner({
             </p>
             <p className="text-xs text-muted-foreground">
               Saldo pendiente:{" "}
-              <span className="font-mono font-medium text-foreground">ARS {saldoFmt}</span>
+              <span className="font-mono font-medium text-foreground">
+                {saldoMoneda} {saldoFmt}
+              </span>
               {" · "}Principal:{" "}
               <span className="font-mono">
                 {contexto.prestamo.principal} {contexto.prestamo.moneda}

@@ -400,14 +400,19 @@ export async function crearMovimientoTesoreriaAction(
       });
       if (!prestamoEnCuenta) continue;
 
-      const intentoArs = new Decimal(linea.monto)
-        .times(new Decimal(tipoCambio))
-        .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-      const saldoCheck = await validarSaldoSuficientePrestamo(linea.cuentaContableId, intentoArs);
+      // Validación currency-aware: un pago USD contra un préstamo USD-nato se
+      // valida en USD (invariante a TC); el resto cae a ARS. Ver
+      // validarSaldoSuficientePrestamo.
+      const saldoCheck = await validarSaldoSuficientePrestamo(linea.cuentaContableId, {
+        monto: linea.monto,
+        moneda,
+        tipoCambio,
+      });
       if (!saldoCheck.ok) {
+        const m = saldoCheck.moneda;
         return {
           ok: false,
-          error: `El monto excede el saldo pendiente del préstamo "${prestamoEnCuenta.prestamista}" (saldo: ARS ${saldoCheck.saldoActual.toFixed(2)}, intento: ARS ${saldoCheck.intento.toFixed(2)}, falta: ARS ${saldoCheck.faltante.toFixed(2)}).`,
+          error: `El monto excede el saldo pendiente del préstamo "${prestamoEnCuenta.prestamista}" (saldo: ${m} ${saldoCheck.saldoActual.toFixed(2)}, intento: ${m} ${saldoCheck.intento.toFixed(2)}, falta: ${m} ${saldoCheck.faltante.toFixed(2)}).`,
         };
       }
     }
