@@ -229,6 +229,33 @@ export const COMPRA_CODIGOS = {
   },
 } as const satisfies Record<string, CuentaDef>;
 
+// ----- ANTICIPOS A PROVEEDORES (decisión contador #4) --------
+// Adelanto a proveedor LOCAL registrado antes de la factura. La clasificación
+// bien vs servicio NO es un enum: la codifica la cuenta-destino elegida en el
+// drilldown del plan. BIENES (1.1.7.07) cuelga de Bienes de Cambio; SERVICIOS
+// (1.1.5.01) de Otros Créditos. Ambas son ACTIVO (saldo deudor a favor).
+export const ANTICIPO_PROVEEDOR_CODIGOS = {
+  BIENES: {
+    codigo: "1.1.7.07",
+    nombre: "ANTICIPOS A PROVEEDORES DE BIENES DE CAMBIO",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+  SERVICIOS: {
+    codigo: "1.1.5.01",
+    nombre: "ANTICIPOS A PROVEEDORES DE SERVICIOS",
+    categoria: CuentaCategoria.ACTIVO,
+  },
+} as const satisfies Record<string, CuentaDef>;
+
+// Raíces del subárbol de anticipo a proveedor: el drilldown
+// (`listarCuentasAnticipoProveedor`) sólo ofrece estas cuentas y sus
+// descendientes, y la action de registro valida que la cuenta elegida caiga
+// bajo una de ellas.
+export const ANTICIPO_PROVEEDOR_ROOTS: readonly string[] = [
+  ANTICIPO_PROVEEDOR_CODIGOS.BIENES.codigo,
+  ANTICIPO_PROVEEDOR_CODIGOS.SERVICIOS.codigo,
+];
+
 // ----- EMBARQUE / IMPORTACIÓN --------------------------------
 export const EMBARQUE_CODIGOS = {
   MERCADERIAS: {

@@ -384,11 +384,12 @@ model User {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  auditLogs              AuditLog[]
-  leads                  Lead[]
-  oportunidades          Oportunidad[]
-  actividades            Actividad[]
-  retencionesPracticadas RetencionPracticada[]
+  auditLogs                 AuditLog[]
+  leads                     Lead[]
+  oportunidades             Oportunidad[]
+  actividades               Actividad[]
+  retencionesPracticadas    RetencionPracticada[]
+  anticiposProveedorCreados AnticipoProveedor[]
 }
 
 // ============================================================
@@ -432,6 +433,7 @@ model CuentaContable {
   gastosFijos          GastoFijo[]
   lineasGasto          LineaGasto[]              @relation("LineaGastoCuentaGasto")
   itemsCompraCategoria ItemCompra[]              @relation("ItemCompraCategoria")
+  anticiposProveedor   AnticipoProveedor[]       @relation("AnticipoProveedorCuenta")
 }
 
 model PeriodoContable {
@@ -460,14 +462,14 @@ model Asiento {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  periodo              PeriodoContable           @relation(fields: [periodoId], references: [id])
+  periodo              PeriodoContable              @relation(fields: [periodoId], references: [id])
   lineas               LineaAsiento[]
   movimiento           MovimientoTesoreria?
   prestamo             PrestamoExterno?
   venta                Venta?
   compra               Compra?
-  embarqueCierre       Embarque?                 @relation("EmbarqueAsientoCierre")
-  embarqueZonaPrimaria Embarque?                 @relation("EmbarqueAsientoZP")
+  embarqueCierre       Embarque?                    @relation("EmbarqueAsientoCierre")
+  embarqueZonaPrimaria Embarque?                    @relation("EmbarqueAsientoZP")
   embarqueCosto        EmbarqueCosto?
   despacho             Despacho?
   gastoFijoRegistro    GastoFijoRegistro?
@@ -475,6 +477,8 @@ model Asiento {
   chequeRecibidoCobro  ChequeRecibido?
   entregaVenta         EntregaVenta?
   divergenciaAjuste    DivergenciaInvestigacion?
+  anticipoProveedor    AnticipoProveedor?
+  aplicacionAnticipo   AplicacionAnticipoProveedor?
 
   @@unique([periodoId, numero])
   @@index([fecha])
@@ -570,6 +574,76 @@ model AplicacionPagoGasto {
   @@index([lineaAsientoId])
 }
 
+// Estado de un anticipo a proveedor (decisión contador #4). VIGENTE = tiene
+// saldo pendiente de aplicar; APLICADO_TOTAL = consumido por facturas;
+// ANULADO = revertido.
+enum EstadoAnticipo {
+  VIGENTE
+  APLICADO_TOTAL
+  ANULADO
+}
+
+// Anticipo (adelanto) a un proveedor LOCAL, registrado ANTES de la factura
+// (decisión contador #4). A diferencia de Compra/Gasto (que SIEMPRE son
+// factura → CxP), un anticipo es un ACTIVO: dinero entregado a cuenta. La
+// `cuentaContableId` (elegida vía drilldown del plan) codifica la
+// clasificación: 1.1.7.07 = bien de cambio, 1.1.5.01 = servicio. El egreso de
+// caja se materializa como un MovimientoTesoreria PAGO (DEBE anticipo / HABER
+// banco). El saldo pendiente = montoArs − saldoAplicadoArs se consume al
+// aplicar el anticipo contra una Compra/Gasto futuro.
+model AnticipoProveedor {
+  id                    String         @id @default(uuid())
+  numero                String         @unique
+  proveedorId           String
+  cuentaContableId      Int
+  cuentaBancariaId      String
+  fecha                 DateTime
+  moneda                Moneda         @default(ARS)
+  tipoCambio            Decimal        @default(1) @db.Decimal(18, 6)
+  montoArs              Decimal        @db.Decimal(18, 2)
+  saldoAplicadoArs      Decimal        @default(0) @db.Decimal(18, 2)
+  estado                EstadoAnticipo @default(VIGENTE)
+  descripcion           String?
+  movimientoTesoreriaId String?        @unique
+  asientoId             String?        @unique
+  createdById           String
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  proveedor      Proveedor                     @relation(fields: [proveedorId], references: [id])
+  cuentaContable CuentaContable                @relation("AnticipoProveedorCuenta", fields: [cuentaContableId], references: [id])
+  cuentaBancaria CuentaBancaria                @relation(fields: [cuentaBancariaId], references: [id])
+  movimiento     MovimientoTesoreria?          @relation(fields: [movimientoTesoreriaId], references: [id])
+  asiento        Asiento?                      @relation(fields: [asientoId], references: [id])
+  createdBy      User                          @relation(fields: [createdById], references: [id])
+  aplicaciones   AplicacionAnticipoProveedor[]
+
+  @@index([proveedorId])
+  @@index([estado])
+}
+
+// Aplicación de un AnticipoProveedor contra una factura (Compra o Gasto):
+// baja el saldo del anticipo y cancela parte del pasivo del proveedor
+// (DEBE proveedor / HABER cuenta-anticipo). Espelha AplicacionPago{Compra,Gasto}.
+model AplicacionAnticipoProveedor {
+  id         Int      @id @default(autoincrement())
+  anticipoId String
+  compraId   String?
+  gastoId    String?
+  montoArs   Decimal  @db.Decimal(18, 2)
+  asientoId  String?  @unique
+  createdAt  DateTime @default(now())
+
+  anticipo AnticipoProveedor @relation(fields: [anticipoId], references: [id], onDelete: Cascade)
+  compra   Compra?           @relation(fields: [compraId], references: [id])
+  gasto    Gasto?            @relation(fields: [gastoId], references: [id])
+  asiento  Asiento?          @relation(fields: [asientoId], references: [id])
+
+  @@index([anticipoId])
+  @@index([compraId])
+  @@index([gastoId])
+}
+
 // ============================================================
 // TESORERÍA
 // ============================================================
@@ -586,10 +660,11 @@ model CuentaBancaria {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
-  cuentaContable CuentaContable        @relation(fields: [cuentaContableId], references: [id])
-  movimientos    MovimientoTesoreria[]
-  prestamos      PrestamoExterno[]
-  importaciones  ImportacionExtracto[]
+  cuentaContable     CuentaContable        @relation(fields: [cuentaContableId], references: [id])
+  movimientos        MovimientoTesoreria[]
+  prestamos          PrestamoExterno[]
+  importaciones      ImportacionExtracto[]
+  anticiposProveedor AnticipoProveedor[]
 }
 
 model MovimientoTesoreria {
@@ -617,6 +692,8 @@ model MovimientoTesoreria {
   vepDespacho        VepDespacho?
   // Retención Ganancias practicada en este pago (RG 830), si aplica.
   retencionGanancias RetencionPracticada?
+  // Anticipo a proveedor cuyo egreso de caja es este movimiento (decisión #4).
+  anticipoProveedor  AnticipoProveedor?
 
   @@index([fecha])
 }
@@ -1169,7 +1246,8 @@ model Compra {
   pedidoCompra PedidoCompra? @relation(fields: [pedidoCompraId], references: [id])
   deposito     Deposito?     @relation(fields: [depositoId], references: [id])
 
-  aplicacionesPago AplicacionPagoCompra[]
+  aplicacionesPago     AplicacionPagoCompra[]
+  aplicacionesAnticipo AplicacionAnticipoProveedor[]
 
   @@index([fechaVencimiento])
   @@index([proveedorId])
@@ -1241,7 +1319,8 @@ model Gasto {
   venta     Venta?       @relation("VentaFleteGasto", fields: [ventaId], references: [id])
   lineas    LineaGasto[]
 
-  aplicacionesPago AplicacionPagoGasto[]
+  aplicacionesPago     AplicacionPagoGasto[]
+  aplicacionesAnticipo AplicacionAnticipoProveedor[]
 
   @@index([proveedorId])
   @@index([fecha])
@@ -1366,6 +1445,7 @@ model Proveedor {
   gastos                 Gasto[]
   simulaciones           SimulacionImportacion[]
   retencionesPracticadas RetencionPracticada[]
+  anticipos              AnticipoProveedor[]
 }
 
 model Producto {
