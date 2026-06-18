@@ -17,8 +17,8 @@ import {
   crearAsientoPrestamo,
 } from "@/lib/services/asiento-automatico";
 import {
-  calcularSaldoPrestamo,
-  calcularSaldosPrestamos,
+  calcularSaldoPrestamoConMoneda,
+  calcularSaldosPrestamosConMoneda,
   contarAmortizacionesContabilizadasPrestamo,
   listarAmortizacionesPrestamo,
 } from "@/lib/services/prestamo";
@@ -128,6 +128,8 @@ export type PrestamoRow = {
     fecha: string;
   } | null;
   saldoPendiente: string;
+  /** Saldo en USD (invariante a TC) cuando el préstamo es USD-nato; null en ARS. */
+  saldoPendienteUsd: string | null;
   createdAt: string;
 };
 
@@ -164,28 +166,32 @@ export async function listarPrestamosConSaldo(
   });
 
   const cuentaIds = Array.from(new Set(prestamos.map((p) => p.cuentaContableId)));
-  const saldos = await calcularSaldosPrestamos(cuentaIds);
+  const saldos = await calcularSaldosPrestamosConMoneda(cuentaIds);
 
-  return prestamos.map((p) => ({
-    id: p.id,
-    prestamista: p.prestamista,
-    clasificacion: p.clasificacion,
-    moneda: p.moneda,
-    principal: p.principal.toString(),
-    tipoCambio: p.tipoCambio.toString(),
-    cuentaBancaria: p.cuentaBancaria,
-    cuentaContable: p.cuentaContable,
-    asiento: p.asiento
-      ? {
-          id: p.asiento.id,
-          numero: p.asiento.numero,
-          estado: p.asiento.estado,
-          fecha: p.asiento.fecha.toISOString(),
-        }
-      : null,
-    saldoPendiente: (saldos.get(p.cuentaContableId) ?? "0").toString(),
-    createdAt: p.createdAt.toISOString(),
-  }));
+  return prestamos.map((p) => {
+    const saldo = saldos.get(p.cuentaContableId);
+    return {
+      id: p.id,
+      prestamista: p.prestamista,
+      clasificacion: p.clasificacion,
+      moneda: p.moneda,
+      principal: p.principal.toString(),
+      tipoCambio: p.tipoCambio.toString(),
+      cuentaBancaria: p.cuentaBancaria,
+      cuentaContable: p.cuentaContable,
+      asiento: p.asiento
+        ? {
+            id: p.asiento.id,
+            numero: p.asiento.numero,
+            estado: p.asiento.estado,
+            fecha: p.asiento.fecha.toISOString(),
+          }
+        : null,
+      saldoPendiente: saldo ? saldo.saldoArs.toString() : "0",
+      saldoPendienteUsd: saldo?.saldoUsd != null ? saldo.saldoUsd.toString() : null,
+      createdAt: p.createdAt.toISOString(),
+    };
+  });
 }
 
 // ============================================================
@@ -231,6 +237,8 @@ export type PrestamoDetalle = {
   } | null;
   amortizaciones: PrestamoAmortizacion[];
   saldoPendiente: string;
+  /** Saldo en USD (invariante a TC) cuando el préstamo es USD-nato; null en ARS. */
+  saldoPendienteUsd: string | null;
   createdAt: string;
 };
 
@@ -257,8 +265,7 @@ export async function obtenerPrestamoDetalle(id: string): Promise<PrestamoDetall
 
   const amortizaciones = await listarAmortizacionesPrestamo(prestamo.cuentaContableId);
 
-  const saldos = await calcularSaldosPrestamos([prestamo.cuentaContableId]);
-  const saldo = saldos.get(prestamo.cuentaContableId) ?? "0";
+  const saldo = await calcularSaldoPrestamoConMoneda(prestamo.cuentaContableId);
 
   const valorArs = prestamo.principal.mul(prestamo.tipoCambio).toFixed(2);
 
@@ -298,7 +305,8 @@ export async function obtenerPrestamoDetalle(id: string): Promise<PrestamoDetall
       asientoEstado: m.asiento?.estado ?? null,
       descripcion: m.descripcion,
     })),
-    saldoPendiente: saldo.toString(),
+    saldoPendiente: saldo.saldoArs.toString(),
+    saldoPendienteUsd: saldo.saldoUsd != null ? saldo.saldoUsd.toString() : null,
     createdAt: prestamo.createdAt.toISOString(),
   };
 }
@@ -319,6 +327,8 @@ export type ContextoAmortizacion = {
   cuentaPrestamo: { id: number; codigo: string; nombre: string };
   cuentaIntereses: { id: number; codigo: string; nombre: string } | null;
   saldoPendiente: string;
+  /** Saldo en USD (invariante a TC) cuando el préstamo es USD-nato; null en ARS. */
+  saldoPendienteUsd: string | null;
 };
 
 const CODIGO_INTERESES_PAGADOS = "9.1.03";
@@ -351,7 +361,7 @@ export async function obtenerContextoAmortizacion(
       },
       select: { id: true, codigo: true, nombre: true },
     }),
-    calcularSaldoPrestamo(prestamo.cuentaContableId),
+    calcularSaldoPrestamoConMoneda(prestamo.cuentaContableId),
   ]);
 
   const valorArs = prestamo.principal.mul(prestamo.tipoCambio).toFixed(2);
@@ -367,7 +377,8 @@ export async function obtenerContextoAmortizacion(
     },
     cuentaPrestamo: prestamo.cuentaContable,
     cuentaIntereses,
-    saldoPendiente: saldo.toFixed(2),
+    saldoPendiente: saldo.saldoArs.toFixed(2),
+    saldoPendienteUsd: saldo.saldoUsd != null ? saldo.saldoUsd.toFixed(2) : null,
   };
 }
 

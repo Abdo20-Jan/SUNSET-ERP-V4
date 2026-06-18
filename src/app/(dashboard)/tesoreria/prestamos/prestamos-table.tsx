@@ -145,11 +145,16 @@ export function PrestamosTable({
       id: "saldo",
       header: () => <span className="block text-right">Saldo pendiente</span>,
       cell: ({ row }) => {
-        const saldo = Number(row.original.saldoPendiente);
+        // Préstamo USD-nato → saldo en USD (invariante a TC); ARS → en ARS.
+        const usd = row.original.saldoPendienteUsd;
+        const esUsd = usd != null;
+        const valor = esUsd ? usd : row.original.saldoPendiente;
+        const num = Number(valor);
         return (
           <span className="block text-right font-mono text-sm font-semibold tabular-nums">
-            {formatMoney(row.original.saldoPendiente)}
-            {saldo < 0 && <span className="ml-1 text-xs text-destructive">(neg.)</span>}
+            {formatMoney(valor)}{" "}
+            <span className="text-xs text-muted-foreground">{esUsd ? "USD" : "ARS"}</span>
+            {num < 0 && <span className="ml-1 text-xs text-destructive">(neg.)</span>}
           </span>
         );
       },

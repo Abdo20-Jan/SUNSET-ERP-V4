@@ -140,7 +140,11 @@ export function PrestamoDetalleSheet({ prestamoId, open, onOpenChange }: Props) 
                   <InfoRow label="Valor en ARS" value={formatMoney(detalle.valorArs)} />
                   <InfoRow
                     label="Saldo pendiente"
-                    value={formatMoney(detalle.saldoPendiente)}
+                    value={
+                      detalle.saldoPendienteUsd != null
+                        ? `${formatMoney(detalle.saldoPendienteUsd)} USD`
+                        : `${formatMoney(detalle.saldoPendiente)} ARS`
+                    }
                     highlight
                   />
                 </dl>
