@@ -2,21 +2,44 @@ import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon } from "@hugeicons/core-free-icons";
 
+import { auth } from "@/lib/auth";
 import { listarCompras } from "@/lib/actions/compras";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePaginationParams } from "@/components/ui/pagination-params";
 
+import { MonedaToggle, type Moneda } from "../reportes/_components/moneda-toggle";
+
 import { ComprasTable } from "./_components/compras-table";
 
-type SearchParams = Promise<{ page?: string; perPage?: string }>;
+type SearchParams = Promise<{ page?: string; perPage?: string; moneda?: string }>;
 
 export const dynamic = "force-dynamic";
 
 export default async function ComprasPage({ searchParams }: { searchParams: SearchParams }) {
-  const params = await searchParams;
+  const [params, session, cotizacion] = await Promise.all([
+    searchParams,
+    auth(),
+    getCotizacionParaFecha(new Date()),
+  ]);
   const { page, perPage } = parsePaginationParams(params);
+
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    params.moneda === "ARS" ? "ARS" : params.moneda === "USD" ? "USD" : monedaPreferida;
+  // El TC se pasa SIEMPRE que haya cotización (no gated en USD): las facturas
+  // USD nativas se preservan 1 a 1 y las ARS se convierten; `convertirMonto`
+  // decide por moneda nativa↔presentación.
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   const { rows, total, emitidas, borradores } = await listarCompras({
     page,
@@ -39,7 +62,8 @@ export default async function ComprasPage({ searchParams }: { searchParams: Sear
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
           <Link href="/compras/pedidos" className={buttonVariants({ variant: "outline" })}>
             Pedidos (OC)
           </Link>
@@ -51,7 +75,7 @@ export default async function ComprasPage({ searchParams }: { searchParams: Sear
       </div>
 
       <Card className="py-0">
-        <ComprasTable data={rows} />
+        <ComprasTable data={rows} moneda={moneda} tc={tc} />
         <Pagination page={page} perPage={perPage} total={total} className="border-t" />
       </Card>
     </div>

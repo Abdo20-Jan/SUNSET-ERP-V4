@@ -13,7 +13,8 @@ import {
   transicionarPedidoCompraAction,
   type PedidoCompraDetalle,
 } from "@/lib/actions/pedidos-compra";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMontoPres } from "@/lib/format";
+import { MonedaToggle, type Moneda } from "../../../reportes/_components/moneda-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -40,6 +41,9 @@ type Props = {
   proveedorNombre: string;
   productosMap: Record<string, { codigo: string; nombre: string }>;
   comprasVinculadas: Array<{ id: string; numero: string; estado: string }>;
+  moneda: Moneda;
+  tc: string | null;
+  tcInfo: { valor: string; fecha: string; fuente: string | null } | null;
 };
 
 function estadoVariant(estado: PedidoEstado): "default" | "outline" | "secondary" | "destructive" {
@@ -62,6 +66,9 @@ export function PedidoCompraDetail({
   proveedorNombre,
   productosMap,
   comprasVinculadas,
+  moneda,
+  tc,
+  tcInfo,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -116,6 +123,7 @@ export function PedidoCompraDetail({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
           {pedido.estado === "BORRADOR" && (
             <Button
               variant="outline"
@@ -179,7 +187,7 @@ export function PedidoCompraDetail({
         />
         <Stat
           label="Total estimado"
-          value={`${fmtMoney(total.toString())} ${pedido.moneda}`}
+          value={`${fmtMontoPres(total.toString(), pedido.moneda, moneda, tc)} ${moneda}`}
           emphasis
         />
       </div>
@@ -213,10 +221,10 @@ export function PedidoCompraDetail({
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">{it.cantidad}</TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(it.precioUnitario)}
+                    {fmtMontoPres(it.precioUnitario, pedido.moneda, moneda, tc)}
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(sub.toString())}
+                    {fmtMontoPres(sub.toString(), pedido.moneda, moneda, tc)}
                   </TableCell>
                 </TableRow>
               );
