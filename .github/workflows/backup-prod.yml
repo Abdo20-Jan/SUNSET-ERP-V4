@@ -1,0 +1,62 @@
+name: backup-prod
+
+# Backup lógico DIÁRIO de produção (Railway / Postgres 18), guardado como
+# artifact com retenção. É uma cópia PRÓPRIA e portável, independente de backups
+# nativos do Railway. Mesmo método de `scripts/backup-prod.sh`: `pg_dump` rodando
+# na imagem `postgres:18-alpine` (paridade de versão com o servidor de prod — um
+# pg_dump < 18 aborta com "server version mismatch").
+#
+# Secret: DATABASE_URL_PROD (o MESMO de migrate-deploy / validar-stock; SEM
+# declarar `environment:`, senão resolve VAZIO — ver nota em migrate-deploy.yml).
+# Deve ser a connection string DIRETA do Railway.
+#
+# Segurança: NÃO há `on: pull_request` → o secret nunca se expõe a PRs de fork.
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # diário 03:00 UTC (~00:00 ART)
+  # Permite disparar à mão (ex.: backup pré-operação de risco).
+  workflow_dispatch:
+
+# Nunca rodar dois backups em paralelo; não cancelar um em voo.
+concurrency:
+  group: backup-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    name: pg_dump produção (Postgres 18)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Dump + gzip + validação
+        env:
+          PGURL: ${{ secrets.DATABASE_URL_PROD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PGURL:-}" ]; then
+            echo "✗ secret DATABASE_URL_PROD vazio"; exit 1
+          fi
+          STAMP="$(date +%Y%m%d-%H%M%S)"
+          OUT="sunset-prod-${STAMP}.sql.gz"
+          # -e PGURL herda do ambiente (não expõe a URL na linha de comando).
+          docker run --rm -e PGURL postgres:18-alpine \
+            sh -c 'exec pg_dump "$PGURL" --no-owner --no-privileges' | gzip >"$OUT"
+          gzip -t "$OUT"
+          tables="$(gunzip -c "$OUT" | grep -c '^CREATE TABLE' || true)"
+          cuentas="$(gunzip -c "$OUT" | grep -c 'public."CuentaContable"' || true)"
+          echo "tabelas: $tables · CuentaContable: $cuentas · tamanho: $(du -h "$OUT" | cut -f1)"
+          if [ "$tables" -lt 1 ] || [ "$cuentas" -lt 1 ]; then
+            echo "✗ backup suspeito"; exit 1
+          fi
+          echo "BACKUP_FILE=$OUT" >>"$GITHUB_ENV"
+      - name: Upload artifact (retenção 30 dias)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: prod-backup-${{ github.run_id }}
+          path: ${{ env.BACKUP_FILE }}
+          retention-days: 30
+          if-no-files-found: error
