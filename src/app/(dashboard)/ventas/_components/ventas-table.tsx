@@ -4,7 +4,8 @@ import Link from "next/link";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 
 import type { VentaRow } from "@/lib/actions/ventas";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMontoPres } from "@/lib/format";
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
 import { DateBadge } from "@/components/ui/date-badge";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -30,7 +31,15 @@ function estadoVariant(
   }
 }
 
-export function VentasTable({ data }: { data: VentaRow[] }) {
+export function VentasTable({
+  data,
+  moneda,
+  tc,
+}: {
+  data: VentaRow[];
+  moneda: Moneda;
+  tc: string | null;
+}) {
   const columns: ColumnDef<VentaRow>[] = [
     {
       id: "numero",
@@ -72,7 +81,7 @@ export function VentasTable({ data }: { data: VentaRow[] }) {
             row.original.estado === "CANCELADA" && "line-through opacity-60",
           )}
         >
-          {fmtMoney(row.original.total)} {row.original.moneda}
+          {fmtMontoPres(row.original.total, row.original.moneda, moneda, tc)} {moneda}
         </span>
       ),
     },

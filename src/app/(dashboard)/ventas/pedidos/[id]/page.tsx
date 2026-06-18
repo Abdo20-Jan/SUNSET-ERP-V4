@@ -1,17 +1,20 @@
 import { notFound } from "next/navigation";
 
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
   listarClientesParaPedidoVenta,
   listarProductosParaPedidoVenta,
   obtenerPedidoVentaPorId,
 } from "@/lib/actions/pedidos-venta";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 
+import type { Moneda } from "../../../reportes/_components/moneda-toggle";
 import { PedidoVentaDetail } from "../_components/pedido-venta-detail";
 import { PedidoVentaForm } from "../_components/pedido-venta-form";
 
 type PageParams = Promise<{ id: string }>;
-type SearchParams = Promise<{ editar?: string }>;
+type SearchParams = Promise<{ editar?: string; moneda?: string }>;
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +26,7 @@ export default async function PedidoVentaDetailPage({
   searchParams: SearchParams;
 }) {
   const { id: idStr } = await params;
-  const { editar } = await searchParams;
+  const { editar, moneda: monedaParam } = await searchParams;
   const id = Number.parseInt(idStr, 10);
   if (Number.isNaN(id)) notFound();
 
@@ -42,7 +45,7 @@ export default async function PedidoVentaDetailPage({
     );
   }
 
-  const [cliente, productos, ventasVinculadas] = await Promise.all([
+  const [cliente, productos, ventasVinculadas, session, cotizacion] = await Promise.all([
     db.cliente.findUnique({
       where: { id: pedido.clienteId },
       select: { nombre: true },
@@ -56,10 +59,24 @@ export default async function PedidoVentaDetailPage({
       select: { id: true, numero: true, estado: true },
       orderBy: { createdAt: "desc" },
     }),
+    auth(),
+    getCotizacionParaFecha(new Date()),
   ]);
 
   const productosMap: Record<string, { codigo: string; nombre: string }> = {};
   for (const p of productos) productosMap[p.id] = { codigo: p.codigo, nombre: p.nombre };
+
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    monedaParam === "ARS" ? "ARS" : monedaParam === "USD" ? "USD" : monedaPreferida;
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   return (
     <PedidoVentaDetail
@@ -67,6 +84,9 @@ export default async function PedidoVentaDetailPage({
       clienteNombre={cliente?.nombre ?? "—"}
       productosMap={productosMap}
       ventasVinculadas={ventasVinculadas}
+      moneda={moneda}
+      tc={tc}
+      tcInfo={tcInfo}
     />
   );
 }
