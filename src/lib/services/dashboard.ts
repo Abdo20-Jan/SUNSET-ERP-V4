@@ -8,7 +8,7 @@ import {
   calcularSaldosCuentasBancariasEnMonedaCuenta,
   getCuentasBancoCajaConMoneda,
 } from "@/lib/services/cuenta-bancaria";
-import { calcularSaldosPrestamos } from "@/lib/services/prestamo";
+import { calcularSaldosPrestamosConMoneda } from "@/lib/services/prestamo";
 import {
   AsientoEstado,
   CuentaCategoria,
@@ -72,7 +72,13 @@ export type PrestamoActivo = {
   principal: Decimal;
   tipoCambio: Decimal;
   equivalenteARS: Decimal;
+  /** Saldo deudor en ARS (ledger, valuado al TC de alta). */
   saldoPendiente: Decimal;
+  /**
+   * Saldo deudor en USD nativo (invariante a TC, derivado de montoOrigen).
+   * `null` cuando el préstamo no tiene partidas en USD (préstamo ARS).
+   */
+  saldoUsd: Decimal | null;
 };
 
 export type AlertaSeveridad = "critical" | "warning";
@@ -263,13 +269,15 @@ export async function getPrestamosActivos(): Promise<PrestamoActivo[]> {
 
   if (prestamos.length === 0) return [];
 
-  const saldos = await calcularSaldosPrestamos(prestamos.map((p) => p.cuentaContableId));
+  const saldos = await calcularSaldosPrestamosConMoneda(prestamos.map((p) => p.cuentaContableId));
 
   return prestamos
     .map((p) => {
       const principal = toDecimal(p.principal).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
       const tipoCambio = toDecimal(p.tipoCambio).toDecimalPlaces(6, Decimal.ROUND_HALF_UP);
-      const saldoPendiente = saldos.get(p.cuentaContableId) ?? new Decimal(0);
+      const saldo = saldos.get(p.cuentaContableId);
+      const saldoPendiente = saldo?.saldoArs ?? new Decimal(0);
+      const saldoUsd = saldo?.saldoUsd ?? null;
       const equivalenteARS = principal.times(tipoCambio).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
       return {
         id: p.id,
@@ -279,6 +287,7 @@ export async function getPrestamosActivos(): Promise<PrestamoActivo[]> {
         tipoCambio,
         equivalenteARS,
         saldoPendiente,
+        saldoUsd,
       };
     })
     .filter((p) => p.saldoPendiente.gt(0));

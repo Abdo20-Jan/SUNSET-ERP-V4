@@ -17,18 +17,32 @@ const fmtCompact = new Intl.NumberFormat("es-AR", {
   maximumFractionDigits: 1,
 });
 
-const fmtPesos = new Intl.NumberFormat("es-AR", {
-  style: "currency",
-  currency: "ARS",
-  maximumFractionDigits: 0,
-});
+const fmtMonedaCache: Record<"ARS" | "USD", Intl.NumberFormat> = {
+  ARS: new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }),
+  USD: new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }),
+};
 
 const config = {
   ingresos: { label: "Ingresos", color: "var(--chart-1)" },
   egresos: { label: "Egresos", color: "var(--chart-2)" },
 } satisfies ChartConfig;
 
-export function IngresosEgresosChart({ data }: { data: IngresoEgresoMensual[] }) {
+export function IngresosEgresosChart({
+  data,
+  moneda,
+}: {
+  data: IngresoEgresoMensual[];
+  moneda: "ARS" | "USD";
+}) {
+  const fmtMoneda = fmtMonedaCache[moneda];
   return (
     <Card size="sm">
       <CardHeader className="flex-row items-center justify-between border-b border-border/60 pb-2">
@@ -80,7 +94,7 @@ export function IngresosEgresosChart({ data }: { data: IngresoEgresoMensual[] })
                     <div className="flex flex-1 justify-between gap-2">
                       <span className="text-muted-foreground">{String(name)}</span>
                       <span className="font-mono font-medium text-foreground tabular-nums">
-                        {fmtPesos.format(Number(v ?? 0))}
+                        {fmtMoneda.format(Number(v ?? 0))}
                       </span>
                     </div>
                   )}
