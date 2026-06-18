@@ -1,33 +1,26 @@
-name: validar-stock
+name: validar-asientos
 
-# Valida invariantes de stock + comex diariamente contra DB de produção (Railway).
-# Invariantes:
-#   1: SUM(SPD.cantidadFisica) por producto == Producto.stockActual
-#   2: SPD.cantidadReservada >= 0 && SPD.cantidadFisica >= SPD.cantidadReservada
-#   3: SPD.cantidadFisica >= 0
-#   4: ItemContenedor disponible+enDespacho+despachada == cantidadFisica (comex)
-#   5: nenhum DespachoBorrador vencido com counters trabados sem reverter (comex)
-#   6: nenhuma Desconsolidacion AGUARDANDO_INVESTIGACAO há mais de 7 dias (comex)
+# Valida invariantes del LEDGER contable diariamente contra DB de producción
+# (Railway). Espejo de validar-stock.yml para los asientos.
+# Invariantes (ver prisma/validar-invariantes-asiento.ts):
+#   A1: Asiento.moneda == ARS
+#   A2: totalDebe == totalHaber (partida doble)
+#   A3: Σ líneas.debe == totalDebe  y  Σ líneas.haber == totalHaber
+#   A4: cada línea tiene exactamente un lado > 0 (debe XOR haber), no-negativo
+#   A5: monedaOrigen ∈ {USD, null}; USD → montoOrigen>0 y tipoCambioOrigen>0;
+#       null → montoOrigen y tipoCambioOrigen ambos null
 #
-# Schedule diário (cron 0 9 * * * = 06:00 ART). Falha → abre issue automática.
+# Schedule diario (cron 30 9 * * * = 06:30 ART, desfasado del de stock).
+# Falla → abre issue automática.
 
 on:
   schedule:
-    # 06:00 ART (UTC-3) = 09:00 UTC
-    - cron: "0 9 * * *"
+    # 06:30 ART (UTC-3) = 09:30 UTC (desfasado de validar-stock 09:00 UTC)
+    - cron: "30 9 * * *"
   workflow_dispatch:
-    inputs:
-      recalcular_reservas:
-        description: "Reconstruir SPD.cantidadReservada antes de validar (replay)"
-        required: false
-        default: "false"
-        type: choice
-        options:
-          - "false"
-          - "true"
 
 concurrency:
-  group: validar-stock-${{ github.ref }}
+  group: validar-asientos-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -36,7 +29,7 @@ permissions:
 
 jobs:
   validar:
-    name: validar invariantes SPD
+    name: validar invariantes ledger
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -62,26 +55,21 @@ jobs:
         id: validar
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}
-          RECALCULAR_RESERVAS: ${{ inputs.recalcular_reservas }}
         run: |
           set +e
           # pipefail: el exit code del pipe `cmd | tee` debe ser el de `cmd`,
           # no el de `tee` (que siempre sale 0) — si no, una violación real
           # nunca falla el workflow ni abre issue (monitoreo muerto).
           set -o pipefail
-          if [ "$RECALCULAR_RESERVAS" = "true" ]; then
-            pnpm db:validar-stock --recalcular-reservas 2>&1 | tee validar-stock.log
-          else
-            pnpm db:validar-stock 2>&1 | tee validar-stock.log
-          fi
+          pnpm db:validar-asientos 2>&1 | tee validar-asientos.log
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Upload log
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: validar-stock-log
-          path: validar-stock.log
+          name: validar-asientos-log
+          path: validar-asientos.log
           retention-days: 30
 
       - name: Criar issue em caso de violação
@@ -90,15 +78,15 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const log = fs.readFileSync('validar-stock.log', 'utf8').slice(0, 60000);
+            const log = fs.readFileSync('validar-asientos.log', 'utf8').slice(0, 60000);
             const today = new Date().toISOString().slice(0, 10);
-            const title = `[validar-stock] Invariante stock/comex violada — ${today}`;
+            const title = `[validar-asientos] Invariante del ledger violada — ${today}`;
 
             const existing = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'open',
-              labels: 'validar-stock'
+              labels: 'validar-asientos'
             });
             if (existing.data.some(i => i.title === title)) {
               core.info('Issue já existe pra hoje — skip');
@@ -109,9 +97,9 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title,
-              labels: ['validar-stock', 'bug', 'prod'],
+              labels: ['validar-asientos', 'bug', 'prod'],
               body: [
-                '## Violação de invariante de stock/comex detectada',
+                '## Violação de invariante del ledger contable detectada',
                 '',
                 `Workflow: ${context.workflow} · Run: [${context.runId}](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
                 '',
@@ -123,14 +111,14 @@ jobs:
                 '',
                 '### Próximos passos',
                 '',
-                '1. Identificar producto/depósito afetado no log.',
-                '2. Rodar `pnpm db:validar-stock --recalcular-reservas` local com DATABASE_URL prod (se for invariante 2).',
-                '3. Investigar causa raiz no MovimientoStock (ver `bug-spd-desincronizado.md` no vault).',
+                '1. Identificar o asiento afetado no log (número + período + id).',
+                '2. Investigar a origem: escrita fora do motor (`asiento-automatico.ts`), `db push` antigo ou bug.',
+                '3. Lembrar a regra canônica: ledger 100% ARS em debe/haber; USD só em metadata (monedaOrigen/montoOrigen/tipoCambioOrigen); saldo USD = Σ montoOrigen.',
               ].join('\n'),
             });
 
       - name: Falhar workflow se violação
         if: steps.validar.outputs.exit_code != '0'
         run: |
-          echo "::error::Invariante SPD violada — ver log + issue automática."
+          echo "::error::Invariante do ledger violada — ver log + issue automática."
           exit 1
