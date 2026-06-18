@@ -4,15 +4,23 @@ import { createTestDb, type TestDb } from "./db";
 
 // Cobertura del flujo de pago a proveedor exterior USD desde cuenta ARS.
 //
-// Modelo simplificado (sin diferencia cambial en el momento del pago):
-//   - Asiento de 2 líneas: DEBE cuentaProveedor / HABER cuentaBanco — mismo ARS.
+// Modelo con diferencia cambiaria realizada (Fase 2, E4c):
+//   - La cuenta del proveedor se debita al TC HISTÓRICO de la factura
+//     (montoUsd × tipoCambioOriginal): cancela el pasivo al valor de ingreso;
+//     el saldo USD es invariante a TC.
+//   - El banco ARS se acredita por el desembolso real (al TC del pago).
+//   - El spread (arsFactura − arsPago) se asienta como diferencia de cambio
+//     realizada: 9.2.01 ganancia (HABER) si TC pago < TC factura / 9.2.02
+//     pérdida (DEBE) si TC pago > TC factura. Con TC pago == TC factura el
+//     spread es 0 → asiento limpio de 2 líneas.
 //   - El input es UNO de los dos: tipoCambioBanco O montoArs; el otro se deriva.
 //   - MovimientoTesoreria USD con tipoCambio aplicado (informativo).
-//   - AplicacionPago* gravada para compra/embarqueCosto (no para embarqueFob).
-//   - La línea DEBE lleva monedaOrigen=USD + montoOrigen + tipoCambioOrigen:
-//     el principal USD pagado, invariante a TC. El saldo USD se descuenta
-//     desde esa metadata (helper compartido con getSaldosExteriorPorProveedor),
-//     con tokens en la descripción sólo como fallback legacy.
+//   - AplicacionPago* gravada para compra/embarqueCosto (no para embarqueFob),
+//     siempre apuntando a la línea DEBE del PROVEEDOR (no a la de diferencia).
+//   - La línea DEBE del proveedor lleva monedaOrigen=USD + montoOrigen +
+//     tipoCambioOrigen (= TC histórico): el principal USD pagado, invariante a
+//     TC. El saldo USD se descuenta desde esa metadata (helper compartido con
+//     getSaldosExteriorPorProveedor), con tokens como fallback legacy.
 
 const h = vi.hoisted(() => {
   let client: PrismaClient | undefined;
@@ -150,6 +158,27 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS (asiento 2 líneas)"
         categoria: "EGRESO",
         nivel: 4,
       },
+    });
+
+    // Sintéticas padre para auto-create de la diferencia de cambio (ULTRA
+    // clase 9). 9.2.01 ganancia / 9.2.02 pérdida cuelgan de 9.2 → 9.
+    await db.prisma.cuentaContable.createMany({
+      data: [
+        {
+          codigo: "9",
+          nombre: "RESULTADOS FINANCIEROS Y POR TENENCIA",
+          tipo: "SINTETICA",
+          categoria: "INGRESO",
+          nivel: 1,
+        },
+        {
+          codigo: "9.2",
+          nombre: "DIFERENCIAS DE CAMBIO",
+          tipo: "SINTETICA",
+          categoria: "INGRESO",
+          nivel: 2,
+        },
+      ],
     });
 
     const cuentaBancariaArs = await db.prisma.cuentaBancaria.create({
@@ -318,7 +347,7 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS (asiento 2 líneas)"
   // Casos principales — modo "tipoCambioBanco" (sistema calcula ARS)
   // ============================================================
 
-  it("paga con TC dado — asiento 2 líneas, sin diferencia cambial", async () => {
+  it("paga con TC dado < histórico — DEBE prov al TC factura + ganancia 9.2.01", async () => {
     const s = await seed();
     const res = await pagarFacturaExteriorAction({
       facturaOrigen: "embarqueCosto",
@@ -329,7 +358,7 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS (asiento 2 líneas)"
     });
     if (!res.ok) throw new Error(`pago falló: ${res.error}`);
 
-    // USD 22.000 × 1.147,50 = ARS 25.245.000
+    // Desembolso: USD 22.000 × 1.147,50 (pago) = ARS 25.245.000
     expect(Number(res.montoUsd)).toBeCloseTo(22000, 2);
     expect(Number(res.montoArs)).toBeCloseTo(25245000, 2);
     expect(Number(res.tipoCambioAplicado)).toBeCloseTo(1147.5, 6);
@@ -337,31 +366,38 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS (asiento 2 líneas)"
     const lineas = await db.prisma.lineaAsiento.findMany({
       where: { asientoId: res.asientoId },
       orderBy: { id: "asc" },
+      include: { cuenta: { select: { codigo: true } } },
     });
-    expect(lineas).toHaveLength(2); // sólo DEBE prov + HABER banco
+    // DEBE prov (histórico) + HABER banco (pago) + HABER ganancia 9.2.01
+    expect(lineas).toHaveLength(3);
     await expectAsientoBalanceado(res.asientoId);
 
-    // DEBE cuentaProveedor = HABER banco = mismo monto
-    expect(Number(lineas[0]!.debe)).toBeCloseTo(25245000, 2);
-    expect(Number(lineas[0]!.haber)).toBeCloseTo(0, 2);
+    // DEBE proveedor al TC HISTÓRICO 1.398,5 → 22.000 × 1.398,5 = 30.767.000
     expect(lineas[0]!.cuentaId).toBe(s.cuentaProveedorExteriorId);
-    expect(Number(lineas[1]!.haber)).toBeCloseTo(25245000, 2);
-    expect(lineas[1]!.cuentaId).toBe(s.cuentaBancoArsId);
-
-    // Línea DEBE lleva el principal USD como metadata, invariante a TC.
+    expect(Number(lineas[0]!.debe)).toBeCloseTo(30767000, 2);
+    expect(Number(lineas[0]!.haber)).toBeCloseTo(0, 2);
+    // Metadata: principal USD + TC histórico (no el del pago).
     expect(lineas[0]!.monedaOrigen).toBe("USD");
     expect(Number(lineas[0]!.montoOrigen)).toBeCloseTo(22000, 2);
-    expect(Number(lineas[0]!.tipoCambioOrigen)).toBeCloseTo(1147.5, 6);
-    // La línea HABER del banco ARS no lleva metadata USD.
-    expect(lineas[1]!.monedaOrigen).toBeNull();
-    expect(lineas[1]!.montoOrigen).toBeNull();
+    expect(Number(lineas[0]!.tipoCambioOrigen)).toBeCloseTo(1398.5, 6);
+
+    // HABER banco por el desembolso real; sin metadata USD.
+    const banco = lineas.find((l) => l.cuentaId === s.cuentaBancoArsId)!;
+    expect(Number(banco.haber)).toBeCloseTo(25245000, 2);
+    expect(banco.monedaOrigen).toBeNull();
+
+    // Ganancia: 30.767.000 − 25.245.000 = 5.522.000 (HABER 9.2.01).
+    const ganancia = lineas.find((l) => l.cuenta.codigo === "9.2.01")!;
+    expect(Number(ganancia.haber)).toBeCloseTo(5522000, 2);
+    expect(Number(ganancia.debe)).toBeCloseTo(0, 2);
+    expect(lineas.some((l) => l.cuenta.codigo === "9.2.02")).toBe(false);
   });
 
   // ============================================================
   // Casos principales — modo "montoArs" (sistema calcula TC)
   // ============================================================
 
-  it("paga con montoArs dado — TC se deriva automáticamente", async () => {
+  it("paga con montoArs dado — TC se deriva, DEBE histórico + ganancia", async () => {
     const s = await seed();
     // Pago ARS 25.000.000 por USD 22.000 → TC implícito 25M / 22k = 1136.363636
     const res = await pagarFacturaExteriorAction({
@@ -379,10 +415,16 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS (asiento 2 líneas)"
     const lineas = await db.prisma.lineaAsiento.findMany({
       where: { asientoId: res.asientoId },
       orderBy: { id: "asc" },
+      include: { cuenta: { select: { codigo: true } } },
     });
-    expect(lineas).toHaveLength(2);
-    expect(Number(lineas[0]!.debe)).toBeCloseTo(25000000, 2);
-    expect(Number(lineas[1]!.haber)).toBeCloseTo(25000000, 2);
+    expect(lineas).toHaveLength(3);
+    await expectAsientoBalanceado(res.asientoId);
+    // DEBE prov histórico 30.767.000; banco 25.000.000; ganancia 5.767.000.
+    expect(Number(lineas[0]!.debe)).toBeCloseTo(30767000, 2);
+    const banco = lineas.find((l) => l.cuentaId === s.cuentaBancoArsId)!;
+    expect(Number(banco.haber)).toBeCloseTo(25000000, 2);
+    const ganancia = lineas.find((l) => l.cuenta.codigo === "9.2.01")!;
+    expect(Number(ganancia.haber)).toBeCloseTo(5767000, 2);
 
     // MovimientoTesoreria tem o TC derivado
     const mov = await db.prisma.movimientoTesoreria.findUniqueOrThrow({
@@ -444,7 +486,7 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS (asiento 2 líneas)"
       facturaOrigen: "embarqueCosto",
       facturaId: s.embarqueCostoExteriorId,
       cuentaBancariaArsId: s.cuentaBancariaArsId,
-      tipoCambioBanco: "1200.000000", // TC distinto — sin generar 4.3.1.01
+      tipoCambioBanco: "1200.000000", // TC distinto; cada perna usa el MISMO TC histórico (sin FIFO)
       fecha: FECHA_PAGO,
       montoUsdAPagar: "12000.00",
     });
@@ -478,7 +520,7 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS (asiento 2 líneas)"
   // Compra USD (proveedor exterior con flujo Pedido→Compra)
   // ============================================================
 
-  it("paga via Compra USD — registra AplicacionPagoCompra", async () => {
+  it("paga via Compra USD — AplicacionPagoCompra apunta a la línea del proveedor", async () => {
     const s = await seed();
     const res = await pagarFacturaExteriorAction({
       facturaOrigen: "compra",
@@ -490,18 +532,32 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS (asiento 2 líneas)"
     if (!res.ok) throw new Error(`pago falló: ${res.error}`);
     await expectAsientoBalanceado(res.asientoId);
 
+    const lineas = await db.prisma.lineaAsiento.findMany({
+      where: { asientoId: res.asientoId },
+      orderBy: { id: "asc" },
+      include: { cuenta: { select: { codigo: true } } },
+    });
+    expect(lineas).toHaveLength(3);
+    expect(Number(lineas[0]!.debe)).toBeCloseTo(30767000, 2); // histórico
+    const ganancia = lineas.find((l) => l.cuenta.codigo === "9.2.01")!;
+    expect(Number(ganancia.haber)).toBeCloseTo(5522000, 2);
+
     const aplicaciones = await db.prisma.aplicacionPagoCompra.findMany({
       where: { compraId: s.compraExteriorId },
     });
     expect(aplicaciones).toHaveLength(1);
+    // montoArs de la aplicación = ARS efectivamente desembolsado (inalterado).
     expect(Number(aplicaciones[0]!.montoArs)).toBeCloseTo(25245000, 2);
+    // Apunta a la línea DEBE del PROVEEDOR, no a la de diferencia.
+    const lineaApl = lineas.find((l) => l.id === aplicaciones[0]!.lineaAsientoId)!;
+    expect(lineaApl.cuentaId).toBe(s.cuentaProveedorExteriorId);
   });
 
   // ============================================================
   // Embarque FOB virtual (sin Compra ni EmbarqueCosto)
   // ============================================================
 
-  it("paga via Embarque FOB virtual — asiento 2 líneas", async () => {
+  it("paga via Embarque FOB virtual — reconoce diferencia SIN HABER contabilizado", async () => {
     const s = await seed();
     const fob = await seedEmbarqueFobOnly(s.proveedorExteriorId);
 
@@ -518,9 +574,83 @@ describe("pagarFacturaExteriorAction — pago USD desde ARS (asiento 2 líneas)"
 
     const lineas = await db.prisma.lineaAsiento.findMany({
       where: { asientoId: res.asientoId },
+      orderBy: { id: "asc" },
+      include: { cuenta: { select: { codigo: true } } },
+    });
+    // El TC del embarque (1.398,5) es el histórico — la diferencia se reconoce
+    // aunque NO exista HABER contabilizado en la cuenta (deuda FOB sólo en items).
+    expect(lineas).toHaveLength(3);
+    await expectAsientoBalanceado(res.asientoId);
+    expect(Number(lineas[0]!.debe)).toBeCloseTo(30767000, 2); // histórico
+    const ganancia = lineas.find((l) => l.cuenta.codigo === "9.2.01")!;
+    expect(Number(ganancia.haber)).toBeCloseTo(5522000, 2);
+  });
+
+  // ============================================================
+  // Pérdida (TC pago > TC factura) + TC igual (sin diferencia)
+  // ============================================================
+
+  it("paga con TC mayor al histórico — pérdida 9.2.02 (DEBE), aplicación al proveedor", async () => {
+    const s = await seed();
+    const res = await pagarFacturaExteriorAction({
+      facturaOrigen: "embarqueCosto",
+      facturaId: s.embarqueCostoExteriorId,
+      cuentaBancariaArsId: s.cuentaBancariaArsId,
+      tipoCambioBanco: "1500.000000",
+      fecha: FECHA_PAGO,
+    });
+    if (!res.ok) throw new Error(`pago falló: ${res.error}`);
+    // Desembolso: 22.000 × 1.500 = 33.000.000
+    expect(Number(res.montoArs)).toBeCloseTo(33000000, 2);
+
+    const lineas = await db.prisma.lineaAsiento.findMany({
+      where: { asientoId: res.asientoId },
+      orderBy: { id: "asc" },
+      include: { cuenta: { select: { codigo: true } } },
+    });
+    expect(lineas).toHaveLength(3);
+    await expectAsientoBalanceado(res.asientoId);
+    // DEBE prov histórico 30.767.000 + DEBE pérdida 2.233.000 = HABER banco 33.000.000
+    expect(lineas[0]!.cuentaId).toBe(s.cuentaProveedorExteriorId);
+    expect(Number(lineas[0]!.debe)).toBeCloseTo(30767000, 2);
+    const perdida = lineas.find((l) => l.cuenta.codigo === "9.2.02")!;
+    expect(Number(perdida.debe)).toBeCloseTo(2233000, 2);
+    expect(Number(perdida.haber)).toBeCloseTo(0, 2);
+    const banco = lineas.find((l) => l.cuentaId === s.cuentaBancoArsId)!;
+    expect(Number(banco.haber)).toBeCloseTo(33000000, 2);
+    expect(lineas.some((l) => l.cuenta.codigo === "9.2.01")).toBe(false);
+
+    // Con DOS líneas DEBE (proveedor + pérdida), la aplicación apunta a la
+    // del PROVEEDOR (primera DEBE por id asc), no a la de pérdida.
+    const aplicaciones = await db.prisma.aplicacionPagoEmbarqueCosto.findMany({
+      where: { embarqueCostoId: s.embarqueCostoExteriorId },
+    });
+    expect(aplicaciones).toHaveLength(1);
+    const lineaApl = lineas.find((l) => l.id === aplicaciones[0]!.lineaAsientoId)!;
+    expect(lineaApl.cuentaId).toBe(s.cuentaProveedorExteriorId);
+  });
+
+  it("paga con TC igual al histórico — sin diferencia, asiento limpio de 2 líneas", async () => {
+    const s = await seed();
+    const res = await pagarFacturaExteriorAction({
+      facturaOrigen: "embarqueCosto",
+      facturaId: s.embarqueCostoExteriorId,
+      cuentaBancariaArsId: s.cuentaBancariaArsId,
+      tipoCambioBanco: TC_FACTURA, // 1.398,5 == TC histórico
+      fecha: FECHA_PAGO,
+    });
+    if (!res.ok) throw new Error(`pago falló: ${res.error}`);
+
+    const lineas = await db.prisma.lineaAsiento.findMany({
+      where: { asientoId: res.asientoId },
+      include: { cuenta: { select: { codigo: true } } },
     });
     expect(lineas).toHaveLength(2);
+    expect(lineas.some((l) => l.cuenta.codigo.startsWith("9.2"))).toBe(false);
     await expectAsientoBalanceado(res.asientoId);
+    // DEBE prov == HABER banco == 30.767.000 (TC pago = TC histórico).
+    const prov = lineas.find((l) => l.cuentaId === s.cuentaProveedorExteriorId)!;
+    expect(Number(prov.debe)).toBeCloseTo(30767000, 2);
   });
 
   // ============================================================

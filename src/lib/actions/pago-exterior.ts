@@ -8,6 +8,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
   AsientoError,
+  construirLineaDiferenciaCambiaria,
   contabilizarAsiento,
   crearAsientoManual,
   type LineaInput,
@@ -41,12 +42,10 @@ const ESTADOS_EMBARQUE_CON_SALDO: EmbarqueEstado[] = [
 ];
 
 // El input acepta UNO de los dos: tipoCambioBanco O montoArs. El otro se
-// deriva automáticamente del USD a pagar. No se calcula diferencia cambial
-// en el momento del pago — el asiento siempre es de 2 líneas (DEBE cuenta
-// proveedor / HABER cuenta banco) por el mismo monto ARS. La diferencia
-// con el saldo contable HABER del proveedor (que viene del asiento de
-// ingreso ZP al TC del día) surge naturalmente como saldo residual y se
-// concilia por separado (ajuste manual de fechamento si necesario).
+// deriva automáticamente del USD a pagar. La cuenta del proveedor se cancela
+// al TC HISTÓRICO de la factura y el spread contra el desembolso real (al TC
+// del pago) se reconoce como diferencia cambiaria realizada en 9.2.x (Fase 2);
+// el saldo USD del proveedor es invariante a TC.
 const pagarFacturaExteriorSchema = z
   .object({
     // "compra"      → Compra USD (id = uuid)
@@ -155,26 +154,28 @@ interface FacturaCargada {
  * del banco O monto ARS efectivamente debitado del banco. El otro se
  * deriva automáticamente del USD a pagar.
  *
- * Asiento de SÓLO 2 líneas:
+ * Diferencia cambiaria realizada (Fase 2) — regla canónica: en el pago el
+ * ARS cambia y el USD es invariante. Asiento:
  *
- *   DEBE  cuentaProveedor   ARS = montoArs    (cancela parte del pasivo)
- *   HABER cuentaBanco ARS   ARS = montoArs    (salida real del banco)
+ *   DEBE  cuentaProveedor   ARS = montoUsd × TC_factura  (cancela el pasivo
+ *                                                         al valor de ingreso)
+ *   HABER cuentaBanco ARS   ARS = montoUsd × TC_pago     (desembolso real)
+ *   ±     diferenciaCambio  ARS = |spread| → 9.2.01 ganancia (HABER) si
+ *         TC_pago < TC_factura / 9.2.02 pérdida (DEBE) si TC_pago > TC_factura
+ *         (sin línea si TC_pago == TC_factura). Cuentas vía registry
+ *         (DIFERENCIA_CAMBIO_CODIGOS), neteadas por construirLineaDiferenciaCambiaria.
  *
- * NO se genera diferencia cambiaria en el momento del pago. La cuenta
- * del proveedor vive en ARS en el libro; el TC del ingreso ZP (registrado
- * al cargar el embarque) sólo determinó el HABER original. Al pagar, se
- * debita el ARS efectivamente desembolsado — sin comparación con el TC
- * original ni cuentas 4.3.1.01 / 5.8.2.01.
- *
- * La diferencia entre el saldo HABER de la cuenta proveedor (al TC del
- * ingreso) y la suma de pagos DEBE (al TC del banco del día) surge como
- * saldo residual y se concilia con un ajuste manual de fechamento.
+ * El TC histórico es el de la propia factura (Compra / EmbarqueCosto /
+ * Embarque FOB) — NO un FIFO de la cuenta: el pago cancela UNA factura
+ * identificada, y el embarqueFob ni siquiera tiene HABER contabilizado
+ * (deuda sólo en items). Fallback: sin TC histórico válido (≤ 0) degrada
+ * al modelo de 2 líneas sin diferencia.
  *
  * La línea DEBE del proveedor lleva monedaOrigen=USD + montoOrigen +
- * tipoCambioOrigen: el principal USD pagado es metadata de la línea,
- * invariante a TC. `getSaldosExteriorPorProveedor` descuenta el saldo
- * USD del proveedor desde esa metadata (con AplicacionPago* como ancla
- * factura↔pago, y tokens en la descripción como fallback legacy).
+ * tipoCambioOrigen (= TC histórico): el principal USD pagado es metadata
+ * de la línea, invariante a TC. `getSaldosExteriorPorProveedor` descuenta
+ * el saldo USD del proveedor desde esa metadata (con AplicacionPago* como
+ * ancla factura↔pago, y tokens en la descripción como fallback legacy).
  */
 export async function pagarFacturaExteriorAction(
   raw: PagarFacturaExteriorInput,
@@ -269,6 +270,20 @@ export async function pagarFacturaExteriorAction(
         montoArs = montoUsd.times(tcAplicado).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
       }
 
+      // Fase 2 (diferencia cambiaria realizada): la cuenta del proveedor se
+      // cancela al TC HISTÓRICO de la factura (USD invariante); el spread
+      // contra el desembolso real (al TC del pago) va a 9.2.x. Fallback
+      // defensivo: sin TC histórico válido degrada al modelo de 2 líneas.
+      const tcFactura = factura.tipoCambioOriginal;
+      const usaFase2 = tcFactura.gt(0);
+      const debeArsProv = usaFase2
+        ? montoUsd.times(tcFactura).toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+        : montoArs;
+      const tcMetadata = usaFase2 ? tcFactura : tcAplicado;
+      // spread = arsFactura − arsPago (> 0 ganancia, < 0 pérdida) — misma
+      // convención que construirLineaDiferenciaCambiaria.
+      const spread = usaFase2 ? debeArsProv.minus(montoArs) : new Decimal(0);
+
       const refFactura = factura.embarqueCodigo
         ? `${factura.numero} ${factura.embarqueCodigo}`
         : factura.numero;
@@ -277,20 +292,21 @@ export async function pagarFacturaExteriorAction(
         ? `${descripcionBase} — ${descripcionExtra}`
         : descripcionBase;
 
-      // Asiento de 2 líneas — sin diferencia cambial. La línea DEBE lleva
-      // el principal USD como metadata (monedaOrigen/montoOrigen) — fuente
-      // canónica del pagado USD, invariante a TC. La descripción mantiene
-      // numero + embarqueCodigo como tokens para el fallback de pagos
+      // DEBE proveedor al TC histórico (cancela el pasivo al valor de ingreso)
+      // + HABER banco por el desembolso real. La línea DEBE lleva el principal
+      // USD como metadata (monedaOrigen/montoOrigen + tipoCambioOrigen=histórico)
+      // — fuente canónica del pagado USD, invariante a TC. La descripción
+      // mantiene numero + embarqueCodigo como tokens para el fallback de pagos
       // legacy sin AplicacionPago* (embarqueFob).
       const lineas: LineaInput[] = [
         {
           cuentaId: factura.cuentaProveedorId,
-          debe: montoArs.toFixed(2),
+          debe: debeArsProv.toFixed(2),
           haber: 0,
           descripcion: `Cancelación ${refFactura}`,
           monedaOrigen: Moneda.USD,
           montoOrigen: montoUsd.toFixed(2),
-          tipoCambioOrigen: tcAplicado.toFixed(6),
+          tipoCambioOrigen: tcMetadata.toFixed(6),
         },
         {
           cuentaId: cuentaBancaria.cuentaContableId,
@@ -301,6 +317,17 @@ export async function pagarFacturaExteriorAction(
           } — ${refFactura}`,
         },
       ];
+
+      // Diferencia cambiaria realizada (9.2.01 ganancia / 9.2.02 pérdida, vía
+      // registry, neteada). El proveedor se inserta PRIMERO → una eventual
+      // pérdida-DEBE tiene id mayor, y la búsqueda de la línea DEBE del
+      // proveedor por `id asc` sigue resolviendo al proveedor.
+      const difLinea = await construirLineaDiferenciaCambiaria(
+        tx,
+        spread,
+        `Diferencia cambiaria ${refFactura}`,
+      );
+      if (difLinea) lineas.push(difLinea);
 
       // MovimientoTesoreria en USD: el saldo bancario ARS se ajusta por
       // la línea HABER del asiento (en ARS), no por el monto del movimiento.
@@ -348,7 +375,8 @@ export async function pagarFacturaExteriorAction(
 
       const contabilizado = await contabilizarAsiento(asiento.id, tx);
 
-      // Recuperar id de la línea DEBE proveedor (única DEBE — modelo 2 líneas).
+      // Recuperar id de la línea DEBE proveedor. Es la PRIMERA DEBE (insertada
+      // antes que una eventual pérdida-DEBE 9.2.02), por eso `id asc`.
       const lineaDebeProv = await tx.lineaAsiento.findFirst({
         where: { asientoId: contabilizado.id, debe: { gt: 0 } },
         orderBy: { id: "asc" },
