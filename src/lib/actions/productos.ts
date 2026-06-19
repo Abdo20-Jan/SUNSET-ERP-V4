@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import { money, toDecimal, Decimal, type MoneyInput } from "@/lib/decimal";
+import { parseSortParams, buildOrderBy, type SortDir } from "@/lib/table-sort";
 
 export type ProductoRow = {
   id: string;
@@ -30,45 +31,119 @@ function percent4(value: MoneyInput): Prisma.Decimal {
   return new Prisma.Decimal(toDecimal(value).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4));
 }
 
-export async function listarProductos(): Promise<ProductoRow[]> {
-  const rows = await db.producto.findMany({
-    orderBy: { codigo: "asc" },
-    select: {
-      id: true,
-      codigo: true,
-      nombre: true,
-      descripcion: true,
-      marca: true,
-      modelo: true,
-      medida: true,
-      ncm: true,
-      unidad: true,
-      diePorcentaje: true,
-      precioVenta: true,
-      costoPromedio: true,
-      stockActual: true,
-      stockMinimo: true,
-      activo: true,
-    },
-  });
+// Keys lógicas habilitadas para ordenar (allowlist) → mapean al campo real del
+// modelo. NUNCA se pasa el nombre de columna crudo a Prisma: `buildOrderBy`
+// solo lee de este mapa y `parseSortParams` rechaza keys fuera de `ALLOWED`.
+const PRODUCTOS_SORT_FIELD_MAP = {
+  codigo: "codigo",
+  nombre: "nombre",
+  marca: "marca",
+  stock: "stockActual",
+  precio: "precioVenta",
+  estado: "activo",
+} as const;
+const PRODUCTOS_SORT_ALLOWED = Object.keys(PRODUCTOS_SORT_FIELD_MAP);
 
-  return rows.map((p) => ({
-    id: p.id,
-    codigo: p.codigo,
-    nombre: p.nombre,
-    descripcion: p.descripcion,
-    marca: p.marca,
-    modelo: p.modelo,
-    medida: p.medida,
-    ncm: p.ncm,
-    unidad: p.unidad,
-    diePorcentaje: p.diePorcentaje.toFixed(4),
-    precioVenta: p.precioVenta.toFixed(2),
-    costoPromedio: p.costoPromedio.toFixed(2),
-    stockActual: p.stockActual,
-    stockMinimo: p.stockMinimo,
-    activo: p.activo,
-  }));
+export type ListarProductosOpts = {
+  q?: string;
+  marca?: string;
+  page?: number;
+  perPage?: number;
+  sort?: string;
+  dir?: SortDir;
+};
+
+export type ListarProductosResult = {
+  rows: ProductoRow[];
+  total: number;
+  marcas: string[];
+};
+
+export async function listarProductos(
+  opts: ListarProductosOpts = {},
+): Promise<ListarProductosResult> {
+  const page = Math.max(1, Math.floor(opts.page ?? 1));
+  const perPage = Math.max(1, Math.min(500, Math.floor(opts.perPage ?? 50)));
+
+  const q = opts.q?.trim();
+  const marca = opts.marca?.trim();
+
+  const where: Prisma.ProductoWhereInput = {};
+  if (q) {
+    where.OR = [
+      { codigo: { contains: q, mode: "insensitive" } },
+      { nombre: { contains: q, mode: "insensitive" } },
+    ];
+  }
+  if (marca && marca !== "todas") {
+    where.marca = marca;
+  }
+
+  const orderBy = buildOrderBy(
+    parseSortParams({ sort: opts.sort, dir: opts.dir }, PRODUCTOS_SORT_ALLOWED, {
+      sort: "codigo",
+      dir: "asc",
+    }),
+    PRODUCTOS_SORT_FIELD_MAP,
+  );
+
+  const [rows, total, marcasRaw] = await Promise.all([
+    db.producto.findMany({
+      where,
+      orderBy,
+      take: perPage,
+      skip: (page - 1) * perPage,
+      select: {
+        id: true,
+        codigo: true,
+        nombre: true,
+        descripcion: true,
+        marca: true,
+        modelo: true,
+        medida: true,
+        ncm: true,
+        unidad: true,
+        diePorcentaje: true,
+        precioVenta: true,
+        costoPromedio: true,
+        stockActual: true,
+        stockMinimo: true,
+        activo: true,
+      },
+    }),
+    db.producto.count({ where }),
+    // Opciones de marca = distinct sobre TODA la tabla (no de la página filtrada).
+    db.producto.findMany({
+      where: { marca: { not: null } },
+      distinct: ["marca"],
+      select: { marca: true },
+      orderBy: { marca: "asc" },
+    }),
+  ]);
+
+  const marcas = marcasRaw.map((m) => m.marca).filter((m): m is string => !!m && m.length > 0);
+
+  return {
+    rows: rows.map((p) => ({
+      id: p.id,
+      codigo: p.codigo,
+      nombre: p.nombre,
+      descripcion: p.descripcion,
+      marca: p.marca,
+      modelo: p.modelo,
+      medida: p.medida,
+      ncm: p.ncm,
+      unidad: p.unidad,
+      diePorcentaje: p.diePorcentaje.toFixed(4),
+      precioVenta: p.precioVenta.toFixed(2),
+      costoPromedio: p.costoPromedio.toFixed(2),
+      stockActual: p.stockActual,
+      stockMinimo: p.stockMinimo,
+      activo: p.activo,
+    })),
+    total,
+    marcas,
+  };
 }
 
 const nullableStr = z
