@@ -6,7 +6,7 @@ import { createTestDb, type TestDb } from "./db";
 //
 // El motor agrupa las líneas de la venta por `Producto.categoria` y emite un
 // crédito de Ventas (4.1.01.0x) y un débito de CMV (5.1.0x) por tipo, en vez
-// de una sola cuenta sin desagregar (4.1.01.09 / 5.1.99). La contrapartida de
+// de una sola cuenta sin desagregar (4.1.01.09 / 5.1.09). La contrapartida de
 // inventario (1.1.7.01 / 1.1.7.05) sigue siendo única. El total de cada split
 // debe coincidir EXACTO con el subtotal / costo convertido para que el asiento
 // cierre (Σdebe = Σhaber), aun con redondeo por grupo (TC ≠ 1).
@@ -128,7 +128,7 @@ describe("Venta — split Ventas/CMV por categoría (ULTRA)", () => {
     // CMV: TBR cost 2·100=200 → 5.1.01; PCR cost 3·50=150 → 5.1.02. Nada al fallback.
     expect(await debe("5.1.01")).toBeCloseTo(200, 2);
     expect(await debe("5.1.02")).toBeCloseTo(150, 2);
-    expect(await debe("5.1.99")).toBeCloseTo(0, 2);
+    expect(await debe("5.1.09")).toBeCloseTo(0, 2);
 
     // Contrapartida de inventario única (1.1.7.01) = costo total 350.
     expect(await haber("1.1.7.01")).toBeCloseTo(350, 2);
@@ -243,7 +243,7 @@ describe("Venta — split Ventas/CMV por categoría (ULTRA)", () => {
     expect(td).toBeCloseTo(th, 2);
   });
 
-  it("sin categoría reconocida cae al fallback 4.1.01.09 / 5.1.99", async () => {
+  it("sin categoría reconocida cae al fallback 4.1.01.09 / 5.1.09", async () => {
     const cli = await db.prisma.cliente.create({ data: { nombre: `Cli ${seq}` } });
     const prod = await db.prisma.producto.create({
       data: { codigo: `X-${seq}`, nombre: "Sin categoría", costoPromedio: "100" },
@@ -278,7 +278,7 @@ describe("Venta — split Ventas/CMV por categoría (ULTRA)", () => {
     const asiento = await crearAsientoVenta(venta.id, db.prisma);
 
     expect(await haber("4.1.01.09")).toBeCloseTo(1000, 2);
-    expect(await debe("5.1.99")).toBeCloseTo(100, 2);
+    expect(await debe("5.1.09")).toBeCloseTo(100, 2);
     const { td, th } = await balanceaAsiento(asiento.id);
     expect(td).toBeCloseTo(th, 2);
   });
@@ -287,8 +287,8 @@ describe("Venta — split Ventas/CMV por categoría (ULTRA)", () => {
     // Decisión 2026-06-17: el ERP es razón gerencial; el Impuesto a las Ganancias
     // se determina al cierre (lucro neto del ejercicio × escala 25/30/35), no por
     // operación. Provisionar 35% fijo sobre la utilidad bruta de cada venta crea
-    // un pasivo falso (2.1.4.3.01) y distorsiona la rentabilidad — el asiento de
-    // venta NO debe tocar 8.6.01 ni 2.1.4.3.01.
+    // un pasivo falso (2.1.3.3.01) y distorsiona la rentabilidad — el asiento de
+    // venta NO debe tocar 8.9.01 ni 2.1.3.3.01.
     const cli = await db.prisma.cliente.create({ data: { nombre: `Cli ${seq}` } });
     const prod = await db.prisma.producto.create({
       data: { codigo: `TBR-${seq}`, nombre: "TBR", categoria: "TBR", costoPromedio: "100" },
@@ -324,8 +324,8 @@ describe("Venta — split Ventas/CMV por categoría (ULTRA)", () => {
 
     // Venta rentable (utilidad bruta 1800): el motor viejo habría provisionado
     // 0.35·1800 = 630. Ahora NO hay línea de provisión.
-    expect(await debe("8.6.01")).toBeCloseTo(0, 2);
-    expect(await haber("2.1.4.3.01")).toBeCloseTo(0, 2);
+    expect(await debe("8.9.01")).toBeCloseTo(0, 2);
+    expect(await haber("2.1.3.3.01")).toBeCloseTo(0, 2);
     const { td, th } = await balanceaAsiento(asiento.id);
     expect(td).toBeCloseTo(th, 2);
   });

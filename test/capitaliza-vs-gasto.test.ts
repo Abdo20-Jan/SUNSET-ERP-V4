@@ -8,7 +8,7 @@ import { GASTO_POR_TIPO_PROVEEDOR } from "@/lib/services/cuenta-registry";
 // El discriminador es el `tipoProveedor`: los servicios de IMPORTACIÓN
 // (despachante, logística/flete de entrada, almacenaje bonded, gastos
 // portuarios, flete internacional) CAPITALIZAN al costo de la mercadería
-// (1.1.7.02 Mercaderías en Tránsito) y NO crean cuenta de resultado por
+// (1.1.7.05 Mercaderías en Tránsito) y NO crean cuenta de resultado por
 // proveedor. Los gastos de PERÍODO (serv. profesionales, alquileres, IT,
 // marketing, otro) siguen siendo egreso de resultado (clases 6/7 en ULTRA).
 
@@ -28,10 +28,10 @@ const PERIODO: TipoProveedor[] = [
 ];
 
 describe("capitaliza-vs-gasto — contrapartida del DEBE por tipo de proveedor", () => {
-  it("servicios de importación capitalizan a 1.1.7.02 (ACTIVO inventariable)", () => {
+  it("servicios de importación capitalizan a 1.1.7.05 (ACTIVO inventariable)", () => {
     for (const tipo of IMPORTACION) {
       const def = GASTO_POR_TIPO_PROVEEDOR[tipo];
-      expect(def.codigo).toBe("1.1.7.02");
+      expect(def.codigo).toBe("1.1.7.05");
       expect(def.categoria).toBe("ACTIVO");
     }
   });

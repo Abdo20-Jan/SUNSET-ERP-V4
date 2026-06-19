@@ -357,7 +357,7 @@ const FECHA_POR_ESTADO: Record<EstadoFisicoTarget, keyof Prisma.ContenedorUpdate
  * (BORRADOR → EN_TRANSITO → ARRIBADO_PUERTO → EN_ZONA_PRIMARIA →
  * TRASLADO_DEPOSITO_FISCAL → EN_DEPOSITO_FISCAL). Sólo avanza (rank estricto);
  * setea la fecha de la fase y el depósito cuando corresponde. Transición
- * puramente mecánica — el asiento de arribo (1.1.5.04) vive a nivel embarque
+ * puramente mecánica — el asiento de arribo (1.1.7.04) vive a nivel embarque
  * (ver confirmarZonaPrimariaAction, Modelo Y) y el de traslado lo genera la
  * desconsolidación. EN_DEPOSITO_FISCAL exige depositoFiscalId.
  */

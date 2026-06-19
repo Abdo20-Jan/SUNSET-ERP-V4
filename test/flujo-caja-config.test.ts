@@ -25,10 +25,10 @@ describe("flujo-caja-config (RT9)", () => {
     expect(() => assertOwnershipUnico()).not.toThrow();
   });
 
-  // El template del flujo de caja referencia códigos del plan; su reapunte al
-  // plan nuevo (prefijos banco/caja) va con el motor (etapa 3), no con la
-  // exposición de Balance/ER (etapa 2). Reactivar entonces.
-  it.skip("todo código referenciado existe en PLAN_RT9", () => {
+  // ETAPA 3: el template del flujo de caja fue reapuntado al plano de 9 clases
+  // (cargas fiscales a pagar 2.1.3.x). Guard ACTIVO: todo código referenciado
+  // debe existir en PLAN_RT9.
+  it("todo código referenciado existe en PLAN_RT9", () => {
     const enPlan = new Set(PLAN_RT9.map((c) => c.codigo));
     const fueraDelPlan = [...new Set(codigosReferenciados())].filter((c) => !enPlan.has(c));
     expect(fueraDelPlan).toEqual([]);

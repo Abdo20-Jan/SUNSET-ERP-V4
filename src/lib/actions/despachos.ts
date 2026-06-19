@@ -581,7 +581,7 @@ export async function contabilizarDespachoAction(
             );
           }
           // Costo landed por línea (no el FC puro) → el ingreso de stock
-          // NACIONAL queda con el mismo costo que el DEBE 1.1.5.01. La clave
+          // NACIONAL queda con el mismo costo que el DEBE 1.1.7.01. La clave
           // existe siempre: el helper computó todas las líneas del despacho.
           const landedUnit = landedCruz.costoUnitarioLandedPorItem.get(i.id);
           if (landedUnit == null) {

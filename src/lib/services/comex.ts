@@ -131,7 +131,7 @@ export type ItemRateioResult<T> = T & {
  * FOB. Pattern espelhado de crearAsientoDespacho.
  *
  * Mantiene `last-idx-absorbs-residue` para reconciliación al centavo
- * con el saldo contable de 1.1.5.02.
+ * con el saldo contable de 1.1.7.05.
  */
 export function calcularRateioZonaPrimaria<T extends ItemRateioInput>(
   embarque: EmbarqueRateioZP,

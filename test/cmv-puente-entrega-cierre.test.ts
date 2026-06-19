@@ -2,20 +2,20 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { crearAsientoEntrega, crearAsientoVenta } from "@/lib/services/asiento-automatico";
 import { createTestDb, type TestDb } from "./db";
 
-// Onda B #9 — cierre de la cuenta-puente 1.1.5.03 (MERCADERÍAS A ENTREGAR).
+// Onda B #9 — cierre de la cuenta-puente 1.1.7.90 (MERCADERÍAS A ENTREGAR).
 //
-// Con stock dual, EMITIR la venta acredita 1.1.5.03 al costoPromedio GLOBAL del
-// producto (CMV provisión). La ENTREGA cancelaba 1.1.5.03 al costoPromedio del
-// SPD del depósito — otra base — así que 1.1.5.03 NO cerraba (residuo
-// Σ(global − SPD)). Fix: la entrega DEBITA 1.1.5.03 por el snapshot que usó la
-// venta (ItemVenta.costoUnitarioCmv), ACREDITA 1.1.5.01 por el costo físico real
+// Con stock dual, EMITIR la venta acredita 1.1.7.90 al costoPromedio GLOBAL del
+// producto (CMV provisión). La ENTREGA cancelaba 1.1.7.90 al costoPromedio del
+// SPD del depósito — otra base — así que 1.1.7.90 NO cerraba (residuo
+// Σ(global − SPD)). Fix: la entrega DEBITA 1.1.7.90 por el snapshot que usó la
+// venta (ItemVenta.costoUnitarioCmv), ACREDITA 1.1.7.01 por el costo físico real
 // (SPD), y la diferencia va a una cuenta de variación de inventario
 // (4.9.1.01 ingreso / 5.9.2.01 pérdida). Las ventas legacy (snapshot 0) caen al
 // SPD como antes (sin variación).
 
 const FECHA = new Date("2026-05-15T12:00:00.000Z");
 
-describe("ponte 1.1.5.03 — la entrega cierra contra el costo de la venta (Onda B #9)", () => {
+describe("ponte 1.1.7.90 — la entrega cierra contra el costo de la venta (Onda B #9)", () => {
   let db: TestDb;
   let seq = 0;
 
@@ -147,7 +147,7 @@ describe("ponte 1.1.5.03 — la entrega cierra contra el costo de la venta (Onda
     return { itemVentaId: venta.items[0]!.id };
   }
 
-  it("costo SPD MAYOR que el de la venta: pérdida de inventario y 1.1.5.03 cierra", async () => {
+  it("costo SPD MAYOR que el de la venta: pérdida de inventario y 1.1.7.90 cierra", async () => {
     // venta a 1000 (CMV 10·1000 = 10.000); entrega física a 1200 (SPD).
     const r = await ventaYEntrega("1000.00", "1200.00");
 
@@ -155,25 +155,25 @@ describe("ponte 1.1.5.03 — la entrega cierra contra el costo de la venta (Onda
     const iv = await db.prisma.itemVenta.findUniqueOrThrow({ where: { id: r.itemVentaId } });
     expect(Number(iv.costoUnitarioCmv)).toBeCloseTo(1000, 2);
 
-    // 1.1.5.03 cierra: HABER 10.000 (venta) − DEBE 10.000 (entrega) = 0.
-    expect(await neto("1.1.7.05")).toBeCloseTo(0, 2);
-    // 1.1.5.01 acreditada por el egreso físico real (SPD): 10·1200 = 12.000.
+    // 1.1.7.90 cierra: HABER 10.000 (venta) − DEBE 10.000 (entrega) = 0.
+    expect(await neto("1.1.7.90")).toBeCloseTo(0, 2);
+    // 1.1.7.01 acreditada por el egreso físico real (SPD): 10·1200 = 12.000.
     expect(await haber("1.1.7.01")).toBeCloseTo(12_000, 2);
     // Diferencia (2.000) como PÉRDIDA de inventario (DEBE 5.9.2.01).
-    expect(await debe("5.2.01")).toBeCloseTo(2_000, 2);
-    expect(await haber("5.2.03")).toBeCloseTo(0, 2);
+    expect(await debe("8.0.02")).toBeCloseTo(2_000, 2);
+    expect(await haber("5.2.04")).toBeCloseTo(0, 2);
   });
 
-  it("costo SPD MENOR que el de la venta: ingreso por diferencia y 1.1.5.03 cierra", async () => {
+  it("costo SPD MENOR que el de la venta: ingreso por diferencia y 1.1.7.90 cierra", async () => {
     // venta a 1200 (CMV 12.000); entrega física a 1000 (SPD).
     await ventaYEntrega("1200.00", "1000.00");
 
-    expect(await neto("1.1.7.05")).toBeCloseTo(0, 2);
-    // 1.1.5.01 por el egreso real: 10·1000 = 10.000.
+    expect(await neto("1.1.7.90")).toBeCloseTo(0, 2);
+    // 1.1.7.01 por el egreso real: 10·1000 = 10.000.
     expect(await haber("1.1.7.01")).toBeCloseTo(10_000, 2);
     // Diferencia (2.000) como INGRESO por diferencia de inventario (HABER 4.9.1.01).
-    expect(await haber("5.2.03")).toBeCloseTo(2_000, 2);
-    expect(await debe("5.2.01")).toBeCloseTo(0, 2);
+    expect(await haber("5.2.04")).toBeCloseTo(2_000, 2);
+    expect(await debe("8.0.02")).toBeCloseTo(0, 2);
   });
 
   it("venta legacy (snapshot 0): la entrega cae al SPD, sin variación (control)", async () => {
@@ -227,11 +227,11 @@ describe("ponte 1.1.5.03 — la entrega cierra contra el costo de la venta (Onda
     });
     await crearAsientoEntrega(entrega.id, db.prisma);
 
-    // Sin snapshot, la entrega cancela 1.1.5.03 al SPD (comportamiento previo):
-    // DEBE 1.1.5.03 = 10·1200 = 12.000, HABER 1.1.5.01 = 12.000, sin variación.
-    expect(await debe("1.1.7.05")).toBeCloseTo(12_000, 2);
+    // Sin snapshot, la entrega cancela 1.1.7.90 al SPD (comportamiento previo):
+    // DEBE 1.1.7.90 = 10·1200 = 12.000, HABER 1.1.7.01 = 12.000, sin variación.
+    expect(await debe("1.1.7.90")).toBeCloseTo(12_000, 2);
     expect(await haber("1.1.7.01")).toBeCloseTo(12_000, 2);
-    expect(await debe("5.2.01")).toBeCloseTo(0, 2);
-    expect(await haber("5.2.03")).toBeCloseTo(0, 2);
+    expect(await debe("8.0.02")).toBeCloseTo(0, 2);
+    expect(await haber("5.2.04")).toBeCloseTo(0, 2);
   });
 });

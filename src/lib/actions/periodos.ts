@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 
 import { requireAdmin } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
+import {
+  AsientoError,
+  crearAsientoCierre,
+  crearAsientoDestinoResultado,
+} from "@/lib/services/asiento-automatico";
 import { AsientoEstado, PeriodoEstado } from "@/generated/prisma/client";
 
 export type PeriodoActionResult =
@@ -90,4 +95,105 @@ export async function reabrirPeriodo(periodoId: number): Promise<PeriodoActionRe
     codigo: periodo.codigo,
     estado: PeriodoEstado.ABIERTO,
   };
+}
+
+// ============================================================
+// Cierre del ejercicio (FLUJOS CONTABLES: cierre de resultados + destino)
+// ============================================================
+
+export type CerrarEjercicioResult =
+  | {
+      ok: true;
+      asientoCierreId: string;
+      numeroCierre: number;
+      asientoDestinoId: string | null;
+      numeroDestino: number | null;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Cierra el ejercicio en el rango [fechaDesde, fechaHasta]: genera el asiento
+ * de cierre de resultados (clases 4-9 → 3.4.01) y, si `conDestino`, transfiere
+ * el resultado a 3.3.01. Operación administrativa (requireAdmin). Cada asiento
+ * corre en su propia transacción (cierre primero); el destino es un paso
+ * societario posterior y puede dispararse aparte. Idempotente por el guard del
+ * generador (un cierre por rango).
+ */
+export async function cerrarEjercicio(input: {
+  fechaDesde: string;
+  fechaHasta: string;
+  conDestino?: boolean;
+}): Promise<CerrarEjercicioResult> {
+  const guard = await requireAdmin();
+  if (!guard.ok) {
+    return { ok: false, error: guard.error };
+  }
+
+  const fechaDesde = new Date(input.fechaDesde);
+  const fechaHasta = new Date(input.fechaHasta);
+  if (
+    Number.isNaN(fechaDesde.getTime()) ||
+    Number.isNaN(fechaHasta.getTime()) ||
+    fechaDesde > fechaHasta
+  ) {
+    return { ok: false, error: "Rango de fechas inválido." };
+  }
+
+  try {
+    const cierre = await crearAsientoCierre({ fechaDesde, fechaHasta });
+    let destino: { id: string; numero: number } | null = null;
+    if (input.conDestino) {
+      destino = await crearAsientoDestinoResultado({ fecha: fechaHasta });
+    }
+    revalidatePath("/contabilidad");
+    revalidatePath("/reportes");
+    return {
+      ok: true,
+      asientoCierreId: cierre.id,
+      numeroCierre: cierre.numero,
+      asientoDestinoId: destino?.id ?? null,
+      numeroDestino: destino?.numero ?? null,
+    };
+  } catch (e) {
+    if (e instanceof AsientoError) {
+      return { ok: false, error: e.message };
+    }
+    throw e;
+  }
+}
+
+export type DestinarResultadoResult =
+  | { ok: true; asientoId: string; numero: number }
+  | { ok: false; error: string };
+
+/**
+ * Destina (aprueba) el resultado del ejercicio por separado: transfiere el
+ * saldo de 3.4.01 → 3.3.01 a la fecha dada. Camino de recuperación cuando el
+ * cierre ya se contabilizó pero el destino quedó pendiente (o se aprueba luego
+ * de la asamblea). Idempotente: si 3.4.01 está en cero, falla.
+ */
+export async function destinarResultado(input: {
+  fecha: string;
+}): Promise<DestinarResultadoResult> {
+  const guard = await requireAdmin();
+  if (!guard.ok) {
+    return { ok: false, error: guard.error };
+  }
+
+  const fecha = new Date(input.fecha);
+  if (Number.isNaN(fecha.getTime())) {
+    return { ok: false, error: "Fecha inválida." };
+  }
+
+  try {
+    const destino = await crearAsientoDestinoResultado({ fecha });
+    revalidatePath("/contabilidad");
+    revalidatePath("/reportes");
+    return { ok: true, asientoId: destino.id, numero: destino.numero };
+  } catch (e) {
+    if (e instanceof AsientoError) {
+      return { ok: false, error: e.message };
+    }
+    throw e;
+  }
 }

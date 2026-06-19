@@ -10,11 +10,19 @@ import type { CuentaDef } from "./cuenta-auto";
  * — si no existe la crea, si existe la reutiliza. De esta forma el plan
  * de cuentas se construye solo a medida que el sistema opera.
  *
- * PLAN ULTRA (9 clases). Los códigos siguen `plan-de-cuentas.ts` (PLAN_CUENTAS).
- * Las clases de resultado se separan: 4 Ingresos · 5 Costo de Ventas ·
- * 6 Comercialización · 7 Administración · 8 Otros Resultados (incl. Impuesto a
- * las Ganancias) · 9 Resultados Financieros y por Tenencia. La diferencia de
- * cambio vive en 9.2.x; la Ley 25.413 no computable en 9.6.01.
+ * PLAN de 9 clases (631 cuentas, Excel maestro). Los códigos siguen
+ * `plan-de-cuentas.ts` (PLAN_CUENTAS) — ETAPA 3/3: reapuntados a los flujos
+ * contables canónicos (`FLUJOS CONTABLES.xlsx`). Las clases de resultado se
+ * separan: 4 Ingresos · 5 Costo de Ventas · 6 Comercialización ·
+ * 7 Administración · 8 Otros Resultados · 9 Resultados Financieros y por
+ * Tenencia. Las cargas fiscales a pagar viven en 2.1.3.x (IVA 2.1.3.1 ·
+ * IIBB 2.1.3.2 · Ganancias 2.1.3.3 · Aduana 2.1.3.4 · otros 2.1.3.5); la
+ * diferencia de cambio en 9.2.x; la Ley 25.413 no computable en 9.6.01.
+ *
+ * NOTA categoría: el guard `guard-registry-plan` exige
+ * `categoria === categoriaPorClase(clase)`. La clase 9 (resultados financieros)
+ * es categoría EGRESO en el modelo legado SIN excepción — incluso las cuentas
+ * de GANANCIA (9.2.01): el signo lo da `naturaleza`/`rubroEECC`, no `categoria`.
  *
  * El split de Ventas/CMV por tipo de neumático se resuelve por
  * Producto.categoria vía `cuentaVentaLocalPorCategoria` / `cuentaCmvPorCategoria`;
@@ -24,8 +32,8 @@ import type { CuentaDef } from "./cuenta-auto";
 // ----- VENTAS ------------------------------------------------
 export const VENTA_CODIGOS = {
   CLIENTE_FALLBACK: {
-    codigo: "1.1.3.01.01",
-    nombre: "DEUDORES POR VENTAS (GENÉRICO)",
+    codigo: "1.1.3.01.000001",
+    nombre: "DEUDORES POR VENTAS NACIONALES — GENÉRICO",
     categoria: CuentaCategoria.ACTIVO,
   },
   // Venta local sin desagregar (fallback). El motor agrupa por
@@ -36,25 +44,25 @@ export const VENTA_CODIGOS = {
     categoria: CuentaCategoria.INGRESO,
   },
   IVA_DEBITO: {
-    codigo: "2.1.4.1.01",
+    codigo: "2.1.3.1.01",
     nombre: "IVA DÉBITO FISCAL",
     categoria: CuentaCategoria.PASIVO,
   },
   IIBB_POR_PAGAR: {
-    codigo: "2.1.4.2.01",
+    codigo: "2.1.3.2.01",
     nombre: "IIBB A PAGAR",
     categoria: CuentaCategoria.PASIVO,
   },
   OTROS_IMPUESTOS: {
-    codigo: "2.1.4.5.99",
+    codigo: "2.1.3.5.99",
     nombre: "OTROS IMPUESTOS A PAGAR",
     categoria: CuentaCategoria.PASIVO,
   },
   // IIBB jurisdiccional embutido en el precio (no discriminado al cliente).
   // Sunset absorbe el IIBB de la jurisdicción del cliente como gasto (6.5.01)
-  // contra este pasivo a depositar. Distinto de IIBB_POR_PAGAR (2.1.4.2.01).
+  // contra este pasivo a depositar. Distinto de IIBB_POR_PAGAR (2.1.3.2.01).
   PERCEPCIONES_IIBB_A_DEPOSITAR: {
-    codigo: "2.1.4.2.02",
+    codigo: "2.1.3.2.02",
     nombre: "IIBB CONVENIO MULTILATERAL A DEPOSITAR",
     categoria: CuentaCategoria.PASIVO,
   },
@@ -68,21 +76,24 @@ export const VENTA_CODIGOS = {
   // CMV sin desagregar (fallback). El motor agrupa por categoría →
   // 5.1.01..04 vía cuentaCmvPorCategoria. Contrapartida HABER 1.1.7.01.
   CMV: {
-    codigo: "5.1.99",
-    nombre: "CMV OTRAS MERCADERÍAS",
+    codigo: "5.1.09",
+    nombre: "CMV — MERCADERÍAS SIN CATEGORÍA DEFINIDA",
     categoria: CuentaCategoria.EGRESO,
   },
   MERCADERIAS: {
     codigo: "1.1.7.01",
-    nombre: "MERCADERÍAS NACIONALIZADAS",
+    nombre: "MERCADERÍAS NACIONALIZADAS DISPONIBLES",
     categoria: CuentaCategoria.ACTIVO,
   },
-  // Cuenta provisória del flujo stock dual (W3). Al EMITIR la venta el CMV se
-  // debita acá (la mercadería aún está físicamente en depósito); al confirmar
-  // la entrega: DEBE 1.1.7.05 / HABER 1.1.7.01.
+  // Stock dual (W3): cuenta REGULARIZADORA (contra-activo, naturaleza ACREEDOR,
+  // SOLO_SISTEMA). Al EMITIR la venta la mercadería ya facturada sigue
+  // físicamente en depósito → se ACREDITA acá (reduce el stock disponible neto)
+  // contra el reconocimiento del CMV; al confirmar la entrega se REVIERTE
+  // (DEBE 1.1.7.90 / HABER 1.1.7.01). Categoría ACTIVO (= categoriaPorClase(1));
+  // el signo contra-activo lo da su naturaleza ACREEDOR en el plan.
   MERCADERIAS_A_ENTREGAR: {
-    codigo: "1.1.7.05",
-    nombre: "MERCADERÍAS A ENTREGAR",
+    codigo: "1.1.7.90",
+    nombre: "(-) MERCADERÍAS FACTURADAS PENDIENTES DE ENTREGA",
     categoria: CuentaCategoria.ACTIVO,
   },
   // Cheques de terceros recibidos como cobro — quedan en cartera (Valores a
@@ -93,19 +104,19 @@ export const VENTA_CODIGOS = {
     categoria: CuentaCategoria.ACTIVO,
   },
   ANTICIPOS_CLIENTES: {
-    codigo: "2.1.2.01",
+    codigo: "2.1.5.01",
     nombre: "ANTICIPOS DE CLIENTES NACIONALES",
     categoria: CuentaCategoria.PASIVO,
   },
   // Flete sobre ventas — gasto de comercialización (clase 6) cuando lo paga Sunset.
   FLETE_GASTO: {
     codigo: "6.3.01",
-    nombre: "FLETES SOBRE VENTAS (SALIDA)",
+    nombre: "FLETES SOBRE VENTAS — SALIDA",
     categoria: CuentaCategoria.EGRESO,
   },
   FLETE_POR_PAGAR: {
-    codigo: "2.1.1.07",
-    nombre: "FLETES SOBRE VENTAS POR PAGAR",
+    codigo: "2.1.1.06",
+    nombre: "FLETES SOBRE VENTAS A PAGAR",
     categoria: CuentaCategoria.PASIVO,
   },
 } as const satisfies Record<string, CuentaDef>;
@@ -192,8 +203,8 @@ export function cuentaCmvPorCategoria(categoria?: string | null): CuentaDef {
 // practicadas al pagar facturas de proveedores.
 export const RETENCION_GANANCIAS_CODIGOS = {
   RETENCIONES_GANANCIAS_POR_PAGAR: {
-    codigo: "2.1.4.3.02",
-    nombre: "GANANCIAS RETENCIONES PRACTICADAS A DEPOSITAR (SICORE)",
+    codigo: "2.1.3.3.02",
+    nombre: "GANANCIAS — RETENCIONES PRACTICADAS A DEPOSITAR (SICORE)",
     categoria: CuentaCategoria.PASIVO,
   },
 } as const satisfies Record<string, CuentaDef>;
@@ -204,7 +215,7 @@ export const DIAS_VENCIMIENTO_RETENCION_ARCA = 15;
 export const COMPRA_CODIGOS = {
   MERCADERIAS: {
     codigo: "1.1.7.01",
-    nombre: "MERCADERÍAS NACIONALIZADAS",
+    nombre: "MERCADERÍAS NACIONALIZADAS DISPONIBLES",
     categoria: CuentaCategoria.ACTIVO,
   },
   IVA_CREDITO: {
@@ -218,8 +229,8 @@ export const COMPRA_CODIGOS = {
     categoria: CuentaCategoria.ACTIVO,
   },
   PROVEEDOR_FALLBACK: {
-    codigo: "2.1.1.01.01",
-    nombre: "PROVEEDORES LOCALES (GENÉRICO)",
+    codigo: "2.1.1.01.000001",
+    nombre: "PROVEEDORES NACIONALES — GENÉRICO",
     categoria: CuentaCategoria.PASIVO,
   },
   OTROS_GASTOS: {
@@ -232,16 +243,16 @@ export const COMPRA_CODIGOS = {
 // ----- ANTICIPOS A PROVEEDORES (decisión contador #4) --------
 // Adelanto a proveedor LOCAL registrado antes de la factura. La clasificación
 // bien vs servicio NO es un enum: la codifica la cuenta-destino elegida en el
-// drilldown del plan. BIENES (1.1.7.07) cuelga de Bienes de Cambio; SERVICIOS
-// (1.1.5.01) de Otros Créditos. Ambas son ACTIVO (saldo deudor a favor).
+// drilldown del plan. BIENES (1.1.7.10) cuelga de Bienes de Cambio; SERVICIOS
+// (1.1.6.10) de Otras Cuentas por Cobrar. Ambas son ACTIVO (saldo deudor a favor).
 export const ANTICIPO_PROVEEDOR_CODIGOS = {
   BIENES: {
-    codigo: "1.1.7.07",
+    codigo: "1.1.7.10",
     nombre: "ANTICIPOS A PROVEEDORES DE BIENES DE CAMBIO",
     categoria: CuentaCategoria.ACTIVO,
   },
   SERVICIOS: {
-    codigo: "1.1.5.01",
+    codigo: "1.1.6.10",
     nombre: "ANTICIPOS A PROVEEDORES DE SERVICIOS",
     categoria: CuentaCategoria.ACTIVO,
   },
@@ -260,11 +271,11 @@ export const ANTICIPO_PROVEEDOR_ROOTS: readonly string[] = [
 export const EMBARQUE_CODIGOS = {
   MERCADERIAS: {
     codigo: "1.1.7.01",
-    nombre: "MERCADERÍAS NACIONALIZADAS",
+    nombre: "MERCADERÍAS NACIONALIZADAS DISPONIBLES",
     categoria: CuentaCategoria.ACTIVO,
   },
   MERCADERIAS_EN_TRANSITO: {
-    codigo: "1.1.7.02",
+    codigo: "1.1.7.05",
     nombre: "IMPORTACIONES EMBARCADAS / EN TRÁNSITO",
     categoria: CuentaCategoria.ACTIVO,
   },
@@ -298,43 +309,44 @@ export const EMBARQUE_CODIGOS = {
     nombre: "IIBB PERCEPCIONES SUFRIDAS — COMPRAS",
     categoria: CuentaCategoria.ACTIVO,
   },
-  // Tributos aduaneros (DIE/Tasa/Arancel) CAPITALIZAN al costo (1.1.7.01/02,
-  // RT17). El DEBE va al stock; acá viven sólo los pasivos "por pagar a Aduana".
+  // Tributos aduaneros (DIE/Tasa/Arancel) CAPITALIZAN al costo (1.1.7.01
+  // nacionalizadas / 1.1.7.05 en tránsito, RT17). El DEBE va al stock; acá
+  // viven sólo los pasivos "por pagar a Aduana".
   DIE_PASIVO: {
-    codigo: "2.1.4.4.01",
+    codigo: "2.1.3.4.01",
     nombre: "DERECHOS DE IMPORTACIÓN A PAGAR",
     categoria: CuentaCategoria.PASIVO,
   },
   TASA_ESTADISTICA_PASIVO: {
-    codigo: "2.1.4.4.02",
+    codigo: "2.1.3.4.02",
     nombre: "TASA ESTADÍSTICA A PAGAR",
     categoria: CuentaCategoria.PASIVO,
   },
   ARANCEL_SIM_PASIVO: {
-    codigo: "2.1.4.4.03",
+    codigo: "2.1.3.4.03",
     nombre: "ARANCEL SIM A PAGAR",
     categoria: CuentaCategoria.PASIVO,
   },
   IVA_POR_PAGAR: {
-    codigo: "2.1.4.4.04",
+    codigo: "2.1.3.4.04",
     nombre: "IVA IMPORTACIÓN A PAGAR",
     categoria: CuentaCategoria.PASIVO,
   },
   IIBB_POR_PAGAR: {
-    codigo: "2.1.4.2.01",
+    codigo: "2.1.3.2.01",
     nombre: "IIBB A PAGAR",
     categoria: CuentaCategoria.PASIVO,
   },
-  // Percepción de Ganancias de importación a pagar a Aduana (era 2.1.3.4.01,
-  // un bucket genérico; ahora hogar preciso: percepciones de importación).
+  // Percepción de Ganancias de importación a pagar a Aduana — hogar preciso en
+  // la familia aduanera de cargas fiscales (2.1.3.4.05).
   GANANCIAS_POR_PAGAR: {
-    codigo: "2.1.4.4.05",
+    codigo: "2.1.3.4.05",
     nombre: "PERCEPCIONES DE IMPORTACIÓN A PAGAR",
     categoria: CuentaCategoria.PASIVO,
   },
   PROVEEDOR_EXTERIOR_FALLBACK: {
-    codigo: "2.1.1.02.01",
-    nombre: "PROVEEDORES DEL EXTERIOR (GENÉRICO)",
+    codigo: "2.1.1.02.000001",
+    nombre: "PROVEEDORES DEL EXTERIOR — GENÉRICO",
     categoria: CuentaCategoria.PASIVO,
   },
   // "Otros" del header de una factura (sin categoría/concepto) → cuenta dedicada,
@@ -347,35 +359,36 @@ export const EMBARQUE_CODIGOS = {
 } as const satisfies Record<string, CuentaDef>;
 
 // ----- COMEX ZPA / DESCONSOLIDACIÓN -------------------------
-// Flujo de contenedores / zona primaria / depósito fiscal:
-//   - Llegada al puerto (ZPA):        DEBE 1.1.7.03 / HABER 1.1.7.02
-//   - Traslado ZPA → depósito fiscal: DEBE 1.1.7.04 / HABER 1.1.7.03
-//   - Nacionalización (vía DF):       DEBE 1.1.7.01 / HABER 1.1.7.04
-//   - Nacionalización directa puerto: DEBE 1.1.7.01 / HABER 1.1.7.03
+// Flujo de contenedores / zona primaria / depósito fiscal (FLUJOS CONTABLES):
+//   - Llegada al puerto (ZPA):        DEBE 1.1.7.04 / HABER 1.1.7.05
+//   - Traslado ZPA → depósito fiscal: DEBE 1.1.7.03 / HABER 1.1.7.04
+//   - Nacionalización (vía DF):       DEBE 1.1.7.01 / HABER 1.1.7.03
+//   - Nacionalización directa puerto: DEBE 1.1.7.01 / HABER 1.1.7.04
 export const COMEX_ZPA_CODIGOS = {
   MERCADERIAS_EN_ZONA_PRIMARIA: {
-    codigo: "1.1.7.03",
-    nombre: "MERCADERÍAS EN PUERTO / ZONA PRIMARIA",
+    codigo: "1.1.7.04",
+    nombre: "MERCADERÍAS EN PUERTO / ZONA PRIMARIA ADUANERA",
     categoria: CuentaCategoria.ACTIVO,
   },
   MERCADERIAS_EN_DEPOSITO_FISCAL: {
-    codigo: "1.1.7.04",
+    codigo: "1.1.7.03",
     nombre: "MERCADERÍAS EN DEPÓSITO FISCAL",
     categoria: CuentaCategoria.ACTIVO,
   },
-  // D9 — falta sin responsable identificado: DEBE acá / HABER 1.1.7.04 (o 03).
+  // D9 — falta sin responsable identificado: DEBE acá / HABER 1.1.7.03 (o 04).
+  // Faltante ANORMAL (clase 8, resultado extraordinario), no merma normal.
   PERDIDAS_LOGISTICAS: {
-    codigo: "5.2.01",
-    nombre: "FALTANTES DE INVENTARIO",
+    codigo: "8.0.02",
+    nombre: "FALTANTES ANORMALES DE INVENTARIO",
     categoria: CuentaCategoria.EGRESO,
   },
-  // D9 — sobra sin responsable. ULTRA: contra-CMV (regularizadora ACREEDOR),
-  // no ingreso. Se ACREDITA → reduce el costo de ventas neto.
+  // D9 — sobra sin responsable: contra-CMV (regularizadora ACREEDOR), no
+  // ingreso. Se ACREDITA → reduce el costo de ventas neto.
   // NOTA: ya NO se usa en el ajuste D9 de despacho (ver DIFERENCIA_DESPACHO_*);
   // queda para la reconciliación de entrega stock-dual (crearAsientoEntrega).
   INGRESO_POR_DIFERENCIA_INVENTARIO: {
-    codigo: "5.2.03",
-    nombre: "(-) SOBRANTES DE INVENTARIO",
+    codigo: "5.2.04",
+    nombre: "(-) SOBRANTES NORMALES DE INVENTARIO",
     categoria: CuentaCategoria.EGRESO,
   },
   // D9 despacho — SOBRANTE (físico > declarado): los bultos de más no son
@@ -383,16 +396,16 @@ export const COMEX_ZPA_CODIGOS = {
   // factura/proforma + despacho, o devolver). Pasivo-puente hasta la
   // reclasificación a la CxP del proveedor. Decisión contador #6.
   DIFERENCIA_DESPACHO_A_PAGAR: {
-    codigo: "2.1.1.08",
-    nombre: "DIFERENCIAS DE DESPACHO A REGULARIZAR (A PAGAR)",
+    codigo: "2.1.1.07",
+    nombre: "DIFERENCIAS DE DESPACHO A REGULARIZAR — A PAGAR",
     categoria: CuentaCategoria.PASIVO,
   },
   // D9 despacho — FALTANTE sin responsable (físico < declarado): pagamos por
   // bultos no recibidos → saldo a favor con el proveedor a regularizar, no
-  // pérdida directa. Activo-puente hasta la reclasificación. Decisión contador #6.
+  // pérdida directa. Crédito-puente hasta la reclasificación. Decisión contador #6.
   DIFERENCIA_DESPACHO_A_FAVOR: {
-    codigo: "1.1.5.07",
-    nombre: "DIFERENCIAS DE DESPACHO A REGULARIZAR (SALDO A FAVOR PROVEEDOR)",
+    codigo: "1.1.6.05",
+    nombre: "DIFERENCIAS DE DESPACHO A RECUPERAR",
     categoria: CuentaCategoria.ACTIVO,
   },
 } as const satisfies Record<string, CuentaDef>;
@@ -402,8 +415,10 @@ export const COMEX_ZPA_CODIGOS = {
 export const TRANSFERENCIA_CODIGOS = {
   DIF_CAMBIO_POSITIVA: {
     codigo: "9.2.01",
+    // Clase 9 → categoría EGRESO (la GANANCIA se distingue por naturaleza
+    // ACREEDOR / rubroEECC, no por la categoría legada). Ver guard-registry-plan.
     nombre: "DIFERENCIA DE CAMBIO POSITIVA — REALIZADA",
-    categoria: CuentaCategoria.INGRESO,
+    categoria: CuentaCategoria.EGRESO,
   },
   DIF_CAMBIO_NEGATIVA: {
     codigo: "9.2.02",
@@ -425,8 +440,8 @@ export const VEP_ADUANA_CODIGOS = {
     categoria: CuentaCategoria.ACTIVO,
   },
   SALDO_PENDIENTE_ADUANA: {
-    codigo: "2.1.4.4.99",
-    nombre: "SALDO PENDIENTE ADUANA (REFUERZO VEP)",
+    codigo: "2.1.3.4.99",
+    nombre: "SALDO PENDIENTE DE ADUANA / REFUERZO VEP",
     categoria: CuentaCategoria.PASIVO,
   },
 } as const satisfies Record<string, CuentaDef>;
@@ -435,8 +450,9 @@ export const VEP_ADUANA_CODIGOS = {
 export const DIFERENCIA_CAMBIO_CODIGOS = {
   GANANCIA: {
     codigo: "9.2.01",
+    // Clase 9 → categoría EGRESO (ganancia distinguida por naturaleza ACREEDOR).
     nombre: "DIFERENCIA DE CAMBIO POSITIVA — REALIZADA",
-    categoria: CuentaCategoria.INGRESO,
+    categoria: CuentaCategoria.EGRESO,
   },
   PERDIDA: {
     codigo: "9.2.02",
@@ -453,8 +469,8 @@ export const COSTOS_FINANCIEROS_CODIGOS = {
     categoria: CuentaCategoria.EGRESO,
   },
   GASTOS_TRANSFERENCIA_EXTERIOR: {
-    codigo: "9.5.02",
-    nombre: "GASTOS DE TRANSFERENCIAS AL EXTERIOR (SWIFT/TT)",
+    codigo: "9.5.03",
+    nombre: "GASTOS DE TRANSFERENCIAS AL EXTERIOR — SWIFT/TT",
     categoria: CuentaCategoria.EGRESO,
   },
   IMPUESTO_DE_SELLOS: {
@@ -506,10 +522,10 @@ export const PORCENTAJE_LEY_25413_COMPUTABLE = 0.33;
 // ----- GASTO CONTRAPARTIDA POR TIPO DE PROVEEDOR ------------
 // Regla capitaliza-vs-gasto (RT17/NIC2): los servicios de IMPORTACIÓN
 // (despachante, logística/flete de entrada, almacenaje bonded, portuarios,
-// flete internacional) CAPITALIZAN al costo (1.1.7.02). Los gastos de PERÍODO
-// van a resultado (clases 6/7).
+// flete internacional) CAPITALIZAN al costo en tránsito (1.1.7.05, flujo
+// "Costos atribuibles"). Los gastos de PERÍODO van a resultado (clases 6/7).
 const CAPITALIZA_IMPORTACION = {
-  codigo: "1.1.7.02",
+  codigo: "1.1.7.05",
   nombre: "IMPORTACIONES EMBARCADAS / EN TRÁNSITO",
   categoria: CuentaCategoria.ACTIVO,
 } as const satisfies CuentaDef;
@@ -517,7 +533,7 @@ const CAPITALIZA_IMPORTACION = {
 export const GASTO_POR_TIPO_PROVEEDOR = {
   MERCADERIA_LOCAL: {
     codigo: "1.1.7.01",
-    nombre: "MERCADERÍAS NACIONALIZADAS",
+    nombre: "MERCADERÍAS NACIONALIZADAS DISPONIBLES",
     categoria: CuentaCategoria.ACTIVO,
   },
   MERCADERIA_EXTERIOR: CAPITALIZA_IMPORTACION,
@@ -558,7 +574,7 @@ export const GASTO_POR_TIPO_PROVEEDOR = {
 // Códigos cuya selección como CATEGORÍA de un ítem de Compra dispara el
 // ingreso de ESTOQUE FÍSICO nacional (MovimientoStock + costoPromedio) al
 // emitir. Hoy sólo Bien de Cambio nacional (1.1.7.01, Estoque nacionalizado).
-// La importación en tránsito (1.1.7.02) NO entra acá: su estoque físico entra
+// La importación en tránsito (1.1.7.05) NO entra acá: su estoque físico entra
 // por el Comex (Embarque→Despacho) — evita el doble conteo. Se deriva del
 // registry para acompañar cualquier renumeración del plan.
 export const ESTOQUE_FISICO_CODIGOS: readonly string[] = [COMPRA_CODIGOS.MERCADERIAS.codigo];

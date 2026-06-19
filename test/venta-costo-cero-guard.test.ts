@@ -4,8 +4,8 @@ import { createTestDb, type TestDb } from "./db";
 
 // Onda B #10 — emitir una venta cuyo producto tiene costoPromedio = 0 omitía el
 // CMV silenciosamente: el bloque `if (totalCosto.gt(0))` no corría, así que no
-// se acreditaba 1.1.5.03 MERCADERÍAS A ENTREGAR. Con stock dual, la entrega que
-// se confirma después DEBITA 1.1.5.03 (nunca acreditada) → débito huérfano que
+// se acreditaba 1.1.7.90 MERCADERÍAS A ENTREGAR. Con stock dual, la entrega que
+// se confirma después DEBITA 1.1.7.90 (nunca acreditada) → débito huérfano que
 // no cierra. El guard bloquea la emisión: exige costo cargado antes de vender.
 
 const FECHA = new Date("2026-05-15T12:00:00.000Z");
@@ -86,17 +86,17 @@ describe("emitir venta — guard de costoPromedio 0 (Onda B #10)", () => {
     await expect(crearAsientoVenta(ventaId, db.prisma)).rejects.toMatchObject({
       code: "DOMINIO_INVALIDO",
     });
-    // No dejó asiento ni movió 1.1.5.03.
+    // No dejó asiento ni movió 1.1.7.90.
     const venta = await db.prisma.venta.findUniqueOrThrow({ where: { id: ventaId } });
     expect(venta.asientoId).toBeNull();
   });
 
-  it("con costo cargado, emite normal y acredita 1.1.5.03 (CMV provisión)", async () => {
+  it("con costo cargado, emite normal y acredita 1.1.7.90 (CMV provisión)", async () => {
     const ventaId = await crearVenta("1000.00");
     const asiento = await crearAsientoVenta(ventaId, db.prisma);
     expect(asiento).toBeTruthy();
     const haber03 = await db.prisma.lineaAsiento.findMany({
-      where: { asientoId: asiento.id, cuenta: { codigo: "1.1.7.05" } },
+      where: { asientoId: asiento.id, cuenta: { codigo: "1.1.7.90" } },
       select: { haber: true },
     });
     const totalHaber = haber03.reduce((a, l) => a + Number(l.haber), 0);

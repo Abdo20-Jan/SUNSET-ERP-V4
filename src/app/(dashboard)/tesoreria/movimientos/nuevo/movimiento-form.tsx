@@ -1085,7 +1085,7 @@ function AsientoPreview({
     ];
   } else if (tipo === "PAGO" && retencion) {
     // Pago con retención Ganancias: proveedor por el bruto, banco por el neto,
-    // y el pasivo 2.1.4.3.02 (SICORE) por la retención.
+    // y el pasivo 2.1.3.3.02 (SICORE) por la retención.
     rows = [
       ...lineas.map((l) => {
         const m = Number(l.monto);
@@ -1095,7 +1095,10 @@ function AsientoPreview({
       {
         role: "HABER",
         cuenta: null,
-        cuentaOverride: { codigo: "2.1.4.3.02", nombre: "RETENCIONES GANANCIAS A PAGAR (SICORE)" },
+        cuentaOverride: {
+          codigo: "2.1.3.3.02",
+          nombre: "GANANCIAS — RETENCIONES PRACTICADAS A DEPOSITAR (SICORE)",
+        },
         debe: "—",
         haber: retencion.importeRetenido,
       },

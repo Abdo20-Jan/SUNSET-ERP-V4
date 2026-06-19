@@ -377,7 +377,7 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     return Number(agg._sum.debe ?? 0) - Number(agg._sum.haber ?? 0);
   }
 
-  it("pago exacto con montoPagado explícito: sin líneas en 1.1.4.13 ni 2.1.4.4.99", async () => {
+  it("pago exacto con montoPagado explícito: sin líneas en 1.1.4.13 ni 2.1.3.4.99", async () => {
     const s = await seed();
     await contabilizarDespachoAction(s.despachoId);
 
@@ -391,9 +391,9 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     expect(res.tipoDiferencia).toBe("exacto");
     expect(Number(res.diferencia)).toBeCloseTo(0, 2);
 
-    // No deben existir líneas en 1.1.4.13 ni 2.1.4.4.99.
+    // No deben existir líneas en 1.1.4.13 ni 2.1.3.4.99.
     const creditoSaldo = await saldoDebePorCodigo("1.1.4.4.01");
-    const deudaSaldo = await saldoHaberPorCodigo("2.1.4.4.99");
+    const deudaSaldo = await saldoHaberPorCodigo("2.1.3.4.99");
     expect(creditoSaldo).toBeCloseTo(0, 2);
     expect(deudaSaldo).toBeCloseTo(0, 2);
 
@@ -419,8 +419,8 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     const creditoSaldo = await saldoDebePorCodigo("1.1.4.4.01");
     expect(creditoSaldo).toBeCloseTo(500, 2);
 
-    // Sin saldo en 2.1.4.4.99.
-    const deudaSaldo = await saldoHaberPorCodigo("2.1.4.4.99");
+    // Sin saldo en 2.1.3.4.99.
+    const deudaSaldo = await saldoHaberPorCodigo("2.1.3.4.99");
     expect(deudaSaldo).toBeCloseTo(0, 2);
 
     // Movimiento tesorería por el monto al banco (141.500).
@@ -435,7 +435,7 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     await expectAsientoBalanceado(res.asientoId);
   });
 
-  it("pago con diferencia a MENOR: genera HABER en 2.1.4.4.99 = |diferencia|", async () => {
+  it("pago con diferencia a MENOR: genera HABER en 2.1.3.4.99 = |diferencia|", async () => {
     const s = await seed();
     await contabilizarDespachoAction(s.despachoId);
 
@@ -450,8 +450,8 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     expect(res.tipoDiferencia).toBe("deuda");
     expect(Number(res.diferencia)).toBeCloseTo(1000, 2);
 
-    // 2.1.4.4.99 con saldo HABER = 1.000.
-    const deudaSaldo = await saldoHaberPorCodigo("2.1.4.4.99");
+    // 2.1.3.4.99 con saldo HABER = 1.000.
+    const deudaSaldo = await saldoHaberPorCodigo("2.1.3.4.99");
     expect(deudaSaldo).toBeCloseTo(1000, 2);
 
     // Sin saldo en 1.1.4.13.
@@ -553,8 +553,8 @@ describe("VEP / Despacho cruzado — lista + pago", () => {
     const creditoSaldo = await saldoDebePorCodigo("1.1.4.4.01");
     expect(creditoSaldo).toBeCloseTo(29000, 2);
 
-    // 2.1.4.4.99 sin saldo.
-    const deudaSaldo = await saldoHaberPorCodigo("2.1.4.4.99");
+    // 2.1.3.4.99 sin saldo.
+    const deudaSaldo = await saldoHaberPorCodigo("2.1.3.4.99");
     expect(deudaSaldo).toBeCloseTo(0, 2);
 
     await expectAsientoBalanceado(res.asientoId);

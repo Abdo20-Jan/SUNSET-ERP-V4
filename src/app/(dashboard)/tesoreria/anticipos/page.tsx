@@ -49,7 +49,7 @@ export default async function AnticiposPage({ searchParams }: { searchParams: Se
           <h1 className="text-[15px] font-semibold tracking-tight">Anticipos a proveedor</h1>
           <p className="text-sm text-muted-foreground">
             {rows.length} anticipo{rows.length === 1 ? "" : "s"} · adelantos a proveedores locales
-            (bienes 1.1.7.07 / servicios 1.1.5.01)
+            (bienes 1.1.7.10 / servicios 1.1.6.10)
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">

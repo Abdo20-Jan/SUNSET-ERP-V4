@@ -46,9 +46,9 @@ import {
 } from "@/lib/actions/ventas";
 
 const FLETE_GASTO_CODIGO = "6.3.01";
-const FLETE_POR_PAGAR_CODIGO = "2.1.1.07";
+const FLETE_POR_PAGAR_CODIGO = "2.1.1.06";
 const IVA_CREDITO_CODIGO = "1.1.4.1.01";
-const PROVEEDOR_FALLBACK_CODIGO = "2.1.1.01.01";
+const PROVEEDOR_FALLBACK_CODIGO = "2.1.1.01.000001";
 
 describe("Venta — flete como factura de gasto", () => {
   let db: TestDb;

@@ -26,7 +26,7 @@ type Props = {
 
 /**
  * Drilldown de "cuenta de anticipo a proveedor" (decisión #4): navega el
- * subárbol de anticipos (1.1.7.07 bienes / 1.1.5.01 servicios) agrupado por
+ * subárbol de anticipos (1.1.7.10 bienes / 1.1.6.10 servicios) agrupado por
  * rubro (cuenta padre). La cuenta elegida codifica la clasificación bien/servicio.
  */
 export function CuentaAnticipoCombobox({ value, onChange, cuentas, disabled = false }: Props) {

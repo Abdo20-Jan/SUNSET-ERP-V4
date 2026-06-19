@@ -42,7 +42,7 @@ class AnticipoError extends Error {
 
 /**
  * Una cuenta es de "anticipo a proveedor" si es una de las raíces
- * (1.1.7.07 bienes / 1.1.5.01 servicios) o cuelga de ellas. La clasificación
+ * (1.1.7.10 bienes / 1.1.6.10 servicios) o cuelga de ellas. La clasificación
  * bien/servicio la codifica la propia cuenta (no hay enum tipoAnticipo).
  */
 function esCuentaAnticipo(codigo: string): boolean {
@@ -60,7 +60,7 @@ export type CuentaAnticipoOption = {
 /**
  * Cuentas seleccionables como destino de un anticipo a proveedor, para el
  * drilldown del formulario (mismo patrón que `listarCategoriasCompra`, E18):
- * cuentas ANALÍTICAS activas bajo el subárbol de anticipo (1.1.7.07 / 1.1.5.01
+ * cuentas ANALÍTICAS activas bajo el subárbol de anticipo (1.1.7.10 / 1.1.6.10
  * y descendientes). `grupo` = nombre del padre, para agrupar el menú.
  */
 export async function listarCuentasAnticipoProveedor(): Promise<CuentaAnticipoOption[]> {
@@ -136,7 +136,7 @@ async function generarNumeroAnticipo(tx: TxClient, fecha: Date): Promise<string>
 /**
  * Registra un anticipo (adelanto) a proveedor LOCAL en ARS (decisión #4). El
  * egreso de caja es un MovimientoTesoreria PAGO cuya contrapartida DEBE es la
- * cuenta de anticipo elegida (1.1.7.07 bien / 1.1.5.01 servicio): el asiento
+ * cuenta de anticipo elegida (1.1.7.10 bien / 1.1.6.10 servicio): el asiento
  * queda DEBE anticipo / HABER banco. El AnticipoProveedor nace VIGENTE con
  * saldoAplicadoArs = 0; se consume al aplicarlo contra una factura (PR #2).
  */
@@ -296,7 +296,7 @@ const aplicarSchema = z
  * Aplica un AnticipoProveedor VIGENTE contra una factura (Compra o Gasto) del
  * MISMO proveedor (decisión #4, PR #2). Cancela parte del pasivo del proveedor
  * y baja el activo-anticipo: asiento **DEBE pasivo-proveedor (2.1.1.0x) / HABER
- * cuenta-anticipo** (la cuenta del anticipo — 1.1.7.07 bien | 1.1.5.01 servicio
+ * cuenta-anticipo** (la cuenta del anticipo — 1.1.7.10 bien | 1.1.6.10 servicio
  * — elegida al registrarlo). Incrementa `saldoAplicadoArs`; al consumir todo el
  * saldo el anticipo pasa a APLICADO_TOTAL. Reusa `crearAsientoManual` +
  * `contabilizarAsiento`; no toca caja (la salida ya se registró al crear el
