@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { ColumnsToggle } from "@/components/ui/columns-toggle";
 import { DataTable } from "@/components/ui/data-table";
 import { DataTableSearch } from "@/components/ui/data-table-search";
+import { ExportButton } from "@/components/ui/export-button";
 import {
   Dialog,
   DialogContent,
@@ -227,6 +228,7 @@ export function ProductosTable({ productos, total, marcas, q, marca }: Props) {
           </SelectContent>
         </Select>
         <ColumnsToggle table={table} />
+        <ExportButton recurso="productos" />
         <Button onClick={() => setFormState({ mode: "create" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
           Nuevo producto

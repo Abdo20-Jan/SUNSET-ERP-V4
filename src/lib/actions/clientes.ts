@@ -49,6 +49,79 @@ const CLIENTES_SORT_FIELD_MAP = {
   cuit: "cuit",
 } as const;
 const CLIENTES_SORT_ALLOWED = Object.keys(CLIENTES_SORT_FIELD_MAP);
+const CLIENTES_SORT_DEFAULT = { sort: "nombre", dir: "asc" } as const;
+
+// `select` compartido entre la lista paginada y el export (mismo shape de fila).
+const CLIENTE_ROW_SELECT = {
+  id: true,
+  nombre: true,
+  cuit: true,
+  tipo: true,
+  tipoCanal: true,
+  condicionIva: true,
+  agenteRetencionIva: true,
+  agenteRetencionGanancias: true,
+  agenteIibb: true,
+  direccion: true,
+  telefono: true,
+  email: true,
+  estado: true,
+  cuentaContableId: true,
+  cuentaContable: { select: { codigo: true, nombre: true } },
+  provinciaId: true,
+  provincia: { select: { nombre: true } },
+  alicuotaPercepcionIIBB: true,
+  exentoPercepcionIIBB: true,
+} satisfies Prisma.ClienteSelect;
+
+type ClienteRowRaw = Prisma.ClienteGetPayload<{ select: typeof CLIENTE_ROW_SELECT }>;
+
+function mapClienteRow(c: ClienteRowRaw): ClienteRow {
+  return {
+    id: c.id,
+    nombre: c.nombre,
+    cuit: c.cuit,
+    tipo: c.tipo,
+    tipoCanal: c.tipoCanal,
+    condicionIva: c.condicionIva,
+    agenteRetencionIva: c.agenteRetencionIva,
+    agenteRetencionGanancias: c.agenteRetencionGanancias,
+    agenteIibb: c.agenteIibb,
+    direccion: c.direccion,
+    telefono: c.telefono,
+    email: c.email,
+    estado: c.estado,
+    cuentaContableId: c.cuentaContableId,
+    cuentaContableCodigo: c.cuentaContable?.codigo ?? null,
+    cuentaContableNombre: c.cuentaContable?.nombre ?? null,
+    provinciaId: c.provinciaId,
+    provinciaNombre: c.provincia?.nombre ?? null,
+    alicuotaPercepcionIIBB: c.alicuotaPercepcionIIBB?.toString() ?? null,
+    exentoPercepcionIIBB: c.exentoPercepcionIIBB,
+  };
+}
+
+// Construye el `where` a partir de {q, estado}. Reutilizado por `listarClientes`
+// (paginado) y `listarClientesParaExport` (todas las filas del set filtrado).
+// `Cliente.estado` es String "activo"/"inactivo"; "todos"/"" → sin filtro.
+function buildClientesWhere(opts: { q?: string; estado?: string }): Prisma.ClienteWhereInput {
+  const q = opts.q?.trim();
+  const estado = opts.estado?.trim();
+
+  const where: Prisma.ClienteWhereInput = {};
+  if (q) {
+    where.OR = [
+      { nombre: { contains: q, mode: "insensitive" } },
+      { cuit: { contains: q, mode: "insensitive" } },
+    ];
+  }
+  if (estado === "activo") {
+    where.estado = "activo";
+  } else if (estado === "inactivo") {
+    where.estado = "inactivo";
+  }
+  return where;
+}
 
 export type ListarClientesOpts = {
   q?: string;
@@ -68,27 +141,14 @@ export async function listarClientes(opts: ListarClientesOpts = {}): Promise<Lis
   const page = Math.max(1, Math.floor(opts.page ?? 1));
   const perPage = Math.max(1, Math.min(500, Math.floor(opts.perPage ?? 50)));
 
-  const q = opts.q?.trim();
-  const estado = opts.estado?.trim();
-
-  const where: Prisma.ClienteWhereInput = {};
-  if (q) {
-    where.OR = [
-      { nombre: { contains: q, mode: "insensitive" } },
-      { cuit: { contains: q, mode: "insensitive" } },
-    ];
-  }
-  if (estado === "activo") {
-    where.estado = "activo";
-  } else if (estado === "inactivo") {
-    where.estado = "inactivo";
-  }
+  const where = buildClientesWhere(opts);
 
   const orderBy = buildOrderBy(
-    parseSortParams({ sort: opts.sort, dir: opts.dir }, CLIENTES_SORT_ALLOWED, {
-      sort: "nombre",
-      dir: "asc",
-    }),
+    parseSortParams(
+      { sort: opts.sort, dir: opts.dir },
+      CLIENTES_SORT_ALLOWED,
+      CLIENTES_SORT_DEFAULT,
+    ),
     CLIENTES_SORT_FIELD_MAP,
   );
 
@@ -98,56 +158,43 @@ export async function listarClientes(opts: ListarClientesOpts = {}): Promise<Lis
       orderBy,
       take: perPage,
       skip: (page - 1) * perPage,
-      select: {
-        id: true,
-        nombre: true,
-        cuit: true,
-        tipo: true,
-        tipoCanal: true,
-        condicionIva: true,
-        agenteRetencionIva: true,
-        agenteRetencionGanancias: true,
-        agenteIibb: true,
-        direccion: true,
-        telefono: true,
-        email: true,
-        estado: true,
-        cuentaContableId: true,
-        cuentaContable: { select: { codigo: true, nombre: true } },
-        provinciaId: true,
-        provincia: { select: { nombre: true } },
-        alicuotaPercepcionIIBB: true,
-        exentoPercepcionIIBB: true,
-      },
+      select: CLIENTE_ROW_SELECT,
     }),
     db.cliente.count({ where }),
   ]);
 
   return {
-    rows: rows.map((c) => ({
-      id: c.id,
-      nombre: c.nombre,
-      cuit: c.cuit,
-      tipo: c.tipo,
-      tipoCanal: c.tipoCanal,
-      condicionIva: c.condicionIva,
-      agenteRetencionIva: c.agenteRetencionIva,
-      agenteRetencionGanancias: c.agenteRetencionGanancias,
-      agenteIibb: c.agenteIibb,
-      direccion: c.direccion,
-      telefono: c.telefono,
-      email: c.email,
-      estado: c.estado,
-      cuentaContableId: c.cuentaContableId,
-      cuentaContableCodigo: c.cuentaContable?.codigo ?? null,
-      cuentaContableNombre: c.cuentaContable?.nombre ?? null,
-      provinciaId: c.provinciaId,
-      provinciaNombre: c.provincia?.nombre ?? null,
-      alicuotaPercepcionIIBB: c.alicuotaPercepcionIIBB?.toString() ?? null,
-      exentoPercepcionIIBB: c.exentoPercepcionIIBB,
-    })),
+    rows: rows.map(mapClienteRow),
     total,
   };
+}
+
+// Export: mismas filas que la lista filtrada (q, estado, sort, dir) pero SIN
+// paginación (todas las filas del set filtrado). No usar en la grilla.
+export async function listarClientesParaExport(opts: {
+  q?: string;
+  estado?: string;
+  sort?: string;
+  dir?: SortDir;
+}): Promise<ClienteRow[]> {
+  const where = buildClientesWhere(opts);
+
+  const orderBy = buildOrderBy(
+    parseSortParams(
+      { sort: opts.sort, dir: opts.dir },
+      CLIENTES_SORT_ALLOWED,
+      CLIENTES_SORT_DEFAULT,
+    ),
+    CLIENTES_SORT_FIELD_MAP,
+  );
+
+  const rows = await db.cliente.findMany({
+    where,
+    orderBy,
+    select: CLIENTE_ROW_SELECT,
+  });
+
+  return rows.map(mapClienteRow);
 }
 
 export async function listarCuentasContablesParaCliente(): Promise<CuentaContableOption[]> {

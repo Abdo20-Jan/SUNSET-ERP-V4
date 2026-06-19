@@ -43,6 +43,67 @@ const PRODUCTOS_SORT_FIELD_MAP = {
   estado: "activo",
 } as const;
 const PRODUCTOS_SORT_ALLOWED = Object.keys(PRODUCTOS_SORT_FIELD_MAP);
+const PRODUCTOS_SORT_DEFAULT = { sort: "codigo", dir: "asc" } as const;
+
+// `select` compartido entre la lista paginada y el export (mismo shape de fila).
+const PRODUCTO_ROW_SELECT = {
+  id: true,
+  codigo: true,
+  nombre: true,
+  descripcion: true,
+  marca: true,
+  modelo: true,
+  medida: true,
+  ncm: true,
+  unidad: true,
+  diePorcentaje: true,
+  precioVenta: true,
+  costoPromedio: true,
+  stockActual: true,
+  stockMinimo: true,
+  activo: true,
+} satisfies Prisma.ProductoSelect;
+
+type ProductoRowRaw = Prisma.ProductoGetPayload<{ select: typeof PRODUCTO_ROW_SELECT }>;
+
+function mapProductoRow(p: ProductoRowRaw): ProductoRow {
+  return {
+    id: p.id,
+    codigo: p.codigo,
+    nombre: p.nombre,
+    descripcion: p.descripcion,
+    marca: p.marca,
+    modelo: p.modelo,
+    medida: p.medida,
+    ncm: p.ncm,
+    unidad: p.unidad,
+    diePorcentaje: p.diePorcentaje.toFixed(4),
+    precioVenta: p.precioVenta.toFixed(2),
+    costoPromedio: p.costoPromedio.toFixed(2),
+    stockActual: p.stockActual,
+    stockMinimo: p.stockMinimo,
+    activo: p.activo,
+  };
+}
+
+// Construye el `where` a partir de {q, marca}. Reutilizado por `listarProductos`
+// (paginado) y `listarProductosParaExport` (todas las filas del set filtrado).
+function buildProductosWhere(opts: { q?: string; marca?: string }): Prisma.ProductoWhereInput {
+  const q = opts.q?.trim();
+  const marca = opts.marca?.trim();
+
+  const where: Prisma.ProductoWhereInput = {};
+  if (q) {
+    where.OR = [
+      { codigo: { contains: q, mode: "insensitive" } },
+      { nombre: { contains: q, mode: "insensitive" } },
+    ];
+  }
+  if (marca && marca !== "todas") {
+    where.marca = marca;
+  }
+  return where;
+}
 
 export type ListarProductosOpts = {
   q?: string;
@@ -65,25 +126,14 @@ export async function listarProductos(
   const page = Math.max(1, Math.floor(opts.page ?? 1));
   const perPage = Math.max(1, Math.min(500, Math.floor(opts.perPage ?? 50)));
 
-  const q = opts.q?.trim();
-  const marca = opts.marca?.trim();
-
-  const where: Prisma.ProductoWhereInput = {};
-  if (q) {
-    where.OR = [
-      { codigo: { contains: q, mode: "insensitive" } },
-      { nombre: { contains: q, mode: "insensitive" } },
-    ];
-  }
-  if (marca && marca !== "todas") {
-    where.marca = marca;
-  }
+  const where = buildProductosWhere(opts);
 
   const orderBy = buildOrderBy(
-    parseSortParams({ sort: opts.sort, dir: opts.dir }, PRODUCTOS_SORT_ALLOWED, {
-      sort: "codigo",
-      dir: "asc",
-    }),
+    parseSortParams(
+      { sort: opts.sort, dir: opts.dir },
+      PRODUCTOS_SORT_ALLOWED,
+      PRODUCTOS_SORT_DEFAULT,
+    ),
     PRODUCTOS_SORT_FIELD_MAP,
   );
 
@@ -93,23 +143,7 @@ export async function listarProductos(
       orderBy,
       take: perPage,
       skip: (page - 1) * perPage,
-      select: {
-        id: true,
-        codigo: true,
-        nombre: true,
-        descripcion: true,
-        marca: true,
-        modelo: true,
-        medida: true,
-        ncm: true,
-        unidad: true,
-        diePorcentaje: true,
-        precioVenta: true,
-        costoPromedio: true,
-        stockActual: true,
-        stockMinimo: true,
-        activo: true,
-      },
+      select: PRODUCTO_ROW_SELECT,
     }),
     db.producto.count({ where }),
     // Opciones de marca = distinct sobre TODA la tabla (no de la página filtrada).
@@ -124,26 +158,38 @@ export async function listarProductos(
   const marcas = marcasRaw.map((m) => m.marca).filter((m): m is string => !!m && m.length > 0);
 
   return {
-    rows: rows.map((p) => ({
-      id: p.id,
-      codigo: p.codigo,
-      nombre: p.nombre,
-      descripcion: p.descripcion,
-      marca: p.marca,
-      modelo: p.modelo,
-      medida: p.medida,
-      ncm: p.ncm,
-      unidad: p.unidad,
-      diePorcentaje: p.diePorcentaje.toFixed(4),
-      precioVenta: p.precioVenta.toFixed(2),
-      costoPromedio: p.costoPromedio.toFixed(2),
-      stockActual: p.stockActual,
-      stockMinimo: p.stockMinimo,
-      activo: p.activo,
-    })),
+    rows: rows.map(mapProductoRow),
     total,
     marcas,
   };
+}
+
+// Export: mismas filas que la lista filtrada (q, marca, sort, dir) pero SIN
+// paginación (todas las filas del set filtrado). No usar en la grilla.
+export async function listarProductosParaExport(opts: {
+  q?: string;
+  marca?: string;
+  sort?: string;
+  dir?: SortDir;
+}): Promise<ProductoRow[]> {
+  const where = buildProductosWhere(opts);
+
+  const orderBy = buildOrderBy(
+    parseSortParams(
+      { sort: opts.sort, dir: opts.dir },
+      PRODUCTOS_SORT_ALLOWED,
+      PRODUCTOS_SORT_DEFAULT,
+    ),
+    PRODUCTOS_SORT_FIELD_MAP,
+  );
+
+  const rows = await db.producto.findMany({
+    where,
+    orderBy,
+    select: PRODUCTO_ROW_SELECT,
+  });
+
+  return rows.map(mapProductoRow);
 }
 
 const nullableStr = z
