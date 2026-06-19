@@ -75,40 +75,54 @@ export async function listarLeads(filtros?: {
   ownerId?: string;
   fuente?: LeadFuente;
   search?: string;
-}): Promise<LeadRow[]> {
+  page?: number;
+  perPage?: number;
+}): Promise<{ rows: LeadRow[]; total: number }> {
   const where: Prisma.LeadWhereInput = {};
   if (filtros?.estado) where.estado = filtros.estado;
   if (filtros?.ownerId) where.ownerId = filtros.ownerId;
   if (filtros?.fuente) where.fuente = filtros.fuente;
   if (filtros?.search) Object.assign(where, buildSearchFilter(filtros.search));
 
-  const rows = await db.lead.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    include: {
-      owner: { select: { nombre: true } },
-      cliente: { select: { nombre: true } },
-    },
-  });
+  const page = Math.max(1, Math.floor(filtros?.page ?? 1));
+  const perPage = Math.max(1, Math.min(500, Math.floor(filtros?.perPage ?? 50)));
+  const skip = (page - 1) * perPage;
 
-  return rows.map((l) => ({
-    id: l.id,
-    nombre: l.nombre,
-    empresa: l.empresa,
-    cuit: l.cuit,
-    email: l.email,
-    telefono: l.telefono,
-    fuente: l.fuente,
-    estado: l.estado,
-    score: l.score,
-    ownerId: l.ownerId,
-    ownerNombre: l.owner.nombre,
-    clienteId: l.clienteId,
-    clienteNombre: l.cliente?.nombre ?? null,
-    notas: l.notas,
-    createdAt: l.createdAt,
-    updatedAt: l.updatedAt,
-  }));
+  const [rows, total] = await Promise.all([
+    db.lead.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      include: {
+        owner: { select: { nombre: true } },
+        cliente: { select: { nombre: true } },
+      },
+      take: perPage,
+      skip,
+    }),
+    db.lead.count({ where }),
+  ]);
+
+  return {
+    rows: rows.map((l) => ({
+      id: l.id,
+      nombre: l.nombre,
+      empresa: l.empresa,
+      cuit: l.cuit,
+      email: l.email,
+      telefono: l.telefono,
+      fuente: l.fuente,
+      estado: l.estado,
+      score: l.score,
+      ownerId: l.ownerId,
+      ownerNombre: l.owner.nombre,
+      clienteId: l.clienteId,
+      clienteNombre: l.cliente?.nombre ?? null,
+      notas: l.notas,
+      createdAt: l.createdAt,
+      updatedAt: l.updatedAt,
+    })),
+    total,
+  };
 }
 
 export async function getLead(id: string) {
