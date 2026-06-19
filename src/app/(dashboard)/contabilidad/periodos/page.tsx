@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 
 import { CierreEjercicioDialog } from "./cierre-ejercicio-dialog";
 import { rangoEjercicioPorDefecto } from "./cierre-helpers";
+import { CrearPeriodoDialog } from "./crear-periodo-dialog";
 import { PeriodosTable, type PeriodoRow } from "./periodos-table";
 
 export const dynamic = "force-dynamic";
@@ -45,9 +46,12 @@ export default async function PeriodosPage() {
           <h1 className="text-[15px] font-semibold tracking-tight">Períodos Contables</h1>
           <p className="text-sm text-muted-foreground">{periodos.length} períodos</p>
         </div>
-        {periodos.length > 0 ? (
-          <CierreEjercicioDialog defaultDesde={rango.desde} defaultHasta={rango.hasta} />
-        ) : null}
+        <div className="flex items-center gap-2">
+          {periodos.length > 0 ? (
+            <CierreEjercicioDialog defaultDesde={rango.desde} defaultHasta={rango.hasta} />
+          ) : null}
+          <CrearPeriodoDialog />
+        </div>
       </div>
       <Card className="py-0">
         <PeriodosTable data={rows} />
