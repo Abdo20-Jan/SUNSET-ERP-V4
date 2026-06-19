@@ -15,6 +15,72 @@ export type PeriodoActionResult =
   | { ok: true; codigo: string; estado: PeriodoEstado }
   | { ok: false; error: string };
 
+export type CrearPeriodoResult =
+  | { ok: true; id: number; codigo: string }
+  | { ok: false; error: string };
+
+/**
+ * Crea un período contable (operación administrativa). Valida código/nombre no
+ * vacíos, fechaInicio ≤ fechaFin, código único y NO solapamiento con otros
+ * períodos — `resolverPeriodo` (motor de asientos) hace findFirst por
+ * contención de fecha, así que rangos superpuestos volverían ambiguo a qué
+ * período va un asiento. Nace ABIERTO.
+ */
+export async function crearPeriodo(input: {
+  codigo: string;
+  nombre: string;
+  fechaInicio: string;
+  fechaFin: string;
+}): Promise<CrearPeriodoResult> {
+  const guard = await requireAdmin();
+  if (!guard.ok) {
+    return { ok: false, error: guard.error };
+  }
+
+  const codigo = input.codigo.trim();
+  const nombre = input.nombre.trim();
+  if (!codigo) return { ok: false, error: "El código es obligatorio." };
+  if (!nombre) return { ok: false, error: "El nombre es obligatorio." };
+
+  const fechaInicio = new Date(input.fechaInicio);
+  const fechaFin = new Date(input.fechaFin);
+  if (Number.isNaN(fechaInicio.getTime()) || Number.isNaN(fechaFin.getTime())) {
+    return { ok: false, error: "Fechas inválidas." };
+  }
+  if (fechaInicio > fechaFin) {
+    return { ok: false, error: "La fecha de inicio debe ser ≤ la de fin." };
+  }
+
+  const duplicado = await db.periodoContable.findUnique({
+    where: { codigo },
+    select: { id: true },
+  });
+  if (duplicado) {
+    return { ok: false, error: `Ya existe un período con código ${codigo}.` };
+  }
+
+  // Solapamiento: dos intervalos [a,b] y [c,d] se superponen si a ≤ d && c ≤ b.
+  const solapado = await db.periodoContable.findFirst({
+    where: { fechaInicio: { lte: fechaFin }, fechaFin: { gte: fechaInicio } },
+    select: { codigo: true },
+  });
+  if (solapado) {
+    return {
+      ok: false,
+      error: `El rango se superpone con el período ${solapado.codigo}.`,
+    };
+  }
+
+  const periodo = await db.periodoContable.create({
+    data: { codigo, nombre, fechaInicio, fechaFin, estado: PeriodoEstado.ABIERTO },
+    select: { id: true, codigo: true },
+  });
+
+  revalidatePath("/contabilidad/periodos");
+
+  return { ok: true, id: periodo.id, codigo: periodo.codigo };
+}
+
 export async function cerrarPeriodo(periodoId: number): Promise<PeriodoActionResult> {
   // Cerrar/reabrir un período contable es una operación administrativa: exige
   // ADMIN (no sólo sesión). requireAdmin revalida el rol contra la DB.
