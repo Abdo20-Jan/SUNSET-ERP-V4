@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Decimal, sumMoney } from "@/lib/decimal";
+import type { DetalleEmbarqueBP } from "@/lib/services/reportes/export/balance-bp-detalle";
 import { construirModeloBP } from "@/lib/services/reportes/export/balance-bp-modelo";
 import type { CuentaTreeNode } from "@/lib/services/reportes/shared";
 
@@ -128,5 +129,69 @@ describe("construirModeloBP", () => {
   it("omite blocos sem linhas (saldo zero)", () => {
     const m = construirModeloBP(bgFixture(), { tc: "10", fecha: "2025-12-31" });
     expect(m.ativo.some((b) => b.key === "IMOBILIZADO")).toBe(false);
+  });
+});
+
+const detalleExterior: DetalleEmbarqueBP[] = [
+  {
+    embarqueCodigo: "BR-250827-015CN",
+    descripcion: "QINGDAO TIRES CO",
+    usd: "300.00",
+    ars: "3000.00",
+  },
+];
+const detalleStock: DetalleEmbarqueBP[] = [
+  {
+    embarqueCodigo: "BR-250827-015CN",
+    descripcion: "QINGDAO TIRES CO",
+    usd: "500.00",
+    ars: "5000.00",
+  },
+];
+
+describe("construirModeloBP — detalhe por embarque (PR2)", () => {
+  it("anexa detalhe ao PROVEDORES_EXTERIOR sem alterar subtotal nem total", () => {
+    const m = construirModeloBP(bgFixture(), { tc: "10", fecha: "2025-12-31", detalleExterior });
+    const prov = m.pasivo.find((b) => b.key === "PROVEDORES_EXTERIOR");
+    expect(prov?.detalle).toHaveLength(1);
+    expect(prov?.detalle?.[0]?.embarqueCodigo).toBe("BR-250827-015CN");
+    expect(prov?.subtotalArs).toBe("3000.00"); // do razão, inalterado
+    expect(m.totalPasivoArs).toBe("3500.00"); // total não inclui detalhe
+  });
+
+  it("anexa detalhe ao STOCK sem alterar subtotal nem total", () => {
+    const m = construirModeloBP(bgFixture(), {
+      tc: "10",
+      fecha: "2025-12-31",
+      detalleStockTransito: detalleStock,
+    });
+    const stock = m.ativo.find((b) => b.key === "STOCK");
+    expect(stock?.detalle).toHaveLength(1);
+    expect(stock?.subtotalArs).toBe("5000.00");
+    expect(m.totalAtivoArs).toBe("6000.00");
+  });
+
+  it("cria bloco STOCK só com detalhe quando não há saldo contável, na ordem certa", () => {
+    const bg = bgFixture();
+    bg.activo = [
+      syn("—", "Caja y bancos", [leaf("1.1.1.01.01", 1000, "Caja y bancos", "CAJA GENERAL")]),
+    ];
+    bg.totalActivo = new Decimal(1000);
+    const m = construirModeloBP(bg, {
+      tc: "10",
+      fecha: "2025-12-31",
+      detalleStockTransito: detalleStock,
+    });
+    const stock = m.ativo.find((b) => b.key === "STOCK");
+    expect(stock?.subtotalArs).toBe("0.00");
+    expect(stock?.detalle).toHaveLength(1);
+    expect(m.totalAtivoArs).toBe("1000.00"); // detalhe não entra no total
+    const keys = m.ativo.map((b) => b.key);
+    expect(keys.indexOf("DISPONIBILIDADE")).toBeLessThan(keys.indexOf("STOCK"));
+  });
+
+  it("sem detalhe: blocos não ganham campo detalle", () => {
+    const m = construirModeloBP(bgFixture(), { tc: "10", fecha: "2025-12-31" });
+    expect(m.pasivo.find((b) => b.key === "PROVEDORES_EXTERIOR")?.detalle).toBeUndefined();
   });
 });
