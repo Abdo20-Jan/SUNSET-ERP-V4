@@ -7,7 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { CancelCircleIcon } from "@hugeicons/core-free-icons";
 
 import { anularGastoAction, type GastoDetalle } from "@/lib/actions/gastos";
-import { fmtDate, fmtMoney, fmtTipoCambio } from "@/lib/format";
+import { fmtDate, fmtMontoPres, fmtTipoCambio } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,11 +29,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
+
 type Props = {
   gasto: GastoDetalle;
   proveedorNombre: string;
   cuentasMap: Record<number, { codigo: string; nombre: string }>;
   asientoNumero: number | null;
+  moneda: Moneda;
+  tc: string | null;
+  tcInfo: { valor: string; fecha: string; fuente: string | null } | null;
 };
 
 const CONDICION_LABELS: Record<string, string> = {
@@ -72,7 +77,15 @@ function estadoVariant(
   }
 }
 
-export function GastoDetailView({ gasto, proveedorNombre, cuentasMap, asientoNumero }: Props) {
+export function GastoDetailView({
+  gasto,
+  proveedorNombre,
+  cuentasMap,
+  asientoNumero,
+  moneda,
+  tc,
+  tcInfo,
+}: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -108,7 +121,8 @@ export function GastoDetailView({ gasto, proveedorNombre, cuentasMap, asientoNum
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
           {puedeAnular && (
             <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={isPending}>
               <HugeiconsIcon icon={CancelCircleIcon} strokeWidth={2} />
@@ -119,15 +133,28 @@ export function GastoDetailView({ gasto, proveedorNombre, cuentasMap, asientoNum
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Subtotal" value={`${fmtMoney(gasto.subtotal)} ${gasto.moneda}`} />
-        <Stat label="IVA" value={`${fmtMoney(gasto.iva)} ${gasto.moneda}`} />
+        <Stat
+          label="Subtotal"
+          value={`${fmtMontoPres(gasto.subtotal, gasto.moneda, moneda, tc)} ${moneda}`}
+        />
+        <Stat
+          label="IVA"
+          value={`${fmtMontoPres(gasto.iva, gasto.moneda, moneda, tc)} ${moneda}`}
+        />
         <Stat
           label="IIBB + Otros"
-          value={`${fmtMoney(
+          value={`${fmtMontoPres(
             (Number(gasto.iibb) + Number(gasto.otros)).toFixed(2),
-          )} ${gasto.moneda}`}
+            gasto.moneda,
+            moneda,
+            tc,
+          )} ${moneda}`}
         />
-        <Stat label="Total" value={`${fmtMoney(gasto.total)} ${gasto.moneda}`} emphasis />
+        <Stat
+          label="Total"
+          value={`${fmtMontoPres(gasto.total, gasto.moneda, moneda, tc)} ${moneda}`}
+          emphasis
+        />
       </div>
 
       <Card>
@@ -186,7 +213,7 @@ export function GastoDetailView({ gasto, proveedorNombre, cuentasMap, asientoNum
                   </TableCell>
                   <TableCell className="text-sm">{l.descripcion}</TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(l.subtotal)}
+                    {fmtMontoPres(l.subtotal, gasto.moneda, moneda, tc)}
                   </TableCell>
                 </TableRow>
               );

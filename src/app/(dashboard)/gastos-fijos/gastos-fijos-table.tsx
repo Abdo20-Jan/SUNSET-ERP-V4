@@ -20,7 +20,7 @@ import {
   type GastoFijoRow,
   type ProveedorOptionParaGastoFijo,
 } from "@/lib/actions/gastos-fijos";
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, fmtMontoPres } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CuentaCombobox } from "@/components/cuenta-combobox";
@@ -51,6 +51,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+
+import type { Moneda } from "../reportes/_components/moneda-toggle";
 
 type DialogState =
   | { mode: "create" }
@@ -106,10 +108,14 @@ export function GastosFijosTable({
   gastos,
   proveedores,
   cuentas,
+  moneda,
+  tc,
 }: {
   gastos: GastoFijoRow[];
   proveedores: ProveedorOptionParaGastoFijo[];
   cuentas: CuentaGastoOption[];
+  moneda: Moneda;
+  tc: string | null;
 }) {
   const [dialog, setDialog] = useState<DialogState>(null);
 
@@ -158,7 +164,7 @@ export function GastosFijosTable({
                     : "— default por proveedor —"}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {g.moneda} {fmtMoney(g.montoNeto)}
+                  {fmtMontoPres(g.montoNeto, g.moneda, moneda, tc)} {moneda}
                   <div className="text-xs text-muted-foreground">
                     +{g.ivaPorcentaje}% IVA
                     {Number(g.iibbPorcentaje) > 0 ? ` · +${g.iibbPorcentaje}% IIBB` : ""}
