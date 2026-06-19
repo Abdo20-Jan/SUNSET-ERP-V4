@@ -14,6 +14,7 @@ import { VentasTab } from "./_tabs/ventas-tab";
 import { ComprasTab } from "./_tabs/compras-tab";
 import { StockTab } from "./_tabs/stock-tab";
 import { TesoreriaTab } from "./_tabs/tesoreria-tab";
+import { GiroTab } from "./_tabs/giro-tab";
 import { RentabilidadTab } from "./_tabs/rentabilidad-tab";
 import { FiscalTab } from "./_tabs/fiscal-tab";
 
@@ -33,6 +34,7 @@ const VALID_TABS: BiTabId[] = [
   "compras",
   "stock",
   "tesoreria",
+  "giro",
   "rentabilidad",
   "fiscal",
 ];
@@ -174,6 +176,19 @@ export default async function BiPage({ searchParams }: { searchParams: SearchPar
               moneda={moneda}
               tcCierre={cotizacion ? cotizacion.valor.toString() : null}
             />
+          </Suspense>
+        ) : null}
+
+        {tab === "giro" ? (
+          <Suspense
+            fallback={
+              <div className="flex flex-col gap-3">
+                <KpiGridSkeleton count={5} />
+                <ChartSkeleton />
+              </div>
+            }
+          >
+            <GiroTab desde={desde} hasta={hasta} tc={tcParaUsd} />
           </Suspense>
         ) : null}
 
