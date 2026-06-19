@@ -8,9 +8,12 @@ import {
   agruparDetalleExterior,
   mapearDetalleStockTransito,
 } from "@/lib/services/reportes/export/balance-bp-detalle";
+import { construirModeloDRE } from "@/lib/services/reportes/export/balance-bp-dre";
 import { generarBalanceBPExcel } from "@/lib/services/reportes/export/balance-bp-excel";
 import { construirModeloBP } from "@/lib/services/reportes/export/balance-bp-modelo";
+import { getImpuestosResultadoDRE } from "@/lib/services/reportes/export/dre-impuestos";
 import { getStockEnTransitoPorEmbarque } from "@/lib/services/reportes/export/stock-transito";
+import { getEstadoResultadosByFecha } from "@/lib/services/reportes/estado-resultados";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -45,11 +48,13 @@ export async function GET(req: Request): Promise<NextResponse> {
   const fechaHasta = endOfDay(hastaStr);
   const fecha = DATE_RE.test(hastaStr) ? hastaStr : new Date().toISOString().slice(0, 10);
 
-  const [bg, cotizacion, exterior, stockTransito] = await Promise.all([
+  const [bg, cotizacion, exterior, stockTransito, er, impuestos] = await Promise.all([
     getBalanceGeneralByFecha({ fechaDesde, fechaHasta }),
     getCotizacionParaFecha(fechaHasta ?? new Date()),
     getSaldosExteriorPorProveedor(),
     getStockEnTransitoPorEmbarque(),
+    getEstadoResultadosByFecha({ fechaDesde, fechaHasta }),
+    getImpuestosResultadoDRE({ fechaDesde, fechaHasta }),
   ]);
   const tc = cotizacion ? cotizacion.valor.toString() : null;
 
@@ -58,6 +63,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     fecha,
     detalleExterior: agruparDetalleExterior(exterior, tc),
     detalleStockTransito: mapearDetalleStockTransito(stockTransito, tc),
+    dre: construirModeloDRE(er.rt9.conceptos, impuestos, tc),
   });
   const bytes = await generarBalanceBPExcel(modelo);
 

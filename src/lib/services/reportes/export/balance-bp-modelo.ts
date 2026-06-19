@@ -9,6 +9,7 @@ import { convertirAUsd } from "@/lib/format";
 import type { BalanceGeneralResult } from "../balance-general";
 import type { CuentaTreeNode } from "../shared";
 import type { DetalleEmbarqueBP } from "./balance-bp-detalle";
+import type { ModeloDRE } from "./balance-bp-dre";
 import {
   BLOQUES,
   type BloqueBP,
@@ -51,6 +52,9 @@ export type BalanceBPModelo = {
   checkUsd: string; // ATIVO − (PASIVO + PL); 0 quando cuadra
   checkArs: string;
   cuadra: boolean;
+  // Bloco "Conferindo o DRE" (cascata RT9 + impostos AR), opcional. `dreCheck*`
+  // = RESULTADO do DRE − RESULTADO do PL; 0 por construção (mesma fonte).
+  dre?: ModeloDRE & { checkArs: string; checkUsd: string };
 };
 
 // Campos do BalanceGeneralResult realmente consumidos (Pick mantém o helper
@@ -147,6 +151,9 @@ export function construirModeloBP(
     // partir de getSaldosExteriorPorProveedor / getStockEnTransitoPorEmbarque.
     detalleExterior?: DetalleEmbarqueBP[];
     detalleStockTransito?: DetalleEmbarqueBP[];
+    // Bloco "Conferindo o DRE" (cascata RT9 + impostos), construído pela rota
+    // via construirModeloDRE. A conferência ▲ vs o RESULTADO do PL é calculada aqui.
+    dre?: ModeloDRE;
   },
 ): BalanceBPModelo {
   const { tc, fecha } = opts;
@@ -186,6 +193,14 @@ export function construirModeloBP(
   const totalPlArs = bg.totalPatrimonioAjustado.toFixed(2);
   const checkArs = bg.diferencia.toFixed(2);
 
+  // Bloco DRE (opcional): conferência ▲ = RESULTADO do DRE − RESULTADO do PL.
+  // Por construção é 0 (ambos = Σ(haber−debe) do razão); a linha prova isso.
+  let dre: BalanceBPModelo["dre"];
+  if (opts.dre) {
+    const dreCheckArs = new Decimal(opts.dre.resultadoArs).minus(bg.resultadoEjercicio).toFixed(2);
+    dre = { ...opts.dre, checkArs: dreCheckArs, checkUsd: convertirAUsd(dreCheckArs, tc) };
+  }
+
   return {
     fecha,
     tc,
@@ -201,5 +216,6 @@ export function construirModeloBP(
     checkArs,
     checkUsd: convertirAUsd(checkArs, tc),
     cuadra: bg.cuadra,
+    dre,
   };
 }

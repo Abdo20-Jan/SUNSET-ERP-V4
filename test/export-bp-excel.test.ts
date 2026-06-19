@@ -43,7 +43,10 @@ const modelo: BalanceBPModelo = {
     {
       key: "PATRIMONIO_LIQUIDO",
       titulo: "PATRIMONIO LÍQUIDO",
-      lineas: [{ codigo: "3.1.01", descripcion: "CAPITAL SOCIAL", usd: "40.00", ars: "55604.40" }],
+      lineas: [
+        { codigo: "3.1.01", descripcion: "CAPITAL SOCIAL", usd: "0.00", ars: "0.00" },
+        { codigo: "3.4", descripcion: "RESULTADO DEL EJERCICIO", usd: "40.00", ars: "55604.40" },
+      ],
       subtotalUsd: "40.00",
       subtotalArs: "55604.40",
     },
@@ -57,6 +60,49 @@ const modelo: BalanceBPModelo = {
   checkUsd: "0.00",
   checkArs: "0.00",
   cuadra: true,
+  dre: {
+    lineas: [
+      {
+        label: "Ingresos por ventas",
+        tipo: "ingreso",
+        enfasis: false,
+        esResultado: false,
+        usd: "100.00",
+        ars: "139011.00",
+      },
+      {
+        label: "Ingresos netos",
+        tipo: "subtotal",
+        enfasis: false,
+        esResultado: false,
+        usd: "100.00",
+        ars: "139011.00",
+      },
+      {
+        label: "Costo de ventas",
+        tipo: "egreso",
+        enfasis: false,
+        esResultado: false,
+        usd: "-60.00",
+        ars: "-83406.60",
+      },
+      {
+        label: "Resultado del ejercicio",
+        tipo: "subtotal",
+        enfasis: true,
+        esResultado: true,
+        usd: "40.00",
+        ars: "55604.40",
+      },
+    ],
+    impuestos: [{ grupo: "Impuestos sobre ventas (IIBB, tasas)", usd: "5.00", ars: "6950.55" }],
+    totalImpuestosUsd: "5.00",
+    totalImpuestosArs: "6950.55",
+    resultadoUsd: "40.00",
+    resultadoArs: "55604.40",
+    checkUsd: "0.00",
+    checkArs: "0.00",
+  },
 };
 
 describe("generarBalanceBPExcel", () => {
@@ -74,9 +120,11 @@ describe("generarBalanceBPExcel", () => {
     expect(ws).toBeDefined();
 
     const textos: string[] = [];
+    const formulas: string[] = [];
     ws?.eachRow((row) => {
       row.eachCell((cell) => {
         if (typeof cell.value === "string") textos.push(cell.value);
+        if (cell.formula) formulas.push(cell.formula);
       });
     });
     const blob = textos.join(" | ");
@@ -89,5 +137,13 @@ describe("generarBalanceBPExcel", () => {
     // Detalhe por embarque (PR2): sub-seção + código do embarque renderizados.
     expect(blob).toContain("Detalle por embarque (informativo)");
     expect(blob).toContain("BR-250827-015CN");
+    // Bloco DRE (PR3): cascata + impostos AR + fórmulas vivas.
+    expect(blob).toContain("CONFERINDO O DRE");
+    expect(blob).toContain("Ingresos por ventas");
+    expect(blob).toContain("Impuestos del ejercicio (detalle AR)");
+    expect(blob).toContain("CONFERE (DRE = Resultado del PL)");
+    // Fórmulas vivas: SUM nos subtotais + subtração da conferência ▲.
+    expect(formulas.some((f) => f.startsWith("SUM("))).toBe(true);
+    expect(formulas.some((f) => f.includes("-"))).toBe(true);
   });
 });
