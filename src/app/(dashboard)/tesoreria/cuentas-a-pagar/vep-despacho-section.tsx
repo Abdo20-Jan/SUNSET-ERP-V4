@@ -7,7 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 
 import { pagarVepDespachoAction } from "@/lib/actions/vep-despacho";
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, fmtMontoPres } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -40,6 +40,8 @@ import {
 
 import type { CuentaBancariaArsOption } from "./vep-section";
 
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
+
 export type VepDespachoPendiente = {
   id: number;
   despachoId: string;
@@ -58,11 +60,15 @@ export function VepDespachoSection({
   cuentasBancarias,
   saldoCreditoAduana,
   defaultFecha,
+  moneda,
+  tc,
 }: {
   veps: VepDespachoPendiente[];
   cuentasBancarias: CuentaBancariaArsOption[];
   saldoCreditoAduana: string;
   defaultFecha?: string;
+  moneda: Moneda;
+  tc: string | null;
 }) {
   const [pagar, setPagar] = useState<VepDespachoPendiente | null>(null);
 
@@ -91,7 +97,7 @@ export function VepDespachoSection({
                 pendiente al momento de pagar.
               </span>
               <span className="font-mono font-semibold tabular-nums">
-                ARS {fmtMoney(saldoCreditoAduana)}
+                {fmtMontoPres(saldoCreditoAduana, "ARS", moneda, tc)} {moneda}
               </span>
             </div>
           )}
@@ -102,7 +108,7 @@ export function VepDespachoSection({
                 <TableHead className="w-48">Despacho</TableHead>
                 <TableHead>Proveedor</TableHead>
                 <TableHead className="w-28">Fecha</TableHead>
-                <TableHead className="text-right">Total ARS</TableHead>
+                <TableHead className="text-right">Total</TableHead>
                 <TableHead className="w-28 text-right" />
               </TableRow>
             </TableHeader>
@@ -120,7 +126,8 @@ export function VepDespachoSection({
                     {v.despachoFecha.slice(0, 10)}
                   </TableCell>
                   <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">
-                    {fmtMoney(v.montoTotal)}
+                    {fmtMontoPres(v.montoTotal, "ARS", moneda, tc)}{" "}
+                    <span className="text-xs text-muted-foreground">{moneda}</span>
                   </TableCell>
                   <TableCell className="text-right">
                     <Button

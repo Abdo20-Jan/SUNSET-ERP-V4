@@ -1,7 +1,11 @@
 import { getHistoricoPagos } from "@/lib/services/historico-pagos";
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { fmtMontoPres } from "@/lib/format";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { Moneda } from "@/generated/prisma/client";
 
+import { MonedaToggle, type Moneda as MonedaPres } from "../../reportes/_components/moneda-toggle";
 import { PagosHistorialTable } from "./pagos-historial-table";
 import { PagosHistorialFilters } from "./pagos-historial-filters";
 
@@ -11,6 +15,7 @@ type SearchParams = Promise<{
   cuentaBancariaId?: string;
   desde?: string;
   hasta?: string;
+  pres?: string;
 }>;
 
 function parseMoneda(v: string | undefined): Moneda | undefined {
@@ -34,7 +39,7 @@ export default async function PagosHistorialPage({ searchParams }: { searchParam
   const hasta = parseDate(params.hasta);
   const moneda = parseMoneda(params.moneda);
 
-  const [pagos, proveedores, cuentasBancarias] = await Promise.all([
+  const [pagos, proveedores, cuentasBancarias, session, cotizacion] = await Promise.all([
     getHistoricoPagos({
       proveedorId: params.proveedorId,
       desde,
@@ -50,7 +55,24 @@ export default async function PagosHistorialPage({ searchParams }: { searchParam
       select: { id: true, banco: true, alias: true, moneda: true },
       orderBy: [{ banco: "asc" }, { moneda: "asc" }],
     }),
+    auth(),
+    getCotizacionParaFecha(new Date()),
   ]);
+
+  // Moneda de PRESENTACIÓN del total agregado (toggle). Usa `pres` para no
+  // pisar el filtro de datos `moneda`. La tabla es registro histórico (moneda
+  // original + ARS contable + TC aplicado) y NO se convierte.
+  const monedaPreferida: MonedaPres = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const monedaPres: MonedaPres =
+    params.pres === "ARS" ? "ARS" : params.pres === "USD" ? "USD" : monedaPreferida;
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   const totalArs = pagos.reduce((acc, p) => acc + Number(p.montoArs), 0);
 
@@ -60,15 +82,13 @@ export default async function PagosHistorialPage({ searchParams }: { searchParam
         <div className="flex flex-col gap-1">
           <h1 className="text-[15px] font-semibold tracking-tight">Histórico de pagos</h1>
           <p className="text-sm text-muted-foreground">
-            {pagos.length} pago{pagos.length === 1 ? "" : "s"} · Total ARS{" "}
+            {pagos.length} pago{pagos.length === 1 ? "" : "s"} · Total{" "}
             <strong>
-              {totalArs.toLocaleString("es-AR", {
-                maximumFractionDigits: 2,
-                minimumFractionDigits: 2,
-              })}
+              {fmtMontoPres(totalArs.toFixed(2), "ARS", monedaPres, tc)} {monedaPres}
             </strong>
           </p>
         </div>
+        <MonedaToggle current={monedaPres} tcInfo={tcInfo} param="pres" />
       </div>
 
       <PagosHistorialFilters
