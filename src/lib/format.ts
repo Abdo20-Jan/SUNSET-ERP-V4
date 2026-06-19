@@ -98,6 +98,23 @@ export function fmtMontoPres(
   return fmtMoney(convertirMonto(valorNativo, monedaNativa, monedaPres, tc));
 }
 
+/**
+ * Elige el saldo en su moneda NATIVA a partir de un par (saldoArs, saldoUsd).
+ * Si `saldoUsd` está presente (no null/undefined) la posición es USD-nativa
+ * (saldo invariante #257); si no, es ARS. Pensado para préstamos
+ * (`saldoPendienteUsd`) y cuentas a pagar (`saldoUsd`), cuyo shape ya trae el
+ * split por moneda nativa — devuelve el par listo para `fmtMontoPres`, evitando
+ * re-dividir un USD nativo o perder el "1 a 1".
+ */
+export function pickSaldoNativo(
+  saldoArs: string,
+  saldoUsd: string | null | undefined,
+): { valor: string; monedaNativa: "ARS" | "USD" } {
+  return saldoUsd != null
+    ? { valor: saldoUsd, monedaNativa: "USD" }
+    : { valor: saldoArs, monedaNativa: "ARS" };
+}
+
 export function fmtSigno(value: string): "positive" | "negative" | "zero" {
   const n = Number.parseFloat(value);
   if (!Number.isFinite(n) || n === 0) return "zero";

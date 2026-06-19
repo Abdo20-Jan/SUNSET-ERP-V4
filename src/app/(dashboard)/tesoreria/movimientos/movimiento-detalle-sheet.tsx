@@ -4,8 +4,9 @@ import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 
-import type { AsientoEstado } from "@/generated/prisma/client";
+import type { AsientoEstado, Moneda } from "@/generated/prisma/client";
 import { getAsientoDetalle, type AsientoDetalle } from "@/lib/actions/asientos";
+import { fmtMoney, fmtMontoPres } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -31,6 +32,8 @@ type Props = {
   movimiento: MovimientoRow | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  moneda: Moneda;
+  tc: string | null;
 };
 
 function estadoVariant(estado: AsientoEstado): "default" | "outline" | "secondary" {
@@ -44,7 +47,7 @@ function estadoVariant(estado: AsientoEstado): "default" | "outline" | "secondar
   }
 }
 
-export function MovimientoDetalleSheet({ movimiento, open, onOpenChange }: Props) {
+export function MovimientoDetalleSheet({ movimiento, open, onOpenChange, moneda, tc }: Props) {
   const [asiento, setAsiento] = useState<AsientoDetalle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -109,7 +112,10 @@ export function MovimientoDetalleSheet({ movimiento, open, onOpenChange }: Props
                   label="Cuenta bancaria"
                   value={`${movimiento.cuentaBancaria.banco}${movimiento.cuentaBancaria.numero ? ` · ${movimiento.cuentaBancaria.numero}` : ""}`}
                 />
-                <InfoRow label="Monto" value={`${movimiento.monto} ${movimiento.moneda}`} />
+                <InfoRow
+                  label="Monto"
+                  value={`${fmtMontoPres(movimiento.monto, movimiento.moneda, moneda, tc)} ${moneda}`}
+                />
                 <InfoRow
                   label="Tipo de cambio"
                   value={Number(movimiento.tipoCambio).toFixed(movimiento.moneda === "ARS" ? 2 : 6)}
@@ -162,10 +168,10 @@ export function MovimientoDetalleSheet({ movimiento, open, onOpenChange }: Props
                           {l.descripcion ?? "—"}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums">
-                          {Number(l.debe) > 0 ? l.debe : ""}
+                          {Number(l.debe) > 0 ? fmtMoney(l.debe) : ""}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums">
-                          {Number(l.haber) > 0 ? l.haber : ""}
+                          {Number(l.haber) > 0 ? fmtMoney(l.haber) : ""}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -174,10 +180,10 @@ export function MovimientoDetalleSheet({ movimiento, open, onOpenChange }: Props
                         Totales
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">
-                        {asiento.totalDebe}
+                        {fmtMoney(asiento.totalDebe)}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">
-                        {asiento.totalHaber}
+                        {fmtMoney(asiento.totalHaber)}
                       </TableCell>
                     </TableRow>
                   </TableBody>
