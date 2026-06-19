@@ -1,5 +1,6 @@
 import "server-only";
 
+import { montoNativoPendiente } from "@/lib/aging-presentacion";
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
 import { VEP_ADUANA_CODIGOS } from "@/lib/services/cuenta-registry";
@@ -10,6 +11,7 @@ import {
   PREFIJO_PROVEEDORES_LOCAL,
   PREFIJOS_TRIBUTOS_DESPACHO,
 } from "@/lib/services/prefijos-plan";
+import { getSaldoUsdNativoPorCuenta } from "@/lib/services/saldo-usd-nativo";
 import {
   AsientoEstado,
   CompraEstado,
@@ -326,6 +328,9 @@ export type FacturaPendiente = {
   diasParaVencer: number | null; // negativo = vencida hace N días
   bucket: "vencida" | "proxima" | "al_dia" | "sin_fecha";
   monto: string; // ARS (Compra/Gasto: total convertido. EmbarqueCosto: lineas convertidas a ARS)
+  // Pendiente en la moneda NATIVA de la factura (USD → ÷TC emisión; ARS →
+  // igual a `monto`). Para presentación native-aware sin ÷tc ciego.
+  montoNativo: string;
   moneda: string;
 };
 
@@ -335,7 +340,10 @@ export type SaldoProveedorAging = {
   cuit: string | null;
   pais: string;
   cuentaContableId: number | null;
-  saldoTotal: string; // contable, vía cuenta. Es la verdad.
+  saldoTotal: string; // contable, vía cuenta. Es la verdad (ARS).
+  // Saldo USD nativo de la cuenta del proveedor (monedaOrigen=USD). Presente
+  // sólo si la posición es USD-nata. Para pickSaldoNativo en presentación.
+  saldoTotalUsd?: string;
   vencido: string;
   proximo: string; // ≤ 7 días
   alDia: string;
@@ -382,6 +390,9 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       return [s.cuentaId, haber.minus(debe).toFixed(2)];
     }),
   );
+
+  // Saldo USD-nativo por cuenta del proveedor (lado acreedor: pasivo).
+  const saldoUsdPorCuenta = await getSaldoUsdNativoPorCuenta(cuentaIds, "acreedor");
 
   // Pagos efectivos por (cuenta del proveedor, asiento): se calcula el NETO
   // (sum DEBE − sum HABER) por asiento en la cuenta del proveedor. Esto
@@ -622,6 +633,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
   // match de número de factura.
   type FacturaInterna = FacturaPendiente & {
     totalArs: ReturnType<typeof toDecimal>;
+    tipoCambioStr: string;
     pagadoFk: ReturnType<typeof toDecimal>; // Layer 0 — AplicacionPago*
     pagadoNumero: ReturnType<typeof toDecimal>;
     pagadoEmbarque: ReturnType<typeof toDecimal>;
@@ -630,17 +642,20 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
   };
 
   function registrarFactura(
-    factura: FacturaPendiente,
+    factura: Omit<FacturaPendiente, "montoNativo">,
     totalArs: ReturnType<typeof toDecimal>,
     proveedorId: string,
     pagadoFk: ReturnType<typeof toDecimal>,
+    tipoCambioStr: string,
   ) {
     const cuentaId = cuentaPorProveedor.get(proveedorId) ?? null;
     const pagadoNumero = montoPagadoFactura(factura.numero, cuentaId);
     const arr = facturasPorProveedor.get(proveedorId) ?? [];
     arr.push({
       ...factura,
+      montoNativo: "0", // provisório — recalculado con el pendiente final
       totalArs,
+      tipoCambioStr,
       pagadoFk,
       pagadoNumero,
       pagadoEmbarque: toDecimal(0),
@@ -671,6 +686,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       totalArs,
       c.proveedorId,
       pagadoFkPorCompra.get(c.id) ?? toDecimal(0),
+      toDecimal(c.tipoCambio).toString(),
     );
   }
 
@@ -701,6 +717,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       totalArs,
       c.proveedorId,
       pagadoFkPorEmbCosto.get(c.id) ?? toDecimal(0),
+      toDecimal(c.tipoCambio).toString(),
     );
   }
 
@@ -727,6 +744,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       totalArs,
       g.proveedorId,
       pagadoFkPorGasto.get(g.id) ?? toDecimal(0),
+      toDecimal(g.tipoCambio).toString(),
     );
   }
 
@@ -895,6 +913,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
         diasParaVencer: f.diasParaVencer,
         bucket: f.bucket,
         monto: pendiente.toFixed(2),
+        montoNativo: montoNativoPendiente(pendiente.toFixed(2), f.moneda, f.tipoCambioStr),
         moneda: f.moneda,
       }));
 
@@ -914,6 +933,10 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       return da - db_;
     });
 
+    const saldoTotalUsdStr = p.cuentaContableId
+      ? saldoUsdPorCuenta.get(p.cuentaContableId)
+      : undefined;
+
     result.push({
       proveedorId: p.id,
       proveedorNombre: p.nombre,
@@ -921,6 +944,7 @@ export async function getSaldosPorProveedorConAging(): Promise<SaldoProveedorAgi
       pais: p.pais,
       cuentaContableId: p.cuentaContableId,
       saldoTotal: saldoContable,
+      ...(saldoTotalUsdStr ? { saldoTotalUsd: saldoTotalUsdStr } : {}),
       vencido: vencido.toFixed(2),
       proximo: proximo.toFixed(2),
       alDia: alDia.toFixed(2),
