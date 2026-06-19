@@ -5,9 +5,10 @@ import { EXPORT_REGISTRY } from "@/lib/export/registry";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/export/[recurso]?<filtros de la lista>
-// Exporta a CSV el set FILTRADO (q, marca/estado/pais, sort, dir) sin paginar.
-// El CSV lleva BOM → Excel lo abre con columnas y acentos correctos.
+// GET /api/export/[recurso]?formato=csv|xlsx&<filtros de la lista>
+// Exporta el set FILTRADO (q, marca/estado/pais, sort, dir) sin paginar.
+// formato=xlsx → workbook (header en negrita); cualquier otro valor → CSV
+// (con BOM → Excel lo abre con columnas y acentos correctos).
 export async function GET(req: Request, { params }: { params: Promise<{ recurso: string }> }) {
   const session = await auth();
   if (!session) {
@@ -21,6 +22,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ recurso:
   }
 
   const sp = new URL(req.url).searchParams;
+
+  if (sp.get("formato") === "xlsx") {
+    const buf = await res.buildXlsx(sp);
+    return new NextResponse(new Uint8Array(buf), {
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${res.filename}.xlsx"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   const csv = await res.buildCsv(sp);
   return new NextResponse(csv, {
     headers: {
