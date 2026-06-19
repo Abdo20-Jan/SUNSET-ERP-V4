@@ -186,10 +186,10 @@ describe("planEntryToSeedRecord — proyección al registro de CuentaContable", 
     expect(r.padreCodigo).toBeNull();
   });
 
-  it("deriva categoria (legada) de la clase y rubroEECC queda null en esta etapa", () => {
+  it("deriva categoria (legada) de la clase y rubroEECC (etapa 2) del código", () => {
     const r = planEntryToSeedRecord(mk({ codigo: "5.1.01", clase: 5 }));
     expect(r.categoria).toBe("EGRESO");
-    expect(r.rubroEECC).toBeNull();
+    expect(r.rubroEECC).toBe("Costo de ventas");
   });
 
   it("deriva moneda de las flags (ME/BI/null) y persiste los 11 atributos nuevos", () => {

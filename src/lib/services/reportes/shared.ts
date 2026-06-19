@@ -8,7 +8,7 @@ import {
   type CuentaTipo,
   type Moneda,
 } from "@/generated/prisma/client";
-import { naturalezaPorDefecto, saldoNatural } from "../cuenta-naturaleza";
+import { naturalezaEfectiva, naturalezaPorDefecto, saldoNatural } from "../cuenta-naturaleza";
 
 export type LineaContabilizada = {
   id: number;
@@ -292,9 +292,10 @@ export async function buildCuentaTree(
     const debe = agg?.debe ?? new Decimal(0);
     const haber = agg?.haber ?? new Decimal(0);
 
-    // Naturaleza explícita; si falta (cuenta sin backfill), naturaleza por
-    // defecto de la categoría (comportamiento histórico).
-    const nat = c.naturaleza ?? naturalezaPorDefecto(c.categoria);
+    // Naturaleza efectiva para signar: DEUDOR/ACREEDOR mandan; MIXTA /
+    // SISTEMA_VARIABLE (resultados mixtos, cierre) y null resuelven por el
+    // defecto de la categoría.
+    const nat = naturalezaEfectiva(c.naturaleza, c.categoria);
 
     // saldoInicial signado por naturaleza. inicialBruto está en términos
     // deudores (debe-haber); para cuentas ACREEDOR se invierte.
@@ -346,6 +347,11 @@ export async function buildCuentaTree(
     roots.push(node);
   }
 
+  // Orden de exposición = código comparado por segmento NUMÉRICO (no lexicográfico),
+  // que reproduce el `orden` del Excel (p. ej. 1.2.10/1.2.11 van DESPUÉS de 1.2.9,
+  // no entre 1.2.1 y 1.2.2) y ubica bien las subcuentas dinámicas (bancos…).
+  ordenarArbolPorCodigo(roots);
+
   // Roll-up bottom-up em contas sintéticas.
   const rollUp = (node: CuentaTreeNode): void => {
     if (node.tipo === "SINTETICA" && node.children.length > 0) {
@@ -376,4 +382,37 @@ export async function buildCuentaTree(
   }
 
   return { roots, porCategoria, totalPorCategoria };
+}
+
+/**
+ * Compara dos códigos contables por segmento NUMÉRICO (no lexicográfico): así
+ * "1.2.10" va después de "1.2.9", y "1.1.1.02.10" después de "1.1.1.02.9". Un
+ * segmento no numérico (no debería ocurrir) cae al final por orden de string.
+ */
+export function compararCodigoNumerico(a: string, b: string): number {
+  const sa = a.split(".");
+  const sb = b.split(".");
+  const n = Math.max(sa.length, sb.length);
+  for (let i = 0; i < n; i++) {
+    const pa = sa[i];
+    const pb = sb[i];
+    if (pa === undefined) return -1; // a es ancestro/prefijo más corto → antes
+    if (pb === undefined) return 1;
+    const na = Number(pa);
+    const nb = Number(pb);
+    if (Number.isNaN(na) || Number.isNaN(nb)) {
+      if (pa !== pb) return pa < pb ? -1 : 1;
+    } else if (na !== nb) {
+      return na - nb;
+    }
+  }
+  return 0;
+}
+
+// Ordena (in place) cada nivel del bosque por código numérico, recursivamente.
+function ordenarArbolPorCodigo(nodes: CuentaTreeNode[]): void {
+  nodes.sort((x, y) => compararCodigoNumerico(x.codigo, y.codigo));
+  for (const n of nodes) {
+    if (n.children.length > 0) ordenarArbolPorCodigo(n.children);
+  }
 }

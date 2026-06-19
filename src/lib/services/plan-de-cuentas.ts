@@ -10,9 +10,10 @@
  * Comercialización · 7 Gastos de Administración · 8 Otros Ingresos/Egresos y
  * Resultados · 9 Resultados Financieros y de Tenencia.
  *
- * ETAPA 1/3 (este cambio): SÓLO se instalan las cuentas. El motor de asientos
- * (cuenta-registry/cuenta-auto/prefijos) y los 4 reportes se reapuntan en las
- * etapas 2 (EECC) y 3 (flujos contables); por eso `rubroEECC` queda en null acá.
+ * ETAPA 2/3: `rubroEECC` se deriva del código contra el orden de presentación
+ * de los EECC (`orden-eecc.ts`) y los reportes Balance/Estado de Resultados ya
+ * lo consumen. El motor de asientos (cuenta-registry/cuenta-auto/prefijos) se
+ * reapunta en la etapa 3 (flujos contables).
  *
  * `categoria` (5 valores, ecuación patrimonial legada) y `moneda` se DERIVAN de
  * la clase y de las flags; el modelo nuevo manda vía `clase`/`clasificacion`.
@@ -20,6 +21,7 @@
  * Sin `import "server-only"`: importable desde `prisma/` (tsx) y el runtime.
  */
 
+import { rubroEECCDeCuenta } from "./orden-eecc";
 import { PLAN_CUENTAS_DATA } from "./plan-de-cuentas.data";
 
 export type TipoCuenta = "SINTETICA" | "ANALITICA";
@@ -178,7 +180,10 @@ export function planEntryToSeedRecord(c: CuentaPlan): CuentaSeedRecord {
     inventariable: c.inventariable,
     sistema: c.sistema,
     dinamica: c.dinamica,
-    rubroEECC: null,
+    // rubro de exposición EECC (etapa 2), derivado del código contra el orden
+    // de presentación de los EECC. Null en las sintéticas de agrupación por
+    // encima del nivel de rubro (raíz de clase, corriente/no corriente).
+    rubroEECC: rubroEECCDeCuenta(c.codigo),
   };
 }
 
