@@ -412,6 +412,26 @@ model User {
   actividades               Actividad[]
   retencionesPracticadas    RetencionPracticada[]
   anticiposProveedorCreados AnticipoProveedor[]
+  savedViews                SavedView[]
+}
+
+// Vistas guardadas por usuario y ruta de lista (filtros + orden + columnas
+// visibles). Una puede marcarse como predeterminada por ruta: se aplica al
+// abrir la ruta sin filtros en la URL. `config` es un JSON con la forma
+// { params: Record<string,string>; columns: Record<string,boolean> }.
+model SavedView {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ruta             String
+  nombre           String
+  config           Json
+  esPredeterminada Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([userId, ruta, nombre])
+  @@index([userId, ruta])
 }
 
 // ============================================================

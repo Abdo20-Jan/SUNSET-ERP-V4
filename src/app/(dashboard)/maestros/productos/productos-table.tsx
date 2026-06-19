@@ -18,6 +18,7 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import { eliminarProductoAction, type ProductoRow } from "@/lib/actions/productos";
+import type { VistaGuardada } from "@/lib/actions/saved-views";
 import type { SortDir } from "@/lib/table-sort";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import { ColumnsToggle } from "@/components/ui/columns-toggle";
 import { DataTable } from "@/components/ui/data-table";
 import { DataTableSearch } from "@/components/ui/data-table-search";
 import { ExportButton } from "@/components/ui/export-button";
+import { SavedViews } from "@/components/ui/saved-views";
 import {
   Dialog,
   DialogContent,
@@ -64,6 +66,7 @@ type Props = {
   productos: ProductoRow[];
   total: number;
   marcas: string[];
+  vistas: VistaGuardada[];
   q: string;
   marca: string;
   sort: string;
@@ -72,7 +75,7 @@ type Props = {
   perPage: number;
 };
 
-export function ProductosTable({ productos, total, marcas, q, marca }: Props) {
+export function ProductosTable({ productos, total, marcas, vistas, q, marca }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -228,6 +231,12 @@ export function ProductosTable({ productos, total, marcas, q, marca }: Props) {
           </SelectContent>
         </Select>
         <ColumnsToggle table={table} />
+        <SavedViews
+          ruta={pathname}
+          vistas={vistas}
+          columnVisibility={columnVisibility}
+          onApplyColumns={setColumnVisibility}
+        />
         <ExportButton recurso="productos" />
         <Button onClick={() => setFormState({ mode: "create" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />

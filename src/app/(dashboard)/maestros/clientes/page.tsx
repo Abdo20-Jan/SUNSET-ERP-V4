@@ -1,5 +1,6 @@
 import { listarClientes, listarCuentasContablesParaCliente } from "@/lib/actions/clientes";
 import { listarProvincias } from "@/lib/actions/provincias";
+import { listarVistas } from "@/lib/actions/saved-views";
 import { Card } from "@/components/ui/card";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePaginationParams } from "@/components/ui/pagination-params";
@@ -29,10 +30,11 @@ export default async function ClientesPage({ searchParams }: { searchParams: Sea
   const q = params.q?.trim() ?? "";
   const estado = params.estado?.trim() ?? "";
 
-  const [{ rows, total }, cuentas, provincias] = await Promise.all([
+  const [{ rows, total }, cuentas, provincias, vistas] = await Promise.all([
     listarClientes({ q, estado, page, perPage, sort, dir }),
     listarCuentasContablesParaCliente(),
     listarProvincias(),
+    listarVistas("/maestros/clientes"),
   ]);
 
   return (
@@ -50,6 +52,7 @@ export default async function ClientesPage({ searchParams }: { searchParams: Sea
           total={total}
           cuentas={cuentas}
           provincias={provincias}
+          vistas={vistas}
           q={q}
           estado={estado}
           sort={sort}
