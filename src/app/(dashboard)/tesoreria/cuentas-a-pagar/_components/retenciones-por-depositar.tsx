@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { fmtMoney } from "@/lib/format";
+import { fmtMontoPres } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -12,6 +12,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { RetencionPracticadaRow } from "@/lib/actions/retenciones";
+
+import type { Moneda } from "../../../reportes/_components/moneda-toggle";
 
 const CONCEPTO_LABEL: Record<string, string> = {
   BIENES_DE_CAMBIO: "Bienes de cambio",
@@ -31,9 +33,13 @@ const CONCEPTO_LABEL: Record<string, string> = {
 export function RetencionesPorDepositar({
   rows,
   hoy,
+  moneda,
+  tc,
 }: {
   rows: RetencionPracticadaRow[];
   hoy: string;
+  moneda: Moneda;
+  tc: string | null;
 }) {
   if (rows.length === 0) return null;
 
@@ -67,7 +73,7 @@ export function RetencionesPorDepositar({
             </p>
           </div>
           <span className="font-mono text-base font-semibold tabular-nums">
-            ARS {fmtMoney(total.toFixed(2))}
+            {fmtMontoPres(total.toFixed(2), "ARS", moneda, tc)} {moneda}
           </span>
         </div>
 
@@ -107,7 +113,8 @@ export function RetencionesPorDepositar({
                       {r.fechaRetencion}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
-                      {fmtMoney(r.importeRetenido)}
+                      {fmtMontoPres(r.importeRetenido, "ARS", moneda, tc)}{" "}
+                      <span className="text-xs text-muted-foreground">{moneda}</span>
                     </TableCell>
                     <TableCell className="text-xs">
                       <span className="font-mono">{r.fechaVencimientoArca}</span>{" "}

@@ -7,7 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 
 import { pagarRefuerzoVepAction, pagarVepEmbarqueAction } from "@/lib/actions/vep-embarque";
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, fmtMontoPres } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -41,6 +41,8 @@ import {
 
 import type { RefuerzoVepPendiente, VepEmbarque } from "@/lib/services/cuentas-a-pagar";
 
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
+
 export type CuentaBancariaArsOption = {
   id: string;
   banco: string;
@@ -53,12 +55,16 @@ export function VepSection({
   cuentasBancarias,
   saldoCreditoAduana,
   defaultFecha,
+  moneda,
+  tc,
 }: {
   veps: VepEmbarque[];
   refuerzos: RefuerzoVepPendiente[];
   cuentasBancarias: CuentaBancariaArsOption[];
   saldoCreditoAduana: string;
   defaultFecha?: string;
+  moneda: Moneda;
+  tc: string | null;
 }) {
   const [pagar, setPagar] = useState<VepEmbarque | null>(null);
   const [pagarRefuerzo, setPagarRefuerzo] = useState<RefuerzoVepPendiente | null>(null);
@@ -91,7 +97,7 @@ export function VepSection({
                 pendiente al momento de pagar.
               </span>
               <span className="font-mono font-semibold tabular-nums">
-                ARS {fmtMoney(saldoCreditoAduana)}
+                {fmtMontoPres(saldoCreditoAduana, "ARS", moneda, tc)} {moneda}
               </span>
             </div>
           )}
@@ -102,7 +108,7 @@ export function VepSection({
                 <TableRow>
                   <TableHead className="w-40">Embarque</TableHead>
                   <TableHead>Tributos</TableHead>
-                  <TableHead className="text-right">Total VEP (ARS)</TableHead>
+                  <TableHead className="text-right">Total VEP</TableHead>
                   <TableHead className="w-32 text-right" />
                 </TableRow>
               </TableHeader>
@@ -125,13 +131,16 @@ export function VepSection({
                             className="inline-flex items-center gap-1 rounded-md border bg-muted/30 px-2 py-0.5 text-[11px]"
                           >
                             <span className="font-mono">{c.cuentaCodigo}</span>
-                            <span className="tabular-nums">{fmtMoney(c.monto)}</span>
+                            <span className="tabular-nums">
+                              {fmtMontoPres(c.monto, "ARS", moneda, tc)}
+                            </span>
                           </span>
                         ))}
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">
-                      {fmtMoney(v.totalArs)}
+                      {fmtMontoPres(v.totalArs, "ARS", moneda, tc)}{" "}
+                      <span className="text-xs text-muted-foreground">{moneda}</span>
                     </TableCell>
                     <TableCell className="text-right">
                       <Button
@@ -158,7 +167,7 @@ export function VepSection({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Embarque</TableHead>
-                    <TableHead className="text-right">Total ARS</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
                     <TableHead />
                   </TableRow>
                 </TableHeader>
@@ -167,7 +176,8 @@ export function VepSection({
                     <TableRow key={v.embarqueId}>
                       <TableCell className="font-mono text-xs">{v.embarqueCodigo}</TableCell>
                       <TableCell className="text-right font-mono tabular-nums">
-                        {fmtMoney(v.totalArs)}
+                        {fmtMontoPres(v.totalArs, "ARS", moneda, tc)}{" "}
+                        <span className="text-xs text-muted-foreground">{moneda}</span>
                       </TableCell>
                       <TableCell>
                         <Badge variant="default" className="bg-emerald-600">
@@ -199,7 +209,7 @@ export function VepSection({
                 <TableRow>
                   <TableHead className="w-40">Embarque</TableHead>
                   <TableHead>Origen</TableHead>
-                  <TableHead className="text-right">Saldo (ARS)</TableHead>
+                  <TableHead className="text-right">Saldo</TableHead>
                   <TableHead className="w-32 text-right" />
                 </TableRow>
               </TableHeader>
@@ -211,7 +221,8 @@ export function VepSection({
                       desde {r.fechaOrigen.slice(0, 10)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm font-semibold tabular-nums">
-                      {fmtMoney(r.saldoPendiente)}
+                      {fmtMontoPres(r.saldoPendiente, "ARS", moneda, tc)}{" "}
+                      <span className="text-xs text-muted-foreground">{moneda}</span>
                     </TableCell>
                     <TableCell className="text-right">
                       <Button size="sm" onClick={() => setPagarRefuerzo(r)}>
