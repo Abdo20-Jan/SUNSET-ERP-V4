@@ -13,6 +13,7 @@ import { serializeTreeNode } from "../_components/cuenta-tree-node";
 import { MonedaToggle, type Moneda } from "../_components/moneda-toggle";
 
 import { BalanceFechaFilter } from "./balance-fecha-filter";
+import { ExportBPButton } from "./export-bp-button";
 
 type SearchParams = Promise<{
   desde?: string;
@@ -88,15 +89,18 @@ export default async function BalanceGeneralPage({ searchParams }: { searchParam
           <h1 className="text-[15px] font-semibold tracking-tight">Balance General</h1>
           <p className="text-sm text-muted-foreground">{titulo}</p>
         </div>
-        {bg.cuadra ? (
-          <Badge variant="default" className="bg-emerald-600 text-white hover:bg-emerald-600">
-            ✓ Cuadra
-          </Badge>
-        ) : (
-          <Badge variant="destructive">
-            ✗ No cuadra — diferencia {fmtMoney(bg.diferencia.toFixed(2))}
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {bg.cuadra ? (
+            <Badge variant="default" className="bg-emerald-600 text-white hover:bg-emerald-600">
+              ✓ Cuadra
+            </Badge>
+          ) : (
+            <Badge variant="destructive">
+              ✗ No cuadra — diferencia {fmtMoney(bg.diferencia.toFixed(2))}
+            </Badge>
+          )}
+          <ExportBPButton desde={desdeStr} hasta={hastaStr} moneda={moneda} />
+        </div>
       </div>
 
       <div className="flex flex-col gap-3">
