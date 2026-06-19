@@ -2,9 +2,15 @@ import { NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
+import { getSaldosExteriorPorProveedor } from "@/lib/services/cuentas-a-pagar";
 import { getBalanceGeneralByFecha } from "@/lib/services/reportes";
+import {
+  agruparDetalleExterior,
+  mapearDetalleStockTransito,
+} from "@/lib/services/reportes/export/balance-bp-detalle";
 import { generarBalanceBPExcel } from "@/lib/services/reportes/export/balance-bp-excel";
 import { construirModeloBP } from "@/lib/services/reportes/export/balance-bp-modelo";
+import { getStockEnTransitoPorEmbarque } from "@/lib/services/reportes/export/stock-transito";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -39,13 +45,20 @@ export async function GET(req: Request): Promise<NextResponse> {
   const fechaHasta = endOfDay(hastaStr);
   const fecha = DATE_RE.test(hastaStr) ? hastaStr : new Date().toISOString().slice(0, 10);
 
-  const [bg, cotizacion] = await Promise.all([
+  const [bg, cotizacion, exterior, stockTransito] = await Promise.all([
     getBalanceGeneralByFecha({ fechaDesde, fechaHasta }),
     getCotizacionParaFecha(fechaHasta ?? new Date()),
+    getSaldosExteriorPorProveedor(),
+    getStockEnTransitoPorEmbarque(),
   ]);
   const tc = cotizacion ? cotizacion.valor.toString() : null;
 
-  const modelo = construirModeloBP(bg, { tc, fecha });
+  const modelo = construirModeloBP(bg, {
+    tc,
+    fecha,
+    detalleExterior: agruparDetalleExterior(exterior, tc),
+    detalleStockTransito: mapearDetalleStockTransito(stockTransito, tc),
+  });
   const bytes = await generarBalanceBPExcel(modelo);
 
   return new NextResponse(Buffer.from(bytes), {

@@ -29,6 +29,14 @@ const modelo: BalanceBPModelo = {
       lineas: [{ codigo: "2.1.1.02.01", descripcion: "PROVEEDOR", usd: "60.00", ars: "83406.60" }],
       subtotalUsd: "60.00",
       subtotalArs: "83406.60",
+      detalle: [
+        {
+          embarqueCodigo: "BR-250827-015CN",
+          descripcion: "QINGDAO TIRES CO",
+          usd: "60.00",
+          ars: "83406.60",
+        },
+      ],
     },
   ],
   pl: [
@@ -78,5 +86,8 @@ describe("generarBalanceBPExcel", () => {
     expect(blob).toContain("PATRIMONIO LÍQUIDO");
     expect(blob).toContain("TOTAL ATIVO");
     expect(blob).toContain("CONFERE");
+    // Detalhe por embarque (PR2): sub-seção + código do embarque renderizados.
+    expect(blob).toContain("Detalle por embarque (informativo)");
+    expect(blob).toContain("BR-250827-015CN");
   });
 });

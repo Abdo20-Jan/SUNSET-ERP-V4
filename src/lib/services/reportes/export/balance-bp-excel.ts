@@ -116,6 +116,7 @@ function renderSeccion(
     ]);
     st.font = { italic: true };
     setMoney(st);
+    renderDetalle(ws, bloque);
   }
 
   const total = ws.addRow([totalLabel, "", num(totalUsd), num(totalArs)]);
@@ -124,6 +125,20 @@ function renderSeccion(
     c.border = { top: { style: "thin" } };
   });
   setMoney(total);
+}
+
+// Detalhe por embarque (informativo) sob o bloco — NÃO soma ao subtotal.
+function renderDetalle(ws: ExcelJS.Worksheet, bloque: BloqueModelo): void {
+  const detalle = bloque.detalle;
+  if (!detalle || detalle.length === 0) return;
+
+  const dh = ws.addRow(["  Detalle por embarque (informativo)"]);
+  dh.font = { italic: true, color: { argb: "FF666666" } };
+  for (const d of detalle) {
+    const r = ws.addRow([`    ${d.embarqueCodigo}`, d.descripcion, num(d.usd), num(d.ars)]);
+    r.font = { color: { argb: "FF666666" } };
+    setMoney(r);
+  }
 }
 
 function setMoney(row: ExcelJS.Row): void {
