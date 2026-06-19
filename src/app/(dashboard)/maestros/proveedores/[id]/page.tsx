@@ -2,11 +2,13 @@ import { notFound } from "next/navigation";
 
 import { db } from "@/lib/db";
 import { Card } from "@/components/ui/card";
+import { AuditTrail } from "@/components/ui/audit-trail";
 import { RecordHeader } from "@/components/layout/record-header";
 import { RecordTabs } from "@/components/ui/record-tabs";
 import { RelatedItem, RelatedList } from "@/components/ui/related-list";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { resolveActiveTab } from "@/lib/record-tabs";
+import { getAuditLog } from "@/lib/services/auditoria";
 import { getHistoricoPagos } from "@/lib/services/historico-pagos";
 import { isProveedorExterior } from "@/lib/services/cuentas-a-pagar";
 
@@ -15,7 +17,7 @@ import { PagosHistorialTable } from "../../../tesoreria/pagos-historial/pagos-hi
 type Params = Promise<{ id: string }>;
 type SearchParams = Promise<{ tab?: string }>;
 
-const TABS_PROVEEDOR = ["general", "compras", "pagos", "anticipos"] as const;
+const TABS_PROVEEDOR = ["general", "compras", "pagos", "anticipos", "historial"] as const;
 
 export const dynamic = "force-dynamic";
 
@@ -58,9 +60,10 @@ export default async function ProveedorDetallePage({
 
   if (!proveedor) notFound();
 
-  const [comprasCount, anticiposCount] = await Promise.all([
+  const [comprasCount, anticiposCount, historialCount] = await Promise.all([
     db.compra.count({ where: { proveedorId: id } }),
     db.anticipoProveedor.count({ where: { proveedorId: id } }),
+    db.auditLog.count({ where: { tabla: "Proveedor", registroId: id } }),
   ]);
   const esExterior = isProveedorExterior(proveedor);
 
@@ -82,6 +85,7 @@ export default async function ProveedorDetallePage({
           { value: "compras", label: "Compras", count: comprasCount },
           { value: "pagos", label: "Pagos" },
           { value: "anticipos", label: "Anticipos", count: anticiposCount },
+          { value: "historial", label: "Historial", count: historialCount },
         ]}
       />
 
@@ -100,8 +104,14 @@ export default async function ProveedorDetallePage({
       {activeTab === "compras" && <ComprasTab proveedorId={id} />}
       {activeTab === "pagos" && <PagosTab proveedorId={id} />}
       {activeTab === "anticipos" && <AnticiposTab proveedorId={id} />}
+      {activeTab === "historial" && <HistorialTab proveedorId={id} />}
     </div>
   );
+}
+
+async function HistorialTab({ proveedorId }: { proveedorId: string }) {
+  const entries = await getAuditLog("Proveedor", proveedorId);
+  return <AuditTrail entries={entries} />;
 }
 
 async function ComprasTab({ proveedorId }: { proveedorId: string }) {
