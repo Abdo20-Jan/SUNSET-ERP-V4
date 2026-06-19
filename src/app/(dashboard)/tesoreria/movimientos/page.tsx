@@ -9,6 +9,8 @@ import { listarPrestamosPorCuentaContable } from "@/lib/services/prestamo";
 import { MovimientoTesoreriaTipo, Prisma } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePaginationParams } from "@/components/ui/pagination-params";
 import { DateRangeFilter } from "@/components/date-range-filter";
 
 import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
@@ -62,6 +64,8 @@ type SearchParams = Promise<{
   hasta?: string;
   tipo?: string;
   moneda?: string;
+  page?: string;
+  perPage?: string;
 }>;
 
 export const dynamic = "force-dynamic";
@@ -72,6 +76,8 @@ export default async function MovimientosPage({ searchParams }: { searchParams: 
     auth(),
     getCotizacionParaFecha(new Date()),
   ]);
+
+  const { page, perPage } = parsePaginationParams(params);
 
   const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
   const moneda: Moneda =
@@ -115,41 +121,46 @@ export default async function MovimientosPage({ searchParams }: { searchParams: 
     };
   }
 
-  const movimientos = await db.movimientoTesoreria.findMany({
-    where,
-    orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
-    select: {
-      id: true,
-      tipo: true,
-      fecha: true,
-      monto: true,
-      moneda: true,
-      tipoCambio: true,
-      descripcion: true,
-      comprobante: true,
-      referenciaBanco: true,
-      cuentaContableId: true,
-      cuentaBancaria: {
-        select: {
-          id: true,
-          banco: true,
-          moneda: true,
-          numero: true,
+  const [movimientos, total] = await Promise.all([
+    db.movimientoTesoreria.findMany({
+      where,
+      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
+      select: {
+        id: true,
+        tipo: true,
+        fecha: true,
+        monto: true,
+        moneda: true,
+        tipoCambio: true,
+        descripcion: true,
+        comprobante: true,
+        referenciaBanco: true,
+        cuentaContableId: true,
+        cuentaBancaria: {
+          select: {
+            id: true,
+            banco: true,
+            moneda: true,
+            numero: true,
+          },
+        },
+        cuentaContable: {
+          select: { codigo: true, nombre: true },
+        },
+        asiento: {
+          select: {
+            id: true,
+            numero: true,
+            estado: true,
+            periodo: { select: { codigo: true } },
+          },
         },
       },
-      cuentaContable: {
-        select: { codigo: true, nombre: true },
-      },
-      asiento: {
-        select: {
-          id: true,
-          numero: true,
-          estado: true,
-          periodo: { select: { codigo: true } },
-        },
-      },
-    },
-  });
+      take: perPage,
+      skip: (page - 1) * perPage,
+    }),
+    db.movimientoTesoreria.count({ where }),
+  ]);
 
   const cuentaContableIds = Array.from(new Set(movimientos.map((m) => m.cuentaContableId)));
   const prestamosPorCuenta = await listarPrestamosPorCuentaContable(cuentaContableIds);
@@ -210,7 +221,7 @@ export default async function MovimientosPage({ searchParams }: { searchParams: 
         <div className="flex flex-col gap-1">
           <h1 className="text-[15px] font-semibold tracking-tight">Movimientos</h1>
           <p className="text-sm text-muted-foreground">
-            {rows.length} movimiento{rows.length === 1 ? "" : "s"} · {rangoLabel}
+            {total} movimiento{total === 1 ? "" : "s"} · {rangoLabel}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -236,6 +247,7 @@ export default async function MovimientosPage({ searchParams }: { searchParams: 
 
       <Card className="py-0">
         <MovimientosTable data={rows} moneda={moneda} tc={tc} />
+        <Pagination page={page} perPage={perPage} total={total} className="border-t" />
       </Card>
     </div>
   );

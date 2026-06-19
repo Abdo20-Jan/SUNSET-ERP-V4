@@ -7,6 +7,8 @@ import { auth } from "@/lib/auth";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePaginationParams } from "@/components/ui/pagination-params";
 import { DateRangeFilter } from "@/components/date-range-filter";
 
 import { MonedaToggle, type Moneda } from "../reportes/_components/moneda-toggle";
@@ -17,16 +19,25 @@ export const dynamic = "force-dynamic";
 export default async function GastosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ desde?: string; hasta?: string; moneda?: string }>;
+  searchParams: Promise<{
+    desde?: string;
+    hasta?: string;
+    moneda?: string;
+    page?: string;
+    perPage?: string;
+  }>;
 }) {
   const [params, session, cotizacion] = await Promise.all([
     searchParams,
     auth(),
     getCotizacionParaFecha(new Date()),
   ]);
-  const rows = await listarGastos({
+  const { page, perPage } = parsePaginationParams(params);
+  const { rows, total, contabilizados, borradores } = await listarGastos({
     desde: params.desde,
     hasta: params.hasta,
+    page,
+    perPage,
   });
 
   const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
@@ -41,17 +52,14 @@ export default async function GastosPage({
       }
     : null;
 
-  const contabilizados = rows.filter((r) => r.estado === "CONTABILIZADO").length;
-  const borradores = rows.filter((r) => r.estado === "BORRADOR").length;
-
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="text-[15px] font-semibold tracking-tight">Gastos locales</h1>
           <p className="text-sm text-muted-foreground">
-            {rows.length} gasto{rows.length === 1 ? "" : "s"}
-            {rows.length > 0 && (
+            {total} gasto{total === 1 ? "" : "s"}
+            {total > 0 && (
               <span>
                 {" "}
                 · {contabilizados} contabilizado
@@ -73,6 +81,7 @@ export default async function GastosPage({
 
       <Card className="py-0">
         <GastosTable data={rows} moneda={moneda} tc={tc} />
+        <Pagination page={page} perPage={perPage} total={total} className="border-t" />
       </Card>
     </div>
   );

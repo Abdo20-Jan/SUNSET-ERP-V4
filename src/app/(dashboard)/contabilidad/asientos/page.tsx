@@ -6,6 +6,8 @@ import { db } from "@/lib/db";
 import { AsientoEstado, Prisma } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePaginationParams } from "@/components/ui/pagination-params";
 import { DateRangeFilter } from "@/components/date-range-filter";
 
 import { AsientosFilters } from "./asientos-filters";
@@ -50,12 +52,15 @@ type SearchParams = Promise<{
   hasta?: string;
   estado?: string;
   q?: string;
+  page?: string;
+  perPage?: string;
 }>;
 
 export const dynamic = "force-dynamic";
 
 export default async function AsientosPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
+  const { page, perPage } = parsePaginationParams(params);
 
   const estadoFilter = parseEstado(params.estado);
   const qFilter = params.q?.trim() ?? "";
@@ -77,22 +82,27 @@ export default async function AsientosPage({ searchParams }: { searchParams: Sea
     where.descripcion = { contains: qFilter, mode: "insensitive" };
   }
 
-  const asientos = await db.asiento.findMany({
-    where,
-    orderBy: [{ fecha: "desc" }, { numero: "desc" }],
-    select: {
-      id: true,
-      numero: true,
-      fecha: true,
-      descripcion: true,
-      estado: true,
-      origen: true,
-      moneda: true,
-      totalDebe: true,
-      totalHaber: true,
-      periodo: { select: { codigo: true } },
-    },
-  });
+  const [asientos, total] = await Promise.all([
+    db.asiento.findMany({
+      where,
+      orderBy: [{ fecha: "desc" }, { numero: "desc" }],
+      select: {
+        id: true,
+        numero: true,
+        fecha: true,
+        descripcion: true,
+        estado: true,
+        origen: true,
+        moneda: true,
+        totalDebe: true,
+        totalHaber: true,
+        periodo: { select: { codigo: true } },
+      },
+      take: perPage,
+      skip: (page - 1) * perPage,
+    }),
+    db.asiento.count({ where }),
+  ]);
 
   const rows: AsientoRow[] = asientos.map((a) => ({
     id: a.id,
@@ -122,7 +132,7 @@ export default async function AsientosPage({ searchParams }: { searchParams: Sea
         <div className="flex flex-col gap-1">
           <h1 className="text-[15px] font-semibold tracking-tight">Asientos</h1>
           <p className="text-sm text-muted-foreground">
-            {rows.length} asiento{rows.length === 1 ? "" : "s"} · {rangoLabel}
+            {total} asiento{total === 1 ? "" : "s"} · {rangoLabel}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -150,6 +160,7 @@ export default async function AsientosPage({ searchParams }: { searchParams: Sea
 
       <Card className="py-0">
         <AsientosTable data={rows} />
+        <Pagination page={page} perPage={perPage} total={total} className="border-t" />
       </Card>
     </div>
   );
