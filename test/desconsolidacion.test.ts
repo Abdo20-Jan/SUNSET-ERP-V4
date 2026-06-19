@@ -91,7 +91,7 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
         tipoCambio: TIPO_CAMBIO,
       },
     });
-    // El arribo a zona primaria (debita 1.1.5.04) debe haber corrido antes de
+    // El arribo a zona primaria (debita 1.1.7.04) debe haber corrido antes de
     // desconsolidar — lo marcamos con un asiento mínimo y el FK del embarque.
     if (conArribo) {
       const periodo = await db.prisma.periodoContable.findFirstOrThrow();
@@ -170,7 +170,7 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
   // ---- happy path (sin divergencia) ------------------------------------
 
   describe("sin divergencia", () => {
-    it("setea counters, mueve stock por SKU y genera el asiento TRASLADO 1.1.5.05/1.1.5.04", async () => {
+    it("setea counters, mueve stock por SKU y genera el asiento TRASLADO 1.1.7.03/1.1.7.04", async () => {
       const s = await seed();
       const out = await desconsolidar(
         {
@@ -218,8 +218,8 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
 
       // asiento principal: Σ FC × cant × TC = 100 × 10 × 1000 = 1 000 000
       expect(await lineasDe(out.asiento!.id)).toEqual([
-        { codigo: "1.1.7.04", debe: "1000000.00", haber: "0.00" },
-        { codigo: "1.1.7.03", debe: "0.00", haber: "1000000.00" },
+        { codigo: "1.1.7.03", debe: "1000000.00", haber: "0.00" },
+        { codigo: "1.1.7.04", debe: "0.00", haber: "1000000.00" },
       ]);
 
       // header
@@ -241,8 +241,8 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
 
       // 100×10×1000 + 40×5×1000 = 1 000 000 + 200 000 = 1 200 000
       expect(await lineasDe(out.asiento!.id)).toEqual([
-        { codigo: "1.1.7.04", debe: "1200000.00", haber: "0.00" },
-        { codigo: "1.1.7.03", debe: "0.00", haber: "1200000.00" },
+        { codigo: "1.1.7.03", debe: "1200000.00", haber: "0.00" },
+        { codigo: "1.1.7.04", debe: "0.00", haber: "1200000.00" },
       ]);
     });
 
@@ -250,9 +250,9 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
       // FC × TC con sub-centavos: 12.3457 × 1000.5 = 12351.87285 por unidad.
       // El traslado debe redondear el unitario a 2dp ANTES de multiplicar
       // (idéntico a la nacionalización: round2(FC×TC)), de modo que el DEBE
-      // 1.1.5.05 del asiento == costoUnitario del MovimientoStock × cantidad.
+      // 1.1.7.03 del asiento == costoUnitario del MovimientoStock × cantidad.
       // Sin alinear, el asiento redondea el total (49407.49) y el movimiento el
-      // unitario (12351.87 × 4 = 49407.48) → residuo de 0,01 en 1.1.5.05.
+      // unitario (12351.87 × 4 = 49407.48) → residuo de 0,01 en 1.1.7.03.
       const s = await seed([{ codigo: "SKU-RND", declarada: 4, fc: "12.3457" }]);
       const cont = await db.prisma.contenedor.findUniqueOrThrow({
         where: { id: s.contenedorId },
@@ -273,8 +273,8 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
       expect(costoUnit.toFixed(2)).toBe("12351.87");
 
       const lineas = await lineasDe(out.asiento!.id);
-      const debe05 = lineas.find((l) => l.codigo === "1.1.7.04")?.debe;
-      // Reconciliación interna: DEBE 1.1.5.05 == costoUnitario × cantidad.
+      const debe05 = lineas.find((l) => l.codigo === "1.1.7.03")?.debe;
+      // Reconciliación interna: DEBE 1.1.7.03 == costoUnitario × cantidad.
       expect(debe05).toBe(costoUnit.times(4).toFixed(2));
       expect(debe05).toBe("49407.48");
     });
@@ -365,8 +365,8 @@ describe("desconsolidacion (PR 3.2, D4 + gate D9)", () => {
     });
 
     it("rechaza desconsolidar sin arribo confirmado (zona primaria) — Onda A #3", async () => {
-      // Sin asientoZonaPrimariaId el traslado 1.1.5.04 → 1.1.5.05 acreditaría
-      // 1.1.5.04 nunca debitada → subcuenta acreedora. Debe bloquearse.
+      // Sin asientoZonaPrimariaId el traslado 1.1.7.04 → 1.1.7.03 acreditaría
+      // 1.1.7.04 nunca debitada → subcuenta acreedora. Debe bloquearse.
       const s = await seed(undefined, "EN_DEPOSITO_FISCAL", false);
       await expect(
         desconsolidar({ contenedorId: s.contenedorId, fecha: FECHA }, db.prisma),

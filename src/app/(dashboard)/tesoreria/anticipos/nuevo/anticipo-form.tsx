@@ -239,7 +239,7 @@ export function AnticipoForm({
               />
               {errors.cuentaContableId && <FieldError message={errors.cuentaContableId.message} />}
               <p className="text-xs text-muted-foreground">
-                La cuenta codifica la clasificación: 1.1.7.07 = bien de cambio, 1.1.5.01 = servicio.
+                La cuenta codifica la clasificación: 1.1.7.10 = bien de cambio, 1.1.6.10 = servicio.
               </p>
             </div>
           </div>

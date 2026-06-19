@@ -4,16 +4,16 @@
  * não há conta contábil dedicada — isso preserva a estrutura completa do relatório
  * conforme PRD (`01-contabilidad/relatorios-financeiros.md`).
  *
- * Numeração RT9 (rebuild #4): os `cuentaCodigos` foram remapeados ao plano v3
- * (`docs/nuevo-plan-de-cuentas-rt9.md`). Decisões do remap:
+ * Numeração: os `cuentaCodigos` seguem o plano de 9 clases (631 contas;
+ * ETAPA 3 reapontou as cargas fiscais a pagar a `2.1.3.x`). Decisões do remap:
  * - Os custos logísticos de importação (gastos portuários, agente de cargas,
  *   operador logístico, despachante, frete internacional) CAPITALIZAM a
- *   `1.1.7.02` (RT17) — já não são contas de egresso `5.4/5.5/5.6/5.7`. Suas
- *   linhas ficam como template sem conta (`cuentaCodigos: []`); a saída de caixa
- *   real aparece no `getFlujoCaja` pela contrapartida do proveedor/banco, não
- *   por este config.
+ *   `1.1.7.05` (en tránsito, RT17) — não são contas de egresso. Suas linhas
+ *   ficam como template sem conta (`cuentaCodigos: []`); a saída de caixa real
+ *   aparece no `getFlujoCaja` pela contrapartida do proveedor/banco, não por
+ *   este config.
  * - Os tributos de nacionalização (DIE/Tasa/Arancel) também capitalizam; resta
- *   apenas a obrigação por pagar (`2.1.5.0x`), que é a que se mapeia aqui.
+ *   apenas a obrigação por pagar (`2.1.3.4.0x`), que é a que se mapeia aqui.
  * - Onde o plano v3 consolidou várias contas antigas numa só (ex.: serviços e
  *   gastos gerais → `5.3.1.05`), uma linha é dona do código e as demais ficam
  *   `[]` (consolidadas), preservando o ownership único.
@@ -105,7 +105,7 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
     label: "Gastos Variables con Llegada de Productos",
     direccion: "SALIDA",
     subsecciones: [
-      // Toda esta sección CAPITALIZA a 1.1.7.02 (Mercaderías en Tránsito) bajo
+      // Toda esta sección CAPITALIZA a 1.1.7.05 (Importaciones en Tránsito) bajo
       // RT17 — ya no hay cuentas de egreso 5.4/5.5/5.6/5.7. Las líneas se
       // conservan como template; la salida de caja real aparece en el flujo
       // realizado por la contrapartida del proveedor/banco.
@@ -172,10 +172,10 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
         label: "IMPUESTOS DE IMPORTAÇÃO",
         items: [
           // DIE/Tasa/Arancel capitalizan (RT17); queda sólo la obligación por
-          // pagar 2.1.5.0x, que es la que mueve caja al cancelarse.
-          { label: "Derecho de Importación (16%)", cuentaCodigos: ["2.1.4.4.01"] },
-          { label: "Tasa Estadística (3%)", cuentaCodigos: ["2.1.4.4.02"] },
-          { label: "Arancel SIM (0,5%)", cuentaCodigos: ["2.1.4.4.03"] },
+          // pagar 2.1.3.4.0x, que es la que mueve caja al cancelarse.
+          { label: "Derecho de Importación (16%)", cuentaCodigos: ["2.1.3.4.01"] },
+          { label: "Tasa Estadística (3%)", cuentaCodigos: ["2.1.3.4.02"] },
+          { label: "Arancel SIM (0,5%)", cuentaCodigos: ["2.1.3.4.03"] },
           { label: "IVA Importación (21%)", cuentaCodigos: ["1.1.4.1.03"] },
           { label: "IVA Adicional (20%)", cuentaCodigos: ["1.1.4.1.04"] },
           { label: "Percepción IIBB (2,5%)", cuentaCodigos: ["1.1.4.2.01"] },
@@ -192,9 +192,9 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
       {
         label: "IMPUESTOS VENTAS",
         items: [
-          { label: "IVA Ventas (21%)", cuentaCodigos: ["2.1.4.1.01"] },
-          { label: "IIBB Ventas (2,5%)", cuentaCodigos: ["2.1.4.2.01"] },
-          { label: "Ganancias por Pagar", cuentaCodigos: ["2.1.4.3.01"] },
+          { label: "IVA Ventas (21%)", cuentaCodigos: ["2.1.3.1.01"] },
+          { label: "IIBB Ventas (2,5%)", cuentaCodigos: ["2.1.3.2.01"] },
+          { label: "Ganancias por Pagar", cuentaCodigos: ["2.1.3.3.01"] },
         ],
       },
     ],
@@ -227,8 +227,8 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
         label: "RECEBIMENTOS DE CAPITAL",
         items: [
           { label: "Aportes de Capital", cuentaCodigos: ["3.1.01", "3.1.02"] },
-          // Préstamos nacen bajo 2.1.5.01.x / 2.2.2.01.x en runtime (sin código
-          // canónico fijo); se exponen por su rama al consolidarse.
+          // Préstamos nacen bajo 2.1.2.02.x (CP) / 2.2.1.01.x (LP) en runtime
+          // (sin código canónico fijo); se exponen por su rama al consolidarse.
           { label: "Empréstimos Bancários CP", cuentaCodigos: [] },
           { label: "Empréstimos Exterior", cuentaCodigos: [] },
         ],
@@ -238,7 +238,7 @@ export const FLUJO_CAJA_ESTRUCTURA: readonly FlujoSeccion[] = [
         items: [
           { label: "Juros Pagos", cuentaCodigos: ["9.1.03"] },
           { label: "Comissões Bancárias", cuentaCodigos: ["9.5.01"] },
-          { label: "Gastos Transferência Exterior", cuentaCodigos: ["9.5.02"] },
+          { label: "Gastos Transferência Exterior", cuentaCodigos: ["9.5.03"] },
         ],
       },
     ],

@@ -4,13 +4,13 @@ import { createTestDb, type TestDb } from "./db";
 
 // Onda A #5 — despacho legacy (crearAsientoDespacho) y las facturas ZP EMITIDA.
 //
-// El despacho legacy transfiere el costo en tránsito 1.1.5.02 → 1.1.5.01 por la
+// El despacho legacy transfiere el costo en tránsito 1.1.7.05 → 1.1.7.01 por la
 // porción despachada. Ese costo = FOB + flete/seguro origen + Σ subtotales de
 // facturas momento=ZONA_PRIMARIA. PERO el filtro de esas facturas usaba
 // `estado !== "ANULADA"`, incluyendo las **EMITIDA** — que ya tienen su asiento
 // standalone (DEBE gasto 5.x / HABER proveedor) y NUNCA se capitalizaron en
-// 1.1.5.02. Resultado: el despacho acreditaba 1.1.5.02 de más (→ saldo ACREEDOR)
-// y duplicaba el costo (gasto 5.x + capitalizado en 1.1.5.01).
+// 1.1.7.05. Resultado: el despacho acreditaba 1.1.7.05 de más (→ saldo ACREEDOR)
+// y duplicaba el costo (gasto 5.x + capitalizado en 1.1.7.01).
 //
 // El fix alinea el filtro con `crearAsientoZonaPrimaria` y con el de facturas de
 // despacho: sólo BORRADOR y LEGACY_BUNDLED. Las EMITIDA quedan fuera.
@@ -198,7 +198,7 @@ describe("despacho legacy — facturas ZP EMITIDA no se re-capitalizan (Onda A #
     return despacho.id;
   }
 
-  it("factura ZP EMITIDA queda FUERA del traslado: 1.1.5.01 = FOB y 1.1.5.02 neto 0", async () => {
+  it("factura ZP EMITIDA queda FUERA del traslado: 1.1.7.01 = FOB y 1.1.7.05 neto 0", async () => {
     const s = await seedLegacy();
 
     // Emitir la factura ZP standalone → EMITIDA (DEBE 5.4.1.12 / HABER proveedor).
@@ -206,20 +206,20 @@ describe("despacho legacy — facturas ZP EMITIDA no se re-capitalizan (Onda A #
     const costo = await db.prisma.embarqueCosto.findUniqueOrThrow({ where: { id: s.costoId } });
     expect(costo.estado).toBe("EMITIDA");
 
-    // Confirmar zona primaria (legacy): DEBE 1.1.5.02 = FOB (1.000.000); la
+    // Confirmar zona primaria (legacy): DEBE 1.1.7.05 = FOB (1.000.000); la
     // EMITIDA NO entra (el confirm filtra BORRADOR/LEGACY_BUNDLED).
     const cf = await confirmarZonaPrimariaAction(s.embarqueId, FECHA_ISO);
     expect(cf.ok).toBe(true);
-    expect(await netoCuenta("1.1.7.02")).toBeCloseTo(1_000_000, 2);
+    expect(await netoCuenta("1.1.7.05")).toBeCloseTo(1_000_000, 2);
 
     // Despachar el total y contabilizar.
     const despachoId = await crearDespachoTotal(s.embarqueId, s.itemEmbarqueId, 100);
     await crearAsientoDespacho(despachoId, db.prisma);
 
-    // El traslado capitaliza SÓLO el FOB (no la EMITIDA): 1.1.5.01 = 1.000.000.
+    // El traslado capitaliza SÓLO el FOB (no la EMITIDA): 1.1.7.01 = 1.000.000.
     expect(await debeCuenta("1.1.7.01")).toBeCloseTo(1_000_000, 2);
-    // 1.1.5.02 vuelve a CERO (entró FOB en el arribo, sale FOB en el despacho).
-    expect(await netoCuenta("1.1.7.02")).toBeCloseTo(0, 2);
+    // 1.1.7.05 vuelve a CERO (entró FOB en el arribo, sale FOB en el despacho).
+    expect(await netoCuenta("1.1.7.05")).toBeCloseTo(0, 2);
     // El gasto 5.4.1.12 de la EMITIDA NO se duplica: sigue con su único débito.
     expect(await debeCuenta("5.4.1.12")).toBeCloseTo(500_000, 2);
   });
@@ -234,7 +234,7 @@ describe("despacho legacy — facturas ZP EMITIDA no se re-capitalizan (Onda A #
     const despachoId = await crearDespachoTotal(s.embarqueId, s.itemEmbarqueId, 100);
     await crearAsientoDespacho(despachoId, db.prisma);
 
-    // BORRADOR sigue dentro del costo capitalizado: 1.1.5.01 = FOB + subtotal ZP.
+    // BORRADOR sigue dentro del costo capitalizado: 1.1.7.01 = FOB + subtotal ZP.
     expect(await debeCuenta("1.1.7.01")).toBeCloseTo(1_500_000, 2);
   });
 });

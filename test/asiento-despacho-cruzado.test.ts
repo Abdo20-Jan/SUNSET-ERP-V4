@@ -3,7 +3,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { createTestDb, type TestDb } from "./db";
 
 // PR 4.5 — contabilización del despacho parcial CRUZADO (E2E vía action).
-// Verifica el asiento NACIONALIZACION_VIA_DF (DEBE 1.1.5.01 / HABER 1.1.5.05
+// Verifica el asiento NACIONALIZACION_VIA_DF (DEBE 1.1.7.01 / HABER 1.1.7.03
 // con costo landed = costoFCUnitario×cant×TC) + tributos, el movimiento de
 // stock DF→destino (aplicarNacionalizacionDF) y el VEP 1:1, todo en la misma
 // transacción de contabilizarDespachoAction (fork por itemContenedorId).
@@ -175,7 +175,7 @@ describe("contabilización despacho cruzado (PR 4.5)", () => {
     };
   }
 
-  it("genera asiento DF (1.1.5.01/1.1.5.05 + tributos), mueve stock DF→destino y crea VEP", async () => {
+  it("genera asiento DF (1.1.7.01/1.1.7.03 + tributos), mueve stock DF→destino y crea VEP", async () => {
     const s = await seed();
     const res = await contabilizarDespachoAction(s.despachoId);
     expect(res.ok).toBe(true);
@@ -196,14 +196,14 @@ describe("contabilización despacho cruzado (PR 4.5)", () => {
       if (l.haber.gt(0)) haberPorCuenta.set(l.cuenta.codigo, l.haber.toFixed(2));
     }
     // Nacionalización CON CAPITALIZACIÓN del DIE en el costo de la mercadería:
-    //   DEBE 1.1.5.01 = nacionalizado 375000 + DIE capitalizado 100000 = 475000.
-    //   HABER 1.1.5.05 = sólo el costo FC nacionalizado (sin tributos) = 375000.
+    //   DEBE 1.1.7.01 = nacionalizado 375000 + DIE capitalizado 100000 = 475000.
+    //   HABER 1.1.7.03 = sólo el costo FC nacionalizado (sin tributos) = 375000.
     expect(debePorCuenta.get("1.1.7.01")).toBe("475000.00");
-    expect(haberPorCuenta.get("1.1.7.04")).toBe("375000.00");
-    // El DIE YA NO va a egreso 5.7.1.01 (capitalizado en 1.1.5.01); el HABER
+    expect(haberPorCuenta.get("1.1.7.03")).toBe("375000.00");
+    // El DIE YA NO va a egreso 5.7.1.01 (capitalizado en 1.1.7.01); el HABER
     // del pasivo aduanero (2.1.5.01) permanece como obligación a pagar.
     expect(debePorCuenta.has("5.7.1.01")).toBe(false);
-    expect(haberPorCuenta.get("2.1.4.4.01")).toBe("100000.00");
+    expect(haberPorCuenta.get("2.1.3.4.01")).toBe("100000.00");
     const totalDebe = lineas.reduce((s2, l) => s2 + Number(l.debe), 0);
     const totalHaber = lineas.reduce((s2, l) => s2 + Number(l.haber), 0);
     expect(totalDebe).toBeCloseTo(totalHaber, 2); // asiento balanceado

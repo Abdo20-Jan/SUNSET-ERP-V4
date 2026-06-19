@@ -170,8 +170,8 @@ export function DesconsolidacionForm({ contenedor, defaultFecha }: Props) {
         </div>
 
         <p className="rounded-md border border-dashed bg-muted/30 p-3 text-xs text-muted-foreground">
-          Sin divergencia: se genera el asiento de traslado a depósito fiscal (DEBE 1.1.5.05 / HABER
-          1.1.5.04) e ingresa el stock al DF. Con divergencia: el asiento queda bloqueado y el
+          Sin divergencia: se genera el asiento de traslado a depósito fiscal (DEBE 1.1.7.03 / HABER
+          1.1.7.04) e ingresa el stock al DF. Con divergencia: el asiento queda bloqueado y el
           contenedor pasa a investigación (AGUARDANDO_INVESTIGACAO).
         </p>
 

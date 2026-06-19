@@ -3,12 +3,12 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { createTestDb, type TestDb } from "./db";
 
 // Onda A #6 — guard de reversión de zona primaria (Modelo Y). En el arribo
-// comex, confirmar zona primaria DEBITA 1.1.5.04 sin mover stock; el primer
-// ingreso de stock (y el traslado 1.1.5.04 → 1.1.5.05) ocurre en la
+// comex, confirmar zona primaria DEBITA 1.1.7.04 sin mover stock; el primer
+// ingreso de stock (y el traslado 1.1.7.04 → 1.1.7.03) ocurre en la
 // desconsolidación. Si después de desconsolidar se permite revertir el arribo,
-// la anulación del asiento de arribo borra el DÉBITO 1.1.5.04 pero deja el
-// traslado (HABER 1.1.5.04 / DEBE 1.1.5.05) y el stock del DF huérfanos →
-// 1.1.5.04 queda en saldo ACREEDOR (negativo). El guard bloquea esa reversión
+// la anulación del asiento de arribo borra el DÉBITO 1.1.7.04 pero deja el
+// traslado (HABER 1.1.7.04 / DEBE 1.1.7.03) y el stock del DF huérfanos →
+// 1.1.7.04 queda en saldo ACREEDOR (negativo). El guard bloquea esa reversión
 // mientras exista una desconsolidación viva en algún contenedor del embarque.
 
 const h = vi.hoisted(() => {
@@ -97,7 +97,7 @@ describe("revertir zona primaria — guard de desconsolidación (Onda A #6)", ()
     return lineas.reduce((acc, l) => acc + Number(l.debe) - Number(l.haber), 0);
   }
 
-  // Modelo Y: FOB 1000 USD @ TC 1000 → base 1.000.000 ARS en 1.1.5.04. Un único
+  // Modelo Y: FOB 1000 USD @ TC 1000 → base 1.000.000 ARS en 1.1.7.04. Un único
   // contenedor con FC cerrado, listo para arribar y luego desconsolidar.
   async function seedModeloY() {
     const prov = await db.prisma.proveedor.create({ data: { nombre: "Exterior SA" } });
@@ -142,16 +142,16 @@ describe("revertir zona primaria — guard de desconsolidación (Onda A #6)", ()
     };
   }
 
-  it("tras desconsolidar un contenedor, revertir zona primaria es rechazado (no orfaniza 1.1.5.04)", async () => {
+  it("tras desconsolidar un contenedor, revertir zona primaria es rechazado (no orfaniza 1.1.7.04)", async () => {
     const s = await seedModeloY();
 
-    // 1) Arribo real (Modelo Y): DEBE 1.1.5.04 = 1.000.000, sin stock.
+    // 1) Arribo real (Modelo Y): DEBE 1.1.7.04 = 1.000.000, sin stock.
     const arribo = await confirmarZonaPrimariaAction(s.embarqueId, FECHA_ISO);
     expect(arribo.ok).toBe(true);
-    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(1_000_000, 2);
+    expect(await netoCuenta("1.1.7.04")).toBeCloseTo(1_000_000, 2);
 
     // 2) Avanzar el contenedor a EN_DEPOSITO_FISCAL y desconsolidar de verdad:
-    //    traslado 1.1.5.04 → 1.1.5.05 + stock al DF + registro Desconsolidacion.
+    //    traslado 1.1.7.04 → 1.1.7.03 + stock al DF + registro Desconsolidacion.
     await db.prisma.contenedor.update({
       where: { id: s.contenedorId },
       data: { estado: "EN_DEPOSITO_FISCAL", depositoFiscalId: s.depFiscalId },
@@ -162,10 +162,10 @@ describe("revertir zona primaria — guard de desconsolidación (Onda A #6)", ()
     );
     expect(desc.divergencia).toBe(false);
     expect(desc.asiento).not.toBeNull();
-    // Post-desconsolidación coherente: 1.1.5.04 neto 0 (debitó arribo, acreditó
-    // traslado) y 1.1.5.05 = 1.000.000.
-    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(0, 2);
-    expect(await netoCuenta("1.1.7.04")).toBeCloseTo(1_000_000, 2);
+    // Post-desconsolidación coherente: 1.1.7.04 neto 0 (debitó arribo, acreditó
+    // traslado) y 1.1.7.03 = 1.000.000.
+    expect(await netoCuenta("1.1.7.04")).toBeCloseTo(0, 2);
+    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(1_000_000, 2);
 
     // 3) Revertir zona primaria DEBE ser rechazado.
     const revert = await revertirZonaPrimariaAction(s.embarqueId);
@@ -173,22 +173,22 @@ describe("revertir zona primaria — guard de desconsolidación (Onda A #6)", ()
     if (!revert.ok) expect(revert.error).toMatch(/desconsolida/i);
 
     // 4) Nada cambió (transacción revertida): el arribo sigue contabilizado, el
-    //    embarque conserva su asiento ZP y 1.1.5.04 NO quedó negativo.
+    //    embarque conserva su asiento ZP y 1.1.7.04 NO quedó negativo.
     const embarque = await db.prisma.embarque.findUniqueOrThrow({ where: { id: s.embarqueId } });
     expect(embarque.asientoZonaPrimariaId).not.toBeNull();
     const arriboAsiento = await db.prisma.asiento.findUniqueOrThrow({
       where: { id: embarque.asientoZonaPrimariaId! },
     });
     expect(arriboAsiento.estado).toBe("CONTABILIZADO");
-    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(0, 2);
-    expect(await netoCuenta("1.1.7.04")).toBeCloseTo(1_000_000, 2);
+    expect(await netoCuenta("1.1.7.04")).toBeCloseTo(0, 2);
+    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(1_000_000, 2);
   });
 
   it("sin desconsolidación, revertir zona primaria sigue funcionando (control)", async () => {
     const s = await seedModeloY();
     const arribo = await confirmarZonaPrimariaAction(s.embarqueId, FECHA_ISO);
     expect(arribo.ok).toBe(true);
-    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(1_000_000, 2);
+    expect(await netoCuenta("1.1.7.04")).toBeCloseTo(1_000_000, 2);
 
     const revert = await revertirZonaPrimariaAction(s.embarqueId);
     expect(revert.ok).toBe(true);
@@ -196,7 +196,7 @@ describe("revertir zona primaria — guard de desconsolidación (Onda A #6)", ()
     const embarque = await db.prisma.embarque.findUniqueOrThrow({ where: { id: s.embarqueId } });
     expect(embarque.asientoZonaPrimariaId).toBeNull();
     expect(embarque.estado).toBe("EN_PUERTO");
-    // El arribo fue anulado → 1.1.5.04 neteado a cero.
-    expect(await netoCuenta("1.1.7.03")).toBeCloseTo(0, 2);
+    // El arribo fue anulado → 1.1.7.04 neteado a cero.
+    expect(await netoCuenta("1.1.7.04")).toBeCloseTo(0, 2);
   });
 });

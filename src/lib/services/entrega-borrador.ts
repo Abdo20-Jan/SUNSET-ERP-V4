@@ -25,7 +25,7 @@ export async function generarNumeroEntrega(tx: TxClient): Promise<string> {
  * venta (stock-dual ON): una EntregaVenta BORRADOR por depósito, con el 100%
  * de cada ItemVenta. NO mueve stock físico ni genera asiento — eso ocurre al
  * CONFIRMAR la entrega. El objetivo es hacer la entrega VISIBLE/pendiente para
- * que la cuenta-puente 1.1.5.03 "Estoque a Entregar" no acumule olvidada.
+ * que la cuenta-puente 1.1.7.90 "Estoque a Entregar" no acumule olvidada.
  *
  * Idempotente: si la venta ya tiene alguna entrega no-ANULADA, no crea nada y
  * devuelve []. Caso contrario devuelve los ids de las entregas creadas.

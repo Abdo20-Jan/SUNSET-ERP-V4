@@ -5,8 +5,8 @@ import { createTestDb, type TestDb } from "./db";
 // Decisión contador #4 (PR #2) — Aplicación de un anticipo a proveedor contra
 // una factura (Compra/Gasto). El anticipo es un ACTIVO (dinero a cuenta); al
 // llegar la factura, aplicarlo CANCELA parte del pasivo del proveedor y BAJA el
-// activo:  DEBE pasivo-proveedor (2.1.1.0x)  /  HABER cuenta-anticipo (1.1.7.07
-// bien | 1.1.5.01 servicio).  Baja saldoAplicadoArs; al consumir todo el saldo
+// activo:  DEBE pasivo-proveedor (2.1.1.0x)  /  HABER cuenta-anticipo (1.1.7.10
+// bien | 1.1.6.10 servicio).  Baja saldoAplicadoArs; al consumir todo el saldo
 // el anticipo pasa a APLICADO_TOTAL.  Anular revierte el asiento del registro
 // (DEBE anticipo / HABER banco) → el saldo del banco vuelve.
 
@@ -100,12 +100,12 @@ describe("Anticipo a proveedor — aplicación + anulación (PR #2)", () => {
 
     const cuentaBanco = await mkCuenta("1.1.1.02.01", "BANCO SANTANDER ARS", "ACTIVO");
     const anticipoBienes = await mkCuenta(
-      "1.1.7.07",
+      "1.1.7.10",
       "ANTICIPOS A PROVEEDORES DE BIENES DE CAMBIO",
       "ACTIVO",
     );
     const anticipoServicios = await mkCuenta(
-      "1.1.5.01",
+      "1.1.6.10",
       "ANTICIPOS A PROVEEDORES DE SERVICIOS",
       "ACTIVO",
     );
@@ -242,7 +242,7 @@ describe("Anticipo a proveedor — aplicación + anulación (PR #2)", () => {
 
     const a = await lineasDelAsiento(r.asientoId);
     expect(a.debe(s.cuentaPasivoACodigo)).toBeCloseTo(100000, 2);
-    expect(a.haber("1.1.7.07")).toBeCloseTo(100000, 2);
+    expect(a.haber("1.1.7.10")).toBeCloseTo(100000, 2);
     expect(a.totalDebe).toBeCloseTo(a.totalHaber, 2);
 
     const anticipo = await db.prisma.anticipoProveedor.findUniqueOrThrow({
@@ -339,7 +339,7 @@ describe("Anticipo a proveedor — aplicación + anulación (PR #2)", () => {
     expect(await db.prisma.aplicacionAnticipoProveedor.count()).toBe(1);
   });
 
-  it("aplica contra un Gasto (no sólo Compra): servicio debita pasivo / acredita 1.1.5.01", async () => {
+  it("aplica contra un Gasto (no sólo Compra): servicio debita pasivo / acredita 1.1.6.10", async () => {
     const s = await seed();
     const { anticipoId } = await registrarAnticipo(s, s.cuentaAnticipoServiciosId, "80000.00");
     const gastoId = await crearGasto(s.proveedorAId, "100000.00");
@@ -355,7 +355,7 @@ describe("Anticipo a proveedor — aplicación + anulación (PR #2)", () => {
 
     const a = await lineasDelAsiento(r.asientoId);
     expect(a.debe(s.cuentaPasivoACodigo)).toBeCloseTo(80000, 2);
-    expect(a.haber("1.1.5.01")).toBeCloseTo(80000, 2);
+    expect(a.haber("1.1.6.10")).toBeCloseTo(80000, 2);
 
     const apls = await db.prisma.aplicacionAnticipoProveedor.findMany({ where: { anticipoId } });
     expect(apls).toHaveLength(1);
@@ -384,7 +384,7 @@ describe("Anticipo a proveedor — aplicación + anulación (PR #2)", () => {
     expect(anticipo.estado).toBe("ANULADO");
     // El asiento del registro quedó ANULADO → su HABER al banco ya no cuenta.
     expect(await saldoCuenta(s.cuentaBancoCodigo)).toBeCloseTo(0, 2);
-    expect(await saldoCuenta("1.1.7.07")).toBeCloseTo(0, 2);
+    expect(await saldoCuenta("1.1.7.10")).toBeCloseTo(0, 2);
   });
 
   it("rechaza anular un anticipo con aplicaciones", async () => {

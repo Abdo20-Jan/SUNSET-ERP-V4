@@ -4,10 +4,10 @@ import { createTestDb, type TestDb } from "./db";
 
 // Ponte PR C — asiento de arribo comex (Modelo Y). Para embarques CON
 // contenedores (flag on), confirmar zona primaria NO mueve stock: lanza un
-// asiento que DEBE 1.1.5.04 (MERCADERÍAS EN ZONA PRIMARIA) por el total
+// asiento que DEBE 1.1.7.04 (MERCADERÍAS EN ZONA PRIMARIA) por el total
 // rateable / HABER proveedores. El primer ingreso de stock recién ocurre en la
 // desconsolidación (DF). Para embarques SIN contenedores, el flujo legacy
-// (1.1.5.02 + ingreso de stock ZPA) queda intacto.
+// (1.1.7.05 + ingreso de stock ZPA) queda intacto.
 
 const h = vi.hoisted(() => {
   let client: PrismaClient | undefined;
@@ -155,7 +155,7 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
     return { embarqueId: embarque.id, prodAId: prodA.id, prodBId: prodB.id };
   }
 
-  it("embarque con contenedores → asiento DEBE 1.1.5.04, sin movimiento de stock", async () => {
+  it("embarque con contenedores → asiento DEBE 1.1.7.04, sin movimiento de stock", async () => {
     const s = await seedComex();
     const res = await confirmarZonaPrimariaAction(s.embarqueId, FECHA_ISO);
     expect(res.ok).toBe(true);
@@ -168,15 +168,15 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
     const { debe, haber, totalDebe, totalHaber } = await lineasPorCuenta(
       embarque.asientoZonaPrimariaId!,
     );
-    // DEBE en 1.1.5.04 (ZONA PRIMARIA), NUNCA en 1.1.5.02 (EN TRÁNSITO).
-    expect(debe.get("1.1.7.03")).toBeCloseTo(1_000_000, 2);
-    expect(debe.has("1.1.7.02")).toBe(false);
+    // DEBE en 1.1.7.04 (ZONA PRIMARIA), NUNCA en 1.1.7.05 (EN TRÁNSITO).
+    expect(debe.get("1.1.7.04")).toBeCloseTo(1_000_000, 2);
+    expect(debe.has("1.1.7.05")).toBe(false);
     // Asiento balanceado; el HABER va a proveedor exterior.
     expect(totalDebe).toBeCloseTo(totalHaber, 2);
     expect(totalDebe).toBeCloseTo(1_000_000, 2);
     expect([...haber.values()].reduce((a, b) => a + b, 0)).toBeCloseTo(1_000_000, 2);
 
-    // Reconciliación con costoFCUnitario: Σ FC × cant × TC == débito 1.1.5.04.
+    // Reconciliación con costoFCUnitario: Σ FC × cant × TC == débito 1.1.7.04.
     const items = await db.prisma.itemContenedor.findMany({
       where: { contenedor: { embarqueId: s.embarqueId } },
     });
@@ -184,7 +184,7 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
       (acc, it) => acc + Number(it.costoFCUnitario) * it.cantidadDeclarada * 1000,
       0,
     );
-    expect(reconc).toBeCloseTo(debe.get("1.1.7.03") ?? 0, 2);
+    expect(reconc).toBeCloseTo(debe.get("1.1.7.04") ?? 0, 2);
 
     // Modelo Y: el arribo NO mueve stock (eso ocurre en la desconsolidación).
     const movs = await db.prisma.movimientoStock.count();
@@ -193,7 +193,7 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
     expect(spd).toBe(0);
   });
 
-  it("factura ZP ya EMITIDA → el arribo reclasifica el gasto 5.x a 1.1.5.04 (neteándolo)", async () => {
+  it("factura ZP ya EMITIDA → el arribo reclasifica el gasto 5.x a 1.1.7.04 (neteándolo)", async () => {
     const provExt = await db.prisma.proveedor.create({ data: { nombre: "Exterior SA" } });
     const ctaPasivo = await db.prisma.cuentaContable.create({
       data: {
@@ -276,8 +276,8 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
     const { debe, haber, totalDebe, totalHaber } = await lineasPorCuenta(
       fresh.asientoZonaPrimariaId!,
     );
-    // 1.1.5.04 = FOB (1.000.000) + subtotal factura (500.000).
-    expect(debe.get("1.1.7.03")).toBeCloseTo(1_500_000, 2);
+    // 1.1.7.04 = FOB (1.000.000) + subtotal factura (500.000).
+    expect(debe.get("1.1.7.04")).toBeCloseTo(1_500_000, 2);
     // El arribo ACREDITA 5.4.1.11 (reclasificación), neteando el gasto.
     expect(haber.get("5.4.1.11")).toBeCloseTo(500_000, 2);
     expect(totalDebe).toBeCloseTo(totalHaber, 2);
@@ -293,7 +293,7 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
     expect(await db.prisma.movimientoStock.count()).toBe(0);
   });
 
-  it("embarque sin contenedores → flujo legacy intacto (1.1.5.02 + ingreso de stock)", async () => {
+  it("embarque sin contenedores → flujo legacy intacto (1.1.7.05 + ingreso de stock)", async () => {
     const prov = await db.prisma.proveedor.create({ data: { nombre: "Exterior SA" } });
     const prod = await db.prisma.producto.create({
       data: { codigo: "L-1", nombre: "Prod Legacy" },
@@ -325,9 +325,9 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
 
     const fresh = await db.prisma.embarque.findUniqueOrThrow({ where: { id: embarque.id } });
     const { debe } = await lineasPorCuenta(fresh.asientoZonaPrimariaId!);
-    // Legacy: DEBE 1.1.5.02 (EN TRÁNSITO), NO 1.1.5.04.
-    expect(debe.get("1.1.7.02")).toBeCloseTo(1_000_000, 2);
-    expect(debe.has("1.1.7.03")).toBe(false);
+    // Legacy: DEBE 1.1.7.05 (EN TRÁNSITO), NO 1.1.7.04.
+    expect(debe.get("1.1.7.05")).toBeCloseTo(1_000_000, 2);
+    expect(debe.has("1.1.7.04")).toBe(false);
     // Legacy SÍ ingresa stock físico al depósito ZPA.
     const movs = await db.prisma.movimientoStock.count();
     expect(movs).toBeGreaterThan(0);
@@ -337,10 +337,22 @@ describe("arribo comex — Modelo Y (Ponte PR C)", () => {
   // primera línea de gasto; va a la cuenta dedicada OTROS GASTOS (7.9.99).
   it("'otros' de la factura de costo va a 7.9.99, no a la primera línea de gasto", async () => {
     const ctaPasivo = await db.prisma.cuentaContable.create({
-      data: { codigo: "2.1.1.01.05", nombre: "Despachante", tipo: "ANALITICA", categoria: "PASIVO", nivel: 5 },
+      data: {
+        codigo: "2.1.1.01.05",
+        nombre: "Despachante",
+        tipo: "ANALITICA",
+        categoria: "PASIVO",
+        nivel: 5,
+      },
     });
     const ctaGasto = await db.prisma.cuentaContable.create({
-      data: { codigo: "6.3.50", nombre: "Gasto portuario", tipo: "ANALITICA", categoria: "EGRESO", nivel: 3 },
+      data: {
+        codigo: "6.3.50",
+        nombre: "Gasto portuario",
+        tipo: "ANALITICA",
+        categoria: "EGRESO",
+        nivel: 3,
+      },
     });
     const provExt = await db.prisma.proveedor.create({ data: { nombre: "Exterior SA" } });
     const provLocal = await db.prisma.proveedor.create({

@@ -6,8 +6,8 @@ import { createTestDb, type TestDb } from "./db";
 // Registrar un adelanto a proveedor SIN factura previa: el egreso de caja es un
 // MovimientoTesoreria PAGO cuya contrapartida DEBE es la cuenta de anticipo
 // elegida vía drilldown del plan. La cuenta codifica la clasificación:
-//   - BIEN     → 1.1.7.07 (Anticipos a proveedores de bienes de cambio)
-//   - SERVICIO → 1.1.5.01 (Anticipos a proveedores de servicios)
+//   - BIEN     → 1.1.7.10 (Anticipos a proveedores de bienes de cambio)
+//   - SERVICIO → 1.1.6.10 (Anticipos a proveedores de servicios)
 // El anticipo nace VIGENTE con saldoAplicadoArs = 0 (la aplicación es PR #2).
 
 const h = vi.hoisted(() => {
@@ -99,12 +99,12 @@ describe("Anticipo a proveedor — registro (PR #1)", () => {
 
     const cuentaBanco = await mkCuenta("1.1.1.02.01", "BANCO SANTANDER ARS", "ACTIVO");
     const anticipoBienes = await mkCuenta(
-      "1.1.7.07",
+      "1.1.7.10",
       "ANTICIPOS A PROVEEDORES DE BIENES DE CAMBIO",
       "ACTIVO",
     );
     const anticipoServicios = await mkCuenta(
-      "1.1.5.01",
+      "1.1.6.10",
       "ANTICIPOS A PROVEEDORES DE SERVICIOS",
       "ACTIVO",
     );
@@ -150,7 +150,7 @@ describe("Anticipo a proveedor — registro (PR #1)", () => {
     return { debe, haber, totalDebe, totalHaber, lineas };
   }
 
-  it("anticipo de BIEN debita 1.1.7.07 y acredita el banco; nace VIGENTE", async () => {
+  it("anticipo de BIEN debita 1.1.7.10 y acredita el banco; nace VIGENTE", async () => {
     const s = await seed();
 
     const r = await registrarAnticipoProveedorAction({
@@ -165,7 +165,7 @@ describe("Anticipo a proveedor — registro (PR #1)", () => {
     if (!r.ok) return;
 
     const a = await lineasDelAsiento(r.asientoId);
-    expect(a.debe("1.1.7.07")).toBeCloseTo(150000, 2);
+    expect(a.debe("1.1.7.10")).toBeCloseTo(150000, 2);
     expect(a.haber("1.1.1.02.01")).toBeCloseTo(150000, 2);
     expect(a.totalDebe).toBeCloseTo(a.totalHaber, 2);
 
@@ -181,7 +181,7 @@ describe("Anticipo a proveedor — registro (PR #1)", () => {
     expect(anticipo.numero).toMatch(/^AP-\d{4}-\d{4}$/);
   });
 
-  it("anticipo de SERVICIO debita 1.1.5.01 y acredita el banco", async () => {
+  it("anticipo de SERVICIO debita 1.1.6.10 y acredita el banco", async () => {
     const s = await seed();
 
     const r = await registrarAnticipoProveedorAction({
@@ -195,7 +195,7 @@ describe("Anticipo a proveedor — registro (PR #1)", () => {
     if (!r.ok) return;
 
     const a = await lineasDelAsiento(r.asientoId);
-    expect(a.debe("1.1.5.01")).toBeCloseTo(80000, 2);
+    expect(a.debe("1.1.6.10")).toBeCloseTo(80000, 2);
     expect(a.haber("1.1.1.02.01")).toBeCloseTo(80000, 2);
     expect(a.totalDebe).toBeCloseTo(a.totalHaber, 2);
   });
@@ -216,12 +216,12 @@ describe("Anticipo a proveedor — registro (PR #1)", () => {
     expect(await db.prisma.movimientoTesoreria.count()).toBe(0);
   });
 
-  it("listarCuentasAnticipoProveedor devuelve sólo cuentas bajo 1.1.7.07/1.1.5.01", async () => {
+  it("listarCuentasAnticipoProveedor devuelve sólo cuentas bajo 1.1.7.10/1.1.6.10", async () => {
     await seed();
     const cuentas = await listarCuentasAnticipoProveedor();
     const codigos = cuentas.map((c) => c.codigo).sort();
-    expect(codigos).toContain("1.1.7.07");
-    expect(codigos).toContain("1.1.5.01");
+    expect(codigos).toContain("1.1.7.10");
+    expect(codigos).toContain("1.1.6.10");
     expect(codigos).not.toContain("7.9.99");
     expect(codigos).not.toContain("1.1.1.02.01");
   });

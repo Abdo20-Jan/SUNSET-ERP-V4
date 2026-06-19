@@ -94,18 +94,14 @@ describe("Anticipo a proveedor — listados (UI)", () => {
       },
     });
 
-    const mkCuenta = (
-      codigo: string,
-      nombre: string,
-      categoria: "ACTIVO" | "PASIVO" | "EGRESO",
-    ) =>
+    const mkCuenta = (codigo: string, nombre: string, categoria: "ACTIVO" | "PASIVO" | "EGRESO") =>
       db.prisma.cuentaContable.create({
         data: { codigo, nombre, tipo: "ANALITICA", categoria, nivel: 4 },
       });
 
     const cuentaBanco = await mkCuenta("1.1.1.02.01", "BANCO SANTANDER ARS", "ACTIVO");
     const anticipoBienes = await mkCuenta(
-      "1.1.7.07",
+      "1.1.7.10",
       "ANTICIPOS A PROVEEDORES DE BIENES DE CAMBIO",
       "ACTIVO",
     );
@@ -247,7 +243,7 @@ describe("Anticipo a proveedor — listados (UI)", () => {
     expect(typeof row.saldoPendienteArs).toBe("string");
     expect(row.estado).toBe("VIGENTE");
     expect(row.proveedor.nombre).toBe("Proveedor Local SA");
-    expect(row.cuentaContable.codigo).toBe("1.1.7.07");
+    expect(row.cuentaContable.codigo).toBe("1.1.7.10");
     expect(row.cuentaBancaria.banco).toBe("Santander");
     expect(row.asiento?.estado).toBe("CONTABILIZADO");
   });

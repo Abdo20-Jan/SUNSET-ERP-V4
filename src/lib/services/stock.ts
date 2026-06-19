@@ -79,7 +79,7 @@ export async function aplicarIngresoEmbarque(
  * el depósito destino es `tipo=NACIONAL` (stock vendable). Para depósitos
  * `ZONA_PRIMARIA` (puerto / depósito fiscal) no toca el agregado del Producto:
  * ese stock no es vendable hasta nacionalizarse (vive sólo en SPD + cuentas
- * 1.1.5.04/05). Coherente con `recalcularStockYCostoPromedio`.
+ * 1.1.7.04/05). Coherente con `recalcularStockYCostoPromedio`.
  */
 async function aplicarIngresoProducto(
   tx: TxClient,
@@ -444,7 +444,7 @@ export async function revertirIngresoCompra(tx: TxClient, compraId: string): Pro
  * únicamente la mercadería disponible para la venta. La mercadería en zona
  * primaria / depósito fiscal (`tipo=ZONA_PRIMARIA`) NO es vendable hasta su
  * nacionalización, por eso se ignora en el agregado a nivel Producto (vive en
- * `StockPorDeposito` y en las cuentas 1.1.5.04/05). El criterio es
+ * `StockPorDeposito` y en las cuentas 1.1.7.04/05). El criterio es
  * `Deposito.tipo`.
  *
  * Reglas (sólo depósitos NACIONAL):
@@ -785,7 +785,7 @@ type NacionalizacionDFItem = {
   cantidad: number;
   /** Costo unitario LANDED en ARS (costoFC×TC + capitalizables prorrateados),
    *  computado por `calcularCostoLandedDespacho` — la misma fuente que el
-   *  DEBE 1.1.5.01 del asiento. Es el costo del stock NACIONALIZADO (vendable). */
+   *  DEBE 1.1.7.01 del asiento. Es el costo del stock NACIONALIZADO (vendable). */
   costoUnitario: Decimal;
   /** Depósito fiscal de origen — puede diferir por línea (un despacho cruzado
    *  consume de N contenedores, potencialmente en DF distintos). */
@@ -800,8 +800,8 @@ type NacionalizacionDFItem = {
  * `aplicarTransferenciaSPD`), pero el origen es el DF (no la ZPA) y el costo
  * es el costo LANDED del ItemDespacho (FC + tributos/facturas capitalizados).
  *
- * Contablemente acompaña al asiento NACIONALIZACION_VIA_DF (DEBE 1.1.5.01 /
- * HABER 1.1.5.05). El stock en el DF fue ingresado al desconsolidar (PR 3.2).
+ * Contablemente acompaña al asiento NACIONALIZACION_VIA_DF (DEBE 1.1.7.01 /
+ * HABER 1.1.7.03). El stock en el DF fue ingresado al desconsolidar (PR 3.2).
  * Al final recalcula `Producto.stockActual`/`costoPromedio` (sólo NACIONAL).
  */
 export async function aplicarNacionalizacionDF(

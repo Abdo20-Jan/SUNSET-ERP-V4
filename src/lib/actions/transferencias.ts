@@ -94,8 +94,8 @@ async function ensureDepositoActivoConId(
   if (!dep?.activo) {
     throw new AsientoError("DOMINIO_INVALIDO", `Depósito ${rol} no existe o está inactivo.`);
   }
-  // Onda C #12: la mercadería en zona primaria aduanera (bonded: ZPA 1.1.5.04 /
-  // DF 1.1.5.05) sólo puede moverse por el flujo COMEX (desconsolidación /
+  // Onda C #12: la mercadería en zona primaria aduanera (bonded: ZPA 1.1.7.04 /
+  // DF 1.1.7.03) sólo puede moverse por el flujo COMEX (desconsolidación /
   // despacho), que genera el asiento y los tributos. Una transferencia manual
   // hacia o desde un depósito ZONA_PRIMARIA mueve el stock físico sin tocar las
   // cuentas COMEX → físico ≠ saldo. Se bloquea en ambos sentidos.

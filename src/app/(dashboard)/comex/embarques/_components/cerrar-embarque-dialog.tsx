@@ -229,7 +229,7 @@ export function AsientoEmbarqueLink({ asiento }: AsientoLinkProps) {
 //
 // Genera asiento parcial: FOB (+ flete/seguro origen) + facturas con
 // momento === ZONA_PRIMARIA. La mercadería NO se nacionaliza acá; queda
-// en 1.1.5.02 sin disponibilidad de stock hasta el despacho final.
+// en 1.1.7.05 sin disponibilidad de stock hasta el despacho final.
 
 type ZPProps = {
   embarqueId: string;
@@ -285,7 +285,7 @@ export function ConfirmarZonaPrimariaDialog({
         <DialogHeader>
           <DialogTitle>Confirmar zona primaria — {embarqueCodigo}</DialogTitle>
           <DialogDescription>
-            Genera el asiento de la mercadería en <strong>1.1.5.02 Mercaderías en Tránsito</strong>{" "}
+            Genera el asiento de la mercadería en <strong>1.1.7.05 Mercaderías en Tránsito</strong>{" "}
             (FOB + facturas de zona primaria). La mercadería <strong>NO</strong> queda disponible
             para venta — eso requiere el despacho final.
           </DialogDescription>
@@ -312,7 +312,7 @@ export function ConfirmarZonaPrimariaDialog({
           <ul className="mt-2 space-y-1 text-muted-foreground">
             <li>
               <span className="inline-block w-24 font-mono">DEBE</span>
-              1.1.5.02 Mercaderías en tránsito (FOB ARS {totalProveedorExterior})
+              1.1.7.05 Mercaderías en tránsito (FOB ARS {totalProveedorExterior})
             </li>
             <li>
               <span className="inline-block w-24 font-mono">HABER</span>

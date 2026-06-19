@@ -613,7 +613,7 @@ export function ProveedorFormDialog({
                       cuentas={cuentasGasto}
                       placeholder={
                         tipoSinGastoAuto
-                          ? "Default 1.1.5.01/02 — opcional override"
+                          ? "Default 1.1.7.01/05 — opcional override"
                           : "Sin vincular — seleccione cuenta o use auto-creación"
                       }
                       emptyMessage="No hay cuentas disponibles."

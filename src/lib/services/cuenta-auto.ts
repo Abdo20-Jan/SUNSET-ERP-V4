@@ -1,7 +1,8 @@
 import "server-only";
 
-import { CuentaCategoria, CuentaTipo, Prisma } from "@/generated/prisma/client";
+import { CuentaCategoria, CuentaTipo, type Naturaleza, Prisma } from "@/generated/prisma/client";
 import { naturalezaPorDefecto } from "./cuenta-naturaleza";
+import { categoriaPorClase, PLAN_CUENTAS } from "./plan-de-cuentas";
 
 type TxClient = Omit<
   Prisma.TransactionClient,
@@ -31,70 +32,36 @@ function deriveNivel(codigo: string): number {
   return codigo.split(".").length;
 }
 
-// Nombres por defecto para SINTETICAs auto-creadas cuando un padre falta.
-// Son rúbricas de uso común; si la SINTETICA ya existe en seed con otro
-// nombre se respeta el existente (find-then-create).
-const SINTETICA_DEFAULTS: Record<string, string> = {
-  // Plan ULTRA (9 clases). El seed crea todas las sintéticas; esto es la red de
-  // seguridad para auto-creación lazy cuando la DB quedó atrás del registry.
-  // ----- ACTIVO -----
-  "1.1.1": "CAJA Y BANCOS",
-  "1.1.1.01": "CAJA Y FONDOS FIJOS",
-  "1.1.1.02": "BANCOS",
-  "1.1.1.03": "VALORES A DEPOSITAR",
-  "1.1.2": "INVERSIONES FINANCIERAS CORRIENTES",
-  "1.1.3": "CUENTAS POR COBRAR A CLIENTES",
-  "1.1.3.01": "DEUDORES POR VENTAS NACIONALES",
-  "1.1.3.02": "DEUDORES POR VENTAS DEL EXTERIOR",
-  "1.1.4": "CRÉDITOS IMPOSITIVOS Y ADUANEROS",
-  "1.1.4.1": "IMPUESTO AL VALOR AGREGADO",
-  "1.1.4.2": "INGRESOS BRUTOS",
-  "1.1.4.3": "IMPUESTO A LAS GANANCIAS",
-  "1.1.4.4": "CRÉDITOS ADUANEROS",
-  "1.1.5": "OTRAS CUENTAS POR COBRAR",
-  "1.1.7": "BIENES DE CAMBIO",
-  // ----- PASIVO -----
-  "2.1.1": "CUENTAS POR PAGAR COMERCIALES",
-  "2.1.1.01": "PROVEEDORES NACIONALES",
-  "2.1.1.02": "PROVEEDORES DEL EXTERIOR",
-  "2.1.2": "ANTICIPOS DE CLIENTES",
-  "2.1.4": "CARGAS FISCALES",
-  "2.1.4.1": "IVA",
-  "2.1.4.2": "INGRESOS BRUTOS",
-  "2.1.4.3": "IMPUESTO A LAS GANANCIAS",
-  "2.1.4.4": "IMPUESTOS ADUANEROS A PAGAR",
-  "2.1.4.5": "OTROS IMPUESTOS Y TASAS",
-  "2.1.5": "DEUDAS FINANCIERAS",
-  "2.1.5.01": "PRÉSTAMOS BANCARIOS — CORTO PLAZO",
-  "2.2.2": "DEUDAS FINANCIERAS NO CORRIENTES",
-  "2.2.2.01": "PRÉSTAMOS BANCARIOS — LARGO PLAZO",
-  // ----- COSTO / GASTOS / RESULTADOS -----
-  "5.1": "COSTO DE MERCADERÍAS VENDIDAS",
-  "5.2": "DIFERENCIAS DE INVENTARIO",
-  "6.3": "FLETES Y DISTRIBUCIÓN",
-  "6.4": "PUBLICIDAD Y MARKETING",
-  "6.4.09": "MARKETING POR PROVEEDOR",
-  "6.5": "IMPUESTOS SOBRE VENTAS",
-  "7.2": "HONORARIOS PROFESIONALES",
-  "7.2.09": "HONORARIOS PROFESIONALES POR PROVEEDOR",
-  "7.3": "SISTEMAS Y TECNOLOGÍA",
-  "7.3.09": "IT / SOFTWARE POR PROVEEDOR",
-  "7.4": "ALQUILERES",
-  "7.4.09": "ALQUILERES POR PROVEEDOR",
-  "7.9": "OTROS GASTOS DE ADMINISTRACIÓN",
-  "7.9.09": "OTROS GASTOS DE ADMINISTRACIÓN POR PROVEEDOR",
-  "8.6": "IMPUESTO A LAS GANANCIAS",
-  "9.1": "INTERESES",
-  "9.2": "DIFERENCIAS DE CAMBIO",
-  "9.5": "COMISIONES Y GASTOS BANCARIOS",
-  "9.6": "IMPUESTOS FINANCIEROS",
-  "9.8": "OTROS RESULTADOS FINANCIEROS",
+// Datos del plan único (`PLAN_CUENTAS`, 631 cuentas) indexados por código. Es
+// la red de seguridad para la auto-creación lazy: si la DB quedó atrás del
+// registry, las cuentas/sintéticas que falten se crean con el MISMO nombre,
+// categoría y naturaleza que declara el plan — sin tablas paralelas que se
+// desincronicen en cada renumeración (ETAPA 3: antes era un mapa hardcodeado
+// `SINTETICA_DEFAULTS` que apuntaba al plan viejo).
+type PlanInfo = {
+  nombre: string;
+  categoria: CuentaCategoria;
+  naturaleza: Naturaleza;
+  tipo: CuentaTipo;
 };
+const PLAN_POR_CODIGO: ReadonlyMap<string, PlanInfo> = new Map(
+  PLAN_CUENTAS.map((c) => [
+    c.codigo,
+    {
+      nombre: c.nombre,
+      categoria: categoriaPorClase(c.clase) as CuentaCategoria,
+      naturaleza: c.naturaleza as Naturaleza,
+      tipo: c.tipo as CuentaTipo,
+    },
+  ]),
+);
 
 /**
  * Asegura que la SINTETICA padre existe (recursivamente) creándola si
  * falta. Evita el error de FK al crear ANALITICAs cuyo padre no fue
- * declarado en seed. Idempotente.
+ * declarado en seed. Idempotente. Toma nombre/categoría/naturaleza del plan
+ * (`PLAN_POR_CODIGO`); si el código no está en el plan, cae a defaults por
+ * categoría (caso de cuentas dinámicas fuera de catálogo).
  */
 async function ensurePadreSintetica(
   tx: TxClient,
@@ -112,18 +79,18 @@ async function ensurePadreSintetica(
     await ensurePadreSintetica(tx, abuelo, categoria);
   }
 
+  const plan = PLAN_POR_CODIGO.get(padreCodigo);
   const nivel = deriveNivel(padreCodigo);
-  const nombre = SINTETICA_DEFAULTS[padreCodigo] ?? `RUBRO ${padreCodigo}`;
   await tx.cuentaContable.create({
     data: {
       codigo: padreCodigo,
-      nombre,
+      nombre: plan?.nombre ?? `RUBRO ${padreCodigo}`,
       tipo: CuentaTipo.SINTETICA,
-      categoria,
+      categoria: plan?.categoria ?? categoria,
       nivel,
       padreCodigo: abuelo,
       activa: true,
-      naturaleza: naturalezaPorDefecto(categoria),
+      naturaleza: plan?.naturaleza ?? naturalezaPorDefecto(plan?.categoria ?? categoria),
     },
   });
 }
@@ -146,16 +113,21 @@ export async function getOrCreateCuenta(tx: TxClient, def: CuentaDef): Promise<n
   if (padreCodigo) {
     await ensurePadreSintetica(tx, padreCodigo, def.categoria);
   }
+  // Si el código está en el plan, se crea idéntico al catálogo (nombre,
+  // categoría y naturaleza) — así una cuenta como 1.1.7.90 (contra-activo,
+  // ACREEDOR) nace con el signo correcto aun en una DB sin seed. El registry
+  // sólo dicta el código; el plan manda los atributos.
+  const plan = PLAN_POR_CODIGO.get(def.codigo);
   const created = await tx.cuentaContable.create({
     data: {
       codigo: def.codigo,
-      nombre: def.nombre,
+      nombre: plan?.nombre ?? def.nombre,
       tipo: CuentaTipo.ANALITICA,
-      categoria: def.categoria,
+      categoria: plan?.categoria ?? def.categoria,
       nivel,
       padreCodigo,
       activa: true,
-      naturaleza: naturalezaPorDefecto(def.categoria),
+      naturaleza: plan?.naturaleza ?? naturalezaPorDefecto(def.categoria),
     },
     select: { id: true },
   });
@@ -216,16 +188,13 @@ const RANGES = {
     categoria: CuentaCategoria.ACTIVO,
   },
 
-  // Proveedor nacional — por tipo, bajo 2.1.1.01.
+  // Proveedor nacional de bienes/servicios generales — bajo 2.1.1.01.
   PROVEEDOR_MERCADERIA_LOCAL: {
     padre: "2.1.1.01",
     min: 10,
     max: 14,
     categoria: CuentaCategoria.PASIVO,
   },
-  PROVEEDOR_DESPACHANTE: { padre: "2.1.1.01", min: 15, max: 19, categoria: CuentaCategoria.PASIVO },
-  PROVEEDOR_LOGISTICA: { padre: "2.1.1.01", min: 20, max: 24, categoria: CuentaCategoria.PASIVO },
-  PROVEEDOR_ALMACENAJE: { padre: "2.1.1.01", min: 25, max: 29, categoria: CuentaCategoria.PASIVO },
   PROVEEDOR_SERVICIOS_PROFESIONALES: {
     padre: "2.1.1.01",
     min: 30,
@@ -234,14 +203,20 @@ const RANGES = {
   },
   PROVEEDOR_ALQUILERES: { padre: "2.1.1.01", min: 35, max: 39, categoria: CuentaCategoria.PASIVO },
   PROVEEDOR_IT_SOFTWARE: { padre: "2.1.1.01", min: 40, max: 44, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_MARKETING: { padre: "2.1.1.01", min: 50, max: 54, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_OTRO: { padre: "2.1.1.01", min: 55, max: 99, categoria: CuentaCategoria.PASIVO },
+
+  // Proveedor de servicios logísticos y aduaneros — bajo el padre dedicado
+  // 2.1.1.03 (separado de las deudas comerciales generales 2.1.1.01).
+  PROVEEDOR_DESPACHANTE: { padre: "2.1.1.03", min: 10, max: 19, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_LOGISTICA: { padre: "2.1.1.03", min: 20, max: 29, categoria: CuentaCategoria.PASIVO },
+  PROVEEDOR_ALMACENAJE: { padre: "2.1.1.03", min: 30, max: 39, categoria: CuentaCategoria.PASIVO },
   PROVEEDOR_GASTOS_PORTUARIOS: {
-    padre: "2.1.1.01",
-    min: 45,
+    padre: "2.1.1.03",
+    min: 40,
     max: 49,
     categoria: CuentaCategoria.PASIVO,
   },
-  PROVEEDOR_MARKETING: { padre: "2.1.1.01", min: 50, max: 54, categoria: CuentaCategoria.PASIVO },
-  PROVEEDOR_OTRO: { padre: "2.1.1.01", min: 55, max: 99, categoria: CuentaCategoria.PASIVO },
 
   // Proveedor extranjero — bajo 2.1.1.02 PROVEEDORES DEL EXTERIOR.
   PROVEEDOR_MERCADERIA_EXTERIOR: {
@@ -259,7 +234,7 @@ const RANGES = {
 
   // Cuenta de gasto POR PROVEEDOR (contrapartida del DEBE en facturas) — sólo
   // gastos de PERÍODO, bajo sintéticas dedicadas .09. Los servicios de
-  // IMPORTACIÓN capitalizan al stock (1.1.7.02, RT17) vía
+  // IMPORTACIÓN capitalizan al stock (1.1.7.05, RT17) vía
   // GASTO_POR_TIPO_PROVEEDOR y NO crean cuenta de resultado (rangoGastoByTipo
   // → null). MERCADERIA_LOCAL/EXTERIOR tampoco se desagregan.
   GASTO_SERVICIOS_PROFESIONALES: {
@@ -273,11 +248,12 @@ const RANGES = {
   GASTO_MARKETING: { padre: "6.4.09", min: 10, max: 49, categoria: CuentaCategoria.EGRESO },
   GASTO_OTRO: { padre: "7.9.09", min: 10, max: 89, categoria: CuentaCategoria.EGRESO },
 
-  // Bancos / cajas / préstamos — sin desagregación por tipo.
+  // Bancos / cajas / préstamos — sin desagregación por tipo. Préstamos
+  // bancarios: corrientes bajo 2.1.2.02, no corrientes bajo 2.2.1.01.
   CAJA: { padre: "1.1.1.01", min: 10, max: 90, categoria: CuentaCategoria.ACTIVO },
   BANCO: { padre: "1.1.1.02", min: 10, max: 99, categoria: CuentaCategoria.ACTIVO },
-  PRESTAMO_CP: { padre: "2.1.5.01", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
-  PRESTAMO_LP: { padre: "2.2.2.01", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
+  PRESTAMO_CP: { padre: "2.1.2.02", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
+  PRESTAMO_LP: { padre: "2.2.1.01", min: 10, max: 99, categoria: CuentaCategoria.PASIVO },
 } as const;
 
 export type RangoCuentaAuto = keyof typeof RANGES;
@@ -399,7 +375,7 @@ export function rangoGastoByTipo(tipo: TipoProveedor): RangoCuentaAuto | null {
       return null;
     case "MERCADERIA_EXTERIOR":
       return null;
-    // Servicios de importación: capitalizan a 1.1.7.02 (RT17) vía
+    // Servicios de importación: capitalizan a 1.1.7.05 (RT17) vía
     // GASTO_POR_TIPO_PROVEEDOR — sin cuenta de resultado por proveedor.
     case "DESPACHANTE":
     case "GASTOS_PORTUARIOS":
