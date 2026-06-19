@@ -9,13 +9,14 @@ import { ArrowRight02Icon } from "@hugeicons/core-free-icons";
 
 import Decimal from "decimal.js";
 
-import { fmtMoney } from "@/lib/format";
+import { convertirMonto, fmtMoney, fmtMontoPres, pickSaldoNativo } from "@/lib/format";
 import {
   type AplicarPagoA,
   crearMovimientoTesoreriaAction,
   pagarConIntermediarioAction,
   type CuentaBancariaOption,
 } from "@/lib/actions/movimientos-tesoreria";
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -49,7 +50,8 @@ type FacturaPendiente = {
   fechaVencimiento: string | null;
   diasParaVencer: number | null;
   bucket: "vencida" | "proxima" | "al_dia" | "sin_fecha";
-  monto: string;
+  monto: string; // ARS — usado en la lógica de pago (no presentación)
+  montoNativo: string; // pendiente en moneda nativa — para displays de lectura
   moneda: string;
 };
 
@@ -59,12 +61,30 @@ type SaldoProveedorAging = {
   cuit: string | null;
   pais: string;
   cuentaContableId: number | null;
-  saldoTotal: string;
+  saldoTotal: string; // ARS contable — usado en la lógica de pago
+  saldoTotalUsd?: string; // USD nativo via monedaOrigen — para displays
   vencido: string;
   proximo: string;
   alDia: string;
   facturas: FacturaPendiente[];
 };
+
+// Suma los pendientes de un bucket POR MONEDA NATIVA y los convierte a la
+// moneda de presentación (lección #262/#263) — versión client-safe (Decimal +
+// convertirMonto puros; no usa @/lib/aging-presentacion, que arrastra Prisma).
+function fmtBucketPres(
+  facturas: FacturaPendiente[],
+  bucket: FacturaPendiente["bucket"],
+  moneda: Moneda,
+  tc: string | null,
+): string {
+  let total = new Decimal(0);
+  for (const f of facturas) {
+    if (f.bucket !== bucket) continue;
+    total = total.plus(convertirMonto(f.montoNativo, f.moneda as Moneda, moneda, tc));
+  }
+  return fmtMoney(total.toFixed(2));
+}
 
 type ProveedorIntermediario = {
   proveedorId: string;
@@ -81,6 +101,11 @@ type Props = {
   intermediarios: ProveedorIntermediario[];
   cuentasBancarias: CuentaBancariaOption[];
   defaultFecha?: string;
+  // Moneda de presentación (USD por default) y TC de cierre — sólo afectan
+  // los DISPLAYS de lectura (saldos/buckets/chips). La lógica de pago opera
+  // siempre en ARS nativo (el dinero sale del banco en ARS).
+  moneda: Moneda;
+  tc: string | null;
 };
 
 export function SaldosBatchPago({
@@ -88,6 +113,8 @@ export function SaldosBatchPago({
   intermediarios,
   cuentasBancarias,
   defaultFecha,
+  moneda,
+  tc,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -309,8 +336,8 @@ export function SaldosBatchPago({
               <TableHead className="text-right">Vencido</TableHead>
               <TableHead className="text-right">A vencer 7d</TableHead>
               <TableHead className="text-right">Al día</TableHead>
-              <TableHead className="text-right">Saldo contable</TableHead>
-              <TableHead className="text-right">A pagar</TableHead>
+              <TableHead className="text-right">Saldo contable ({moneda})</TableHead>
+              <TableHead className="text-right">A pagar (ARS)</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
@@ -325,6 +352,8 @@ export function SaldosBatchPago({
                 onMontoChange={(v) =>
                   setMontosOverride((prev) => ({ ...prev, [p.proveedorId]: v }))
                 }
+                moneda={moneda}
+                tc={tc}
               />
             ))}
           </TableBody>
@@ -646,15 +675,20 @@ function ProveedorRow({
   onToggle,
   montoOverride,
   onMontoChange,
+  moneda,
+  tc,
 }: {
   p: SaldoProveedorAging;
   isChecked: boolean;
   onToggle: () => void;
   montoOverride: string | undefined;
   onMontoChange: (v: string) => void;
+  moneda: Moneda;
+  tc: string | null;
 }) {
   const tieneVencidas = Number(p.vencido) > 0;
   const tieneProximas = Number(p.proximo) > 0;
+  const saldoPick = pickSaldoNativo(p.saldoTotal, p.saldoTotalUsd);
 
   return (
     <>
@@ -682,7 +716,7 @@ function ProveedorRow({
         <TableCell className="text-right font-mono tabular-nums">
           {tieneVencidas ? (
             <span className="font-semibold text-red-700 dark:text-red-300">
-              {fmtMoney(p.vencido)}
+              {fmtBucketPres(p.facturas, "vencida", moneda, tc)}
             </span>
           ) : (
             <span className="text-muted-foreground">—</span>
@@ -690,20 +724,22 @@ function ProveedorRow({
         </TableCell>
         <TableCell className="text-right font-mono tabular-nums">
           {tieneProximas ? (
-            <span className="text-amber-700 dark:text-amber-300">{fmtMoney(p.proximo)}</span>
+            <span className="text-amber-700 dark:text-amber-300">
+              {fmtBucketPres(p.facturas, "proxima", moneda, tc)}
+            </span>
           ) : (
             <span className="text-muted-foreground">—</span>
           )}
         </TableCell>
         <TableCell className="text-right font-mono tabular-nums">
           {Number(p.alDia) > 0 ? (
-            fmtMoney(p.alDia)
+            fmtBucketPres(p.facturas, "al_dia", moneda, tc)
           ) : (
             <span className="text-muted-foreground">—</span>
           )}
         </TableCell>
         <TableCell className="text-right font-mono tabular-nums">
-          {fmtMoney(p.saldoTotal)}
+          {fmtMontoPres(saldoPick.valor, saldoPick.monedaNativa, moneda, tc)}
         </TableCell>
         <TableCell className="text-right">
           {isChecked ? (
@@ -751,7 +787,7 @@ function ProveedorRow({
                   </Badge>
                   <span className="font-mono">{f.numero}</span>
                   <span className="font-mono text-muted-foreground tabular-nums">
-                    {fmtMoney(f.monto)}
+                    {fmtMontoPres(f.montoNativo, f.moneda as Moneda, moneda, tc)}
                   </span>
                   <DateBadge fecha={f.fechaVencimiento} relative />
                 </span>

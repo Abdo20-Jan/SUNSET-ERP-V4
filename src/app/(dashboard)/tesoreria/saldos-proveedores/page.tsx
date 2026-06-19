@@ -8,14 +8,18 @@ import {
 } from "@/lib/services/cuentas-a-pagar";
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
+import { auth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
+import { convertirBucket, sumarBucketsNativos, sumarSaldosNativos } from "@/lib/aging-presentacion";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { toDecimal } from "@/lib/decimal";
 import { Card, CardContent } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 
+import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
 import { SaldosBatchPago } from "./saldos-batch-pago";
 
-type SearchParams = Promise<{ filtro?: string }>;
+type SearchParams = Promise<{ filtro?: string; moneda?: string }>;
 
 export const dynamic = "force-dynamic";
 
@@ -24,29 +28,60 @@ export default async function SaldosProveedoresPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const { filtro } = await searchParams;
-  const [todos, cuentasBancarias, intermediarios, defaultFecha] = await Promise.all([
-    getSaldosPorProveedorConAging(),
-    listarCuentasBancariasParaMovimiento(),
-    listarProveedoresParaIntermediario(),
-    getDefaultFecha(),
-  ]);
+  const [params, session, cotizacion, todos, cuentasBancarias, intermediarios, defaultFecha] =
+    await Promise.all([
+      searchParams,
+      auth(),
+      getCotizacionParaFecha(new Date()),
+      getSaldosPorProveedorConAging(),
+      listarCuentasBancariasParaMovimiento(),
+      listarProveedoresParaIntermediario(),
+      getDefaultFecha(),
+    ]);
+
+  const { filtro } = params;
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    params.moneda === "ARS" ? "ARS" : params.moneda === "USD" ? "USD" : monedaPreferida;
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   const conVencidas = todos.filter((p) => toDecimal(p.vencido).gt(0));
   const list = filtro === "vencidas" ? conVencidas : todos;
 
-  const totalVencido = todos
-    .reduce((acc, p) => acc.plus(toDecimal(p.vencido)), toDecimal(0))
-    .toFixed(2);
-  const totalProximo = todos
-    .reduce((acc, p) => acc.plus(toDecimal(p.proximo)), toDecimal(0))
-    .toFixed(2);
-  const totalAlDia = todos
-    .reduce((acc, p) => acc.plus(toDecimal(p.alDia)), toDecimal(0))
-    .toFixed(2);
-  const totalSaldoContable = todos
-    .reduce((acc, p) => acc.plus(toDecimal(p.saldoTotal)), toDecimal(0))
-    .toFixed(2);
+  // KPIs de aging: suma POR MONEDA NATIVA antes de convertir (lección
+  // #262/#263), no ÷tc ciego sobre el agregado ARS.
+  const buckets = sumarBucketsNativos(
+    todos.flatMap((p) =>
+      p.facturas.map((f) => ({ bucket: f.bucket, moneda: f.moneda, montoNativo: f.montoNativo })),
+    ),
+  );
+  const totalVencido = fmtMoney(convertirBucket(buckets.vencida, moneda, tc));
+  const totalProximo = fmtMoney(convertirBucket(buckets.proxima, moneda, tc));
+  const totalAlDia = fmtMoney(convertirBucket(buckets.al_dia, moneda, tc));
+  const totalSaldoContable = fmtMoney(
+    convertirBucket(
+      sumarSaldosNativos(todos.map((p) => ({ saldoArs: p.saldoTotal, saldoUsd: p.saldoTotalUsd }))),
+      moneda,
+      tc,
+    ),
+  );
+
+  // Links de filtro preservando la moneda de presentación.
+  const qpTodos = new URLSearchParams();
+  if (params.moneda) qpTodos.set("moneda", params.moneda);
+  const hrefTodos = qpTodos.toString()
+    ? `/tesoreria/saldos-proveedores?${qpTodos}`
+    : "/tesoreria/saldos-proveedores";
+  const qpVenc = new URLSearchParams({ filtro: "vencidas" });
+  if (params.moneda) qpVenc.set("moneda", params.moneda);
+  const hrefVencidas = `/tesoreria/saldos-proveedores?${qpVenc}`;
 
   return (
     <div className="flex flex-col gap-3">
@@ -59,8 +94,9 @@ export default async function SaldosProveedoresPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
           <Link
-            href="/tesoreria/saldos-proveedores"
+            href={hrefTodos}
             className={buttonVariants({
               variant: filtro === "vencidas" ? "outline" : "default",
               size: "sm",
@@ -69,7 +105,7 @@ export default async function SaldosProveedoresPage({
             Todos
           </Link>
           <Link
-            href="/tesoreria/saldos-proveedores?filtro=vencidas"
+            href={hrefVencidas}
             className={buttonVariants({
               variant: filtro === "vencidas" ? "default" : "outline",
               size: "sm",
@@ -83,25 +119,25 @@ export default async function SaldosProveedoresPage({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <KpiCard
           label="Total vencido"
-          value={`${fmtMoney(totalVencido)} ARS`}
+          value={`${totalVencido} ${moneda}`}
           tone="danger"
           icon={Alert02Icon}
         />
         <KpiCard
           label="A vencer ≤ 7d"
-          value={`${fmtMoney(totalProximo)} ARS`}
+          value={`${totalProximo} ${moneda}`}
           tone="warning"
           icon={Calendar03Icon}
         />
         <KpiCard
           label="Al día"
-          value={`${fmtMoney(totalAlDia)} ARS`}
+          value={`${totalAlDia} ${moneda}`}
           tone="ok"
           icon={CheckmarkCircle02Icon}
         />
         <KpiCard
           label="Saldo contable total"
-          value={`${fmtMoney(totalSaldoContable)} ARS`}
+          value={`${totalSaldoContable} ${moneda}`}
           tone="muted"
         />
       </div>
@@ -111,6 +147,8 @@ export default async function SaldosProveedoresPage({
         intermediarios={intermediarios}
         cuentasBancarias={cuentasBancarias}
         defaultFecha={defaultFecha}
+        moneda={moneda}
+        tc={tc}
       />
     </div>
   );

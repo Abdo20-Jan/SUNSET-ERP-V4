@@ -1,8 +1,10 @@
 import "server-only";
 
+import { montoNativoPendiente } from "@/lib/aging-presentacion";
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
 import { CODIGO_VALORES_A_COBRAR, PREFIJO_CLIENTES } from "@/lib/services/prefijos-plan";
+import { getSaldoUsdNativoPorCuenta } from "@/lib/services/saldo-usd-nativo";
 import { AsientoEstado, VentaEstado } from "@/generated/prisma/client";
 
 // ============================================================
@@ -25,6 +27,10 @@ export type CxCRow = {
   cuentaCodigo: string;
   cuentaNombre: string;
   saldo: string;
+  // Saldo USD nativo: presente sólo si la cuenta tiene líneas con
+  // monedaOrigen=USD (clientes USD-natos). Invariante a TC — el principal
+  // histórico en USD. `saldo` (ARS) sigue siendo la valuación contable.
+  saldoUsd?: string;
   clientes: ClienteAsociado[];
 };
 
@@ -32,6 +38,10 @@ export type CuentasACobrar = {
   clientes: CxCRow[]; // 1.1.3.x — saldos por cliente
   valoresACobrar: CxCRow[]; // 1.1.4.20 — cheques de terceros en cartera
   totalGeneral: string;
+  // Σ de los saldoUsd nativos (cuentas USD-natas). Para el KPI native-aware
+  // de presentación: convertir totalGeneral (ARS) + totalGeneralUsd (USD)
+  // por separado. `totalGeneral` (ARS) se mantiene para tesoreria-overview.
+  totalGeneralUsd: string;
 };
 
 const PREFIXES = {
@@ -91,9 +101,13 @@ export async function getCuentasACobrar(): Promise<CuentasACobrar> {
     }),
   );
 
+  // Saldo USD-nativo por cuenta (lado deudor: cuentas de activo).
+  const saldoUsdPorCuenta = await getSaldoUsdNativoPorCuenta(cuentaIds, "deudor");
+
   const clientes: CxCRow[] = [];
   const valoresACobrar: CxCRow[] = [];
   let totalGeneral = toDecimal(0);
+  let totalGeneralUsd = toDecimal(0);
 
   for (const c of cuentas) {
     if (c.tipo !== "ANALITICA") continue;
@@ -101,11 +115,13 @@ export async function getCuentasACobrar(): Promise<CuentasACobrar> {
     const saldo = toDecimal(saldoStr);
     if (!saldo.gt(0)) continue;
 
+    const saldoUsdStr = saldoUsdPorCuenta.get(c.id);
     const row: CxCRow = {
       cuentaId: c.id,
       cuentaCodigo: c.codigo,
       cuentaNombre: c.nombre,
       saldo: saldoStr,
+      ...(saldoUsdStr ? { saldoUsd: saldoUsdStr } : {}),
       clientes: c.clientes,
     };
 
@@ -116,12 +132,14 @@ export async function getCuentasACobrar(): Promise<CuentasACobrar> {
     }
 
     totalGeneral = totalGeneral.plus(saldo);
+    if (saldoUsdStr) totalGeneralUsd = totalGeneralUsd.plus(toDecimal(saldoUsdStr));
   }
 
   return {
     clientes,
     valoresACobrar,
     totalGeneral: totalGeneral.toFixed(2),
+    totalGeneralUsd: totalGeneralUsd.toFixed(2),
   };
 }
 
@@ -137,6 +155,9 @@ export type VentaPendiente = {
   diasParaVencer: number | null; // negativo = vencida hace N días
   bucket: "vencida" | "proxima" | "al_dia" | "sin_fecha";
   monto: string; // ARS
+  // Pendiente en la moneda NATIVA de la venta (USD → ÷TC emisión; ARS → igual
+  // a `monto`). Para presentación native-aware sin ÷tc ciego.
+  montoNativo: string;
   moneda: string;
 };
 
@@ -146,7 +167,10 @@ export type SaldoClienteAging = {
   cuit: string | null;
   cuentaContableId: number | null;
   cuentaCodigo: string | null;
-  saldoTotal: string; // contable, via cuenta — la verdad
+  saldoTotal: string; // contable, via cuenta — la verdad (ARS)
+  // Saldo USD nativo de la cuenta del cliente (monedaOrigen=USD). Presente
+  // sólo si la posición es USD-nata. Para pickSaldoNativo en presentación.
+  saldoTotalUsd?: string;
   vencido: string;
   proximo: string; // ≤ 7 días
   alDia: string;
@@ -193,6 +217,9 @@ export async function getSaldosPorClienteConAging(): Promise<SaldoClienteAging[]
       return [s.cuentaId, debe.minus(haber).toFixed(2)];
     }),
   );
+
+  // Saldo USD-nativo por cuenta del cliente (lado deudor).
+  const saldoUsdPorCuenta = await getSaldoUsdNativoPorCuenta(cuentaIds, "deudor");
 
   // Cobros efectivos por (cuenta cliente, asiento): neto HABER - DEBE > 0.
   // Mismo enfoque que cuentas-a-pagar pero invertido. Si un asiento HABER
@@ -307,6 +334,7 @@ export async function getSaldosPorClienteConAging(): Promise<SaldoClienteAging[]
 
   type VentaInterna = VentaPendiente & {
     totalArs: ReturnType<typeof toDecimal>;
+    tipoCambioStr: string;
     cobradoNumero: ReturnType<typeof toDecimal>;
     cobradoFifo: ReturnType<typeof toDecimal>;
   };
@@ -328,8 +356,10 @@ export async function getSaldosPorClienteConAging(): Promise<SaldoClienteAging[]
       diasParaVencer: dias,
       bucket,
       monto: totalArs.toFixed(2),
+      montoNativo: "0", // provisório — recalculado con el pendiente final
       moneda: v.moneda,
       totalArs,
+      tipoCambioStr: toDecimal(v.tipoCambio).toString(),
       cobradoNumero,
       cobradoFifo: toDecimal(0),
     });
@@ -386,6 +416,7 @@ export async function getSaldosPorClienteConAging(): Promise<SaldoClienteAging[]
         diasParaVencer: v.diasParaVencer,
         bucket: v.bucket,
         monto: pendienteStr,
+        montoNativo: montoNativoPendiente(pendienteStr, v.moneda, v.tipoCambioStr),
         moneda: v.moneda,
       });
       if (v.bucket === "vencida") vencido = vencido.plus(pendienteArs);
@@ -408,6 +439,10 @@ export async function getSaldosPorClienteConAging(): Promise<SaldoClienteAging[]
       return aDias - bDias;
     });
 
+    const saldoTotalUsdStr = c.cuentaContableId
+      ? saldoUsdPorCuenta.get(c.cuentaContableId)
+      : undefined;
+
     resultado.push({
       clienteId: c.id,
       clienteNombre: c.nombre,
@@ -415,6 +450,7 @@ export async function getSaldosPorClienteConAging(): Promise<SaldoClienteAging[]
       cuentaContableId: c.cuentaContableId,
       cuentaCodigo: c.cuentaContable?.codigo ?? null,
       saldoTotal: saldoContable.toFixed(2),
+      ...(saldoTotalUsdStr ? { saldoTotalUsd: saldoTotalUsdStr } : {}),
       vencido: vencido.toFixed(2),
       proximo: proximo.toFixed(2),
       alDia: alDia.toFixed(2),
