@@ -7,7 +7,7 @@ import type { VentaRow } from "@/lib/actions/ventas";
 import { fmtDate, fmtMontoPres } from "@/lib/format";
 import type { Moneda } from "../../reportes/_components/moneda-toggle";
 import { DateBadge } from "@/components/ui/date-badge";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import {
   Table,
   TableBody,
@@ -17,19 +17,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-
-function estadoVariant(
-  estado: VentaRow["estado"],
-): "default" | "outline" | "secondary" | "destructive" {
-  switch (estado) {
-    case "BORRADOR":
-      return "outline";
-    case "EMITIDA":
-      return "default";
-    case "CANCELADA":
-      return "destructive";
-  }
-}
 
 export function VentasTable({
   data,
@@ -88,9 +75,7 @@ export function VentasTable({
     {
       id: "estado",
       header: "Estado",
-      cell: ({ row }) => (
-        <Badge variant={estadoVariant(row.original.estado)}>{row.original.estado}</Badge>
-      ),
+      cell: ({ row }) => <StatusBadge estado={row.original.estado} />,
     },
   ];
 
