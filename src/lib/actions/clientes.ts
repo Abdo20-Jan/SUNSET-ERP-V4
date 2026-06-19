@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { crearCuentaParaEntidad, rangoClienteByCanal } from "@/lib/services/cuenta-auto";
 import { PREFIJO_CLIENTES } from "@/lib/services/prefijos-plan";
+import { buildOrderBy, parseSortParams, type SortDir } from "@/lib/table-sort";
 import { CondicionIva, CuentaTipo, Prisma, TipoCanal } from "@/generated/prisma/client";
 
 export type ClienteRow = {
@@ -40,54 +41,113 @@ export type CuentaContableOption = {
 
 const CUENTAS_CLIENTES_PREFIX = PREFIJO_CLIENTES;
 
-export async function listarClientes(): Promise<ClienteRow[]> {
-  const rows = await db.cliente.findMany({
-    orderBy: { nombre: "asc" },
-    select: {
-      id: true,
-      nombre: true,
-      cuit: true,
-      tipo: true,
-      tipoCanal: true,
-      condicionIva: true,
-      agenteRetencionIva: true,
-      agenteRetencionGanancias: true,
-      agenteIibb: true,
-      direccion: true,
-      telefono: true,
-      email: true,
-      estado: true,
-      cuentaContableId: true,
-      cuentaContable: { select: { codigo: true, nombre: true } },
-      provinciaId: true,
-      provincia: { select: { nombre: true } },
-      alicuotaPercepcionIIBB: true,
-      exentoPercepcionIIBB: true,
-    },
-  });
+// Keys lógicas habilitadas para ordenar (allowlist) → mapean al campo real del
+// modelo. NUNCA se pasa el nombre de columna crudo a Prisma: `buildOrderBy`
+// solo lee de este mapa y `parseSortParams` rechaza keys fuera de `ALLOWED`.
+const CLIENTES_SORT_FIELD_MAP = {
+  nombre: "nombre",
+  cuit: "cuit",
+} as const;
+const CLIENTES_SORT_ALLOWED = Object.keys(CLIENTES_SORT_FIELD_MAP);
 
-  return rows.map((c) => ({
-    id: c.id,
-    nombre: c.nombre,
-    cuit: c.cuit,
-    tipo: c.tipo,
-    tipoCanal: c.tipoCanal,
-    condicionIva: c.condicionIva,
-    agenteRetencionIva: c.agenteRetencionIva,
-    agenteRetencionGanancias: c.agenteRetencionGanancias,
-    agenteIibb: c.agenteIibb,
-    direccion: c.direccion,
-    telefono: c.telefono,
-    email: c.email,
-    estado: c.estado,
-    cuentaContableId: c.cuentaContableId,
-    cuentaContableCodigo: c.cuentaContable?.codigo ?? null,
-    cuentaContableNombre: c.cuentaContable?.nombre ?? null,
-    provinciaId: c.provinciaId,
-    provinciaNombre: c.provincia?.nombre ?? null,
-    alicuotaPercepcionIIBB: c.alicuotaPercepcionIIBB?.toString() ?? null,
-    exentoPercepcionIIBB: c.exentoPercepcionIIBB,
-  }));
+export type ListarClientesOpts = {
+  q?: string;
+  estado?: string;
+  page?: number;
+  perPage?: number;
+  sort?: string;
+  dir?: SortDir;
+};
+
+export type ListarClientesResult = {
+  rows: ClienteRow[];
+  total: number;
+};
+
+export async function listarClientes(opts: ListarClientesOpts = {}): Promise<ListarClientesResult> {
+  const page = Math.max(1, Math.floor(opts.page ?? 1));
+  const perPage = Math.max(1, Math.min(500, Math.floor(opts.perPage ?? 50)));
+
+  const q = opts.q?.trim();
+  const estado = opts.estado?.trim();
+
+  const where: Prisma.ClienteWhereInput = {};
+  if (q) {
+    where.OR = [
+      { nombre: { contains: q, mode: "insensitive" } },
+      { cuit: { contains: q, mode: "insensitive" } },
+    ];
+  }
+  if (estado === "activo") {
+    where.estado = "activo";
+  } else if (estado === "inactivo") {
+    where.estado = "inactivo";
+  }
+
+  const orderBy = buildOrderBy(
+    parseSortParams({ sort: opts.sort, dir: opts.dir }, CLIENTES_SORT_ALLOWED, {
+      sort: "nombre",
+      dir: "asc",
+    }),
+    CLIENTES_SORT_FIELD_MAP,
+  );
+
+  const [rows, total] = await Promise.all([
+    db.cliente.findMany({
+      where,
+      orderBy,
+      take: perPage,
+      skip: (page - 1) * perPage,
+      select: {
+        id: true,
+        nombre: true,
+        cuit: true,
+        tipo: true,
+        tipoCanal: true,
+        condicionIva: true,
+        agenteRetencionIva: true,
+        agenteRetencionGanancias: true,
+        agenteIibb: true,
+        direccion: true,
+        telefono: true,
+        email: true,
+        estado: true,
+        cuentaContableId: true,
+        cuentaContable: { select: { codigo: true, nombre: true } },
+        provinciaId: true,
+        provincia: { select: { nombre: true } },
+        alicuotaPercepcionIIBB: true,
+        exentoPercepcionIIBB: true,
+      },
+    }),
+    db.cliente.count({ where }),
+  ]);
+
+  return {
+    rows: rows.map((c) => ({
+      id: c.id,
+      nombre: c.nombre,
+      cuit: c.cuit,
+      tipo: c.tipo,
+      tipoCanal: c.tipoCanal,
+      condicionIva: c.condicionIva,
+      agenteRetencionIva: c.agenteRetencionIva,
+      agenteRetencionGanancias: c.agenteRetencionGanancias,
+      agenteIibb: c.agenteIibb,
+      direccion: c.direccion,
+      telefono: c.telefono,
+      email: c.email,
+      estado: c.estado,
+      cuentaContableId: c.cuentaContableId,
+      cuentaContableCodigo: c.cuentaContable?.codigo ?? null,
+      cuentaContableNombre: c.cuentaContable?.nombre ?? null,
+      provinciaId: c.provinciaId,
+      provinciaNombre: c.provincia?.nombre ?? null,
+      alicuotaPercepcionIIBB: c.alicuotaPercepcionIIBB?.toString() ?? null,
+      exentoPercepcionIIBB: c.exentoPercepcionIIBB,
+    })),
+    total,
+  };
 }
 
 export async function listarCuentasContablesParaCliente(): Promise<CuentaContableOption[]> {

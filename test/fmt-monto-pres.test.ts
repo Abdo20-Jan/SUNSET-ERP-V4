@@ -52,3 +52,34 @@ describe("fmtMontoPres", () => {
     expect(fmtMontoPres("abc", "ARS", "USD", "1300")).toBe("abc");
   });
 });
+
+// Rollout USD de las LISTAS de Comex (embarques + simulaciones). Documenta la
+// semántica de moneda REAL de cada campo verificada en los servicios:
+//   - FOB: NATIVO en la moneda del embarque/simulación (USD o ARS).
+//   - CIF / costoTotal / costoTotalNacionalizado: ya consolidados en ARS (cada
+//     parcela × su propio TC antes de sumar) → se tratan como ARS-nativos.
+// La presentación los lleva a la moneda elegida con el TC de cierre. No hay
+// `÷tc` ciego sobre mezcla de monedas (lección #262/#263).
+describe("fmtMontoPres — semántica Comex listas", () => {
+  const TC = "1300";
+
+  it("FOB USD nativo en vista USD: 1 a 1 (no re-divide)", () => {
+    expect(fmtMontoPres("1000", "USD", "USD", TC)).toBe("1.000,00");
+  });
+
+  it("FOB USD nativo en vista ARS: × TC", () => {
+    expect(fmtMontoPres("1000", "USD", "ARS", TC)).toBe("1.300.000,00");
+  });
+
+  it("FOB ARS nativo (embarque ARS) en vista USD: ÷ TC", () => {
+    expect(fmtMontoPres("1300000", "ARS", "USD", TC)).toBe("1.000,00");
+  });
+
+  it("CIF/costo (ARS consolidado) en vista USD: ÷ TC", () => {
+    expect(fmtMontoPres("130000", "ARS", "USD", TC)).toBe("100,00");
+  });
+
+  it("CIF/costo (ARS consolidado) en vista ARS: passthrough", () => {
+    expect(fmtMontoPres("130000", "ARS", "ARS", TC)).toBe("130.000,00");
+  });
+});

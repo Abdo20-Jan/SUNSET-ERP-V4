@@ -11,6 +11,7 @@ import {
   rangoProveedorByTipo,
 } from "@/lib/services/cuenta-auto";
 import { PREFIJO_PROVEEDORES_LOCAL } from "@/lib/services/prefijos-plan";
+import { buildOrderBy, parseSortParams, type SortDir } from "@/lib/table-sort";
 import {
   CondicionGanancias,
   ConceptoRG830,
@@ -53,59 +54,129 @@ export type CuentaContableOption = {
 
 const CUENTAS_PROVEEDORES_PREFIX = PREFIJO_PROVEEDORES_LOCAL;
 
-export async function listarProveedores(): Promise<ProveedorRow[]> {
-  const rows = await db.proveedor.findMany({
-    orderBy: { nombre: "asc" },
-    select: {
-      id: true,
-      nombre: true,
-      cuit: true,
-      tipo: true,
-      tipoProveedor: true,
-      conceptoRG830: true,
-      sujetoRetencionGanancias: true,
-      condicionGanancias: true,
-      alicuotaRetencionGananciasOverride: true,
-      certificadoExclusionGanancias: true,
-      vigenciaCertExclusionGanancias: true,
-      pais: true,
-      direccion: true,
-      telefono: true,
-      email: true,
-      estado: true,
-      cuentaContableId: true,
-      cuentaContable: { select: { codigo: true, nombre: true } },
-      cuentaGastoContableId: true,
-      cuentaGastoContable: { select: { codigo: true, nombre: true } },
-    },
-  });
+// Keys lógicas habilitadas para ordenar (allowlist) → mapean al campo real del
+// modelo. NUNCA se pasa el nombre de columna crudo a Prisma: `buildOrderBy`
+// solo lee de este mapa y `parseSortParams` rechaza keys fuera de `ALLOWED`.
+const PROVEEDORES_SORT_FIELD_MAP = {
+  nombre: "nombre",
+  cuit: "cuit",
+  pais: "pais",
+} as const;
+const PROVEEDORES_SORT_ALLOWED = Object.keys(PROVEEDORES_SORT_FIELD_MAP);
 
-  return rows.map((p) => ({
-    id: p.id,
-    nombre: p.nombre,
-    cuit: p.cuit,
-    tipo: p.tipo,
-    tipoProveedor: p.tipoProveedor,
-    conceptoRG830: p.conceptoRG830,
-    sujetoRetencionGanancias: p.sujetoRetencionGanancias,
-    condicionGanancias: p.condicionGanancias,
-    alicuotaRetencionGananciasOverride: p.alicuotaRetencionGananciasOverride?.toString() ?? null,
-    certificadoExclusionGanancias: p.certificadoExclusionGanancias,
-    vigenciaCertExclusionGanancias: p.vigenciaCertExclusionGanancias
-      ? p.vigenciaCertExclusionGanancias.toISOString().slice(0, 10)
-      : null,
-    pais: p.pais,
-    direccion: p.direccion,
-    telefono: p.telefono,
-    email: p.email,
-    estado: p.estado,
-    cuentaContableId: p.cuentaContableId,
-    cuentaContableCodigo: p.cuentaContable?.codigo ?? null,
-    cuentaContableNombre: p.cuentaContable?.nombre ?? null,
-    cuentaGastoContableId: p.cuentaGastoContableId,
-    cuentaGastoContableCodigo: p.cuentaGastoContable?.codigo ?? null,
-    cuentaGastoContableNombre: p.cuentaGastoContable?.nombre ?? null,
-  }));
+export type ListarProveedoresOpts = {
+  q?: string;
+  pais?: string;
+  page?: number;
+  perPage?: number;
+  sort?: string;
+  dir?: SortDir;
+};
+
+export type ListarProveedoresResult = {
+  rows: ProveedorRow[];
+  total: number;
+  paises: string[];
+};
+
+export async function listarProveedores(
+  opts: ListarProveedoresOpts = {},
+): Promise<ListarProveedoresResult> {
+  const page = Math.max(1, Math.floor(opts.page ?? 1));
+  const perPage = Math.max(1, Math.min(500, Math.floor(opts.perPage ?? 50)));
+
+  const q = opts.q?.trim();
+  const pais = opts.pais?.trim();
+
+  const where: Prisma.ProveedorWhereInput = {};
+  if (q) {
+    where.OR = [
+      { nombre: { contains: q, mode: "insensitive" } },
+      { cuit: { contains: q, mode: "insensitive" } },
+    ];
+  }
+  if (pais && pais !== "todos") {
+    where.pais = pais;
+  }
+
+  const orderBy = buildOrderBy(
+    parseSortParams({ sort: opts.sort, dir: opts.dir }, PROVEEDORES_SORT_ALLOWED, {
+      sort: "nombre",
+      dir: "asc",
+    }),
+    PROVEEDORES_SORT_FIELD_MAP,
+  );
+
+  const [rows, total, paisesRaw] = await Promise.all([
+    db.proveedor.findMany({
+      where,
+      orderBy,
+      take: perPage,
+      skip: (page - 1) * perPage,
+      select: {
+        id: true,
+        nombre: true,
+        cuit: true,
+        tipo: true,
+        tipoProveedor: true,
+        conceptoRG830: true,
+        sujetoRetencionGanancias: true,
+        condicionGanancias: true,
+        alicuotaRetencionGananciasOverride: true,
+        certificadoExclusionGanancias: true,
+        vigenciaCertExclusionGanancias: true,
+        pais: true,
+        direccion: true,
+        telefono: true,
+        email: true,
+        estado: true,
+        cuentaContableId: true,
+        cuentaContable: { select: { codigo: true, nombre: true } },
+        cuentaGastoContableId: true,
+        cuentaGastoContable: { select: { codigo: true, nombre: true } },
+      },
+    }),
+    db.proveedor.count({ where }),
+    // Opciones de país = distinct sobre TODA la tabla (no de la página filtrada).
+    db.proveedor.findMany({
+      distinct: ["pais"],
+      select: { pais: true },
+      orderBy: { pais: "asc" },
+    }),
+  ]);
+
+  const paises = paisesRaw.map((p) => p.pais).filter((p): p is string => !!p && p.length > 0);
+
+  return {
+    rows: rows.map((p) => ({
+      id: p.id,
+      nombre: p.nombre,
+      cuit: p.cuit,
+      tipo: p.tipo,
+      tipoProveedor: p.tipoProveedor,
+      conceptoRG830: p.conceptoRG830,
+      sujetoRetencionGanancias: p.sujetoRetencionGanancias,
+      condicionGanancias: p.condicionGanancias,
+      alicuotaRetencionGananciasOverride: p.alicuotaRetencionGananciasOverride?.toString() ?? null,
+      certificadoExclusionGanancias: p.certificadoExclusionGanancias,
+      vigenciaCertExclusionGanancias: p.vigenciaCertExclusionGanancias
+        ? p.vigenciaCertExclusionGanancias.toISOString().slice(0, 10)
+        : null,
+      pais: p.pais,
+      direccion: p.direccion,
+      telefono: p.telefono,
+      email: p.email,
+      estado: p.estado,
+      cuentaContableId: p.cuentaContableId,
+      cuentaContableCodigo: p.cuentaContable?.codigo ?? null,
+      cuentaContableNombre: p.cuentaContable?.nombre ?? null,
+      cuentaGastoContableId: p.cuentaGastoContableId,
+      cuentaGastoContableCodigo: p.cuentaGastoContable?.codigo ?? null,
+      cuentaGastoContableNombre: p.cuentaGastoContable?.nombre ?? null,
+    })),
+    total,
+    paises,
+  };
 }
 
 export async function listarCuentasContablesParaProveedor(): Promise<CuentaContableOption[]> {

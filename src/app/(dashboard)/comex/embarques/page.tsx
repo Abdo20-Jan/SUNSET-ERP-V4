@@ -2,13 +2,17 @@ import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon } from "@hugeicons/core-free-icons";
 
+import { auth } from "@/lib/auth";
 import { listarEmbarques, type EmbarqueListFilters } from "@/lib/actions/embarques";
 import { db } from "@/lib/db";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { EmbarqueEstado, Moneda } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePaginationParams } from "@/components/ui/pagination-params";
+
+import { MonedaToggle } from "../../reportes/_components/moneda-toggle";
 
 import { EmbarquesFilters } from "./embarques-filters";
 import { EmbarquesTable } from "./embarques-table";
@@ -17,6 +21,7 @@ import { EmbarquesTabs, type EmbarqueTabKey } from "./embarques-tabs";
 type SearchParams = Promise<{
   tab?: string;
   moneda?: string;
+  pres?: string;
   page?: string;
   perPage?: string;
 }>;
@@ -51,11 +56,34 @@ function parseMoneda(v: string | undefined): Moneda | null {
 export const dynamic = "force-dynamic";
 
 export default async function EmbarquesPage({ searchParams }: { searchParams: SearchParams }) {
-  const params = await searchParams;
+  const [params, session, cotizacion] = await Promise.all([
+    searchParams,
+    auth(),
+    getCotizacionParaFecha(new Date()),
+  ]);
 
   const tab = parseTab(params.tab);
   const moneda = parseMoneda(params.moneda);
   const { page, perPage } = parsePaginationParams(params);
+
+  // Moneda de PRESENTACIÓN (default USD), independiente del filtro `?moneda`
+  // (que filtra embarques por su moneda nativa). Por eso el toggle usa `?pres`.
+  const pres: Moneda =
+    params.pres === "ARS"
+      ? "ARS"
+      : params.pres === "USD"
+        ? "USD"
+        : session?.user.monedaPreferida === "ARS"
+          ? "ARS"
+          : "USD";
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   const filtros: EmbarqueListFilters & { page: number; perPage: number } = {
     estado: TAB_ESTADOS[tab],
@@ -94,10 +122,13 @@ export default async function EmbarquesPage({ searchParams }: { searchParams: Se
             {total} embarque{total === 1 ? "" : "s"} · {filtroTags.join(" · ")}
           </p>
         </div>
-        <Link href="/comex/embarques/nuevo" className={buttonVariants({ variant: "default" })}>
-          <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-          Nuevo embarque
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <MonedaToggle current={pres} tcInfo={tcInfo} param="pres" />
+          <Link href="/comex/embarques/nuevo" className={buttonVariants({ variant: "default" })}>
+            <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+            Nuevo embarque
+          </Link>
+        </div>
       </div>
 
       <EmbarquesTabs current={tab} counts={counts} />
@@ -105,7 +136,7 @@ export default async function EmbarquesPage({ searchParams }: { searchParams: Se
       <EmbarquesFilters selectedMoneda={moneda ?? "all"} />
 
       <Card className="py-0">
-        <EmbarquesTable data={rows} />
+        <EmbarquesTable data={rows} pres={pres} tc={tc} />
         <Pagination page={page} perPage={perPage} total={total} className="border-t" />
       </Card>
     </div>

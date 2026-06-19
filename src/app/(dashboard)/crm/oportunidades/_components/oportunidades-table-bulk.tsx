@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { bulkAssignOportunidadesOwnerAction } from "@/lib/actions/oportunidades";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMontoPres } from "@/lib/format";
 import type { OportunidadEstado } from "@/generated/prisma/client";
 
+import type { Moneda } from "../../../reportes/_components/moneda-toggle";
 import type { OportunidadRow } from "./oportunidades-table";
 
 function estadoCls(estado: OportunidadEstado): string {
@@ -38,9 +39,13 @@ function VinculoCell({ row }: { row: OportunidadRow }) {
 export function OportunidadesTableBulk({
   ops,
   usuarios,
+  moneda,
+  tc,
 }: {
   ops: OportunidadRow[];
   usuarios: Array<{ id: string; nombre: string }>;
+  moneda: Moneda;
+  tc: string | null;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -163,7 +168,7 @@ export function OportunidadesTableBulk({
                 </td>
                 <td className="px-3 py-2">{o.titulo}</td>
                 <td className="px-3 py-2 text-right font-medium">
-                  {o.moneda} {fmtMoney(o.monto)}
+                  {fmtMontoPres(o.monto, o.moneda as Moneda, moneda, tc)} {moneda}
                 </td>
                 <td className="px-3 py-2">{o.stageNombre}</td>
                 <td className="px-3 py-2">

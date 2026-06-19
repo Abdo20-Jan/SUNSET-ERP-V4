@@ -1,7 +1,9 @@
 import Link from "next/link";
 
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMontoPres } from "@/lib/format";
 import { OportunidadEstado } from "@/generated/prisma/client";
+
+import type { Moneda } from "../../../reportes/_components/moneda-toggle";
 
 export type OportunidadRow = {
   id: string;
@@ -49,7 +51,15 @@ function VinculoCell({ row }: { row: OportunidadRow }) {
   return <>—</>;
 }
 
-export function OportunidadesTable({ ops }: { ops: OportunidadRow[] }) {
+export function OportunidadesTable({
+  ops,
+  moneda,
+  tc,
+}: {
+  ops: OportunidadRow[];
+  moneda: Moneda;
+  tc: string | null;
+}) {
   return (
     <div className="overflow-x-auto rounded-md border">
       <table className="w-full text-sm">
@@ -75,7 +85,7 @@ export function OportunidadesTable({ ops }: { ops: OportunidadRow[] }) {
               </td>
               <td className="px-3 py-2">{o.titulo}</td>
               <td className="px-3 py-2 text-right font-medium">
-                {o.moneda} {fmtMoney(o.monto)}
+                {fmtMontoPres(o.monto, o.moneda as Moneda, moneda, tc)} {moneda}
               </td>
               <td className="px-3 py-2">{o.stageNombre}</td>
               <td className="px-3 py-2">
