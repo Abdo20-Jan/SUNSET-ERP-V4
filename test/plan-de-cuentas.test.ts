@@ -1,22 +1,41 @@
 import { describe, expect, it } from "vitest";
 import {
+  categoriaPorClase,
   type CuentaPlan,
+  monedaDeCuenta,
   naturalezaPorDefecto,
-  PLAN_RT9,
+  PLAN_CUENTAS,
   planEntryToSeedRecord,
   validarPlan,
 } from "@/lib/services/plan-de-cuentas";
 
-// Rebuild RT9 — el plan de cuentas v3 vive como dato estructurado (fuente única
-// para el seed, el registry y el guard). `validarPlan` es la lógica del guard:
-// fija las invariantes que el ADR exige (sin huérfanas, categoría coherente,
-// ningún 5.x inventariable, regularizadoras con naturaleza explícita).
+// Plan de cuentas — modelo de 9 clases del Excel maestro `PLANO DE CONTAS FINAL`
+// (631 cuentas). El plan vive como dato (`plan-de-cuentas.data.ts`, generado);
+// `validarPlan` fija las invariantes estructurales que el Excel cumple 100%.
 
+let _ord = 0;
 function mk(p: Partial<CuentaPlan> & { codigo: string }): CuentaPlan {
-  return { nombre: p.codigo, tipo: "ANALITICA", categoria: "ACTIVO", ...p };
+  const tipo = p.tipo ?? "ANALITICA";
+  return {
+    orden: ++_ord,
+    nombre: p.codigo,
+    clase: Number(p.codigo.split(".")[0]),
+    clasificacion: "CORRIENTE",
+    tipo,
+    naturaleza: "DEUDOR",
+    imputacion: tipo === "SINTETICA" ? "NO_IMPUTABLE" : "IMPUTABLE",
+    regularizadora: false,
+    bimonetaria: false,
+    monedaExtranjera: false,
+    enEspecie: false,
+    inventariable: false,
+    sistema: false,
+    dinamica: false,
+    ...p,
+  };
 }
 
-describe("validarPlan — guard de consistencia del plan RT9", () => {
+describe("validarPlan — guard de consistencia del plan", () => {
   it("plan mínimo coherente → sin problemas", () => {
     const plan: CuentaPlan[] = [
       mk({ codigo: "1", tipo: "SINTETICA" }),
@@ -27,56 +46,92 @@ describe("validarPlan — guard de consistencia del plan RT9", () => {
     expect(validarPlan(plan)).toEqual([]);
   });
 
-  it("R1: analítica huérfana (padre sintético no declarado)", () => {
-    const probs = validarPlan([mk({ codigo: "2.1.1.01", categoria: "PASIVO" })]);
-    expect(probs.some((p) => p.regla === "R1_ORFA")).toBe(true);
+  it("R_DUP: código duplicado", () => {
+    const plan = [mk({ codigo: "1", tipo: "SINTETICA" }), mk({ codigo: "1", tipo: "SINTETICA" })];
+    expect(validarPlan(plan).some((p) => p.regla === "R_DUP")).toBe(true);
   });
 
-  it("R2: categoría incoherente con el dígito raíz", () => {
-    const plan: CuentaPlan[] = [
+  it("R_ORDEN: orden duplicado", () => {
+    const plan = [
+      mk({ codigo: "1", tipo: "SINTETICA", orden: 7 }),
+      mk({ codigo: "2", tipo: "SINTETICA", orden: 7 }),
+    ];
+    expect(validarPlan(plan).some((p) => p.regla === "R_ORDEN")).toBe(true);
+  });
+
+  it("R_CLASE: clase ≠ dígito raíz", () => {
+    expect(
+      validarPlan([mk({ codigo: "1", tipo: "SINTETICA", clase: 2 })]).some(
+        (p) => p.regla === "R_CLASE",
+      ),
+    ).toBe(true);
+  });
+
+  it("R_CLASIF: clasificacion no válida para la clase (clase 1 con RESULTADO)", () => {
+    expect(
+      validarPlan([mk({ codigo: "1", tipo: "SINTETICA", clasificacion: "RESULTADO" })]).some(
+        (p) => p.regla === "R_CLASIF",
+      ),
+    ).toBe(true);
+  });
+
+  it("R_ORFA: padre sintético no declarado", () => {
+    expect(
+      validarPlan([mk({ codigo: "2.1.1.01", clase: 2 })]).some((p) => p.regla === "R_ORFA"),
+    ).toBe(true);
+  });
+
+  it("R_ORFA: padre declarado pero ANALÍTICA (no sintética)", () => {
+    const plan = [
+      mk({ codigo: "1", tipo: "SINTETICA" }),
+      mk({ codigo: "1.1" }),
+      mk({ codigo: "1.1.1" }),
+    ];
+    expect(validarPlan(plan).some((p) => p.regla === "R_ORFA")).toBe(true);
+  });
+
+  it("R_IMPUT: sintética marcada imputable", () => {
+    expect(
+      validarPlan([mk({ codigo: "1", tipo: "SINTETICA", imputacion: "IMPUTABLE" })]).some(
+        (p) => p.regla === "R_IMPUT",
+      ),
+    ).toBe(true);
+  });
+
+  it("R_IMPUT: analítica marcada no imputable", () => {
+    const plan = [
+      mk({ codigo: "1", tipo: "SINTETICA" }),
+      mk({ codigo: "1.1", tipo: "ANALITICA", imputacion: "NO_IMPUTABLE" }),
+    ];
+    expect(validarPlan(plan).some((p) => p.regla === "R_IMPUT")).toBe(true);
+  });
+
+  it("R_INVENTARIABLE: inventariable fuera de ACTIVO (clase ≠ 1)", () => {
+    const plan = [
+      mk({ codigo: "5", tipo: "SINTETICA", clase: 5 }),
+      mk({ codigo: "5.1", clase: 5, inventariable: true }),
+    ];
+    expect(validarPlan(plan).some((p) => p.regla === "R_INVENTARIABLE")).toBe(true);
+  });
+
+  it("R_REGULARIZADORA: regularizadora con naturaleza = al default (no invertida)", () => {
+    // ACTIVO default = DEUDOR; una regularizadora de activo debe ser ACREEDOR.
+    const plan = [
       mk({ codigo: "1", tipo: "SINTETICA" }),
       mk({ codigo: "1.1", tipo: "SINTETICA" }),
-      mk({ codigo: "1.1.1", tipo: "SINTETICA" }),
-      mk({ codigo: "1.1.1.01", categoria: "PASIVO" }), // dígito 1 = ACTIVO
+      mk({ codigo: "1.1.09", regularizadora: true, naturaleza: "DEUDOR" }),
     ];
-    expect(validarPlan(plan).some((p) => p.regla === "R2_CATEGORIA")).toBe(true);
+    expect(validarPlan(plan).some((p) => p.regla === "R_REGULARIZADORA")).toBe(true);
   });
+});
 
-  it("R3: cuenta de resultado (5-9) marcada inventariable", () => {
-    const plan: CuentaPlan[] = [
-      mk({ codigo: "5", tipo: "SINTETICA", categoria: "EGRESO" }),
-      mk({ codigo: "5.1", tipo: "SINTETICA", categoria: "EGRESO" }),
-      mk({ codigo: "5.1.01", categoria: "EGRESO", inventariable: true }),
-    ];
-    expect(validarPlan(plan).some((p) => p.regla === "R3_INVENTARIABLE_RESULTADO")).toBe(true);
-  });
-
-  it("R4: regularizadora '(-)' sin naturaleza explícita", () => {
-    const plan: CuentaPlan[] = [
-      mk({ codigo: "1", tipo: "SINTETICA" }),
-      mk({ codigo: "1.1", tipo: "SINTETICA" }),
-      mk({ codigo: "1.1.7", tipo: "SINTETICA" }),
-      mk({ codigo: "1.1.7.09", nombre: "(-) DESVALORIZACIÓN DE BIENES DE CAMBIO" }),
-    ];
-    expect(validarPlan(plan).some((p) => p.regla === "R4_REGULARIZADORA")).toBe(true);
-  });
-
-  it("R4: regularizadora con naturaleza = al default (no invertida) también falla", () => {
-    const plan: CuentaPlan[] = [
-      mk({ codigo: "1", tipo: "SINTETICA" }),
-      mk({ codigo: "1.1", tipo: "SINTETICA" }),
-      mk({ codigo: "1.1.7", tipo: "SINTETICA" }),
-      mk({ codigo: "1.1.7.09", nombre: "(-) DESVALORIZACIÓN", naturaleza: "DEUDOR" }), // ACTIVO default
-    ];
-    expect(validarPlan(plan).some((p) => p.regla === "R4_REGULARIZADORA")).toBe(true);
-  });
-
-  it("R5: código duplicado", () => {
-    const plan: CuentaPlan[] = [
-      mk({ codigo: "1", tipo: "SINTETICA" }),
-      mk({ codigo: "1", tipo: "SINTETICA" }),
-    ];
-    expect(validarPlan(plan).some((p) => p.regla === "R5_DUP")).toBe(true);
+describe("helpers de derivación", () => {
+  it("categoriaPorClase: 1→ACTIVO 2→PASIVO 3→PATRIMONIO 4→INGRESO 5..9→EGRESO", () => {
+    expect(categoriaPorClase(1)).toBe("ACTIVO");
+    expect(categoriaPorClase(2)).toBe("PASIVO");
+    expect(categoriaPorClase(3)).toBe("PATRIMONIO");
+    expect(categoriaPorClase(4)).toBe("INGRESO");
+    for (const c of [5, 6, 7, 8, 9]) expect(categoriaPorClase(c)).toBe("EGRESO");
   });
 
   it("naturalezaPorDefecto: ACTIVO/EGRESO=DEUDOR, resto=ACREEDOR", () => {
@@ -86,34 +141,39 @@ describe("validarPlan — guard de consistencia del plan RT9", () => {
     expect(naturalezaPorDefecto("PATRIMONIO")).toBe("ACREEDOR");
     expect(naturalezaPorDefecto("INGRESO")).toBe("ACREEDOR");
   });
+
+  it("monedaDeCuenta: ME pura > bimonetaria > ARS (null)", () => {
+    expect(monedaDeCuenta(mk({ codigo: "1.1.1.01.91", monedaExtranjera: true }))).toBe("ME");
+    expect(monedaDeCuenta(mk({ codigo: "1.1.7.01", bimonetaria: true }))).toBe("BI");
+    expect(monedaDeCuenta(mk({ codigo: "1.1.1.01.01" }))).toBeNull();
+  });
 });
 
-describe("PLAN_RT9 — el plan v3 real", () => {
+describe("PLAN_CUENTAS — el plan real (631 cuentas)", () => {
   it("es internamente consistente (pasa el guard)", () => {
-    expect(validarPlan(PLAN_RT9)).toEqual([]);
+    expect(validarPlan(PLAN_CUENTAS)).toEqual([]);
   });
 
-  it("incluye los rubros raíz 1..5 como SINTÉTICA", () => {
-    for (const raiz of ["1", "2", "3", "4", "5"]) {
-      const c = PLAN_RT9.find((x) => x.codigo === raiz);
-      expect(c?.tipo).toBe("SINTETICA");
+  it("tiene exactamente 631 cuentas con código y orden únicos", () => {
+    expect(PLAN_CUENTAS.length).toBe(631);
+    expect(new Set(PLAN_CUENTAS.map((c) => c.codigo)).size).toBe(631);
+    expect(new Set(PLAN_CUENTAS.map((c) => c.orden)).size).toBe(631);
+  });
+
+  it("las 9 raíces 1..9 son SINTÉTICAS", () => {
+    for (const raiz of ["1", "2", "3", "4", "5", "6", "7", "8", "9"]) {
+      expect(PLAN_CUENTAS.find((c) => c.codigo === raiz)?.tipo).toBe("SINTETICA");
     }
   });
 
-  it("las cuentas de Bienes de Cambio (1.1.7.0x) son inventariables y ninguna 5.x lo es", () => {
-    const stock = PLAN_RT9.filter((c) => /^1\.1\.7\.0[1-5]$/.test(c.codigo));
-    expect(stock.length).toBe(5);
-    expect(stock.every((c) => c.inventariable === true)).toBe(true);
-    expect(PLAN_RT9.some((c) => c.codigo.startsWith("5.") && c.inventariable)).toBe(false);
-  });
-
-  it("tiene la diferencia de cambio realizada en la clase 9 (9.2.01 ganancia / 9.2.02 pérdida)", () => {
-    expect(PLAN_RT9.find((c) => c.codigo === "9.2.01")).toBeDefined();
-    expect(PLAN_RT9.find((c) => c.codigo === "9.2.02")).toBeDefined();
+  it("sólo cuentas de ACTIVO (clase 1) son inventariables", () => {
+    const inv = PLAN_CUENTAS.filter((c) => c.inventariable);
+    expect(inv.length).toBeGreaterThan(0);
+    expect(inv.every((c) => c.clase === 1)).toBe(true);
   });
 });
 
-describe("planEntryToSeedRecord — proyección al registro de CuentaContable (seed #3)", () => {
+describe("planEntryToSeedRecord — proyección al registro de CuentaContable", () => {
   it("deriva nivel (segmentos) y padreCodigo (todo antes del último '.')", () => {
     const r = planEntryToSeedRecord(mk({ codigo: "1.1.5.1.01" }));
     expect(r.nivel).toBe(5);
@@ -126,40 +186,35 @@ describe("planEntryToSeedRecord — proyección al registro de CuentaContable (s
     expect(r.padreCodigo).toBeNull();
   });
 
-  it("resuelve naturaleza por defecto cuando no es explícita (ACTIVO → DEUDOR)", () => {
-    expect(planEntryToSeedRecord(mk({ codigo: "1.1.7.01" })).naturaleza).toBe("DEUDOR");
+  it("deriva categoria (legada) de la clase y rubroEECC queda null en esta etapa", () => {
+    const r = planEntryToSeedRecord(mk({ codigo: "5.1.01", clase: 5 }));
+    expect(r.categoria).toBe("EGRESO");
+    expect(r.rubroEECC).toBeNull();
   });
 
-  it("preserva la naturaleza explícita de una regularizadora (ACTIVO/ACREEDOR)", () => {
+  it("deriva moneda de las flags (ME/BI/null) y persiste los 11 atributos nuevos", () => {
     const r = planEntryToSeedRecord(
-      mk({ codigo: "1.1.7.09", nombre: "(-) DESVALORIZACIÓN", naturaleza: "ACREEDOR" }),
-    );
-    expect(r.naturaleza).toBe("ACREEDOR");
-  });
-
-  it("normaliza moneda/rubroEECC a null y los preserva cuando vienen seteados", () => {
-    expect(planEntryToSeedRecord(mk({ codigo: "1.1.7.01" })).moneda).toBeNull();
-    expect(planEntryToSeedRecord(mk({ codigo: "1.1.7.01" })).rubroEECC).toBeNull();
-    const usd = planEntryToSeedRecord(
       mk({
-        codigo: "2.1.8.01",
-        categoria: "PASIVO",
-        moneda: "USD",
-        rubroEECC: "Deudas Comerciales",
+        codigo: "1.1.1.01.91",
+        orden: 42,
+        clasificacion: "CORRIENTE",
+        imputacion: "IMPUTABLE",
+        monedaExtranjera: true,
+        dinamica: true,
       }),
     );
-    expect(usd.moneda).toBe("USD");
-    expect(usd.rubroEECC).toBe("Deudas Comerciales");
+    expect(r.moneda).toBe("ME");
+    expect(r.orden).toBe(42);
+    expect(r.clase).toBe(1);
+    expect(r.clasificacion).toBe("CORRIENTE");
+    expect(r.imputacion).toBe("IMPUTABLE");
+    expect(r.monedaExtranjera).toBe(true);
+    expect(r.dinamica).toBe(true);
   });
 
-  it("no persiste `inventariable` (no es columna; sólo lo usa el guard)", () => {
-    const r = planEntryToSeedRecord(mk({ codigo: "1.1.7.02", inventariable: true }));
-    expect(r).not.toHaveProperty("inventariable");
-  });
-
-  it("todo PLAN_RT9 se proyecta con padreCodigo que existe en el propio plan (sin huérfanas)", () => {
-    const codigos = new Set(PLAN_RT9.map((c) => c.codigo));
-    for (const c of PLAN_RT9) {
+  it("todo PLAN_CUENTAS se proyecta con padreCodigo que existe en el propio plan", () => {
+    const codigos = new Set(PLAN_CUENTAS.map((c) => c.codigo));
+    for (const c of PLAN_CUENTAS) {
       const r = planEntryToSeedRecord(c);
       if (r.padreCodigo !== null) {
         expect(codigos.has(r.padreCodigo), `${r.codigo} → padre ${r.padreCodigo}`).toBe(true);

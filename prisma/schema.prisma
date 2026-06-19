@@ -35,6 +35,11 @@ enum CuentaCategoria {
 enum Naturaleza {
   DEUDOR
   ACREEDOR
+  // Resultados que pueden cerrar deudores o acreedores (clases 8/9).
+  MIXTA
+  // Cuentas de cierre/sistema cuyo saldo lo fija el sistema (resultado del
+  // ejercicio, operaciones discontinuadas).
+  SISTEMA_VARIABLE
 }
 
 enum MonedaCuenta {
@@ -42,6 +47,23 @@ enum MonedaCuenta {
   USD
   BI
   ME
+}
+
+// Agrupamiento de exposición del Balance (modelo de 9 clases del Excel maestro).
+enum ClasificacionCuenta {
+  ACTIVO
+  PASIVO
+  CORRIENTE
+  NO_CORRIENTE
+  PATRIMONIO_NETO
+  RESULTADO
+}
+
+// Imputabilidad de la cuenta: ¿recibe asientos directos?
+enum ImputacionCuenta {
+  IMPUTABLE
+  NO_IMPUTABLE
+  SOLO_SISTEMA
 }
 
 enum PeriodoEstado {
@@ -417,6 +439,32 @@ model CuentaContable {
   moneda     MonedaCuenta?
   // Rubro de Estados Contables (RT9) para agrupar el balance y el ER.
   rubroEECC  String?
+
+  // --- Modelo de 9 clases (Excel maestro `PLANO DE CONTAS FINAL`, etapa 1/3) ---
+  // Nullable/aditivo: poblado por el seed del plan. El motor y los reportes
+  // migran a estos campos en las etapas 2 (EECC) y 3 (flujos contables).
+  /// Clase contable 1..9 (= primer dígito del código). Fuente de la verdad.
+  clase            Int?
+  /// Agrupamiento de exposición del Balance (corriente/no corriente/resultado).
+  clasificacion    ClasificacionCuenta?
+  /// Orden de exhibición del plan/EECC.
+  orden            Int?
+  /// Imputabilidad: recibe asientos directos.
+  imputacion       ImputacionCuenta?
+  /// Cuenta retificadora (depreciaciones/previsiones/deducciones).
+  regularizadora   Boolean @default(false)
+  /// Acumula ARS + ME (revalúo al cierre).
+  bimonetaria      Boolean @default(false)
+  /// Moneda extranjera pura.
+  monedaExtranjera Boolean @default(false)
+  /// Recibe bienes en especie.
+  enEspecie        Boolean @default(false)
+  /// Vincula la cuenta con el stock (bienes de cambio).
+  inventariable    Boolean @default(false)
+  /// Movida sólo por el sistema (cierre, Ley 25.413).
+  sistema          Boolean @default(false)
+  /// Recibe subcuentas generadas en runtime (bancos, clientes, proveedores…).
+  dinamica         Boolean @default(false)
 
   padre CuentaContable?  @relation("CuentaPadre", fields: [padreCodigo], references: [codigo])
   hijos CuentaContable[] @relation("CuentaPadre")
