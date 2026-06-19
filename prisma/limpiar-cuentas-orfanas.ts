@@ -1,12 +1,14 @@
 /**
- * Limpieza de cuentas contables huérfanas del plan ANTIGUO tras instalar RT9
- * (rebuild 2026-06-17). Post-wipe + post `seed-plan-rt9 --apply`, el plan tiene
- * las 164 cuentas RT9 + ~102 cuentas viejas que no están en `PLAN_RT9`.
+ * Limpieza de cuentas contables que NO pertenecen al plan canónico
+ * (`PLAN_CUENTAS`, modelo de 9 clases del Excel maestro). Útil tras un re-seed
+ * para dejar sólo las cuentas del plan + las que tengan FK viva.
  *
- * Borra las viejas (no-RT9) PRESERVANDO:
- *  - Cualquier cuenta referenciada por `CuentaBancaria.cuentaContableId` (las
- *    cuentas analíticas de banco 1.1.2.1x, válidas bajo el sintético RT9 1.1.2).
- *  - (defensivo) cualquier cuenta que tenga FK entrante viva de otra tabla.
+ * Borra las que no están en `PLAN_CUENTAS` PRESERVANDO:
+ *  - Cualquier cuenta referenciada por `CuentaBancaria.cuentaContableId`.
+ *
+ * Sólo preserva por CuentaBancaria. Si se corre con --apply sobre una base con
+ * otras FK entrantes vivas (clientes/proveedores/asientos/etc.), el delete
+ * fallaría con P2003 y abortaría — no corrompe datos, pero no las pre-filtra.
  *
  * Borra hijas antes que padres (orden por profundidad de código desc) para
  * respetar la self-FK `padreCodigo`. DRY-RUN por defecto; `--apply` borra.
