@@ -1,4 +1,10 @@
 import Link from "next/link";
+import {
+  Building03Icon,
+  FactoryIcon,
+  PackageIcon,
+  TruckDeliveryIcon,
+} from "@hugeicons/core-free-icons";
 
 import {
   listarEnProduccion,
@@ -7,7 +13,9 @@ import {
   listarStockAduanero,
 } from "@/lib/actions/inventario";
 import { isContenedorDesconsolidacionEnabled, isStockDualEnabled } from "@/lib/features";
+import { fmtInt } from "@/lib/format";
 
+import { KpiCard } from "../dashboard/_components/kpi-card";
 import { InventarioTabs } from "./_components/inventario-tabs";
 
 type SearchParams = Promise<{ q?: string; tab?: string }>;
@@ -53,6 +61,37 @@ export default async function InventarioPage({ searchParams }: { searchParams: S
           Transferencias
         </Link>
       </header>
+
+      <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+        <KpiCard
+          label="Productos"
+          value={fmtInt(productos.length)}
+          icon={PackageIcon}
+          accent="info"
+          hint="SKUs con stock físico"
+        />
+        <KpiCard
+          label="Depósitos"
+          value={fmtInt(depositos.length)}
+          icon={Building03Icon}
+          accent="neutral"
+          hint="Activos"
+        />
+        <KpiCard
+          label="En tránsito"
+          value={fmtInt(transito.filas.length)}
+          icon={TruckDeliveryIcon}
+          accent="neutral"
+          hint="Productos en embarques no nacionalizados"
+        />
+        <KpiCard
+          label="En producción"
+          value={fmtInt(produccion.filas.length)}
+          icon={FactoryIcon}
+          accent="neutral"
+          hint="Productos pedidos a fábrica sin embarcar"
+        />
+      </section>
 
       <form className="flex gap-2" action="/inventario">
         <input
