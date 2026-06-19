@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { ColumnsToggle } from "@/components/ui/columns-toggle";
 import { DataTable } from "@/components/ui/data-table";
 import { DataTableSearch } from "@/components/ui/data-table-search";
+import { ExportButton } from "@/components/ui/export-button";
 import {
   Dialog,
   DialogContent,
@@ -211,6 +212,7 @@ export function ClientesTable({ clientes, total, cuentas, provincias, q, estado 
           </SelectContent>
         </Select>
         <ColumnsToggle table={table} />
+        <ExportButton recurso="clientes" />
         <Button onClick={() => setFormState({ mode: "create" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
           Nuevo cliente

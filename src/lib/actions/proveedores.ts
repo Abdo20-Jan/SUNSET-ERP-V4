@@ -63,6 +63,81 @@ const PROVEEDORES_SORT_FIELD_MAP = {
   pais: "pais",
 } as const;
 const PROVEEDORES_SORT_ALLOWED = Object.keys(PROVEEDORES_SORT_FIELD_MAP);
+const PROVEEDORES_SORT_DEFAULT = { sort: "nombre", dir: "asc" } as const;
+
+// `select` compartido entre la lista paginada y el export (mismo shape de fila).
+const PROVEEDOR_ROW_SELECT = {
+  id: true,
+  nombre: true,
+  cuit: true,
+  tipo: true,
+  tipoProveedor: true,
+  conceptoRG830: true,
+  sujetoRetencionGanancias: true,
+  condicionGanancias: true,
+  alicuotaRetencionGananciasOverride: true,
+  certificadoExclusionGanancias: true,
+  vigenciaCertExclusionGanancias: true,
+  pais: true,
+  direccion: true,
+  telefono: true,
+  email: true,
+  estado: true,
+  cuentaContableId: true,
+  cuentaContable: { select: { codigo: true, nombre: true } },
+  cuentaGastoContableId: true,
+  cuentaGastoContable: { select: { codigo: true, nombre: true } },
+} satisfies Prisma.ProveedorSelect;
+
+type ProveedorRowRaw = Prisma.ProveedorGetPayload<{ select: typeof PROVEEDOR_ROW_SELECT }>;
+
+function mapProveedorRow(p: ProveedorRowRaw): ProveedorRow {
+  return {
+    id: p.id,
+    nombre: p.nombre,
+    cuit: p.cuit,
+    tipo: p.tipo,
+    tipoProveedor: p.tipoProveedor,
+    conceptoRG830: p.conceptoRG830,
+    sujetoRetencionGanancias: p.sujetoRetencionGanancias,
+    condicionGanancias: p.condicionGanancias,
+    alicuotaRetencionGananciasOverride: p.alicuotaRetencionGananciasOverride?.toString() ?? null,
+    certificadoExclusionGanancias: p.certificadoExclusionGanancias,
+    vigenciaCertExclusionGanancias: p.vigenciaCertExclusionGanancias
+      ? p.vigenciaCertExclusionGanancias.toISOString().slice(0, 10)
+      : null,
+    pais: p.pais,
+    direccion: p.direccion,
+    telefono: p.telefono,
+    email: p.email,
+    estado: p.estado,
+    cuentaContableId: p.cuentaContableId,
+    cuentaContableCodigo: p.cuentaContable?.codigo ?? null,
+    cuentaContableNombre: p.cuentaContable?.nombre ?? null,
+    cuentaGastoContableId: p.cuentaGastoContableId,
+    cuentaGastoContableCodigo: p.cuentaGastoContable?.codigo ?? null,
+    cuentaGastoContableNombre: p.cuentaGastoContable?.nombre ?? null,
+  };
+}
+
+// Construye el `where` a partir de {q, pais}. Reutilizado por `listarProveedores`
+// (paginado) y `listarProveedoresParaExport` (todas las filas del set filtrado).
+function buildProveedoresWhere(opts: { q?: string; pais?: string }): Prisma.ProveedorWhereInput {
+  const q = opts.q?.trim();
+  const pais = opts.pais?.trim();
+
+  const where: Prisma.ProveedorWhereInput = {};
+  if (q) {
+    where.OR = [
+      { nombre: { contains: q, mode: "insensitive" } },
+      { cuit: { contains: q, mode: "insensitive" } },
+    ];
+  }
+  if (pais && pais !== "todos") {
+    where.pais = pais;
+  }
+  return where;
+}
 
 export type ListarProveedoresOpts = {
   q?: string;
@@ -85,25 +160,14 @@ export async function listarProveedores(
   const page = Math.max(1, Math.floor(opts.page ?? 1));
   const perPage = Math.max(1, Math.min(500, Math.floor(opts.perPage ?? 50)));
 
-  const q = opts.q?.trim();
-  const pais = opts.pais?.trim();
-
-  const where: Prisma.ProveedorWhereInput = {};
-  if (q) {
-    where.OR = [
-      { nombre: { contains: q, mode: "insensitive" } },
-      { cuit: { contains: q, mode: "insensitive" } },
-    ];
-  }
-  if (pais && pais !== "todos") {
-    where.pais = pais;
-  }
+  const where = buildProveedoresWhere(opts);
 
   const orderBy = buildOrderBy(
-    parseSortParams({ sort: opts.sort, dir: opts.dir }, PROVEEDORES_SORT_ALLOWED, {
-      sort: "nombre",
-      dir: "asc",
-    }),
+    parseSortParams(
+      { sort: opts.sort, dir: opts.dir },
+      PROVEEDORES_SORT_ALLOWED,
+      PROVEEDORES_SORT_DEFAULT,
+    ),
     PROVEEDORES_SORT_FIELD_MAP,
   );
 
@@ -113,28 +177,7 @@ export async function listarProveedores(
       orderBy,
       take: perPage,
       skip: (page - 1) * perPage,
-      select: {
-        id: true,
-        nombre: true,
-        cuit: true,
-        tipo: true,
-        tipoProveedor: true,
-        conceptoRG830: true,
-        sujetoRetencionGanancias: true,
-        condicionGanancias: true,
-        alicuotaRetencionGananciasOverride: true,
-        certificadoExclusionGanancias: true,
-        vigenciaCertExclusionGanancias: true,
-        pais: true,
-        direccion: true,
-        telefono: true,
-        email: true,
-        estado: true,
-        cuentaContableId: true,
-        cuentaContable: { select: { codigo: true, nombre: true } },
-        cuentaGastoContableId: true,
-        cuentaGastoContable: { select: { codigo: true, nombre: true } },
-      },
+      select: PROVEEDOR_ROW_SELECT,
     }),
     db.proveedor.count({ where }),
     // Opciones de país = distinct sobre TODA la tabla (no de la página filtrada).
@@ -148,35 +191,38 @@ export async function listarProveedores(
   const paises = paisesRaw.map((p) => p.pais).filter((p): p is string => !!p && p.length > 0);
 
   return {
-    rows: rows.map((p) => ({
-      id: p.id,
-      nombre: p.nombre,
-      cuit: p.cuit,
-      tipo: p.tipo,
-      tipoProveedor: p.tipoProveedor,
-      conceptoRG830: p.conceptoRG830,
-      sujetoRetencionGanancias: p.sujetoRetencionGanancias,
-      condicionGanancias: p.condicionGanancias,
-      alicuotaRetencionGananciasOverride: p.alicuotaRetencionGananciasOverride?.toString() ?? null,
-      certificadoExclusionGanancias: p.certificadoExclusionGanancias,
-      vigenciaCertExclusionGanancias: p.vigenciaCertExclusionGanancias
-        ? p.vigenciaCertExclusionGanancias.toISOString().slice(0, 10)
-        : null,
-      pais: p.pais,
-      direccion: p.direccion,
-      telefono: p.telefono,
-      email: p.email,
-      estado: p.estado,
-      cuentaContableId: p.cuentaContableId,
-      cuentaContableCodigo: p.cuentaContable?.codigo ?? null,
-      cuentaContableNombre: p.cuentaContable?.nombre ?? null,
-      cuentaGastoContableId: p.cuentaGastoContableId,
-      cuentaGastoContableCodigo: p.cuentaGastoContable?.codigo ?? null,
-      cuentaGastoContableNombre: p.cuentaGastoContable?.nombre ?? null,
-    })),
+    rows: rows.map(mapProveedorRow),
     total,
     paises,
   };
+}
+
+// Export: mismas filas que la lista filtrada (q, pais, sort, dir) pero SIN
+// paginación (todas las filas del set filtrado). No usar en la grilla.
+export async function listarProveedoresParaExport(opts: {
+  q?: string;
+  pais?: string;
+  sort?: string;
+  dir?: SortDir;
+}): Promise<ProveedorRow[]> {
+  const where = buildProveedoresWhere(opts);
+
+  const orderBy = buildOrderBy(
+    parseSortParams(
+      { sort: opts.sort, dir: opts.dir },
+      PROVEEDORES_SORT_ALLOWED,
+      PROVEEDORES_SORT_DEFAULT,
+    ),
+    PROVEEDORES_SORT_FIELD_MAP,
+  );
+
+  const rows = await db.proveedor.findMany({
+    where,
+    orderBy,
+    select: PROVEEDOR_ROW_SELECT,
+  });
+
+  return rows.map(mapProveedorRow);
 }
 
 export async function listarCuentasContablesParaProveedor(): Promise<CuentaContableOption[]> {
