@@ -47,19 +47,23 @@ export function TopnavUserMenu({
         </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={8} className="min-w-56 rounded-lg">
-        <DropdownMenuLabel className="p-0 font-normal">
-          <div className="flex items-center gap-2 px-2 py-1.5 text-left text-sm">
-            <Avatar className="size-8 rounded-md">
-              <AvatarFallback className="rounded-md text-xs">
-                {getInitials(user.nombre) || "??"}
-              </AvatarFallback>
-            </Avatar>
-            <div className="grid flex-1 leading-tight">
-              <span className="truncate font-medium">{user.nombre}</span>
-              <span className="truncate text-xs text-muted-foreground">{user.role}</span>
+        {/* Menu.GroupLabel (DropdownMenuLabel) exige MenuGroupContext: SIEMPRE
+            dentro de un DropdownMenuGroup, o base-ui lanza el error #31 al abrir. */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="p-0 font-normal">
+            <div className="flex items-center gap-2 px-2 py-1.5 text-left text-sm">
+              <Avatar className="size-8 rounded-md">
+                <AvatarFallback className="rounded-md text-xs">
+                  {getInitials(user.nombre) || "??"}
+                </AvatarFallback>
+              </Avatar>
+              <div className="grid flex-1 leading-tight">
+                <span className="truncate font-medium">{user.nombre}</span>
+                <span className="truncate text-xs text-muted-foreground">{user.role}</span>
+              </div>
             </div>
-          </div>
-        </DropdownMenuLabel>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         {config.sections.map((section) => (
           <DropdownMenuGroup key={section.label}>
@@ -72,9 +76,11 @@ export function TopnavUserMenu({
             <DropdownMenuSeparator />
           </DropdownMenuGroup>
         ))}
-        <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          Tema
-        </DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Tema
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <ThemeToggle />
         <DropdownMenuSeparator />
         <form action={logout}>
