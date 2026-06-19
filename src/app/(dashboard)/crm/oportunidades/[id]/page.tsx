@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { auth } from "@/lib/auth";
 import { getOportunidad } from "@/lib/actions/oportunidades";
 import { listarStages } from "@/lib/actions/pipeline";
 import { isCrmEnabled } from "@/lib/features";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
+import { fmtDate, fmtMontoPres } from "@/lib/format";
 import { OportunidadEstado } from "@/generated/prisma/client";
+
+import { MonedaToggle, type Moneda } from "../../../reportes/_components/moneda-toggle";
 
 import { CerrarButtons } from "./_components/cerrar-buttons";
 import { MoverStageSelect } from "./_components/mover-stage-select";
@@ -14,8 +18,10 @@ export const dynamic = "force-dynamic";
 
 export default async function OportunidadDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ moneda?: string }>;
 }) {
   if (!isCrmEnabled()) {
     return (
@@ -29,8 +35,25 @@ export default async function OportunidadDetailPage({
   }
 
   const { id } = await params;
-  const op = await getOportunidad(id);
+  const [{ moneda: monedaParam }, session, cotizacion, op] = await Promise.all([
+    searchParams,
+    auth(),
+    getCotizacionParaFecha(new Date()),
+    getOportunidad(id),
+  ]);
   if (!op) notFound();
+
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    monedaParam === "ARS" ? "ARS" : monedaParam === "USD" ? "USD" : monedaPreferida;
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   const stages = await listarStages();
 
@@ -40,19 +63,23 @@ export default async function OportunidadDetailPage({
         <div>
           <h1 className="text-2xl font-semibold">{op.titulo}</h1>
           <p className="text-sm text-muted-foreground">
-            {op.numero} · {op.moneda} {fmtMoney(op.monto.toString())} · {op.estado}
+            {op.numero} · {fmtMontoPres(op.monto.toString(), op.moneda as Moneda, moneda, tc)}{" "}
+            {moneda} · {op.estado}
           </p>
         </div>
-        {op.estado === OportunidadEstado.ABIERTA && (
-          <div className="flex flex-wrap gap-2">
-            <MoverStageSelect
-              opId={op.id}
-              stageActual={op.stageId}
-              stages={stages.map((s) => ({ id: s.id, nombre: s.nombre }))}
-            />
-            <CerrarButtons opId={op.id} />
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
+          {op.estado === OportunidadEstado.ABIERTA && (
+            <div className="flex flex-wrap gap-2">
+              <MoverStageSelect
+                opId={op.id}
+                stageActual={op.stageId}
+                stages={stages.map((s) => ({ id: s.id, nombre: s.nombre }))}
+              />
+              <CerrarButtons opId={op.id} />
+            </div>
+          )}
+        </div>
       </header>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
