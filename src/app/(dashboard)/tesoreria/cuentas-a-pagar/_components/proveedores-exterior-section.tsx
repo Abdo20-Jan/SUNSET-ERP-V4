@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { fmtMontoPres } from "@/lib/format";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Table,
@@ -11,18 +12,16 @@ import {
 } from "@/components/ui/table";
 import type { ProveedorExteriorSaldo } from "@/lib/services/cuentas-a-pagar";
 
-function fmtUsd(s: string | number) {
-  const n = typeof s === "string" ? Number(s) : s;
-  return n.toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+import type { Moneda } from "../../../reportes/_components/moneda-toggle";
 
 export function ProveedoresExteriorSection({
   proveedores,
+  moneda,
+  tc,
 }: {
   proveedores: ProveedorExteriorSaldo[];
+  moneda: Moneda;
+  tc: string | null;
 }) {
   if (proveedores.length === 0) return null;
 
@@ -44,7 +43,7 @@ export function ProveedoresExteriorSection({
             </p>
           </div>
           <span className="whitespace-nowrap font-mono text-sm font-semibold tabular-nums">
-            USD {fmtUsd(totalUsd)}
+            {fmtMontoPres(totalUsd.toFixed(2), "USD", moneda, tc)} {moneda}
           </span>
         </div>
         <Table>
@@ -53,7 +52,7 @@ export function ProveedoresExteriorSection({
               <TableHead>Proveedor</TableHead>
               <TableHead className="w-16">País</TableHead>
               <TableHead className="w-32 text-right">Embarques</TableHead>
-              <TableHead className="text-right">Saldo USD</TableHead>
+              <TableHead className="text-right">Saldo</TableHead>
               <TableHead className="w-28 text-right" />
             </TableRow>
           </TableHeader>
@@ -68,7 +67,8 @@ export function ProveedoresExteriorSection({
                     {cantEmbarques}
                   </TableCell>
                   <TableCell className="text-right font-mono font-medium tabular-nums">
-                    {fmtUsd(p.saldoUsd)}
+                    {fmtMontoPres(p.saldoUsd, "USD", moneda, tc)}{" "}
+                    <span className="text-xs text-muted-foreground">{moneda}</span>
                   </TableCell>
                   <TableCell className="text-right">
                     <Link

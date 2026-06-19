@@ -9,7 +9,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fmtMoney } from "../../reportes/_components/money";
+import { auth } from "@/lib/auth";
+import { fmtMontoPres, pickSaldoNativo } from "@/lib/format";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import {
   getCuentasAPagar,
   getCuentasAPagarPorEmbarque,
@@ -27,6 +29,8 @@ import { listarVepDespachosPendientes } from "@/lib/actions/vep-despacho";
 import { listarRetencionesPracticadas } from "@/lib/actions/retenciones";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
 import { isRetencionGananciasEnabled } from "@/lib/features";
+
+import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
 import { RetencionesPorDepositar } from "./_components/retenciones-por-depositar";
 
 import { VepSection } from "./vep-section";
@@ -37,7 +41,9 @@ import { ProveedoresExteriorSection } from "./_components/proveedores-exterior-s
 
 export const dynamic = "force-dynamic";
 
-export default async function CuentasAPagarPage() {
+type SearchParams = Promise<{ moneda?: string }>;
+
+export default async function CuentasAPagarPage({ searchParams }: { searchParams: SearchParams }) {
   const [
     data,
     porEmbarque,
@@ -51,6 +57,9 @@ export default async function CuentasAPagarPage() {
     intermediarios,
     defaultFecha,
     saldosExterior,
+    params,
+    session,
+    cotizacion,
   ] = await Promise.all([
     getCuentasAPagar(),
     getCuentasAPagarPorEmbarque(),
@@ -64,7 +73,22 @@ export default async function CuentasAPagarPage() {
     listarProveedoresParaIntermediario(),
     getDefaultFecha(),
     getSaldosExteriorPorProveedor(),
+    searchParams,
+    auth(),
+    getCotizacionParaFecha(new Date()),
   ]);
+
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    params.moneda === "ARS" ? "ARS" : params.moneda === "USD" ? "USD" : monedaPreferida;
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   // Filtrar 2.1.4.4.99 de la sección Aduana genérica — el saldo pendiente
   // de refuerzo se gestiona en la sección VEP con flujo dedicado.
@@ -80,37 +104,44 @@ export default async function CuentasAPagarPage() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-[15px] font-semibold tracking-tight">Cuentas a pagar</h1>
-        <p className="text-sm text-muted-foreground">
-          Saldos acreedores derivados de los asientos contabilizados. Para dar de baja una deuda
-          registre un pago en{" "}
-          <Link
-            href="/tesoreria/movimientos/nuevo?tipo=PAGO"
-            className="underline underline-offset-2"
-          >
-            Tesorería · Nuevo movimiento
-          </Link>
-          .
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-[15px] font-semibold tracking-tight">Cuentas a pagar</h1>
+          <p className="text-sm text-muted-foreground">
+            Saldos acreedores derivados de los asientos contabilizados. Para dar de baja una deuda
+            registre un pago en{" "}
+            <Link
+              href="/tesoreria/movimientos/nuevo?tipo=PAGO"
+              className="underline underline-offset-2"
+            >
+              Tesorería · Nuevo movimiento
+            </Link>
+            .
+          </p>
+        </div>
+        <MonedaToggle current={moneda} tcInfo={tcInfo} />
       </div>
 
       <Card>
         <CardContent className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">Total pendiente</span>
           <span className="font-mono text-lg font-semibold tabular-nums">
-            ARS {fmtMoney(data.totalGeneral)}
+            {fmtMontoPres(data.totalGeneral, "ARS", moneda, tc)} {moneda}
           </span>
         </CardContent>
       </Card>
 
-      {retencionEnabled && <RetencionesPorDepositar rows={retencionesPorDepositar} hoy={hoy} />}
+      {retencionEnabled && (
+        <RetencionesPorDepositar rows={retencionesPorDepositar} hoy={hoy} moneda={moneda} tc={tc} />
+      )}
 
       <PagoPorFactura
         proveedores={saldosProveedores}
         cuentasBancarias={cuentasBancariasMov}
         defaultFecha={defaultFecha}
         retencionGananciasEnabled={retencionEnabled}
+        moneda={moneda}
+        tc={tc}
       />
 
       <EmbarqueBatchPago
@@ -118,6 +149,8 @@ export default async function CuentasAPagarPage() {
         cuentasBancarias={cuentasBancariasMov}
         intermediarios={intermediarios}
         defaultFecha={defaultFecha}
+        moneda={moneda}
+        tc={tc}
       />
 
       <VepSection
@@ -126,6 +159,8 @@ export default async function CuentasAPagarPage() {
         cuentasBancarias={cuentasBancariasArs}
         saldoCreditoAduana={saldoCreditoAduana.saldo}
         defaultFecha={defaultFecha}
+        moneda={moneda}
+        tc={tc}
       />
 
       <VepDespachoSection
@@ -133,6 +168,8 @@ export default async function CuentasAPagarPage() {
         cuentasBancarias={cuentasBancariasArs}
         saldoCreditoAduana={saldoCreditoAduana.saldo}
         defaultFecha={defaultFecha}
+        moneda={moneda}
+        tc={tc}
       />
 
       <Section
@@ -140,20 +177,26 @@ export default async function CuentasAPagarPage() {
         subtitle="Saldos pendientes a proveedores locales (cuenta 2.1.1.x). Incluye gastos, compras, gastos fijos y costos de embarque. Pagos se registran en Tesorería."
         rows={data.proveedoresComerciales}
         showProveedores
+        moneda={moneda}
+        tc={tc}
       />
 
-      <ProveedoresExteriorSection proveedores={saldosExterior} />
+      <ProveedoresExteriorSection proveedores={saldosExterior} moneda={moneda} tc={tc} />
 
       <Section
         title="Aduana / Nacionalización"
         subtitle="Tributos por pagar a Aduana y AFIP por embarques importados (cuenta 2.1.5.x). El pago se hace via VEP arriba — esta tabla muestra el saldo agregado por cuenta."
         rows={aduanaSinRefuerzo}
+        moneda={moneda}
+        tc={tc}
       />
 
       <Section
         title="Otros impuestos"
         subtitle="Retenciones y percepciones a depositar (cuenta 2.1.3.x)."
         rows={data.fiscales}
+        moneda={moneda}
+        tc={tc}
       />
     </div>
   );
@@ -164,11 +207,15 @@ function Section({
   subtitle,
   rows,
   showProveedores = false,
+  moneda,
+  tc,
 }: {
   title: string;
   subtitle: string;
   rows: CxPRow[];
   showProveedores?: boolean;
+  moneda: Moneda;
+  tc: string | null;
 }) {
   if (rows.length === 0) {
     return (
@@ -197,8 +244,7 @@ function Section({
               <TableHead className="w-32">Cuenta</TableHead>
               <TableHead>Nombre</TableHead>
               {showProveedores && <TableHead>Proveedores</TableHead>}
-              <TableHead className="text-right">Saldo (USD)</TableHead>
-              <TableHead className="text-right">Saldo (ARS)</TableHead>
+              <TableHead className="text-right">Saldo</TableHead>
               <TableHead className="w-28 text-right" />
             </TableRow>
           </TableHeader>
@@ -219,11 +265,13 @@ function Section({
                           : `${proveedoresActivos.length} proveedores comparten esta cuenta`}
                     </TableCell>
                   )}
-                  <TableCell className="text-right font-mono tabular-nums text-muted-foreground">
-                    {r.saldoUsd ? `US$ ${fmtMoney(r.saldoUsd)}` : "—"}
-                  </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(r.saldo)}
+                    {(() => {
+                      // Saldo en su moneda NATIVA (USD-nato si la cuenta tiene
+                      // líneas USD, o ARS) → convertido a la moneda de presentación.
+                      const { valor, monedaNativa } = pickSaldoNativo(r.saldo, r.saldoUsd);
+                      return `${fmtMontoPres(valor, monedaNativa, moneda, tc)} ${moneda}`;
+                    })()}
                   </TableCell>
                   <TableCell className="text-right">
                     <Link

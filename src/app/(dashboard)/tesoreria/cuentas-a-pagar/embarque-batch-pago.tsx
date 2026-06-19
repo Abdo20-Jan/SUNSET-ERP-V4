@@ -36,8 +36,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { CuentaAPagarPorEmbarque } from "@/lib/services/cuentas-a-pagar";
+import { fmtMontoPres } from "@/lib/format";
 
-import { fmtMoney } from "../../reportes/_components/money";
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
 
 type ProveedorOption = {
   proveedorId: string;
@@ -54,13 +55,22 @@ type Props = {
   // despachante sin facturas en el sistema (ej: CYSAR) pueda seleccionarse.
   intermediarios: ProveedorOption[];
   defaultFecha?: string;
+  moneda: Moneda;
+  tc: string | null;
 };
 
 function rowKey(r: CuentaAPagarPorEmbarque): string {
   return `${r.embarqueId}::${r.proveedorId}`;
 }
 
-export function EmbarqueBatchPago({ rows, cuentasBancarias, intermediarios, defaultFecha }: Props) {
+export function EmbarqueBatchPago({
+  rows,
+  cuentasBancarias,
+  intermediarios,
+  defaultFecha,
+  moneda,
+  tc,
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -336,7 +346,8 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, intermediarios, defa
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{r.facturas.length}</TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {fmtMoney(r.totalArs)}
+                    {fmtMontoPres(r.totalArs, "ARS", moneda, tc)}{" "}
+                    <span className="text-xs text-muted-foreground">{moneda}</span>
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
                     <span
@@ -348,7 +359,8 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, intermediarios, defa
                             : ""
                       }
                     >
-                      {fmtMoney(r.saldoVivoProveedorArs)}
+                      {fmtMontoPres(r.saldoVivoProveedorArs, "ARS", moneda, tc)}{" "}
+                      <span className="text-xs text-muted-foreground">{moneda}</span>
                     </span>
                     {saldoMatchTotal && (
                       <div className="text-[10px] font-normal text-muted-foreground">
@@ -375,7 +387,8 @@ export function EmbarqueBatchPago({ rows, cuentasBancarias, intermediarios, defa
                       />
                     ) : (
                       <span className="font-mono text-xs tabular-nums font-semibold">
-                        {fmtMoney(r.pendienteArs)}
+                        {fmtMontoPres(r.pendienteArs, "ARS", moneda, tc)}{" "}
+                        <span className="text-muted-foreground">{moneda}</span>
                       </span>
                     )}
                   </TableCell>

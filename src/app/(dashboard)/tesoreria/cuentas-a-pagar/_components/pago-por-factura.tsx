@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Search01Icon } from "@hugeicons/core-free-icons";
 
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, fmtMontoPres } from "@/lib/format";
 import {
   crearMovimientoTesoreriaAction,
   type CuentaBancariaOption,
@@ -46,6 +46,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ConceptoRG830 } from "@/generated/prisma/client";
+
+import type { Moneda } from "../../../reportes/_components/moneda-toggle";
 
 const CONCEPTO_LABEL: Record<ConceptoRG830, string> = {
   BIENES_DE_CAMBIO: "Bienes de cambio",
@@ -93,6 +95,8 @@ type Props = {
   cuentasBancarias: CuentaBancariaOption[];
   defaultFecha?: string;
   retencionGananciasEnabled?: boolean;
+  moneda: Moneda;
+  tc: string | null;
 };
 
 const ORIGEN_LABEL: Record<FacturaPendiente["origen"], string> = {
@@ -126,6 +130,8 @@ export function PagoPorFactura({
   cuentasBancarias,
   defaultFecha,
   retencionGananciasEnabled = false,
+  moneda,
+  tc,
 }: Props) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -426,8 +432,10 @@ export function PagoPorFactura({
                         <DateBadge fecha={f.fechaVencimiento} relative />
                       </TableCell>
                       <TableCell className="text-right font-mono tabular-nums">
-                        {fmtMoney(f.monto)}{" "}
-                        <span className="text-xs text-muted-foreground">{f.moneda}</span>
+                        {/* `f.monto` ya está SIEMPRE en ARS (total convertido en el
+                            servicio); la moneda nativa es ARS, no `f.moneda`. */}
+                        {fmtMontoPres(f.monto, "ARS", moneda, tc)}{" "}
+                        <span className="text-xs text-muted-foreground">{moneda}</span>
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
