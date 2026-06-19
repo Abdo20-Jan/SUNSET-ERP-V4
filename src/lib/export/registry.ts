@@ -3,25 +3,29 @@ import { listarProductosParaExport, type ProductoRow } from "@/lib/actions/produ
 import { listarProveedoresParaExport, type ProveedorRow } from "@/lib/actions/proveedores";
 import { toCsv } from "@/lib/export/csv";
 import type { ExportColumn } from "@/lib/export/types";
+import { toXlsx } from "@/lib/export/xlsx";
 import type { SortDir } from "@/lib/table-sort";
 
 // Cada recurso es homogéneo en su propio `Row`, pero el registry es heterogéneo.
 // En vez de exponer `columns`/`fetchRows` con el tipo borrado (que obligaría a
-// `any`), cada recurso encapsula su `Row` detrás de `buildCsv`: el genérico vive
-// dentro de `makeResource`, así el registry queda 100% tipado.
+// `any`), cada recurso encapsula su `Row` detrás de `buildCsv`/`buildXlsx`: el
+// genérico vive dentro de `makeResource`, así el registry queda 100% tipado.
 export type ExportResource = {
   filename: string;
   buildCsv: (sp: URLSearchParams) => Promise<string>;
+  buildXlsx: (sp: URLSearchParams) => Promise<Uint8Array>;
 };
 
 function makeResource<T>(opts: {
   filename: string;
+  sheetName: string;
   columns: ExportColumn<T>[];
   fetchRows: (sp: URLSearchParams) => Promise<T[]>;
 }): ExportResource {
   return {
     filename: opts.filename,
     buildCsv: async (sp) => toCsv(opts.columns, await opts.fetchRows(sp)),
+    buildXlsx: async (sp) => toXlsx(opts.columns, await opts.fetchRows(sp), opts.sheetName),
   };
 }
 
@@ -68,6 +72,7 @@ const PROVEEDORES_COLUMNS: ExportColumn<ProveedorRow>[] = [
 export const EXPORT_REGISTRY: Record<string, ExportResource> = {
   productos: makeResource<ProductoRow>({
     filename: "productos",
+    sheetName: "Productos",
     columns: PRODUCTOS_COLUMNS,
     fetchRows: (sp) =>
       listarProductosParaExport({
@@ -79,6 +84,7 @@ export const EXPORT_REGISTRY: Record<string, ExportResource> = {
   }),
   clientes: makeResource<ClienteRow>({
     filename: "clientes",
+    sheetName: "Clientes",
     columns: CLIENTES_COLUMNS,
     fetchRows: (sp) =>
       listarClientesParaExport({
@@ -90,6 +96,7 @@ export const EXPORT_REGISTRY: Record<string, ExportResource> = {
   }),
   proveedores: makeResource<ProveedorRow>({
     filename: "proveedores",
+    sheetName: "Proveedores",
     columns: PROVEEDORES_COLUMNS,
     fetchRows: (sp) =>
       listarProveedoresParaExport({
