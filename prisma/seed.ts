@@ -1,25 +1,12 @@
 import "dotenv/config";
 import bcrypt from "bcryptjs";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient, Role, PeriodoEstado, TipoDeposito } from "../src/generated/prisma/client";
 import {
-  PrismaClient,
-  Role,
-  PeriodoEstado,
-  CuentaTipo,
-  CuentaCategoria,
-  Naturaleza,
-  TipoDeposito,
-} from "../src/generated/prisma/client";
-
-// Naturaleza por defecto derivada de la categoría (ACTIVO/EGRESO → DEUDOR;
-// resto → ACREEDOR). Espejo de src/lib/services/cuenta-naturaleza.ts; inline
-// para mantener el seed autocontenido (los scripts de prisma/ no usan el
-// alias @/). Las regularizadoras declaran su naturaleza explícita.
-function naturalezaDefault(categoria: CuentaCategoria): Naturaleza {
-  return categoria === CuentaCategoria.ACTIVO || categoria === CuentaCategoria.EGRESO
-    ? Naturaleza.DEUDOR
-    : Naturaleza.ACREEDOR;
-}
+  PLAN_CUENTAS,
+  planEntryToSeedRecord,
+  validarPlan,
+} from "../src/lib/services/plan-de-cuentas";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -82,9 +69,7 @@ async function seedPeriodos() {
   for (let m = 1; m <= 6; m++) PERIODOS.push({ year: 2026, month: m });
 
   const desiredCodes = new Set(
-    PERIODOS.map(
-      ({ year, month }) => `${year}-${String(month).padStart(2, "0")}`,
-    ),
+    PERIODOS.map(({ year, month }) => `${year}-${String(month).padStart(2, "0")}`),
   );
 
   // 1) Eliminar períodos fuera del rango — sólo si no tienen asientos.
@@ -99,9 +84,7 @@ async function seedPeriodos() {
   for (const p of existentes) {
     if (desiredCodes.has(p.codigo)) continue;
     if (p._count.asientos > 0) {
-      console.log(
-        `  ⚠ skipping delete of ${p.codigo} (tiene ${p._count.asientos} asientos)`,
-      );
+      console.log(`  ⚠ skipping delete of ${p.codigo} (tiene ${p._count.asientos} asientos)`);
       skippedDelete++;
       continue;
     }
@@ -133,216 +116,60 @@ async function seedPeriodos() {
     upserted++;
   }
 
-  const extra = skippedDelete > 0 ? `, ${skippedDelete} fuera de rango mantenidos (tienen asientos)` : "";
+  const extra =
+    skippedDelete > 0 ? `, ${skippedDelete} fuera de rango mantenidos (tienen asientos)` : "";
   console.log(
     `✓ ${upserted} períodos en rango (12/2024 a 06/2026), ${deleted} fuera de rango eliminados${extra}`,
   );
 }
 
 // ============================================================
-// 3. PLAN DE CUENTAS — SOLO ESPINA SINTETICA
+// 3. PLAN DE CUENTAS (modelo de 9 clases, 631 cuentas)
 // ============================================================
-//
-// ANALITICAs (las hojas) NO se cargan acá. Se crean automáticamente
-// cuando se opera:
-//   - CuentaBancaria → 1.1.1.X (caja) o 1.1.2.X (banco)
-//   - Proveedor      → 2.1.1.X (nacional 10-49 / extranjero 50-99)
-//   - Cliente        → 1.1.3.X
-//   - Préstamo       → 2.1.7.X (CP) / 2.2.1.X (LP)
-//   - Cuentas fiscales (IVA débito/crédito, IIBB, ganancias, etc.)
-//     → vía cuenta-registry.ts + getOrCreateCuenta lazy en asiento
-//        generators
-//
-// Ver: src/lib/services/cuenta-auto.ts y src/lib/services/cuenta-registry.ts
+// Fuente única: PLAN_CUENTAS (src/lib/services/plan-de-cuentas.ts; dato en
+// plan-de-cuentas.data.ts, generado del Excel maestro). Mismo comportamiento
+// que el seed dedicado prisma/seed-plan-de-cuentas.ts: upsert idempotente por
+// código, padres antes que hijos (orden por nivel, luego orden).
 
-type CuentaSeed = {
-  codigo: string;
-  nombre: string;
-  categoria: CuentaCategoria;
-  nivel: number;
-};
-
-const CUENTAS_SINTETICAS: CuentaSeed[] = [
-  // ACTIVO
-  { codigo: "1",      nombre: "ACTIVO",                              categoria: CuentaCategoria.ACTIVO, nivel: 1 },
-  { codigo: "1.1",    nombre: "ACTIVO CORRIENTE",                    categoria: CuentaCategoria.ACTIVO, nivel: 2 },
-  { codigo: "1.1.1",  nombre: "CAJA",                                categoria: CuentaCategoria.ACTIVO, nivel: 3 },
-  { codigo: "1.1.2",  nombre: "BANCOS",                              categoria: CuentaCategoria.ACTIVO, nivel: 3 },
-  { codigo: "1.1.3",  nombre: "CRÉDITOS POR VENTAS",                 categoria: CuentaCategoria.ACTIVO, nivel: 3 },
-  { codigo: "1.1.4",  nombre: "OTROS CRÉDITOS",                      categoria: CuentaCategoria.ACTIVO, nivel: 3 },
-  { codigo: "1.1.5",  nombre: "ESTOQUE",                             categoria: CuentaCategoria.ACTIVO, nivel: 3 },
-  { codigo: "1.1.6",  nombre: "INVERSIONES",                         categoria: CuentaCategoria.ACTIVO, nivel: 3 },
-  { codigo: "1.2",    nombre: "ACTIVO NO CORRIENTE",                 categoria: CuentaCategoria.ACTIVO, nivel: 2 },
-  { codigo: "1.2.1",  nombre: "BIENES DE USO",                       categoria: CuentaCategoria.ACTIVO, nivel: 3 },
-
-  // PASIVO
-  { codigo: "2",      nombre: "PASIVO",                              categoria: CuentaCategoria.PASIVO, nivel: 1 },
-  { codigo: "2.1",    nombre: "PASIVO CORRIENTE",                    categoria: CuentaCategoria.PASIVO, nivel: 2 },
-  { codigo: "2.1.1",  nombre: "DEUDAS COMERCIALES",                  categoria: CuentaCategoria.PASIVO, nivel: 3 },
-  { codigo: "2.1.2",  nombre: "DEUDAS BANCARIAS",                    categoria: CuentaCategoria.PASIVO, nivel: 3 },
-  { codigo: "2.1.3",  nombre: "DEUDAS FISCALES",                     categoria: CuentaCategoria.PASIVO, nivel: 3 },
-  { codigo: "2.1.4",  nombre: "DEUDAS SOCIALES",                     categoria: CuentaCategoria.PASIVO, nivel: 3 },
-  { codigo: "2.1.5",  nombre: "IMPUESTOS NACIONALIZACIÓN",           categoria: CuentaCategoria.PASIVO, nivel: 3 },
-  { codigo: "2.1.6",  nombre: "IMPUESTOS SOBRE VENTAS",              categoria: CuentaCategoria.PASIVO, nivel: 3 },
-  { codigo: "2.1.7",  nombre: "PRÉSTAMOS CORTO PLAZO",               categoria: CuentaCategoria.PASIVO, nivel: 3 },
-  { codigo: "2.1.8",  nombre: "PROVEEDORES DEL EXTERIOR",            categoria: CuentaCategoria.PASIVO, nivel: 3 },
-  { codigo: "2.1.9",  nombre: "DIVIDENDOS A PAGAR",                  categoria: CuentaCategoria.PASIVO, nivel: 3 },
-  { codigo: "2.2",    nombre: "PASIVO NO CORRIENTE",                 categoria: CuentaCategoria.PASIVO, nivel: 2 },
-  { codigo: "2.2.1",  nombre: "PRÉSTAMOS LARGO PLAZO",               categoria: CuentaCategoria.PASIVO, nivel: 3 },
-
-  // PATRIMONIO
-  { codigo: "3",      nombre: "PATRIMONIO NETO",                     categoria: CuentaCategoria.PATRIMONIO, nivel: 1 },
-  { codigo: "3.1",    nombre: "CAPITAL",                             categoria: CuentaCategoria.PATRIMONIO, nivel: 2 },
-  { codigo: "3.1.1",  nombre: "APORTES",                             categoria: CuentaCategoria.PATRIMONIO, nivel: 3 },
-  { codigo: "3.1.2",  nombre: "AJUSTES DE CAPITAL",                  categoria: CuentaCategoria.PATRIMONIO, nivel: 3 },
-  { codigo: "3.2",    nombre: "RESULTADOS",                          categoria: CuentaCategoria.PATRIMONIO, nivel: 2 },
-  { codigo: "3.2.1",  nombre: "RESULTADOS ACUMULADOS",               categoria: CuentaCategoria.PATRIMONIO, nivel: 3 },
-  { codigo: "3.3",    nombre: "RESERVAS",                            categoria: CuentaCategoria.PATRIMONIO, nivel: 2 },
-  { codigo: "3.3.1",  nombre: "RESERVAS DE UTILIDADES",              categoria: CuentaCategoria.PATRIMONIO, nivel: 3 },
-
-  // INGRESOS
-  { codigo: "4",      nombre: "INGRESOS",                            categoria: CuentaCategoria.INGRESO, nivel: 1 },
-  { codigo: "4.1",    nombre: "INGRESOS POR VENTAS",                 categoria: CuentaCategoria.INGRESO, nivel: 2 },
-  { codigo: "4.1.1",  nombre: "VENTAS NEUMÁTICOS",                   categoria: CuentaCategoria.INGRESO, nivel: 3 },
-  { codigo: "4.2",    nombre: "OTROS INGRESOS",                      categoria: CuentaCategoria.INGRESO, nivel: 2 },
-  { codigo: "4.2.1",  nombre: "INGRESOS VARIOS",                     categoria: CuentaCategoria.INGRESO, nivel: 3 },
-  { codigo: "4.3",    nombre: "INGRESOS FINANCIEROS",                categoria: CuentaCategoria.INGRESO, nivel: 2 },
-  { codigo: "4.3.1",  nombre: "RESULTADOS FINANCIEROS POSITIVOS",    categoria: CuentaCategoria.INGRESO, nivel: 3 },
-
-  // EGRESOS
-  { codigo: "5",      nombre: "EGRESOS",                             categoria: CuentaCategoria.EGRESO, nivel: 1 },
-  { codigo: "5.1",    nombre: "GASTOS FIJOS - HONORARIOS",           categoria: CuentaCategoria.EGRESO, nivel: 2 },
-  { codigo: "5.1.1",  nombre: "HONORARIOS PROFESIONALES",            categoria: CuentaCategoria.EGRESO, nivel: 3 },
-  { codigo: "5.1.2",  nombre: "ENCARGOS LABORALES",                  categoria: CuentaCategoria.EGRESO, nivel: 3 },
-  { codigo: "5.2",    nombre: "GASTOS FIJOS - INFRAESTRUCTURA",      categoria: CuentaCategoria.EGRESO, nivel: 2 },
-  { codigo: "5.2.1",  nombre: "GASTOS DE INFRAESTRUCTURA",           categoria: CuentaCategoria.EGRESO, nivel: 3 },
-  { codigo: "5.3",    nombre: "GASTOS FIJOS - SERVICIOS",            categoria: CuentaCategoria.EGRESO, nivel: 2 },
-  { codigo: "5.3.1",  nombre: "SERVICIOS GENERALES",                 categoria: CuentaCategoria.EGRESO, nivel: 3 },
-  { codigo: "5.4",    nombre: "GASTOS VARIABLES - PORTUARIOS",       categoria: CuentaCategoria.EGRESO, nivel: 2 },
-  { codigo: "5.4.1",  nombre: "GASTOS PORTUARIOS",                   categoria: CuentaCategoria.EGRESO, nivel: 3 },
-  { codigo: "5.5",    nombre: "GASTOS VARIABLES - LOGÍSTICA",        categoria: CuentaCategoria.EGRESO, nivel: 2 },
-  { codigo: "5.5.1",  nombre: "GASTOS LOGÍSTICOS",                   categoria: CuentaCategoria.EGRESO, nivel: 3 },
-  { codigo: "5.6",    nombre: "GASTOS VARIABLES - DESPACHANTE",      categoria: CuentaCategoria.EGRESO, nivel: 2 },
-  { codigo: "5.6.1",  nombre: "GASTOS DESPACHANTE",                  categoria: CuentaCategoria.EGRESO, nivel: 3 },
-  { codigo: "5.7",    nombre: "IMPUESTOS NACIONALIZACIÓN (EGRESOS)", categoria: CuentaCategoria.EGRESO, nivel: 2 },
-  { codigo: "5.7.1",  nombre: "DERECHOS E IMPUESTOS",                categoria: CuentaCategoria.EGRESO, nivel: 3 },
-  { codigo: "5.8",    nombre: "GASTOS FINANCIEROS",                  categoria: CuentaCategoria.EGRESO, nivel: 2 },
-  { codigo: "5.8.1",  nombre: "COSTOS FINANCIEROS",                  categoria: CuentaCategoria.EGRESO, nivel: 3 },
-  { codigo: "5.8.2",  nombre: "RESULTADOS FINANCIEROS NEGATIVOS",    categoria: CuentaCategoria.EGRESO, nivel: 3 },
-  { codigo: "5.9",    nombre: "PROVISIONES Y CONTINGENCIAS",         categoria: CuentaCategoria.EGRESO, nivel: 2 },
-  { codigo: "5.9.1",  nombre: "PROVISIONES",                         categoria: CuentaCategoria.EGRESO, nivel: 3 },
-];
-
-function derivePadreCodigo(codigo: string): string | null {
-  const lastDot = codigo.lastIndexOf(".");
-  if (lastDot === -1) return null;
-  return codigo.slice(0, lastDot);
-}
-
-async function seedCuentas() {
-  for (const c of CUENTAS_SINTETICAS) {
-    const padreCodigo = derivePadreCodigo(c.codigo);
+async function seedPlanDeCuentas() {
+  const problemas = validarPlan(PLAN_CUENTAS);
+  if (problemas.length > 0) {
+    for (const pr of problemas) console.error(`  [${pr.regla}] ${pr.codigo}: ${pr.detalle}`);
+    throw new Error(`PLAN_CUENTAS inconsistente (${problemas.length})`);
+  }
+  const registros = PLAN_CUENTAS.map(planEntryToSeedRecord).sort(
+    (a, b) => a.nivel - b.nivel || a.orden - b.orden,
+  );
+  for (const r of registros) {
     const data = {
-      codigo: c.codigo,
-      nombre: c.nombre,
-      tipo: CuentaTipo.SINTETICA,
-      categoria: c.categoria,
-      nivel: c.nivel,
-      padreCodigo,
-      activa: true,
-      naturaleza: naturalezaDefault(c.categoria),
+      nombre: r.nombre,
+      tipo: r.tipo,
+      categoria: r.categoria,
+      clase: r.clase,
+      clasificacion: r.clasificacion,
+      orden: r.orden,
+      nivel: r.nivel,
+      padreCodigo: r.padreCodigo,
+      activa: r.activa,
+      naturaleza: r.naturaleza,
+      moneda: r.moneda,
+      imputacion: r.imputacion,
+      regularizadora: r.regularizadora,
+      bimonetaria: r.bimonetaria,
+      monedaExtranjera: r.monedaExtranjera,
+      enEspecie: r.enEspecie,
+      inventariable: r.inventariable,
+      sistema: r.sistema,
+      dinamica: r.dinamica,
+      rubroEECC: r.rubroEECC,
     };
     await prisma.cuentaContable.upsert({
-      where: { codigo: c.codigo },
+      where: { codigo: r.codigo },
+      create: { codigo: r.codigo, ...data },
       update: data,
-      create: data,
     });
   }
-  console.log(
-    `✓ ${CUENTAS_SINTETICAS.length} cuentas SINTETICAS (espina del plan) creadas/actualizadas`,
-  );
-  console.log(
-    "   ANALITICAs se auto-crean al operar (cajas, bancos, proveedores, clientes, fiscales).",
-  );
-}
-
-// ============================================================
-// 3.1. ANALITICAs base — cuentas que el motor contable no
-// auto-crea pero que el usuario necesita seleccionar como
-// contrapartida en movimientos manuales (aportes, intereses,
-// comisiones, diferencia de cambio, etc.). Patrimônio +
-// ingresos/egresos financieros básicos.
-// ============================================================
-
-type AnaliticaBaseSeed = {
-  codigo: string;
-  nombre: string;
-  categoria: CuentaCategoria;
-  /** Override para cuentas regularizadoras (naturaleza opuesta a su categoría). */
-  naturaleza?: Naturaleza;
-};
-
-const ANALITICAS_BASE: AnaliticaBaseSeed[] = [
-  // Patrimônio (necesario para aportes y cierres)
-  { codigo: "3.1.1.01", nombre: "CAPITAL SOCIAL",                      categoria: CuentaCategoria.PATRIMONIO },
-  { codigo: "3.1.1.02", nombre: "APORTES IRREVOCABLES",                categoria: CuentaCategoria.PATRIMONIO },
-  { codigo: "3.1.2.01", nombre: "AJUSTE INTEGRAL DE CAPITAL",          categoria: CuentaCategoria.PATRIMONIO },
-  { codigo: "3.1.2.02", nombre: "PRIMA DE EMISIÓN",                    categoria: CuentaCategoria.PATRIMONIO },
-  { codigo: "3.2.1.01", nombre: "RESULTADOS EJERCICIOS ANTERIORES",    categoria: CuentaCategoria.PATRIMONIO },
-  { codigo: "3.2.1.02", nombre: "RESULTADO DEL EJERCICIO",             categoria: CuentaCategoria.PATRIMONIO },
-  // Regularizadora del PN: naturaleza DEUDOR (resta del patrimonio).
-  { codigo: "3.2.1.03", nombre: "DIVIDENDOS DECLARADOS",               categoria: CuentaCategoria.PATRIMONIO, naturaleza: Naturaleza.DEUDOR },
-  // Reservas (Ley 19.550 — RT 8/9). RESERVA LEGAL es obligatoria: 5%
-  // de la utilidad neta hasta alcanzar 20% del capital social.
-  { codigo: "3.3.1.01", nombre: "RESERVA LEGAL",                       categoria: CuentaCategoria.PATRIMONIO },
-  { codigo: "3.3.1.02", nombre: "RESERVA FACULTATIVA",                 categoria: CuentaCategoria.PATRIMONIO },
-  { codigo: "3.3.1.03", nombre: "RESERVA ESTATUTARIA",                 categoria: CuentaCategoria.PATRIMONIO },
-  { codigo: "3.3.1.04", nombre: "RESERVA POR REVALÚO TÉCNICO",         categoria: CuentaCategoria.PATRIMONIO },
-
-  // Pasivo — provisión de dividendos a pagar (contrapartida del DEBE
-  // 3.2.1.03 al declarar dividendos antes del pago efectivo).
-  { codigo: "2.1.9.01", nombre: "DIVIDENDOS A PAGAR",                  categoria: CuentaCategoria.PASIVO },
-
-  // Inversiones FCI por banco. 1.1.6.01 queda como genérica (legacy).
-  { codigo: "1.1.6.02", nombre: "INVERSIONES — SANTANDER SUPERFONDOS PESOS", categoria: CuentaCategoria.ACTIVO },
-  { codigo: "1.1.6.03", nombre: "INVERSIONES — GALICIA FONDOS FIMA PESOS",   categoria: CuentaCategoria.ACTIVO },
-
-  // Ingresos no operativos
-  { codigo: "4.2.1.01", nombre: "DESCUENTOS OBTENIDOS",                categoria: CuentaCategoria.INGRESO },
-  { codigo: "4.2.1.02", nombre: "INTERESES GANADOS",                   categoria: CuentaCategoria.INGRESO },
-  { codigo: "4.3.1.01", nombre: "DIFERENCIA DE CAMBIO POSITIVA",       categoria: CuentaCategoria.INGRESO },
-  { codigo: "4.3.1.02", nombre: "RENDIMIENTO POR INVERSIONES EN FCI",  categoria: CuentaCategoria.INGRESO },
-
-  // Egresos financieros
-  { codigo: "5.8.1.01", nombre: "COMISIONES BANCARIAS",                categoria: CuentaCategoria.EGRESO },
-  { codigo: "5.8.1.02", nombre: "GASTOS TRANSFERENCIA EXTERIOR",       categoria: CuentaCategoria.EGRESO },
-  { codigo: "5.8.1.06", nombre: "IMPUESTO LEY 25413 (DEB/CRED BANCARIOS)", categoria: CuentaCategoria.EGRESO },
-  { codigo: "5.8.2.01", nombre: "DIFERENCIA DE CAMBIO NEGATIVA",       categoria: CuentaCategoria.EGRESO },
-  { codigo: "5.8.2.02", nombre: "INTERESES PAGADOS",                   categoria: CuentaCategoria.EGRESO },
-];
-
-async function seedAnaliticasBase() {
-  for (const c of ANALITICAS_BASE) {
-    const padreCodigo = derivePadreCodigo(c.codigo);
-    const data = {
-      codigo: c.codigo,
-      nombre: c.nombre,
-      tipo: CuentaTipo.ANALITICA,
-      categoria: c.categoria,
-      nivel: c.codigo.split(".").length,
-      padreCodigo,
-      activa: true,
-      naturaleza: c.naturaleza ?? naturalezaDefault(c.categoria),
-    };
-    await prisma.cuentaContable.upsert({
-      where: { codigo: c.codigo },
-      update: data,
-      create: data,
-    });
-  }
-  console.log(
-    `✓ ${ANALITICAS_BASE.length} cuentas ANALITICAs base (patrimônio, intereses, comisiones, etc.) creadas/actualizadas`,
-  );
+  console.log(`✓ ${registros.length} cuentas del plan (9 clases) creadas/actualizadas`);
 }
 
 // ============================================================
@@ -441,30 +268,174 @@ const PROVINCIAS_AR: Array<{
   alicuotaPercepcion: string;
   esAgentePercepcion: boolean;
 }> = [
-  { codigo: "CABA", nombre: "Ciudad Autónoma de Buenos Aires", codigoAfip: "901", alicuotaPercepcion: "3.0000", esAgentePercepcion: true },
-  { codigo: "BA", nombre: "Buenos Aires", codigoAfip: "902", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
-  { codigo: "CAT", nombre: "Catamarca", codigoAfip: "903", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
-  { codigo: "CBA", nombre: "Córdoba", codigoAfip: "904", alicuotaPercepcion: "4.7500", esAgentePercepcion: true },
-  { codigo: "COR", nombre: "Corrientes", codigoAfip: "905", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
-  { codigo: "CHA", nombre: "Chaco", codigoAfip: "906", alicuotaPercepcion: "4.7500", esAgentePercepcion: true },
-  { codigo: "CHU", nombre: "Chubut", codigoAfip: "907", alicuotaPercepcion: "4.5000", esAgentePercepcion: true },
-  { codigo: "ER", nombre: "Entre Ríos", codigoAfip: "908", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
-  { codigo: "FOR", nombre: "Formosa", codigoAfip: "909", alicuotaPercepcion: "4.5000", esAgentePercepcion: true },
-  { codigo: "JUJ", nombre: "Jujuy", codigoAfip: "910", alicuotaPercepcion: "3.5000", esAgentePercepcion: true },
-  { codigo: "LP", nombre: "La Pampa", codigoAfip: "911", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
-  { codigo: "LR", nombre: "La Rioja", codigoAfip: "912", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
-  { codigo: "MZA", nombre: "Mendoza", codigoAfip: "913", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
-  { codigo: "MIS", nombre: "Misiones", codigoAfip: "914", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
-  { codigo: "NEU", nombre: "Neuquén", codigoAfip: "915", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
-  { codigo: "RN", nombre: "Río Negro", codigoAfip: "916", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
-  { codigo: "SAL", nombre: "Salta", codigoAfip: "917", alicuotaPercepcion: "3.6000", esAgentePercepcion: true },
-  { codigo: "SJ", nombre: "San Juan", codigoAfip: "918", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
-  { codigo: "SL", nombre: "San Luis", codigoAfip: "919", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
-  { codigo: "SC", nombre: "Santa Cruz", codigoAfip: "920", alicuotaPercepcion: "5.0000", esAgentePercepcion: true },
-  { codigo: "SF", nombre: "Santa Fe", codigoAfip: "921", alicuotaPercepcion: "4.5000", esAgentePercepcion: true },
-  { codigo: "SDE", nombre: "Santiago del Estero", codigoAfip: "922", alicuotaPercepcion: "4.5000", esAgentePercepcion: true },
-  { codigo: "TDF", nombre: "Tierra del Fuego", codigoAfip: "923", alicuotaPercepcion: "4.0000", esAgentePercepcion: true },
-  { codigo: "TUC", nombre: "Tucumán", codigoAfip: "924", alicuotaPercepcion: "4.5000", esAgentePercepcion: true },
+  {
+    codigo: "CABA",
+    nombre: "Ciudad Autónoma de Buenos Aires",
+    codigoAfip: "901",
+    alicuotaPercepcion: "3.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "BA",
+    nombre: "Buenos Aires",
+    codigoAfip: "902",
+    alicuotaPercepcion: "5.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "CAT",
+    nombre: "Catamarca",
+    codigoAfip: "903",
+    alicuotaPercepcion: "4.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "CBA",
+    nombre: "Córdoba",
+    codigoAfip: "904",
+    alicuotaPercepcion: "4.7500",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "COR",
+    nombre: "Corrientes",
+    codigoAfip: "905",
+    alicuotaPercepcion: "5.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "CHA",
+    nombre: "Chaco",
+    codigoAfip: "906",
+    alicuotaPercepcion: "4.7500",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "CHU",
+    nombre: "Chubut",
+    codigoAfip: "907",
+    alicuotaPercepcion: "4.5000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "ER",
+    nombre: "Entre Ríos",
+    codigoAfip: "908",
+    alicuotaPercepcion: "5.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "FOR",
+    nombre: "Formosa",
+    codigoAfip: "909",
+    alicuotaPercepcion: "4.5000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "JUJ",
+    nombre: "Jujuy",
+    codigoAfip: "910",
+    alicuotaPercepcion: "3.5000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "LP",
+    nombre: "La Pampa",
+    codigoAfip: "911",
+    alicuotaPercepcion: "4.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "LR",
+    nombre: "La Rioja",
+    codigoAfip: "912",
+    alicuotaPercepcion: "4.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "MZA",
+    nombre: "Mendoza",
+    codigoAfip: "913",
+    alicuotaPercepcion: "4.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "MIS",
+    nombre: "Misiones",
+    codigoAfip: "914",
+    alicuotaPercepcion: "5.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "NEU",
+    nombre: "Neuquén",
+    codigoAfip: "915",
+    alicuotaPercepcion: "5.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "RN",
+    nombre: "Río Negro",
+    codigoAfip: "916",
+    alicuotaPercepcion: "4.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "SAL",
+    nombre: "Salta",
+    codigoAfip: "917",
+    alicuotaPercepcion: "3.6000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "SJ",
+    nombre: "San Juan",
+    codigoAfip: "918",
+    alicuotaPercepcion: "4.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "SL",
+    nombre: "San Luis",
+    codigoAfip: "919",
+    alicuotaPercepcion: "4.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "SC",
+    nombre: "Santa Cruz",
+    codigoAfip: "920",
+    alicuotaPercepcion: "5.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "SF",
+    nombre: "Santa Fe",
+    codigoAfip: "921",
+    alicuotaPercepcion: "4.5000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "SDE",
+    nombre: "Santiago del Estero",
+    codigoAfip: "922",
+    alicuotaPercepcion: "4.5000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "TDF",
+    nombre: "Tierra del Fuego",
+    codigoAfip: "923",
+    alicuotaPercepcion: "4.0000",
+    esAgentePercepcion: true,
+  },
+  {
+    codigo: "TUC",
+    nombre: "Tucumán",
+    codigoAfip: "924",
+    alicuotaPercepcion: "4.5000",
+    esAgentePercepcion: true,
+  },
 ];
 
 async function seedProvinciasYJurisdicciones() {
@@ -507,8 +478,7 @@ async function main() {
   console.log("🌱 Iniciando seed (skeleton + analíticas base)...\n");
   await seedAdmin();
   await seedPeriodos();
-  await seedCuentas();
-  await seedAnaliticasBase();
+  await seedPlanDeCuentas();
   await seedDepositos();
   await seedPipelineStages();
   await seedProvinciasYJurisdicciones();
