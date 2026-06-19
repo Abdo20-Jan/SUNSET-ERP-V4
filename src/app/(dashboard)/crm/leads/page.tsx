@@ -3,6 +3,8 @@ import Link from "next/link";
 import { listarLeads } from "@/lib/actions/leads";
 import { isCrmEnabled } from "@/lib/features";
 import { LeadEstado, LeadFuente } from "@/generated/prisma/client";
+import { Pagination } from "@/components/ui/pagination";
+import { parsePaginationParams } from "@/components/ui/pagination-params";
 
 import { LeadsFilterBar } from "./_components/leads-filter-bar";
 import { LeadsTableBulk } from "./_components/leads-table-bulk";
@@ -11,6 +13,8 @@ type SearchParams = Promise<{
   estado?: string;
   fuente?: string;
   q?: string;
+  page?: string;
+  perPage?: string;
 }>;
 
 function parseEstado(v: string | undefined): LeadEstado | undefined {
@@ -37,12 +41,16 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
     );
   }
 
-  const { estado, fuente, q } = await searchParams;
+  const params = await searchParams;
+  const { estado, fuente, q } = params;
+  const { page, perPage } = parsePaginationParams(params);
 
-  const leads = await listarLeads({
+  const { rows, total } = await listarLeads({
     estado: parseEstado(estado),
     fuente: parseFuente(fuente),
     search: q,
+    page,
+    perPage,
   });
 
   return (
@@ -50,7 +58,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Leads</h1>
-          <p className="text-sm text-muted-foreground">{leads.length} lead(s)</p>
+          <p className="text-sm text-muted-foreground">{total} lead(s)</p>
         </div>
         <div className="flex gap-2">
           <Link href="/crm/leads/import" className="rounded-md border px-4 py-2 hover:bg-muted">
@@ -67,10 +75,13 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
 
       <LeadsFilterBar q={q} estado={estado} fuente={fuente} />
 
-      {leads.length === 0 ? (
+      {total === 0 ? (
         <p className="text-muted-foreground">No hay leads.</p>
       ) : (
-        <LeadsTableBulk leads={leads} />
+        <>
+          <LeadsTableBulk leads={rows} />
+          <Pagination page={page} perPage={perPage} total={total} />
+        </>
       )}
     </main>
   );

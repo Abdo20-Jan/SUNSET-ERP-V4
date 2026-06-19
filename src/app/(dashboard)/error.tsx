@@ -2,9 +2,9 @@
 
 import { RouteError } from "@/components/route-error";
 
-export default function ComexError(props: {
+export default function DashboardError(props: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  return <RouteError {...props} titulo="No se pudo cargar Comex" modulo="comex" />;
+  return <RouteError {...props} titulo="No se pudo cargar la página" />;
 }
