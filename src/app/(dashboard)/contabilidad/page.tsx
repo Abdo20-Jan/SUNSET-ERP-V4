@@ -28,13 +28,13 @@ const SECTIONS = [
   {
     href: "/contabilidad/cuentas",
     title: "Plan de Cuentas",
-    description: "Árbol jerárquico de las 124 cuentas contables.",
+    description: "Árbol jerárquico de las cuentas contables.",
     icon: Invoice01Icon,
   },
   {
     href: "/contabilidad/periodos",
     title: "Períodos Contables",
-    description: "Gestioná el estado (ABIERTO/CERRADO) de los 36 períodos.",
+    description: "Gestioná el estado ABIERTO/CERRADO de los períodos contables.",
     icon: Calendar03Icon,
   },
   {
