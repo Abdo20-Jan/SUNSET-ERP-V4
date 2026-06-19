@@ -187,73 +187,6 @@ function grupoReclasificacion(
   };
 }
 
-// Id sintético base para los grupos de rubro EECC (negativos, sin colisión).
-const GRUPO_RUBRO_EECC_ID = -950;
-
-/**
- * Exposición por `rubroEECC`: las hojas analíticas que declaran un rubro EECC
- * explícito se EXTRAEN de su rama de código y se reagrupan bajo un grupo
- * sintético rotulado con ese rubro (el rubro MANDA sobre el árbol de código).
- * Las cuentas sin rubro quedan donde estaban; los sintéticos que se vacían se
- * descartan. El total se preserva (sólo cambia la presentación).
- *
- * Si NINGUNA cuenta del bosque lleva rubroEECC, devuelve la MISMA referencia
- * (identidad): el balance vigente —donde ninguna cuenta tiene rubro— no se
- * altera. Pura y exportada para tests.
- */
-export function reagruparPorRubroEECC(nodes: CuentaTreeNode[]): CuentaTreeNode[] {
-  if (!algunaHojaConRubro(nodes)) return nodes;
-
-  const porRubro = new Map<string, CuentaTreeNode[]>();
-  const limpio = extraerHojasConRubro(nodes, porRubro);
-
-  const grupos: CuentaTreeNode[] = [];
-  let nextId = GRUPO_RUBRO_EECC_ID;
-  for (const [rubro, hojas] of porRubro) {
-    grupos.push(grupoReclasificacion(nextId--, "—", rubro, hojas[0]?.categoria ?? "ACTIVO", hojas));
-  }
-
-  return [...limpio, ...grupos];
-}
-
-function algunaHojaConRubro(nodes: CuentaTreeNode[]): boolean {
-  return nodes.some((n) =>
-    n.children.length === 0 ? Boolean(n.rubroEECC) : algunaHojaConRubro(n.children),
-  );
-}
-
-// Igual que extraerHojasInvertidas, pero el criterio de extracción es "tiene
-// rubroEECC" y las hojas se acumulan en `sink` agrupadas por su rubro.
-function extraerHojasConRubro(
-  nodes: CuentaTreeNode[],
-  sink: Map<string, CuentaTreeNode[]>,
-): CuentaTreeNode[] {
-  const out: CuentaTreeNode[] = [];
-  for (const node of nodes) {
-    if (node.children.length === 0) {
-      if (node.rubroEECC) {
-        const arr = sink.get(node.rubroEECC) ?? [];
-        arr.push(node);
-        sink.set(node.rubroEECC, arr);
-        continue;
-      }
-      out.push(node);
-    } else {
-      const children = extraerHojasConRubro(node.children, sink);
-      if (children.length === 0) continue; // sintético vacío → drop
-      out.push({
-        ...node,
-        children,
-        saldoInicial: sumMoney(children.map((c) => c.saldoInicial)),
-        debe: sumMoney(children.map((c) => c.debe)),
-        haber: sumMoney(children.map((c) => c.haber)),
-        saldo: sumMoney(children.map((c) => c.saldo)),
-      });
-    }
-  }
-  return out;
-}
-
 // NOTA: la UI usa getBalanceGeneralByFecha. La revaluación se computa acumulada
 // hasta `periodo.fechaFin`; el árbol por período agrega sólo los movimientos del
 // período (sin saldo de apertura). Para una foto patrimonial usar la variante
@@ -367,11 +300,13 @@ function ensamblar({
     tree.porCategoria.get("ACTIVO") ?? [],
     tree.porCategoria.get("PASIVO") ?? [],
   );
-  // Exposición por rubroEECC (manda sobre el código). Identidad mientras
-  // ninguna cuenta declare rubro → el balance vigente no cambia.
-  const activo = reagruparPorRubroEECC(reclas.activo);
-  const pasivo = reagruparPorRubroEECC(reclas.pasivo);
-  const patrimonio = reagruparPorRubroEECC(tree.porCategoria.get("PATRIMONIO") ?? []);
+  // El árbol de código YA expone grupo (corriente/no corriente) → rubro
+  // (sintética de nivel 3) → cuenta en el orden de los EECC (`buildCuentaTree`
+  // ordena por código numérico, == `orden` del Excel). `rubroEECC` queda como
+  // atributo de cada cuenta (lo consume el Estado de Resultados).
+  const activo = reclas.activo;
+  const pasivo = reclas.pasivo;
+  const patrimonio = tree.porCategoria.get("PATRIMONIO") ?? [];
 
   // Totales recomputados desde las listas ya reclasificadas (ambos lados se
   // agrupan por igual, así que la igualdad A = P + PN se preserva).

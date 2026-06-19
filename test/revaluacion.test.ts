@@ -278,7 +278,7 @@ describe("MOEDA balance/ER — revaluación de posiciones USD al TC de cierre", 
     // No realizada total = 0 (estoque +60k / proveedor −60k).
     expect(er.difCambioNoRealizada.toNumber()).toBeCloseTo(0, 2);
     // FINANCIEROS = realizada (−10.000) + no realizada (0) = −10.000.
-    const fin = er.rt9.secciones.find((s) => s.id === "FINANCIEROS");
+    const fin = er.rt9.conceptos.find((c) => c.id === "RESULTADOS_FINANCIEROS");
     expect(fin?.total.toNumber()).toBeCloseTo(-10000, 2);
   });
 
@@ -301,7 +301,7 @@ describe("MOEDA balance/ER — revaluación de posiciones USD al TC de cierre", 
     const er = await getEstadoResultadosByFecha({ fechaDesde: DESDE, fechaHasta: HASTA });
     expect(er.difCambioNoRealizada.toNumber()).toBeCloseTo(40000, 2);
     expect(er.resultado.toNumber()).toBeCloseTo(40000, 2);
-    const fin = er.rt9.secciones.find((s) => s.id === "FINANCIEROS");
+    const fin = er.rt9.conceptos.find((c) => c.id === "RESULTADOS_FINANCIEROS");
     expect(fin?.total.toNumber()).toBeCloseTo(40000, 2);
     // La ganancia se expone en la lista de ingresos (nodo sintético).
     const totalIngresos = er.totalIngresos.toNumber();
@@ -379,7 +379,7 @@ describe("MOEDA balance/ER — revaluación de posiciones USD al TC de cierre", 
 
     const er = await getEstadoResultadosByFecha({ fechaDesde: DESDE, fechaHasta: HASTA });
     expect(er.difCambioNoRealizada.toNumber()).toBe(0);
-    const fin = er.rt9.secciones.find((s) => s.id === "FINANCIEROS");
+    const fin = er.rt9.conceptos.find((c) => c.id === "RESULTADOS_FINANCIEROS");
     expect(fin?.total.toNumber()).toBe(0);
   });
 

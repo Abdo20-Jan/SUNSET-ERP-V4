@@ -33,9 +33,10 @@ export {
 } from "./reportes/estado-resultados";
 export type { EstadoResultadosResult, MonedaReporte } from "./reportes/estado-resultados";
 export type {
+  ConceptoDRE,
+  ConceptoDREId,
+  ConceptoTipo,
   EstadoResultadosRT9,
-  SeccionRT9,
-  SeccionRT9Id,
 } from "./reportes/estado-resultados-rt9";
 
 export { getFlujoCaja } from "./reportes/flujo-caja";

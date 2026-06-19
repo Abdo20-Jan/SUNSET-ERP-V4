@@ -14,6 +14,21 @@ export function naturalezaPorDefecto(categoria: CuentaCategoria): Naturaleza {
   return categoria === "ACTIVO" || categoria === "EGRESO" ? "DEUDOR" : "ACREEDOR";
 }
 
+// Naturaleza EFECTIVA para signar saldos. DEUDOR/ACREEDOR mandan tal cual; las
+// cuentas mixtas o de cierre (MIXTA / SISTEMA_VARIABLE) y las que no declaran
+// naturaleza resuelven por el defecto de su categoría. Esto evita que un
+// resultado mixto (clases 8/9, categoría EGRESO) se signe como acreedor e
+// invierta su aporte al resultado del ejercicio; el PN de cierre (3.4) toma el
+// signo acreedor correcto.
+export function naturalezaEfectiva(
+  naturaleza: Naturaleza | null | undefined,
+  categoria: CuentaCategoria,
+): Naturaleza {
+  return naturaleza === "DEUDOR" || naturaleza === "ACREEDOR"
+    ? naturaleza
+    : naturalezaPorDefecto(categoria);
+}
+
 // Saldo natural: valor positivo representa el saldo en la naturaleza de la
 // cuenta. Usa la naturaleza explícita, no la categoría, para soportar
 // regularizadoras correctamente.

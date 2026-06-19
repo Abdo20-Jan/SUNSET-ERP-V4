@@ -102,7 +102,7 @@ async function buildEstadoResultadosRT9(
       // Diferencia de cambio NO realizada (revaluación al cierre), clase 9.2.
       codigo: esGanancia ? "9.2.03" : "9.2.04",
       categoria: esGanancia ? "INGRESO" : "EGRESO",
-      rubroEECC: "Resultados financieros y por tenencia",
+      rubroEECC: "Resultados financieros y de tenencia",
       debe: esGanancia ? new Decimal(0) : difCambioNoRealizada.abs(),
       haber: esGanancia ? difCambioNoRealizada : new Decimal(0),
     });
@@ -123,7 +123,7 @@ function nodoDifCambio(total: Decimal): CuentaTreeNode {
     tipo: "ANALITICA",
     categoria: esGanancia ? "INGRESO" : "EGRESO",
     nivel: 4,
-    rubroEECC: "Resultados Financieros y por Tenencia",
+    rubroEECC: "Resultados financieros y de tenencia",
     saldoInicial: new Decimal(0),
     debe: esGanancia ? new Decimal(0) : saldo,
     haber: esGanancia ? saldo : new Decimal(0),
@@ -181,7 +181,14 @@ async function armarEstadoResultados(
     egresos,
     totalIngresos: totalIngresos.toDecimalPlaces(2),
     totalEgresos: totalEgresos.toDecimalPlaces(2),
-    resultado: totalIngresos.minus(totalEgresos).toDecimalPlaces(2),
+    // Resultado del ejercicio = Σ(haber − debe) de toda cuenta de resultado (la
+    // cascada). Es el valor contablemente correcto y el que cierra A = P + PN.
+    // `totalIngresos − totalEgresos` NO sirve acá: las cuentas con naturaleza
+    // opuesta a su categoría (deducciones 4.2 DEUDOR; ganancias financieras y
+    // "otros ingresos" en clases 8/9, ACREEDOR) entran con signo invertido en
+    // esa resta. (Los totales de los árboles se exhiben tal cual; el subledger
+    // detallado puede no foot-ear al resultado cuando hay contra-cuentas.)
+    resultado: rt9.resultadoEjercicio,
     rt9,
     difCambioNoRealizada: rev.total,
     tipoCambioCierre,
