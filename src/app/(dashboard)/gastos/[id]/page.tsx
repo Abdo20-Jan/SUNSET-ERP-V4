@@ -6,15 +6,25 @@ import {
   listarProveedoresParaGasto,
   obtenerGastoPorId,
 } from "@/lib/actions/gastos";
+import { auth } from "@/lib/auth";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
 import { GastoForm } from "../_components/gasto-form";
 import { GastoDetailView } from "../_components/gasto-detail-view";
 
 type PageParams = Promise<{ id: string }>;
+type SearchParams = Promise<{ moneda?: string }>;
 
 export const dynamic = "force-dynamic";
 
-export default async function GastoDetailPage({ params }: { params: PageParams }) {
+export default async function GastoDetailPage({
+  params,
+  searchParams,
+}: {
+  params: PageParams;
+  searchParams: SearchParams;
+}) {
   const { id } = await params;
 
   const gasto = await obtenerGastoPorId(id);
@@ -30,7 +40,7 @@ export default async function GastoDetailPage({ params }: { params: PageParams }
     );
   }
 
-  const [proveedor, cuentas, asiento] = await Promise.all([
+  const [proveedor, cuentas, asiento, params2, session, cotizacion] = await Promise.all([
     db.proveedor.findUnique({
       where: { id: gasto.proveedorId },
       select: { nombre: true },
@@ -47,6 +57,9 @@ export default async function GastoDetailPage({ params }: { params: PageParams }
           select: { numero: true },
         })
       : Promise.resolve(null),
+    searchParams,
+    auth(),
+    getCotizacionParaFecha(new Date()),
   ]);
 
   const cuentasMap: Record<number, { codigo: string; nombre: string }> = {};
@@ -54,12 +67,27 @@ export default async function GastoDetailPage({ params }: { params: PageParams }
     cuentasMap[c.id] = { codigo: c.codigo, nombre: c.nombre };
   }
 
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    params2.moneda === "ARS" ? "ARS" : params2.moneda === "USD" ? "USD" : monedaPreferida;
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
+
   return (
     <GastoDetailView
       gasto={gasto}
       proveedorNombre={proveedor?.nombre ?? "—"}
       cuentasMap={cuentasMap}
       asientoNumero={asiento?.numero ?? null}
+      moneda={moneda}
+      tc={tc}
+      tcInfo={tcInfo}
     />
   );
 }

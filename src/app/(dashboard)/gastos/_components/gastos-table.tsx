@@ -4,7 +4,7 @@ import Link from "next/link";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 
 import type { GastoRow } from "@/lib/actions/gastos";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMontoPres } from "@/lib/format";
 import { DateBadge } from "@/components/ui/date-badge";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -16,6 +16,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
 
 function estadoVariant(
   estado: GastoRow["estado"],
@@ -30,7 +32,15 @@ function estadoVariant(
   }
 }
 
-export function GastosTable({ data }: { data: GastoRow[] }) {
+export function GastosTable({
+  data,
+  moneda,
+  tc,
+}: {
+  data: GastoRow[];
+  moneda: Moneda;
+  tc: string | null;
+}) {
   const columns: ColumnDef<GastoRow>[] = [
     {
       id: "numero",
@@ -81,7 +91,7 @@ export function GastosTable({ data }: { data: GastoRow[] }) {
             row.original.estado === "ANULADO" && "line-through opacity-60",
           )}
         >
-          {fmtMoney(row.original.total)} {row.original.moneda}
+          {fmtMontoPres(row.original.total, row.original.moneda, moneda, tc)} {moneda}
         </span>
       ),
     },
