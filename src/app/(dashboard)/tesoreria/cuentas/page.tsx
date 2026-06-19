@@ -2,17 +2,41 @@ import {
   listarCuentasBancariasConSaldo,
   listarCuentasContablesDisponibles,
 } from "@/lib/actions/cuentas-bancarias";
+import { auth } from "@/lib/auth";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { Card } from "@/components/ui/card";
 
+import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
 import { CuentasBancariasTable } from "./cuentas-table";
+
+type SearchParams = Promise<{ moneda?: string }>;
 
 export const dynamic = "force-dynamic";
 
-export default async function CuentasBancariasPage() {
-  const [cuentas, cuentasContables] = await Promise.all([
+export default async function CuentasBancariasPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  const [cuentas, cuentasContables, params, session, cotizacion] = await Promise.all([
     listarCuentasBancariasConSaldo(),
     listarCuentasContablesDisponibles(),
+    searchParams,
+    auth(),
+    getCotizacionParaFecha(new Date()),
   ]);
+
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    params.moneda === "ARS" ? "ARS" : params.moneda === "USD" ? "USD" : monedaPreferida;
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -24,10 +48,16 @@ export default async function CuentasBancariasPage() {
             asientos contabilizados
           </p>
         </div>
+        <MonedaToggle current={moneda} tcInfo={tcInfo} />
       </div>
 
       <Card className="py-0">
-        <CuentasBancariasTable data={cuentas} cuentasContables={cuentasContables} />
+        <CuentasBancariasTable
+          data={cuentas}
+          cuentasContables={cuentasContables}
+          moneda={moneda}
+          tc={tc}
+        />
       </Card>
     </div>
   );

@@ -3,12 +3,15 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon } from "@hugeicons/core-free-icons";
 
 import { db } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { listarPrestamosPorCuentaContable } from "@/lib/services/prestamo";
 import { MovimientoTesoreriaTipo, Prisma } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DateRangeFilter } from "@/components/date-range-filter";
 
+import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
 import { MovimientosFilters, type CuentaBancariaOption } from "./movimientos-filters";
 import { MovimientosTable, type MovimientoRow } from "./movimientos-table";
 
@@ -58,12 +61,29 @@ type SearchParams = Promise<{
   desde?: string;
   hasta?: string;
   tipo?: string;
+  moneda?: string;
 }>;
 
 export const dynamic = "force-dynamic";
 
 export default async function MovimientosPage({ searchParams }: { searchParams: SearchParams }) {
-  const params = await searchParams;
+  const [params, session, cotizacion] = await Promise.all([
+    searchParams,
+    auth(),
+    getCotizacionParaFecha(new Date()),
+  ]);
+
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    params.moneda === "ARS" ? "ARS" : params.moneda === "USD" ? "USD" : monedaPreferida;
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   const cuentasBancarias = await db.cuentaBancaria.findMany({
     orderBy: [{ banco: "asc" }, { moneda: "asc" }],
@@ -193,13 +213,16 @@ export default async function MovimientosPage({ searchParams }: { searchParams: 
             {rows.length} movimiento{rows.length === 1 ? "" : "s"} · {rangoLabel}
           </p>
         </div>
-        <Link
-          href="/tesoreria/movimientos/nuevo"
-          className={buttonVariants({ variant: "default" })}
-        >
-          <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-          Nuevo movimiento
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
+          <Link
+            href="/tesoreria/movimientos/nuevo"
+            className={buttonVariants({ variant: "default" })}
+          >
+            <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+            Nuevo movimiento
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -212,7 +235,7 @@ export default async function MovimientosPage({ searchParams }: { searchParams: 
       </div>
 
       <Card className="py-0">
-        <MovimientosTable data={rows} />
+        <MovimientosTable data={rows} moneda={moneda} tc={tc} />
       </Card>
     </div>
   );

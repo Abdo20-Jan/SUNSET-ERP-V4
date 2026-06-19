@@ -58,8 +58,14 @@ export function PrestamosFilters({ selectedClasificacion, selectedMoneda, select
   };
 
   const onClear = () => {
+    // Limpia sólo los filtros de datos; preserva la moneda de presentación
+    // (`?pres=`), que el MonedaToggle controla aparte del filtro `?moneda=`.
+    const next = new URLSearchParams();
+    const pres = searchParams.get("pres");
+    if (pres) next.set("pres", pres);
+    const qs = next.toString();
     startTransition(() => {
-      router.push(pathname);
+      router.push(qs.length > 0 ? `${pathname}?${qs}` : pathname);
     });
   };
 

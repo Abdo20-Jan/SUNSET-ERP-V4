@@ -4,6 +4,7 @@ import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tan
 
 import type { CuentaBancariaRow, CuentaContableOption } from "@/lib/actions/cuentas-bancarias";
 import type { Moneda, TipoCuentaBancaria } from "@/generated/prisma/client";
+import { fmtMontoPres } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -22,21 +23,16 @@ const TIPO_LABEL: Record<TipoCuentaBancaria, string> = {
   CAJA_CHICA: "Caja Chica",
 };
 
-function formatMoney(value: string, moneda: Moneda): string {
-  const num = Number(value);
-  const formatted = new Intl.NumberFormat("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num);
-  return `${formatted} ${moneda}`;
-}
-
 export function CuentasBancariasTable({
   data,
   cuentasContables,
+  moneda,
+  tc,
 }: {
   data: CuentaBancariaRow[];
   cuentasContables: CuentaContableOption[];
+  moneda: Moneda;
+  tc: string | null;
 }) {
   const columns: ColumnDef<CuentaBancariaRow>[] = [
     {
@@ -94,7 +90,8 @@ export function CuentasBancariasTable({
       header: () => <span className="block text-right">Saldo</span>,
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm tabular-nums">
-          {formatMoney(row.original.saldo, row.original.moneda)}
+          {fmtMontoPres(row.original.saldo, row.original.moneda, moneda, tc)}{" "}
+          <span className="text-xs text-muted-foreground">{moneda}</span>
         </span>
       ),
     },

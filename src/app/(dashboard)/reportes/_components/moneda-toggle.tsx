@@ -5,6 +5,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
+import { buildMonedaHref } from "./moneda-toggle-href";
+
 export type Moneda = "ARS" | "USD";
 
 type Props = {
@@ -15,24 +17,21 @@ type Props = {
     fecha: string; // YYYY-MM-DD
     fuente: string | null;
   } | null;
+  /**
+   * Query param donde se escribe la moneda de presentación. Por default
+   * `"moneda"`; pantallas que ya usan `?moneda=` como filtro de datos
+   * (préstamos, pagos-historial) pasan `"pres"` para no pisar ese filtro.
+   */
+  param?: string;
 };
 
-function buildHref(pathname: string, searchParams: URLSearchParams, moneda: Moneda): string {
-  const next = new URLSearchParams(searchParams.toString());
-  // Setar siempre explícito: la ausencia del param se interpreta como
-  // "preferencia del usuario" (USD por default), entonces borrar al elegir ARS
-  // hace que la página vuelva a USD.
-  next.set("moneda", moneda);
-  return `${pathname}?${next.toString()}`;
-}
-
-export function MonedaToggle({ current, tcInfo }: Props) {
+export function MonedaToggle({ current, tcInfo, param = "moneda" }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
 
   const onClick = (m: Moneda) => {
-    router.push(buildHref(pathname, new URLSearchParams(searchParams), m));
+    router.push(buildMonedaHref(pathname, searchParams.toString(), m, param));
   };
 
   return (
