@@ -32,3 +32,18 @@ export function esRangoEjercicioValido(desde: string, hasta: string): boolean {
   if (!desde || !hasta) return false;
   return desde <= hasta;
 }
+
+/**
+ * Validación del formulario de creación de período: código y nombre no vacíos
+ * (trim) y rango de fechas válido (inicio ≤ fin). Solo valida forma; la
+ * unicidad del código y el no-solapamiento los verifica la action contra la DB.
+ */
+export function esCrearPeriodoValido(
+  codigo: string,
+  nombre: string,
+  fechaInicio: string,
+  fechaFin: string,
+): boolean {
+  if (!codigo.trim() || !nombre.trim()) return false;
+  return esRangoEjercicioValido(fechaInicio, fechaFin);
+}

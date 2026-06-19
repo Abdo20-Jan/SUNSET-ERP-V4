@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  esCrearPeriodoValido,
   esRangoEjercicioValido,
   rangoEjercicioPorDefecto,
 } from "@/app/(dashboard)/contabilidad/periodos/cierre-helpers";
@@ -56,5 +57,22 @@ describe("esRangoEjercicioValido", () => {
 
   it("rechaza desde > hasta", () => {
     expect(esRangoEjercicioValido("2025-12-31", "2025-01-01")).toBe(false);
+  });
+});
+
+describe("esCrearPeriodoValido", () => {
+  it("acepta código + nombre + rango válidos", () => {
+    expect(esCrearPeriodoValido("2025", "Ejercicio 2025", "2025-01-01", "2025-12-31")).toBe(true);
+  });
+
+  it("rechaza código o nombre vacíos (incluso con espacios)", () => {
+    expect(esCrearPeriodoValido("", "Ejercicio 2025", "2025-01-01", "2025-12-31")).toBe(false);
+    expect(esCrearPeriodoValido("   ", "Ejercicio 2025", "2025-01-01", "2025-12-31")).toBe(false);
+    expect(esCrearPeriodoValido("2025", "  ", "2025-01-01", "2025-12-31")).toBe(false);
+  });
+
+  it("rechaza rango inválido (fechas vacías o inicio > fin)", () => {
+    expect(esCrearPeriodoValido("2025", "Ejercicio 2025", "", "2025-12-31")).toBe(false);
+    expect(esCrearPeriodoValido("2025", "Ejercicio 2025", "2025-12-31", "2025-01-01")).toBe(false);
   });
 });
