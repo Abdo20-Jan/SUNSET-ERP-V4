@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import type { NavCenter } from "@/components/layout/nav-config";
 
 function getInitials(nombre: string) {
@@ -71,6 +72,11 @@ export function TopnavUserMenu({
             <DropdownMenuSeparator />
           </DropdownMenuGroup>
         ))}
+        <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          Tema
+        </DropdownMenuLabel>
+        <ThemeToggle />
+        <DropdownMenuSeparator />
         <form action={logout}>
           <DropdownMenuItem render={<button type="submit" className="w-full cursor-pointer" />}>
             <HugeiconsIcon icon={Logout01Icon} />

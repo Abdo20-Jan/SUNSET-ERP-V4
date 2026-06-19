@@ -10,6 +10,7 @@ import { getCenterActivo, getBreadcrumb } from "@/lib/nav/center-activo";
 import { CenterMegaMenu } from "@/components/layout/center-mega-menu";
 import { TopnavUserMenu } from "@/components/layout/topnav-user-menu";
 import { NavDrawer } from "@/components/layout/nav-drawer";
+import { CommandMenu } from "@/components/layout/command-menu";
 import { Menubar } from "@/components/ui/menubar";
 
 export function AppTopnav({ user }: { user: { nombre: string; username: string; role: string } }) {
@@ -39,6 +40,7 @@ export function AppTopnav({ user }: { user: { nombre: string; username: string; 
           </Menubar>
         </div>
         <div className="flex items-center gap-2">
+          <CommandMenu />
           <TopnavUserMenu user={user} config={config} />
         </div>
       </div>
