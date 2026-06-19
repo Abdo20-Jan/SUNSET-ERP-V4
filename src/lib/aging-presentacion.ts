@@ -62,7 +62,11 @@ export function sumarBucketsNativos(items: ItemBucketNativo[]): Record<BucketKey
   };
 
   for (const it of items) {
-    const par = acc[it.bucket];
+    // El servicio legado agrupa las facturas sin fecha de vencimiento en
+    // "al día" (rama else); espelhamos para que el total presentado coincida
+    // con los campos legados vencido/proximo/alDia.
+    const bucket = it.bucket === "sin_fecha" ? "al_dia" : it.bucket;
+    const par = acc[bucket];
     if (!par) continue;
     const n = Number.parseFloat(it.montoNativo);
     if (!Number.isFinite(n)) continue;

@@ -80,7 +80,9 @@ function fmtBucketPres(
 ): string {
   let total = new Decimal(0);
   for (const f of facturas) {
-    if (f.bucket !== bucket) continue;
+    // sin_fecha colapsa en al_dia (paridad con el servicio legado).
+    const fb = f.bucket === "sin_fecha" ? "al_dia" : f.bucket;
+    if (fb !== bucket) continue;
     total = total.plus(convertirMonto(f.montoNativo, f.moneda as Moneda, moneda, tc));
   }
   return fmtMoney(total.toFixed(2));

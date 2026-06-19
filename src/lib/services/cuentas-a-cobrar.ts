@@ -37,11 +37,11 @@ export type CxCRow = {
 export type CuentasACobrar = {
   clientes: CxCRow[]; // 1.1.3.x — saldos por cliente
   valoresACobrar: CxCRow[]; // 1.1.4.20 — cheques de terceros en cartera
+  // ARS contable de TODAS las cuentas (incluye la valuación ARS de las
+  // USD-natas). El total native-aware de presentación se deriva en el
+  // call-site con `sumarSaldosNativos` sobre las rows (saldo + saldoUsd) —
+  // NO sumar totalGeneral + Σ saldoUsd, sería doble conteo de la parte USD.
   totalGeneral: string;
-  // Σ de los saldoUsd nativos (cuentas USD-natas). Para el KPI native-aware
-  // de presentación: convertir totalGeneral (ARS) + totalGeneralUsd (USD)
-  // por separado. `totalGeneral` (ARS) se mantiene para tesoreria-overview.
-  totalGeneralUsd: string;
 };
 
 const PREFIXES = {
@@ -107,7 +107,6 @@ export async function getCuentasACobrar(): Promise<CuentasACobrar> {
   const clientes: CxCRow[] = [];
   const valoresACobrar: CxCRow[] = [];
   let totalGeneral = toDecimal(0);
-  let totalGeneralUsd = toDecimal(0);
 
   for (const c of cuentas) {
     if (c.tipo !== "ANALITICA") continue;
@@ -132,14 +131,12 @@ export async function getCuentasACobrar(): Promise<CuentasACobrar> {
     }
 
     totalGeneral = totalGeneral.plus(saldo);
-    if (saldoUsdStr) totalGeneralUsd = totalGeneralUsd.plus(toDecimal(saldoUsdStr));
   }
 
   return {
     clientes,
     valoresACobrar,
     totalGeneral: totalGeneral.toFixed(2),
-    totalGeneralUsd: totalGeneralUsd.toFixed(2),
   };
 }
 

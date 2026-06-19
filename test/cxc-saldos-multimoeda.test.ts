@@ -150,7 +150,6 @@ describe("cuentas a cobrar — saldo USD nativo + montoNativo", () => {
     expect(row).toBeDefined();
     expect(row?.saldo).toBe("1200000.00");
     expect(row?.saldoUsd).toBe("1000.00"); // neto DEBE−HABER de montoOrigen USD
-    expect(data.totalGeneralUsd).toBe("1000.00");
   });
 
   it("getCuentasACobrar: cliente solo-ARS → saldoUsd ausente, totalGeneralUsd 0", async () => {
@@ -168,7 +167,6 @@ describe("cuentas a cobrar — saldo USD nativo + montoNativo", () => {
     const row = data.clientes.find((c) => c.cuentaCodigo === "1.1.3.01");
     expect(row?.saldo).toBe("500000.00");
     expect(row?.saldoUsd).toBeUndefined();
-    expect(data.totalGeneralUsd).toBe("0.00");
   });
 
   it("getSaldosPorClienteConAging: venta USD → saldoTotalUsd + montoNativo (÷TC emisión)", async () => {

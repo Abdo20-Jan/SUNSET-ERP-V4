@@ -37,7 +37,7 @@ describe("montoNativoPendiente", () => {
 });
 
 describe("sumarBucketsNativos", () => {
-  it("suma por bucket Y por moneda nativa (sin mezclar)", () => {
+  it("suma por bucket Y por moneda nativa (sin mezclar); sin_fecha colapsa en al_dia", () => {
     const r = sumarBucketsNativos([
       { bucket: "vencida", moneda: "ARS", montoNativo: "1000" },
       { bucket: "vencida", moneda: "USD", montoNativo: "100" },
@@ -48,8 +48,9 @@ describe("sumarBucketsNativos", () => {
     ]);
     expect(r.vencida).toEqual({ ars: "1250.50", usd: "100.00" });
     expect(r.proxima).toEqual({ ars: "500.00", usd: "0.00" });
-    expect(r.al_dia).toEqual({ ars: "0.00", usd: "50.00" });
-    expect(r.sin_fecha).toEqual({ ars: "0.00", usd: "7.00" });
+    // al_dia incluye el sin_fecha (50 + 7) — paridad con el servicio legado.
+    expect(r.al_dia).toEqual({ ars: "0.00", usd: "57.00" });
+    expect(r.sin_fecha).toEqual({ ars: "0.00", usd: "0.00" });
   });
 
   it("lista vacía → todos los buckets en cero", () => {
