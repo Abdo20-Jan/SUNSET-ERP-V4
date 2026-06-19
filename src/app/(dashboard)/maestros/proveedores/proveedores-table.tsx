@@ -23,6 +23,7 @@ import {
   type CuentaContableOption,
   type ProveedorRow,
 } from "@/lib/actions/proveedores";
+import type { VistaGuardada } from "@/lib/actions/saved-views";
 import type { SortDir } from "@/lib/table-sort";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import { ColumnsToggle } from "@/components/ui/columns-toggle";
 import { DataTable } from "@/components/ui/data-table";
 import { DataTableSearch } from "@/components/ui/data-table-search";
 import { ExportButton } from "@/components/ui/export-button";
+import { SavedViews } from "@/components/ui/saved-views";
 import {
   Dialog,
   DialogContent,
@@ -60,6 +62,7 @@ type Props = {
   proveedores: ProveedorRow[];
   total: number;
   paises: string[];
+  vistas: VistaGuardada[];
   q: string;
   pais: string;
   sort: string;
@@ -74,6 +77,7 @@ export function ProveedoresTable({
   proveedores,
   total,
   paises,
+  vistas,
   q,
   pais,
   cuentas,
@@ -220,6 +224,12 @@ export function ProveedoresTable({
           </SelectContent>
         </Select>
         <ColumnsToggle table={table} />
+        <SavedViews
+          ruta={pathname}
+          vistas={vistas}
+          columnVisibility={columnVisibility}
+          onApplyColumns={setColumnVisibility}
+        />
         <ExportButton recurso="proveedores" />
         <Button onClick={() => setFormState({ mode: "create" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />

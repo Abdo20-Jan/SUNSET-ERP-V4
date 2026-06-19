@@ -3,6 +3,7 @@ import {
   listarCuentasContablesParaProveedor,
   listarProveedores,
 } from "@/lib/actions/proveedores";
+import { listarVistas } from "@/lib/actions/saved-views";
 import { Card } from "@/components/ui/card";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePaginationParams } from "@/components/ui/pagination-params";
@@ -32,10 +33,11 @@ export default async function ProveedoresPage({ searchParams }: { searchParams: 
   const q = params.q?.trim() ?? "";
   const pais = params.pais?.trim() ?? "";
 
-  const [{ rows, total, paises }, cuentas, cuentasGasto] = await Promise.all([
+  const [{ rows, total, paises }, cuentas, cuentasGasto, vistas] = await Promise.all([
     listarProveedores({ q, pais, page, perPage, sort, dir }),
     listarCuentasContablesParaProveedor(),
     listarCuentasContablesParaGastoProveedor(),
+    listarVistas("/maestros/proveedores"),
   ]);
 
   return (
@@ -54,6 +56,7 @@ export default async function ProveedoresPage({ searchParams }: { searchParams: 
           proveedores={rows}
           total={total}
           paises={paises}
+          vistas={vistas}
           q={q}
           pais={pais}
           sort={sort}

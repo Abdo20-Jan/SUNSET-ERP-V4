@@ -24,6 +24,7 @@ import {
   type CuentaContableOption,
 } from "@/lib/actions/clientes";
 import type { ProvinciaRow } from "@/lib/actions/provincias";
+import type { VistaGuardada } from "@/lib/actions/saved-views";
 import type { SortDir } from "@/lib/table-sort";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ import { ColumnsToggle } from "@/components/ui/columns-toggle";
 import { DataTable } from "@/components/ui/data-table";
 import { DataTableSearch } from "@/components/ui/data-table-search";
 import { ExportButton } from "@/components/ui/export-button";
+import { SavedViews } from "@/components/ui/saved-views";
 import {
   Dialog,
   DialogContent,
@@ -70,6 +72,7 @@ type Props = {
   total: number;
   cuentas: CuentaContableOption[];
   provincias: ProvinciaRow[];
+  vistas: VistaGuardada[];
   q: string;
   estado: string;
   sort: string;
@@ -78,7 +81,7 @@ type Props = {
   perPage: number;
 };
 
-export function ClientesTable({ clientes, total, cuentas, provincias, q, estado }: Props) {
+export function ClientesTable({ clientes, total, cuentas, provincias, vistas, q, estado }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -212,6 +215,12 @@ export function ClientesTable({ clientes, total, cuentas, provincias, q, estado 
           </SelectContent>
         </Select>
         <ColumnsToggle table={table} />
+        <SavedViews
+          ruta={pathname}
+          vistas={vistas}
+          columnVisibility={columnVisibility}
+          onApplyColumns={setColumnVisibility}
+        />
         <ExportButton recurso="clientes" />
         <Button onClick={() => setFormState({ mode: "create" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />

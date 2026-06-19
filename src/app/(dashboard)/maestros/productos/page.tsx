@@ -1,4 +1,5 @@
 import { listarProductos } from "@/lib/actions/productos";
+import { listarVistas } from "@/lib/actions/saved-views";
 import { Card } from "@/components/ui/card";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePaginationParams } from "@/components/ui/pagination-params";
@@ -28,14 +29,10 @@ export default async function ProductosPage({ searchParams }: { searchParams: Se
   const q = params.q?.trim() ?? "";
   const marca = params.marca?.trim() ?? "";
 
-  const { rows, total, marcas } = await listarProductos({
-    q,
-    marca,
-    page,
-    perPage,
-    sort,
-    dir,
-  });
+  const [{ rows, total, marcas }, vistas] = await Promise.all([
+    listarProductos({ q, marca, page, perPage, sort, dir }),
+    listarVistas("/maestros/productos"),
+  ]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -51,6 +48,7 @@ export default async function ProductosPage({ searchParams }: { searchParams: Se
           productos={rows}
           total={total}
           marcas={marcas}
+          vistas={vistas}
           q={q}
           marca={marca}
           sort={sort}
