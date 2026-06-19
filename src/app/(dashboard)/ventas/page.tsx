@@ -1,18 +1,68 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon } from "@hugeicons/core-free-icons";
+import {
+  Add01Icon,
+  Invoice01Icon,
+  FileEditIcon,
+  ReceiptDollarIcon,
+  TruckDeliveryIcon,
+} from "@hugeicons/core-free-icons";
 
 import { auth } from "@/lib/auth";
 import { listarVentas } from "@/lib/actions/ventas";
+import { listarVentasConEntregaPendiente } from "@/lib/actions/entregas";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
+import { getCuentasACobrar } from "@/lib/services/cuentas-a-cobrar";
+import { convertirMonto, fmtInt, fmtMoney } from "@/lib/format";
 import { buttonVariants } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardHeader } from "@/components/ui/card";
 import { Pagination } from "@/components/ui/pagination";
 import { parsePaginationParams } from "@/components/ui/pagination-params";
+import { Skeleton } from "@/components/ui/skeleton";
 
 import { MonedaToggle, type Moneda } from "../reportes/_components/moneda-toggle";
+import { KpiCard } from "../dashboard/_components/kpi-card";
 
 import { VentasTable } from "./_components/ventas-table";
+
+function KpiSkeleton() {
+  return (
+    <Card>
+      <CardHeader className="gap-3">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-7 w-20" />
+        <Skeleton className="h-3 w-24" />
+      </CardHeader>
+    </Card>
+  );
+}
+
+async function PorCobrarKpi({ moneda, tc }: { moneda: Moneda; tc: string | null }) {
+  const { totalGeneral } = await getCuentasACobrar();
+  return (
+    <KpiCard
+      label="Por cobrar"
+      value={fmtMoney(convertirMonto(totalGeneral, "ARS", moneda, tc))}
+      icon={ReceiptDollarIcon}
+      accent="warning"
+      hint="Saldo deudor de clientes"
+    />
+  );
+}
+
+async function PendientesEntregaKpi() {
+  const pendientes = await listarVentasConEntregaPendiente();
+  return (
+    <KpiCard
+      label="Pendientes de entrega"
+      value={fmtInt(pendientes.length)}
+      icon={TruckDeliveryIcon}
+      accent="neutral"
+      hint="Ventas emitidas con despacho físico pendiente"
+    />
+  );
+}
 
 type SearchParams = Promise<{
   page?: string;
@@ -94,6 +144,29 @@ export default async function VentasPage({ searchParams }: { searchParams: Searc
           </Link>
         </div>
       </div>
+
+      <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+        <KpiCard
+          label="Ventas emitidas"
+          value={fmtInt(emitidas)}
+          icon={Invoice01Icon}
+          accent="info"
+          hint="Facturas emitidas (contabilizadas)"
+        />
+        <KpiCard
+          label="Borradores"
+          value={fmtInt(borradores)}
+          icon={FileEditIcon}
+          accent="neutral"
+          hint="Ventas en borrador sin emitir"
+        />
+        <Suspense fallback={<KpiSkeleton />}>
+          <PorCobrarKpi moneda={moneda} tc={tc} />
+        </Suspense>
+        <Suspense fallback={<KpiSkeleton />}>
+          <PendientesEntregaKpi />
+        </Suspense>
+      </section>
 
       <Card className="py-0">
         <VentasTable data={rows} moneda={moneda} tc={tc} />

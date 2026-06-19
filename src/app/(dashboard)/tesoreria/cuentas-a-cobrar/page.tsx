@@ -13,8 +13,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fmtMoney } from "@/lib/format";
+import { auth } from "@/lib/auth";
+import { fmtMoney, fmtMontoPres, pickSaldoNativo } from "@/lib/format";
 import { toDecimal } from "@/lib/decimal";
+import { convertirBucket, sumarBucketsNativos, sumarSaldosNativos } from "@/lib/aging-presentacion";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import {
   getCuentasACobrar,
   getSaldosPorClienteConAging,
@@ -23,27 +26,71 @@ import {
   type VentaPendiente,
 } from "@/lib/services/cuentas-a-cobrar";
 
-type SearchParams = Promise<{ filtro?: string }>;
+import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
+
+type SearchParams = Promise<{ filtro?: string; moneda?: string }>;
 
 export const dynamic = "force-dynamic";
 
 export default async function CuentasACobrarPage({ searchParams }: { searchParams: SearchParams }) {
-  const { filtro } = await searchParams;
+  const [params, session, cotizacion, data, clientes] = await Promise.all([
+    searchParams,
+    auth(),
+    getCotizacionParaFecha(new Date()),
+    getCuentasACobrar(),
+    getSaldosPorClienteConAging(),
+  ]);
 
-  const [data, clientes] = await Promise.all([getCuentasACobrar(), getSaldosPorClienteConAging()]);
+  const { filtro } = params;
+  const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const moneda: Moneda =
+    params.moneda === "ARS" ? "ARS" : params.moneda === "USD" ? "USD" : monedaPreferida;
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   const conVencidas = clientes.filter((c) => toDecimal(c.vencido).gt(0));
   const list = filtro === "vencidas" ? conVencidas : clientes;
 
-  const totalVencido = clientes
-    .reduce((acc, c) => acc.plus(toDecimal(c.vencido)), toDecimal(0))
-    .toFixed(2);
-  const totalProximo = clientes
-    .reduce((acc, c) => acc.plus(toDecimal(c.proximo)), toDecimal(0))
-    .toFixed(2);
-  const totalAlDia = clientes
-    .reduce((acc, c) => acc.plus(toDecimal(c.alDia)), toDecimal(0))
-    .toFixed(2);
+  // KPIs de aging: suma POR MONEDA NATIVA antes de convertir (lección
+  // #262/#263), no ÷tc ciego sobre el agregado ARS.
+  const buckets = sumarBucketsNativos(
+    clientes.flatMap((c) =>
+      c.ventas.map((v) => ({ bucket: v.bucket, moneda: v.moneda, montoNativo: v.montoNativo })),
+    ),
+  );
+  const totalVencido = fmtMoney(convertirBucket(buckets.vencida, moneda, tc));
+  const totalProximo = fmtMoney(convertirBucket(buckets.proxima, moneda, tc));
+  const totalAlDia = fmtMoney(convertirBucket(buckets.al_dia, moneda, tc));
+  // Saldo contable total: cada cuenta en su moneda nativa (pickSaldoNativo
+  // agregado) → convertido por separado.
+  const totalContable = fmtMoney(
+    convertirBucket(
+      sumarSaldosNativos(
+        [...data.clientes, ...data.valoresACobrar].map((r) => ({
+          saldoArs: r.saldo,
+          saldoUsd: r.saldoUsd,
+        })),
+      ),
+      moneda,
+      tc,
+    ),
+  );
+
+  // Links de filtro preservando la moneda de presentación.
+  const qpTodos = new URLSearchParams();
+  if (params.moneda) qpTodos.set("moneda", params.moneda);
+  const hrefTodos = qpTodos.toString()
+    ? `/tesoreria/cuentas-a-cobrar?${qpTodos}`
+    : "/tesoreria/cuentas-a-cobrar";
+  const qpVenc = new URLSearchParams({ filtro: "vencidas" });
+  if (params.moneda) qpVenc.set("moneda", params.moneda);
+  const hrefVencidas = `/tesoreria/cuentas-a-cobrar?${qpVenc}`;
 
   return (
     <div className="flex flex-col gap-3">
@@ -62,8 +109,9 @@ export default async function CuentasACobrarPage({ searchParams }: { searchParam
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <MonedaToggle current={moneda} tcInfo={tcInfo} />
           <Link
-            href="/tesoreria/cuentas-a-cobrar"
+            href={hrefTodos}
             className={buttonVariants({
               variant: filtro === "vencidas" ? "outline" : "default",
               size: "sm",
@@ -72,7 +120,7 @@ export default async function CuentasACobrarPage({ searchParams }: { searchParam
             Todos
           </Link>
           <Link
-            href="/tesoreria/cuentas-a-cobrar?filtro=vencidas"
+            href={hrefVencidas}
             className={buttonVariants({
               variant: filtro === "vencidas" ? "default" : "outline",
               size: "sm",
@@ -86,31 +134,29 @@ export default async function CuentasACobrarPage({ searchParams }: { searchParam
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <KpiCard
           label="Total vencido"
-          value={`${fmtMoney(totalVencido)} ARS`}
+          value={`${totalVencido} ${moneda}`}
           tone="danger"
           icon={Alert02Icon}
         />
         <KpiCard
           label="A vencer ≤ 7d"
-          value={`${fmtMoney(totalProximo)} ARS`}
+          value={`${totalProximo} ${moneda}`}
           tone="warning"
           icon={Calendar03Icon}
         />
         <KpiCard
           label="Al día"
-          value={`${fmtMoney(totalAlDia)} ARS`}
+          value={`${totalAlDia} ${moneda}`}
           tone="ok"
           icon={CheckmarkCircle02Icon}
         />
-        <KpiCard
-          label="Saldo contable total"
-          value={`${fmtMoney(data.totalGeneral)} ARS`}
-          tone="muted"
-        />
+        <KpiCard label="Saldo contable total" value={`${totalContable} ${moneda}`} tone="muted" />
       </div>
 
       <ClientesSection
         list={list}
+        moneda={moneda}
+        tc={tc}
         emptyMsg={
           filtro === "vencidas"
             ? "Ningún cliente con facturas vencidas."
@@ -123,6 +169,8 @@ export default async function CuentasACobrarPage({ searchParams }: { searchParam
           title="Valores a cobrar (cheques de terceros)"
           subtitle="Cheques recibidos en cartera pendientes de acreditar en cuenta bancaria (cuenta 1.1.4.20)."
           rows={data.valoresACobrar}
+          moneda={moneda}
+          tc={tc}
         />
       )}
     </div>
@@ -132,7 +180,17 @@ export default async function CuentasACobrarPage({ searchParams }: { searchParam
 // =============================================================
 // Sección principal — Clientes con detalle de ventas pendientes
 // =============================================================
-function ClientesSection({ list, emptyMsg }: { list: SaldoClienteAging[]; emptyMsg: string }) {
+function ClientesSection({
+  list,
+  moneda,
+  tc,
+  emptyMsg,
+}: {
+  list: SaldoClienteAging[];
+  moneda: Moneda;
+  tc: string | null;
+  emptyMsg: string;
+}) {
   if (list.length === 0) {
     return (
       <Card>
@@ -159,7 +217,7 @@ function ClientesSection({ list, emptyMsg }: { list: SaldoClienteAging[]; emptyM
 
         <div className="flex flex-col gap-3">
           {list.map((c) => (
-            <ClienteCard key={c.clienteId} cliente={c} />
+            <ClienteCard key={c.clienteId} cliente={c} moneda={moneda} tc={tc} />
           ))}
         </div>
       </CardContent>
@@ -167,7 +225,15 @@ function ClientesSection({ list, emptyMsg }: { list: SaldoClienteAging[]; emptyM
   );
 }
 
-function ClienteCard({ cliente }: { cliente: SaldoClienteAging }) {
+function ClienteCard({
+  cliente,
+  moneda,
+  tc,
+}: {
+  cliente: SaldoClienteAging;
+  moneda: Moneda;
+  tc: string | null;
+}) {
   const cobrarHref = (() => {
     const params = new URLSearchParams({
       tipo: "COBRO",
@@ -179,6 +245,12 @@ function ClienteCard({ cliente }: { cliente: SaldoClienteAging }) {
     }
     return `/tesoreria/movimientos/nuevo?${params.toString()}`;
   })();
+
+  // Saldo y buckets en presentación native-aware.
+  const saldoPick = pickSaldoNativo(cliente.saldoTotal, cliente.saldoTotalUsd);
+  const buckets = sumarBucketsNativos(
+    cliente.ventas.map((v) => ({ bucket: v.bucket, moneda: v.moneda, montoNativo: v.montoNativo })),
+  );
 
   return (
     <div className="rounded-lg border bg-card">
@@ -198,24 +270,24 @@ function ClienteCard({ cliente }: { cliente: SaldoClienteAging }) {
           <div className="mt-1 flex items-center gap-2 text-xs">
             {toDecimal(cliente.vencido).gt(0) && (
               <span className="rounded-full border border-red-300 bg-red-50 px-2 py-0.5 font-medium text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
-                Vencido: {fmtMoney(cliente.vencido)}
+                Vencido: {fmtMoney(convertirBucket(buckets.vencida, moneda, tc))}
               </span>
             )}
             {toDecimal(cliente.proximo).gt(0) && (
               <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-medium text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-                ≤ 7d: {fmtMoney(cliente.proximo)}
+                ≤ 7d: {fmtMoney(convertirBucket(buckets.proxima, moneda, tc))}
               </span>
             )}
             {toDecimal(cliente.alDia).gt(0) && (
               <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-                Al día: {fmtMoney(cliente.alDia)}
+                Al día: {fmtMoney(convertirBucket(buckets.al_dia, moneda, tc))}
               </span>
             )}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
           <span className="font-mono text-base font-semibold tabular-nums">
-            ARS {fmtMoney(cliente.saldoTotal)}
+            {moneda} {fmtMontoPres(saldoPick.valor, saldoPick.monedaNativa, moneda, tc)}
           </span>
           <Link href={cobrarHref} className={buttonVariants({ variant: "default", size: "sm" })}>
             <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} className="size-3.5" />
@@ -237,7 +309,7 @@ function ClienteCard({ cliente }: { cliente: SaldoClienteAging }) {
           </TableHeader>
           <TableBody>
             {cliente.ventas.map((v) => (
-              <VentaRow key={v.id} venta={v} />
+              <VentaRow key={v.id} venta={v} moneda={moneda} tc={tc} />
             ))}
           </TableBody>
         </Table>
@@ -246,7 +318,15 @@ function ClienteCard({ cliente }: { cliente: SaldoClienteAging }) {
   );
 }
 
-function VentaRow({ venta }: { venta: VentaPendiente }) {
+function VentaRow({
+  venta,
+  moneda,
+  tc,
+}: {
+  venta: VentaPendiente;
+  moneda: Moneda;
+  tc: string | null;
+}) {
   const fechaVenc = venta.fechaVencimiento ? new Date(venta.fechaVencimiento) : null;
   const fecha = new Date(venta.fecha);
 
@@ -291,7 +371,7 @@ function VentaRow({ venta }: { venta: VentaPendiente }) {
         </span>
       </TableCell>
       <TableCell className="text-right font-mono tabular-nums">
-        ARS {fmtMoney(venta.monto)}
+        {fmtMontoPres(venta.montoNativo, venta.moneda as Moneda, moneda, tc)}
       </TableCell>
     </TableRow>
   );
@@ -300,7 +380,19 @@ function VentaRow({ venta }: { venta: VentaPendiente }) {
 // =============================================================
 // Sección genérica — Valores a cobrar (cheques en cartera)
 // =============================================================
-function Section({ title, subtitle, rows }: { title: string; subtitle: string; rows: CxCRow[] }) {
+function Section({
+  title,
+  subtitle,
+  rows,
+  moneda,
+  tc,
+}: {
+  title: string;
+  subtitle: string;
+  rows: CxCRow[];
+  moneda: Moneda;
+  tc: string | null;
+}) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-3">
@@ -313,19 +405,22 @@ function Section({ title, subtitle, rows }: { title: string; subtitle: string; r
             <TableRow>
               <TableHead className="w-32">Cuenta</TableHead>
               <TableHead>Nombre</TableHead>
-              <TableHead className="text-right">Saldo (ARS)</TableHead>
+              <TableHead className="text-right">Saldo</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.cuentaId}>
-                <TableCell className="font-mono text-xs">{r.cuentaCodigo}</TableCell>
-                <TableCell>{r.cuentaNombre}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums">
-                  {fmtMoney(r.saldo)}
-                </TableCell>
-              </TableRow>
-            ))}
+            {rows.map((r) => {
+              const pick = pickSaldoNativo(r.saldo, r.saldoUsd);
+              return (
+                <TableRow key={r.cuentaId}>
+                  <TableCell className="font-mono text-xs">{r.cuentaCodigo}</TableCell>
+                  <TableCell>{r.cuentaNombre}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {fmtMontoPres(pick.valor, pick.monedaNativa, moneda, tc)} {moneda}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </CardContent>
