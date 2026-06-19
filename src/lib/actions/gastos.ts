@@ -35,10 +35,19 @@ export type GastoRow = {
   asientoId: string | null;
 };
 
+export type GastosListPage = {
+  rows: GastoRow[];
+  total: number;
+  contabilizados: number;
+  borradores: number;
+};
+
 export async function listarGastos(filters?: {
   desde?: string;
   hasta?: string;
-}): Promise<GastoRow[]> {
+  page?: number;
+  perPage?: number;
+}): Promise<GastosListPage> {
   const where: Prisma.GastoWhereInput = {};
   if (filters?.desde || filters?.hasta) {
     where.fecha = {};
@@ -49,26 +58,45 @@ export async function listarGastos(filters?: {
       where.fecha.lte = h;
     }
   }
-  const rows = await db.gasto.findMany({
-    where,
-    orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
-    include: { proveedor: { select: { id: true, nombre: true } } },
-  });
-  return rows.map((g) => ({
-    id: g.id,
-    numero: g.numero,
-    fecha: g.fecha.toISOString(),
-    fechaVencimiento: g.fechaVencimiento?.toISOString() ?? null,
-    proveedor: g.proveedor,
-    facturaNumero: g.facturaNumero,
-    moneda: g.moneda,
-    subtotal: g.subtotal.toString(),
-    iva: g.iva.toString(),
-    iibb: g.iibb.toString(),
-    total: g.total.toString(),
-    estado: g.estado,
-    asientoId: g.asientoId,
-  }));
+
+  const page = Math.max(1, Math.floor(filters?.page ?? 1));
+  const perPage = Math.max(1, Math.min(500, Math.floor(filters?.perPage ?? 50)));
+  const skip = (page - 1) * perPage;
+
+  const [rows, total, byEstado] = await Promise.all([
+    db.gasto.findMany({
+      where,
+      orderBy: [{ fecha: "desc" }, { createdAt: "desc" }],
+      include: { proveedor: { select: { id: true, nombre: true } } },
+      take: perPage,
+      skip,
+    }),
+    db.gasto.count({ where }),
+    db.gasto.groupBy({ by: ["estado"], where, _count: { _all: true } }),
+  ]);
+
+  const counts = new Map(byEstado.map((g) => [g.estado, g._count._all]));
+
+  return {
+    rows: rows.map((g) => ({
+      id: g.id,
+      numero: g.numero,
+      fecha: g.fecha.toISOString(),
+      fechaVencimiento: g.fechaVencimiento?.toISOString() ?? null,
+      proveedor: g.proveedor,
+      facturaNumero: g.facturaNumero,
+      moneda: g.moneda,
+      subtotal: g.subtotal.toString(),
+      iva: g.iva.toString(),
+      iibb: g.iibb.toString(),
+      total: g.total.toString(),
+      estado: g.estado,
+      asientoId: g.asientoId,
+    })),
+    total,
+    contabilizados: counts.get(GastoEstado.CONTABILIZADO) ?? 0,
+    borradores: counts.get(GastoEstado.BORRADOR) ?? 0,
+  };
 }
 
 export type ProveedorParaGasto = {
