@@ -9,6 +9,7 @@ import { CancelCircleIcon, MoreHorizontalCircle01Icon, ViewIcon } from "@hugeico
 
 import type { AsientoEstado, Moneda, MovimientoTesoreriaTipo } from "@/generated/prisma/client";
 import { anularAsientoAction } from "@/lib/actions/asientos";
+import { fmtMontoPres } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -97,7 +98,15 @@ function tipoVariant(tipo: MovimientoTesoreriaTipo): "default" | "outline" | "se
   }
 }
 
-export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
+export function MovimientosTable({
+  data,
+  moneda,
+  tc,
+}: {
+  data: MovimientoRow[];
+  moneda: Moneda;
+  tc: string | null;
+}) {
   const [pending, setPending] = useState<MovimientoRow | null>(null);
   const [detalle, setDetalle] = useState<MovimientoRow | null>(null);
   const [isSubmitting, startTransition] = useTransition();
@@ -164,14 +173,14 @@ export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
       header: () => <span className="block text-right">Monto</span>,
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm tabular-nums">
-          {row.original.monto}
+          {fmtMontoPres(row.original.monto, row.original.moneda, moneda, tc)}
         </span>
       ),
     },
     {
       id: "moneda",
       header: "Moneda",
-      cell: ({ row }) => <span className="font-mono text-xs">{row.original.moneda}</span>,
+      cell: () => <span className="font-mono text-xs">{moneda}</span>,
     },
     {
       id: "estado",
@@ -271,8 +280,9 @@ export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
                 <DialogTitle>Anular movimiento Nº {pending.asiento.numero}</DialogTitle>
                 <DialogDescription>
                   {pending.tipo} · {formatDate(pending.fecha)} · {pending.cuentaBancaria.banco} ·{" "}
-                  {pending.monto} {pending.moneda}. Al anularlo, el asiento pasará a ANULADO y
-                  dejará de afectar saldos. El número se mantiene para auditoría.
+                  {fmtMontoPres(pending.monto, pending.moneda, moneda, tc)} {moneda}. Al anularlo,
+                  el asiento pasará a ANULADO y dejará de afectar saldos. El número se mantiene para
+                  auditoría.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -294,6 +304,8 @@ export function MovimientosTable({ data }: { data: MovimientoRow[] }) {
         onOpenChange={(open) => {
           if (!open) setDetalle(null);
         }}
+        moneda={moneda}
+        tc={tc}
       />
     </TooltipProvider>
   );

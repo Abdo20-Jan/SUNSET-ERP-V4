@@ -7,10 +7,13 @@ import {
   type PrestamoEstadoFiltro,
   type PrestamoListFilters,
 } from "@/lib/actions/prestamos";
+import { auth } from "@/lib/auth";
+import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { Moneda, PrestamoClasificacion } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
+import { MonedaToggle, type Moneda as MonedaPres } from "../../reportes/_components/moneda-toggle";
 import { PrestamosFilters } from "./prestamos-filters";
 import { PrestamosTable } from "./prestamos-table";
 
@@ -19,6 +22,7 @@ type SearchParams = Promise<{
   moneda?: string;
   estado?: string;
   prestamoId?: string;
+  pres?: string;
 }>;
 
 function parseClasificacion(v: string | undefined): PrestamoClasificacion | null {
@@ -52,7 +56,25 @@ const ESTADO_SHORT: Record<PrestamoEstadoFiltro, string> = {
 export const dynamic = "force-dynamic";
 
 export default async function PrestamosPage({ searchParams }: { searchParams: SearchParams }) {
-  const params = await searchParams;
+  const [params, session, cotizacion] = await Promise.all([
+    searchParams,
+    auth(),
+    getCotizacionParaFecha(new Date()),
+  ]);
+
+  // Moneda de PRESENTACIÓN (toggle USD/ARS). Usa el param `pres` para no pisar
+  // el filtro de datos `moneda` (préstamos por moneda nativa).
+  const monedaPreferida: MonedaPres = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
+  const monedaPres: MonedaPres =
+    params.pres === "ARS" ? "ARS" : params.pres === "USD" ? "USD" : monedaPreferida;
+  const tc = cotizacion ? cotizacion.valor.toString() : null;
+  const tcInfo = cotizacion
+    ? {
+        valor: cotizacion.valor.toString(),
+        fecha: cotizacion.fecha.toISOString().slice(0, 10),
+        fuente: cotizacion.fuente,
+      }
+    : null;
 
   const clasificacion = parseClasificacion(params.clasificacion);
   const moneda = parseMoneda(params.moneda);
@@ -88,10 +110,16 @@ export default async function PrestamosPage({ searchParams }: { searchParams: Se
               : " · saldo calculado desde los asientos contabilizados"}
           </p>
         </div>
-        <Link href="/tesoreria/prestamos/nuevo" className={buttonVariants({ variant: "default" })}>
-          <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-          Nuevo préstamo
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <MonedaToggle current={monedaPres} tcInfo={tcInfo} param="pres" />
+          <Link
+            href="/tesoreria/prestamos/nuevo"
+            className={buttonVariants({ variant: "default" })}
+          >
+            <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+            Nuevo préstamo
+          </Link>
+        </div>
       </div>
 
       <PrestamosFilters
@@ -101,7 +129,7 @@ export default async function PrestamosPage({ searchParams }: { searchParams: Se
       />
 
       <Card className="py-0">
-        <PrestamosTable data={rows} prestamoInicial={prestamoInicial} />
+        <PrestamosTable data={rows} prestamoInicial={prestamoInicial} moneda={monedaPres} tc={tc} />
       </Card>
     </div>
   );

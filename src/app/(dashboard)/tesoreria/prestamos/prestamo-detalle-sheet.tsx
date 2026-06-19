@@ -8,6 +8,7 @@ import { Add01Icon } from "@hugeicons/core-free-icons";
 
 import type { AsientoEstado } from "@/generated/prisma/client";
 import { obtenerPrestamoDetalle, type PrestamoDetalle } from "@/lib/actions/prestamos";
+import { fmtMoney, fmtMontoPres, pickSaldoNativo } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -28,10 +29,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
+
 type Props = {
   prestamoId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  moneda: Moneda;
+  tc: string | null;
 };
 
 function estadoVariant(estado: AsientoEstado): "default" | "outline" | "secondary" {
@@ -45,16 +50,7 @@ function estadoVariant(estado: AsientoEstado): "default" | "outline" | "secondar
   }
 }
 
-function formatMoney(value: string): string {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return value;
-  return n.toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-export function PrestamoDetalleSheet({ prestamoId, open, onOpenChange }: Props) {
+export function PrestamoDetalleSheet({ prestamoId, open, onOpenChange, moneda, tc }: Props) {
   const [detalle, setDetalle] = useState<PrestamoDetalle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -131,20 +127,24 @@ export function PrestamoDetalleSheet({ prestamoId, open, onOpenChange }: Props) 
                   />
                   <InfoRow
                     label="Principal"
-                    value={`${formatMoney(detalle.principal)} ${detalle.moneda}`}
+                    value={`${fmtMontoPres(detalle.principal, detalle.moneda, moneda, tc)} ${moneda}`}
                   />
                   <InfoRow
                     label="Tipo de cambio"
                     value={Number(detalle.tipoCambio).toFixed(detalle.moneda === "ARS" ? 2 : 6)}
                   />
-                  <InfoRow label="Valor en ARS" value={formatMoney(detalle.valorArs)} />
+                  <InfoRow label="Valor en ARS" value={fmtMoney(detalle.valorArs)} />
                   <InfoRow
                     label="Saldo pendiente"
-                    value={
-                      detalle.saldoPendienteUsd != null
-                        ? `${formatMoney(detalle.saldoPendienteUsd)} USD`
-                        : `${formatMoney(detalle.saldoPendiente)} ARS`
-                    }
+                    value={(() => {
+                      // Saldo en su moneda NATIVA (USD-nato invariante, o ARS) →
+                      // convertido a la moneda de presentación al TC de cierre.
+                      const { valor, monedaNativa } = pickSaldoNativo(
+                        detalle.saldoPendiente,
+                        detalle.saldoPendienteUsd,
+                      );
+                      return `${fmtMontoPres(valor, monedaNativa, moneda, tc)} ${moneda}`;
+                    })()}
                     highlight
                   />
                 </dl>
@@ -181,10 +181,10 @@ export function PrestamoDetalleSheet({ prestamoId, open, onOpenChange }: Props) 
                               {l.descripcion ?? "—"}
                             </TableCell>
                             <TableCell className="text-right font-mono text-sm tabular-nums">
-                              {Number(l.debe) > 0 ? formatMoney(l.debe) : ""}
+                              {Number(l.debe) > 0 ? fmtMoney(l.debe) : ""}
                             </TableCell>
                             <TableCell className="text-right font-mono text-sm tabular-nums">
-                              {Number(l.haber) > 0 ? formatMoney(l.haber) : ""}
+                              {Number(l.haber) > 0 ? fmtMoney(l.haber) : ""}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -235,8 +235,8 @@ export function PrestamoDetalleSheet({ prestamoId, open, onOpenChange }: Props) 
                             </TableCell>
                             <TableCell className="text-sm">{a.cuentaBancaria}</TableCell>
                             <TableCell className="text-right font-mono text-sm tabular-nums">
-                              {formatMoney(a.monto)}{" "}
-                              <span className="text-xs text-muted-foreground">{a.moneda}</span>
+                              {fmtMontoPres(a.monto, a.moneda, moneda, tc)}{" "}
+                              <span className="text-xs text-muted-foreground">{moneda}</span>
                             </TableCell>
                             <TableCell className="font-mono text-xs text-muted-foreground">
                               {a.asientoNumero ? `Nº ${a.asientoNumero}` : "—"}

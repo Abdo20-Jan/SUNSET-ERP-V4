@@ -14,6 +14,7 @@ import {
 
 import type { AsientoEstado, PrestamoClasificacion } from "@/generated/prisma/client";
 import { anularPrestamoAction, type PrestamoRow } from "@/lib/actions/prestamos";
+import { fmtMontoPres, pickSaldoNativo } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
 import { PrestamoDetalleSheet } from "./prestamo-detalle-sheet";
 
 function estadoVariant(estado: AsientoEstado): "default" | "outline" | "secondary" {
@@ -57,21 +59,16 @@ function clasificacionLabel(c: PrestamoClasificacion): string {
   return c === "CORTO_PLAZO" ? "CP" : "LP";
 }
 
-function formatMoney(value: string): string {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return value;
-  return n.toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
 export function PrestamosTable({
   data,
   prestamoInicial,
+  moneda,
+  tc,
 }: {
   data: PrestamoRow[];
   prestamoInicial?: PrestamoRow | null;
+  moneda: Moneda;
+  tc: string | null;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState<PrestamoRow | null>(null);
@@ -127,8 +124,8 @@ export function PrestamosTable({
       header: () => <span className="block text-right">Principal</span>,
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm tabular-nums">
-          {formatMoney(row.original.principal)}{" "}
-          <span className="text-xs text-muted-foreground">{row.original.moneda}</span>
+          {fmtMontoPres(row.original.principal, row.original.moneda, moneda, tc)}{" "}
+          <span className="text-xs text-muted-foreground">{moneda}</span>
         </span>
       ),
     },
@@ -145,15 +142,17 @@ export function PrestamosTable({
       id: "saldo",
       header: () => <span className="block text-right">Saldo pendiente</span>,
       cell: ({ row }) => {
-        // Préstamo USD-nato → saldo en USD (invariante a TC); ARS → en ARS.
-        const usd = row.original.saldoPendienteUsd;
-        const esUsd = usd != null;
-        const valor = esUsd ? usd : row.original.saldoPendiente;
+        // Saldo en su moneda NATIVA (USD-nato invariante a TC, o ARS) → se
+        // convierte a la moneda de presentación al TC de cierre.
+        const { valor, monedaNativa } = pickSaldoNativo(
+          row.original.saldoPendiente,
+          row.original.saldoPendienteUsd,
+        );
         const num = Number(valor);
         return (
           <span className="block text-right font-mono text-sm font-semibold tabular-nums">
-            {formatMoney(valor)}{" "}
-            <span className="text-xs text-muted-foreground">{esUsd ? "USD" : "ARS"}</span>
+            {fmtMontoPres(valor, monedaNativa, moneda, tc)}{" "}
+            <span className="text-xs text-muted-foreground">{moneda}</span>
             {num < 0 && <span className="ml-1 text-xs text-destructive">(neg.)</span>}
           </span>
         );
@@ -257,9 +256,10 @@ export function PrestamosTable({
               <DialogHeader>
                 <DialogTitle>Anular préstamo de {pending.prestamista}</DialogTitle>
                 <DialogDescription>
-                  Principal: {formatMoney(pending.principal)} {pending.moneda}. Al anularlo, el
-                  asiento pasará a ANULADO y dejará de afectar los saldos. Las amortizaciones
-                  registradas se mantienen. El número del asiento se conserva para auditoría.
+                  Principal: {fmtMontoPres(pending.principal, pending.moneda, moneda, tc)} {moneda}.
+                  Al anularlo, el asiento pasará a ANULADO y dejará de afectar los saldos. Las
+                  amortizaciones registradas se mantienen. El número del asiento se conserva para
+                  auditoría.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -281,6 +281,8 @@ export function PrestamosTable({
         onOpenChange={(open) => {
           if (!open) setDetalle(null);
         }}
+        moneda={moneda}
+        tc={tc}
       />
     </>
   );

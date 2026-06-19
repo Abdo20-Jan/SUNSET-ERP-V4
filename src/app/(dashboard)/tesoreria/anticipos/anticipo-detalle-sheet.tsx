@@ -13,6 +13,7 @@ import {
   getAnticipoDetalle,
   listarFacturasAplicablesProveedor,
 } from "@/lib/actions/anticipos-proveedor";
+import { fmtMoney, fmtMontoPres } from "@/lib/format";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,11 +52,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
+
 type Props = {
   anticipoId: string | null;
   proveedorId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  moneda: Moneda;
+  tc: string | null;
 };
 
 const ESTADO_LABEL: Record<EstadoAnticipo, string> = {
@@ -75,16 +80,14 @@ function estadoVariant(estado: EstadoAnticipo): "default" | "outline" | "seconda
   }
 }
 
-function formatMoney(value: string): string {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return value;
-  return n.toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-export function AnticipoDetalleSheet({ anticipoId, proveedorId, open, onOpenChange }: Props) {
+export function AnticipoDetalleSheet({
+  anticipoId,
+  proveedorId,
+  open,
+  onOpenChange,
+  moneda,
+  tc,
+}: Props) {
   const router = useRouter();
   const [detalle, setDetalle] = useState<AnticipoDetalle | null>(null);
   const [facturas, setFacturas] = useState<FacturaAplicableOption[]>([]);
@@ -211,12 +214,15 @@ export function AnticipoDetalleSheet({ anticipoId, proveedorId, open, onOpenChan
                   />
                   <InfoRow
                     label="Monto"
-                    value={`${formatMoney(detalle.montoArs)} ${detalle.moneda}`}
+                    value={`${fmtMontoPres(detalle.montoArs, "ARS", moneda, tc)} ${moneda}`}
                   />
-                  <InfoRow label="Aplicado" value={formatMoney(detalle.saldoAplicadoArs)} />
+                  <InfoRow
+                    label="Aplicado"
+                    value={`${fmtMontoPres(detalle.saldoAplicadoArs, "ARS", moneda, tc)} ${moneda}`}
+                  />
                   <InfoRow
                     label="Saldo pendiente"
-                    value={formatMoney(detalle.saldoPendienteArs)}
+                    value={`${fmtMontoPres(detalle.saldoPendienteArs, "ARS", moneda, tc)} ${moneda}`}
                     highlight
                   />
                   {detalle.descripcion && (
@@ -263,7 +269,7 @@ export function AnticipoDetalleSheet({ anticipoId, proveedorId, open, onOpenChan
                               )}
                             </TableCell>
                             <TableCell className="text-right font-mono text-sm tabular-nums">
-                              {formatMoney(ap.montoArs)}
+                              {fmtMontoPres(ap.montoArs, "ARS", moneda, tc)}
                             </TableCell>
                             <TableCell className="font-mono text-xs text-muted-foreground">
                               {ap.asientoNumero ? `Nº ${ap.asientoNumero}` : "—"}
@@ -302,7 +308,7 @@ export function AnticipoDetalleSheet({ anticipoId, proveedorId, open, onOpenChan
                                   <span className="text-xs uppercase text-muted-foreground">
                                     {f.tipo}
                                   </span>{" "}
-                                  {f.numero} · {formatMoney(f.total)}
+                                  {f.numero} · {fmtMoney(f.total)}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -318,7 +324,7 @@ export function AnticipoDetalleSheet({ anticipoId, proveedorId, open, onOpenChan
                             onChange={(e) => setMontoAplicar(e.target.value)}
                           />
                           <p className="text-xs text-muted-foreground">
-                            Saldo pendiente: {formatMoney(detalle.saldoPendienteArs)}
+                            Saldo pendiente: {fmtMoney(detalle.saldoPendienteArs)} ARS
                           </p>
                         </div>
                         <div className="flex justify-end">
@@ -363,9 +369,9 @@ export function AnticipoDetalleSheet({ anticipoId, proveedorId, open, onOpenChan
               <DialogHeader>
                 <DialogTitle>Anular anticipo {detalle.numero}</DialogTitle>
                 <DialogDescription>
-                  Monto: {formatMoney(detalle.montoArs)} {detalle.moneda}. Al anularlo, el asiento
-                  de la salida de dinero pasará a ANULADO y el banco vuelve a su saldo previo. El
-                  número del asiento se conserva para auditoría.
+                  Monto: {fmtMontoPres(detalle.montoArs, "ARS", moneda, tc)} {moneda}. Al anularlo,
+                  el asiento de la salida de dinero pasará a ANULADO y el banco vuelve a su saldo
+                  previo. El número del asiento se conserva para auditoría.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>

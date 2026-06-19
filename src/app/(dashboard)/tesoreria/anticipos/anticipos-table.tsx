@@ -15,6 +15,7 @@ import {
 
 import type { EstadoAnticipo } from "@/generated/prisma/client";
 import { type AnticipoRow, anularAnticipoProveedorAction } from "@/lib/actions/anticipos-proveedor";
+import { fmtMontoPres } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +42,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
 import { AnticipoDetalleSheet } from "./anticipo-detalle-sheet";
 
 const ESTADO_LABEL: Record<EstadoAnticipo, string> = {
@@ -60,21 +62,16 @@ function estadoVariant(estado: EstadoAnticipo): "default" | "outline" | "seconda
   }
 }
 
-function formatMoney(value: string): string {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return value;
-  return n.toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
 export function AnticiposTable({
   data,
   anticipoInicial,
+  moneda,
+  tc,
 }: {
   data: AnticipoRow[];
   anticipoInicial?: AnticipoRow | null;
+  moneda: Moneda;
+  tc: string | null;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState<AnticipoRow | null>(null);
@@ -139,8 +136,8 @@ export function AnticiposTable({
       header: () => <span className="block text-right">Monto</span>,
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm tabular-nums">
-          {formatMoney(row.original.montoArs)}{" "}
-          <span className="text-xs text-muted-foreground">{row.original.moneda}</span>
+          {fmtMontoPres(row.original.montoArs, "ARS", moneda, tc)}{" "}
+          <span className="text-xs text-muted-foreground">{moneda}</span>
         </span>
       ),
     },
@@ -149,7 +146,8 @@ export function AnticiposTable({
       header: () => <span className="block text-right">Saldo pendiente</span>,
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm font-semibold tabular-nums">
-          {formatMoney(row.original.saldoPendienteArs)}
+          {fmtMontoPres(row.original.saldoPendienteArs, "ARS", moneda, tc)}{" "}
+          <span className="text-xs text-muted-foreground">{moneda}</span>
         </span>
       ),
     },
@@ -246,9 +244,9 @@ export function AnticiposTable({
               <DialogHeader>
                 <DialogTitle>Anular anticipo {pending.numero}</DialogTitle>
                 <DialogDescription>
-                  Monto: {formatMoney(pending.montoArs)} {pending.moneda}. Al anularlo, el asiento
-                  de la salida de dinero pasará a ANULADO y el banco vuelve a su saldo previo. El
-                  número del asiento se conserva para auditoría.
+                  Monto: {fmtMontoPres(pending.montoArs, "ARS", moneda, tc)} {moneda}. Al anularlo,
+                  el asiento de la salida de dinero pasará a ANULADO y el banco vuelve a su saldo
+                  previo. El número del asiento se conserva para auditoría.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -271,6 +269,8 @@ export function AnticiposTable({
         onOpenChange={(open) => {
           if (!open) setDetalle(null);
         }}
+        moneda={moneda}
+        tc={tc}
       />
     </>
   );
