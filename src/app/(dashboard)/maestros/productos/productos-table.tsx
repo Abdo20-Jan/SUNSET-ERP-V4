@@ -1,8 +1,13 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table";
+import { useState, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  type ColumnDef,
+  getCoreRowModel,
+  useReactTable,
+  type VisibilityState,
+} from "@tanstack/react-table";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -10,12 +15,15 @@ import {
   Delete02Icon,
   Edit02Icon,
   MoreHorizontalCircle01Icon,
-  SearchIcon,
 } from "@hugeicons/core-free-icons";
 
 import { eliminarProductoAction, type ProductoRow } from "@/lib/actions/productos";
+import type { SortDir } from "@/lib/table-sort";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ColumnsToggle } from "@/components/ui/columns-toggle";
+import { DataTable } from "@/components/ui/data-table";
+import { DataTableSearch } from "@/components/ui/data-table-search";
 import {
   Dialog,
   DialogContent,
@@ -31,7 +39,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -39,7 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DataTable } from "@/components/ui/data-table";
+import { SortableHeader } from "@/components/ui/sortable-header";
 
 import { ProductoFormDialog, type ProductoFormState } from "./producto-form-dialog";
 
@@ -52,61 +59,83 @@ function formatPrecio(v: string): string {
   });
 }
 
-export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
+type Props = {
+  productos: ProductoRow[];
+  total: number;
+  marcas: string[];
+  q: string;
+  marca: string;
+  sort: string;
+  dir: SortDir;
+  page: number;
+  perPage: number;
+};
+
+export function ProductosTable({ productos, total, marcas, q, marca }: Props) {
   const router = useRouter();
-  const [searchText, setSearchText] = useState("");
-  const [marcaFilter, setMarcaFilter] = useState<string>("todas");
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [, startNav] = useTransition();
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [formState, setFormState] = useState<ProductoFormState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ProductoRow | null>(null);
   const [isDeleting, startDelete] = useTransition();
 
-  const marcaOptions = useMemo(() => {
-    const s = new Set(
-      productos.map((p) => p.marca).filter((m): m is string => !!m && m.length > 0),
-    );
-    return Array.from(s).sort();
-  }, [productos]);
-
-  const filtered = useMemo(() => {
-    const q = searchText.trim().toLowerCase();
-    return productos.filter((p) => {
-      if (marcaFilter !== "todas" && p.marca !== marcaFilter) return false;
-      if (!q) return true;
-      return p.codigo.toLowerCase().includes(q) || p.nombre.toLowerCase().includes(q);
+  const onMarcaChange = (value: string | null) => {
+    const next = new URLSearchParams(searchParams.toString());
+    if (!value || value === "todas") {
+      next.delete("marca");
+    } else {
+      next.set("marca", value);
+    }
+    next.delete("page");
+    const qs = next.toString();
+    startNav(() => {
+      router.push(qs.length > 0 ? `${pathname}?${qs}` : pathname);
     });
-  }, [productos, searchText, marcaFilter]);
+  };
 
   const columns: ColumnDef<ProductoRow>[] = [
     {
       id: "codigo",
-      header: "Código",
+      header: () => <SortableHeader columnId="codigo">Código</SortableHeader>,
+      meta: { label: "Código" },
       cell: ({ row }) => <span className="font-mono text-xs">{row.original.codigo}</span>,
     },
     {
       id: "nombre",
-      header: "Nombre",
+      header: () => <SortableHeader columnId="nombre">Nombre</SortableHeader>,
+      meta: { label: "Nombre" },
       cell: ({ row }) => <span className="text-sm font-medium">{row.original.nombre}</span>,
     },
     {
       id: "marca",
-      header: "Marca",
+      header: () => <SortableHeader columnId="marca">Marca</SortableHeader>,
+      meta: { label: "Marca" },
       cell: ({ row }) => <span className="text-sm">{row.original.marca ?? "—"}</span>,
     },
     {
       id: "medida",
       header: "Medida",
+      meta: { label: "Medida" },
       cell: ({ row }) => <span className="font-mono text-xs">{row.original.medida ?? "—"}</span>,
     },
     {
       id: "ncm",
       header: "NCM",
+      meta: { label: "NCM" },
       cell: ({ row }) => (
         <span className="font-mono text-xs text-muted-foreground">{row.original.ncm ?? "—"}</span>
       ),
     },
     {
       id: "stock",
-      header: () => <span className="block text-right">Stock</span>,
+      header: () => (
+        <SortableHeader columnId="stock" align="right">
+          <span className="block text-right">Stock</span>
+        </SortableHeader>
+      ),
+      meta: { label: "Stock" },
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm tabular-nums">
           {row.original.stockActual}
@@ -118,7 +147,12 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
     },
     {
       id: "precio",
-      header: () => <span className="block text-right">Precio venta</span>,
+      header: () => (
+        <SortableHeader columnId="precio" align="right">
+          <span className="block text-right">Precio venta</span>
+        </SortableHeader>
+      ),
+      meta: { label: "Precio venta" },
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm tabular-nums">
           {formatPrecio(row.original.precioVenta)}
@@ -127,7 +161,8 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
     },
     {
       id: "estado",
-      header: "Estado",
+      header: () => <SortableHeader columnId="estado">Estado</SortableHeader>,
+      meta: { label: "Estado" },
       cell: ({ row }) => (
         <Badge variant={row.original.activo ? "default" : "secondary"}>
           {row.original.activo ? "Activo" : "Inactivo"}
@@ -137,6 +172,7 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
     {
       id: "acciones",
       header: () => <span className="sr-only">Acciones</span>,
+      enableHiding: false,
       cell: ({ row }) => (
         <RowActions
           onEdit={() => setFormState({ mode: "edit", row: row.original })}
@@ -147,9 +183,11 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
   ];
 
   const table = useReactTable({
-    data: filtered,
+    data: productos,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    state: { columnVisibility },
+    onColumnVisibilityChange: setColumnVisibility,
   });
 
   const onConfirmDelete = () => {
@@ -174,32 +212,21 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
   return (
     <div className="flex flex-col">
       <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <HugeiconsIcon
-            icon={SearchIcon}
-            strokeWidth={2}
-            className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            placeholder="Buscar por código o nombre…"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <Select value={marcaFilter} onValueChange={(v) => setMarcaFilter(v ?? "todas")}>
+        <DataTableSearch paramName="q" initialValue={q} placeholder="Buscar por código o nombre…" />
+        <Select value={marca || "todas"} onValueChange={onMarcaChange}>
           <SelectTrigger className="w-full sm:w-48">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="todas">Todas las marcas</SelectItem>
-            {marcaOptions.map((m) => (
+            {marcas.map((m) => (
               <SelectItem key={m} value={m}>
                 {m}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+        <ColumnsToggle table={table} />
         <Button onClick={() => setFormState({ mode: "create" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
           Nuevo producto
@@ -210,7 +237,7 @@ export function ProductosTable({ productos }: { productos: ProductoRow[] }) {
         table={table}
         emptyMessage="Aún no hay productos registrados."
         emptyFilteredMessage="No hay productos para los filtros seleccionados."
-        isFiltered={productos.length > 0}
+        isFiltered={total > 0 || q.length > 0 || (marca.length > 0 && marca !== "todas")}
       />
 
       <ProductoFormDialog state={formState} onClose={() => setFormState(null)} />

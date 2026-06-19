@@ -1,8 +1,13 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table";
+import { useState, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  type ColumnDef,
+  getCoreRowModel,
+  useReactTable,
+  type VisibilityState,
+} from "@tanstack/react-table";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -10,7 +15,6 @@ import {
   Delete02Icon,
   Edit02Icon,
   MoreHorizontalCircle01Icon,
-  SearchIcon,
 } from "@hugeicons/core-free-icons";
 
 import { CondicionIva } from "@/generated/prisma/client";
@@ -20,8 +24,12 @@ import {
   type CuentaContableOption,
 } from "@/lib/actions/clientes";
 import type { ProvinciaRow } from "@/lib/actions/provincias";
+import type { SortDir } from "@/lib/table-sort";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ColumnsToggle } from "@/components/ui/columns-toggle";
+import { DataTable } from "@/components/ui/data-table";
+import { DataTableSearch } from "@/components/ui/data-table-search";
 import {
   Dialog,
   DialogContent,
@@ -37,7 +45,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -45,7 +52,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DataTable } from "@/components/ui/data-table";
+import { SortableHeader } from "@/components/ui/sortable-header";
 
 import { ClienteFormDialog, type ClienteFormState } from "./cliente-form-dialog";
 
@@ -57,40 +64,54 @@ const CONDICION_IVA_SHORT: Record<CondicionIva, string> = {
   EXTERIOR: "Exterior",
 };
 
-export function ClientesTable({
-  clientes,
-  cuentas,
-  provincias,
-}: {
+type Props = {
   clientes: ClienteRow[];
+  total: number;
   cuentas: CuentaContableOption[];
   provincias: ProvinciaRow[];
-}) {
+  q: string;
+  estado: string;
+  sort: string;
+  dir: SortDir;
+  page: number;
+  perPage: number;
+};
+
+export function ClientesTable({ clientes, total, cuentas, provincias, q, estado }: Props) {
   const router = useRouter();
-  const [searchText, setSearchText] = useState("");
-  const [estadoFilter, setEstadoFilter] = useState<"todos" | "activo" | "inactivo">("todos");
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [, startNav] = useTransition();
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [formState, setFormState] = useState<ClienteFormState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ClienteRow | null>(null);
   const [isDeleting, startDelete] = useTransition();
 
-  const filtered = useMemo(() => {
-    const q = searchText.trim().toLowerCase();
-    return clientes.filter((c) => {
-      if (estadoFilter !== "todos" && c.estado !== estadoFilter) return false;
-      if (!q) return true;
-      return c.nombre.toLowerCase().includes(q) || (c.cuit?.toLowerCase().includes(q) ?? false);
+  const onEstadoChange = (value: string | null) => {
+    const next = new URLSearchParams(searchParams.toString());
+    if (!value || value === "todos") {
+      next.delete("estado");
+    } else {
+      next.set("estado", value);
+    }
+    next.delete("page");
+    const qs = next.toString();
+    startNav(() => {
+      router.push(qs.length > 0 ? `${pathname}?${qs}` : pathname);
     });
-  }, [clientes, searchText, estadoFilter]);
+  };
 
   const columns: ColumnDef<ClienteRow>[] = [
     {
       id: "nombre",
-      header: "Nombre",
+      header: () => <SortableHeader columnId="nombre">Nombre</SortableHeader>,
+      meta: { label: "Nombre" },
       cell: ({ row }) => <span className="text-sm font-medium">{row.original.nombre}</span>,
     },
     {
       id: "cuit",
-      header: "CUIT",
+      header: () => <SortableHeader columnId="cuit">CUIT</SortableHeader>,
+      meta: { label: "CUIT" },
       cell: ({ row }) => (
         <span className="font-mono text-xs tabular-nums">{row.original.cuit ?? "—"}</span>
       ),
@@ -98,6 +119,7 @@ export function ClientesTable({
     {
       id: "condicionIva",
       header: "Condición IVA",
+      meta: { label: "Condición IVA" },
       cell: ({ row }) => (
         <Badge variant="outline">{CONDICION_IVA_SHORT[row.original.condicionIva]}</Badge>
       ),
@@ -105,11 +127,13 @@ export function ClientesTable({
     {
       id: "telefono",
       header: "Teléfono",
+      meta: { label: "Teléfono" },
       cell: ({ row }) => <span className="text-sm">{row.original.telefono ?? "—"}</span>,
     },
     {
       id: "estado",
       header: "Estado",
+      meta: { label: "Estado" },
       cell: ({ row }) => (
         <Badge variant={row.original.estado === "activo" ? "default" : "secondary"}>
           {row.original.estado}
@@ -119,6 +143,7 @@ export function ClientesTable({
     {
       id: "cuenta",
       header: "Cuenta contable",
+      meta: { label: "Cuenta contable" },
       cell: ({ row }) =>
         row.original.cuentaContableCodigo ? (
           <div className="flex flex-col leading-tight">
@@ -134,6 +159,7 @@ export function ClientesTable({
     {
       id: "acciones",
       header: () => <span className="sr-only">Acciones</span>,
+      enableHiding: false,
       cell: ({ row }) => (
         <RowActions
           onEdit={() => setFormState({ mode: "edit", row: row.original })}
@@ -144,9 +170,11 @@ export function ClientesTable({
   ];
 
   const table = useReactTable({
-    data: filtered,
+    data: clientes,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    state: { columnVisibility },
+    onColumnVisibilityChange: setColumnVisibility,
   });
 
   const onConfirmDelete = () => {
@@ -171,27 +199,8 @@ export function ClientesTable({
   return (
     <div className="flex flex-col">
       <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <HugeiconsIcon
-            icon={SearchIcon}
-            strokeWidth={2}
-            className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            placeholder="Buscar por nombre o CUIT…"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <Select
-          value={estadoFilter}
-          onValueChange={(v) => {
-            if (v === "activo" || v === "inactivo" || v === "todos") {
-              setEstadoFilter(v);
-            }
-          }}
-        >
+        <DataTableSearch paramName="q" initialValue={q} placeholder="Buscar por nombre o CUIT…" />
+        <Select value={estado || "todos"} onValueChange={onEstadoChange}>
           <SelectTrigger className="w-full sm:w-40">
             <SelectValue />
           </SelectTrigger>
@@ -201,6 +210,7 @@ export function ClientesTable({
             <SelectItem value="inactivo">Inactivos</SelectItem>
           </SelectContent>
         </Select>
+        <ColumnsToggle table={table} />
         <Button onClick={() => setFormState({ mode: "create" })}>
           <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
           Nuevo cliente
@@ -211,7 +221,7 @@ export function ClientesTable({
         table={table}
         emptyMessage="Aún no hay clientes registrados."
         emptyFilteredMessage="No hay clientes para los filtros seleccionados."
-        isFiltered={clientes.length > 0}
+        isFiltered={total > 0 || q.length > 0 || (estado.length > 0 && estado !== "todos")}
       />
 
       <ClienteFormDialog

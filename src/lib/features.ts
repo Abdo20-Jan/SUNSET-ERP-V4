@@ -10,11 +10,11 @@ import "server-only";
  *
  * **Cuando está ON**:
  *  - Emisión de venta crea reserva en `StockPorDeposito.cantidadReservada`
- *    y el asiento usa la cuenta provisória `1.1.5.03 MERCADERIAS A ENTREGAR`
- *    en lugar de `1.1.5.01 MERCADERÍAS`.
+ *    y el asiento usa la cuenta provisória `1.1.7.90 MERCADERIAS A ENTREGAR`
+ *    en lugar de `1.1.7.01 MERCADERÍAS`.
  *  - Entrega (remito) confirmada genera `MovimientoStock` tipo EGRESO,
  *    decrementa `cantidadFisica` y `cantidadReservada`, y emite asiento
- *    DEBE `1.1.5.03` / HABER `1.1.5.01` con el costo capturado en el
+ *    DEBE `1.1.7.90` / HABER `1.1.7.01` con el costo capturado en el
  *    momento de la confirmación.
  *  - Transferencias entre depósitos quedan disponibles (mueven stock
  *    entre `StockPorDeposito` sin generar asiento contable).

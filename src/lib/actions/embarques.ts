@@ -748,7 +748,7 @@ export async function anularEmbarqueCostoFacturaAction(
 // ============================================================
 //
 // Genera asiento parcial: FOB + facturas con momento === ZONA_PRIMARIA.
-// La mercadería queda en 1.1.5.02 MERCADERÍAS EN TRÁNSITO sin
+// La mercadería queda en 1.1.7.05 MERCADERÍAS EN TRÁNSITO sin
 // disponibilidad de stock. El despacho posterior (cierre) sigue.
 
 export type ConfirmarZonaPrimariaResult =
@@ -822,7 +822,7 @@ export async function confirmarZonaPrimariaAction(
       }
 
       // Modelo Y (Ponte PR C): embarques CON contenedores (flag on) NO usan el
-      // flujo legacy. El arribo capitaliza el costo en 1.1.5.04 (sin mover
+      // flujo legacy. El arribo capitaliza el costo en 1.1.7.04 (sin mover
       // stock); el primer ingreso de stock ocurre en la desconsolidación (DF).
       const tieneContenedores =
         isContenedorDesconsolidacionEnabled() &&
@@ -866,7 +866,7 @@ export async function confirmarZonaPrimariaAction(
         })),
       );
 
-      // 1) Asiento de Zona Primaria (DEBE 1.1.5.02 vs HABER proveedores).
+      // 1) Asiento de Zona Primaria (DEBE 1.1.7.05 vs HABER proveedores).
       const asiento = await crearAsientoZonaPrimaria(embarqueId, tx, fecha);
       const contabilizado = await contabilizarAsiento(asiento.id, tx);
 
@@ -966,11 +966,11 @@ export async function revertirZonaPrimariaAction(
           `El embarque ${embarque.codigo} tiene ${despachosActivosCount} despacho(s) parcial(es) activo(s) — anule los despachos primero.`,
         );
       }
-      // Modelo Y: el arribo DEBITA 1.1.5.04 sin mover stock; el traslado a
-      // 1.1.5.05 + el stock del DF nacen en la desconsolidación. Si un
+      // Modelo Y: el arribo DEBITA 1.1.7.04 sin mover stock; el traslado a
+      // 1.1.7.03 + el stock del DF nacen en la desconsolidación. Si un
       // contenedor ya fue desconsolidado, anular el arribo borraría el DÉBITO
-      // 1.1.5.04 dejando el traslado (HABER 1.1.5.04) y el stock huérfanos →
-      // 1.1.5.04 en saldo ACREEDOR. Bloquear hasta deshacer la desconsolidación.
+      // 1.1.7.04 dejando el traslado (HABER 1.1.7.04) y el stock huérfanos →
+      // 1.1.7.04 en saldo ACREEDOR. Bloquear hasta deshacer la desconsolidación.
       const desconsolidacionesCount = await tx.desconsolidacion.count({
         where: { contenedor: { embarqueId } },
       });
@@ -985,7 +985,7 @@ export async function revertirZonaPrimariaAction(
       //    ligados a ItemEmbarque + recalcula stockActual y SPD).
       await revertirIngresoEmbarque(tx, embarqueId);
 
-      // 2) Anular el asiento ZP (DEBE 1.1.5.02 vs HABER proveedores).
+      // 2) Anular el asiento ZP (DEBE 1.1.7.05 vs HABER proveedores).
       await anularAsiento(embarque.asientoZonaPrimariaId, tx);
 
       await tx.embarque.update({
@@ -1087,7 +1087,7 @@ export async function cerrarYContabilizarEmbarqueAction(
         );
       }
       // Bloquear cierre monolítico con destino ZPA: no tiene sentido
-      // cerrar (que ingresa mercadería en 1.1.5.01) hacia un depósito
+      // cerrar (que ingresa mercadería en 1.1.7.01) hacia un depósito
       // aduanero. Use confirmar zona primaria + despachos parciales.
       const depositoDestino = await tx.deposito.findUnique({
         where: { id: embarque.depositoDestinoId },

@@ -20,8 +20,8 @@ import {
 //
 // Abre un contenedor en depósito fiscal: graba el físico conferido, detecta
 // divergencia y —si no la hay— mueve el stock al DF y genera el asiento
-// principal de transferencia de subcuenta (TRASLADO ZPA→DF, DEBE 1.1.5.05 /
-// HABER 1.1.5.04). Si hay divergencia (físico ≠ declarado en algún SKU),
+// principal de transferencia de subcuenta (TRASLADO ZPA→DF, DEBE 1.1.7.03 /
+// HABER 1.1.7.04). Si hay divergencia (físico ≠ declarado en algún SKU),
 // BLOQUEA el asiento/stock, crea el header de Desconsolidacion (para que la
 // investigación de PR 3.3 se enganche) y deja el contenedor en
 // AGUARDANDO_INVESTIGACAO.
@@ -225,10 +225,10 @@ async function ejecutar(t: TxClient, input: DesconsolidarInput): Promise<Descons
     return { desconsolidacion, contenedor: actualizado, divergencia: true, asiento: null, diffs };
   }
 
-  // Guard de coherencia de camino (Onda A #3): el traslado 1.1.5.04 → 1.1.5.05
-  // sólo es válido si el arribo a zona primaria YA debitó 1.1.5.04
-  // (embarque.asientoZonaPrimariaId). Sin arribo, acreditar 1.1.5.04 la dejaría
-  // con saldo acreedor y 1.1.5.05 inflada — raíz de la anomalía de 1.1.5.05.
+  // Guard de coherencia de camino (Onda A #3): el traslado 1.1.7.04 → 1.1.7.03
+  // sólo es válido si el arribo a zona primaria YA debitó 1.1.7.04
+  // (embarque.asientoZonaPrimariaId). Sin arribo, acreditar 1.1.7.04 la dejaría
+  // con saldo acreedor y 1.1.7.03 inflada — raíz de la anomalía de 1.1.7.03.
   if (!contenedor.embarque.asientoZonaPrimariaId) {
     throw new DesconsolidacionError(
       "ARRIBO_PENDIENTE",
@@ -250,7 +250,7 @@ async function ejecutar(t: TxClient, input: DesconsolidarInput): Promise<Descons
   for (const grupo of grupos) {
     // Onda A #4: redondear el unitario ARS a 2dp ANTES de multiplicar — idéntico
     // al criterio de la nacionalización (calcularCostoLandedDespacho: round2(FC×TC)).
-    // Así el DEBE 1.1.5.05 del traslado y el HABER 1.1.5.05 del despacho cuadran
+    // Así el DEBE 1.1.7.03 del traslado y el HABER 1.1.7.03 del despacho cuadran
     // por unidad (la subcuenta DF neta a cero al nacionalizar todo) y el asiento,
     // el MovimientoStock y el SPD comparten la misma base, sin residuo de centavos.
     const arsUnitario = money(grupo.fcPromedio.times(tipoCambio));

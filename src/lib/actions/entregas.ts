@@ -217,7 +217,7 @@ function ensureEntregaConfirmable(entrega: EntregaEnConfirmacion): void {
     throw new AsientoError("DOMINIO_INVALIDO", `Entrega ${entrega.numero} ya tiene asiento.`);
   }
   // La venta debe seguir EMITIDA: si fue CANCELADA, su asiento de CMV (HABER
-  // 1.1.5.03) ya se revirtió; confirmar la entrega DEBITARÍA 1.1.5.03 sin
+  // 1.1.7.90) ya se revirtió; confirmar la entrega DEBITARÍA 1.1.7.90 sin
   // crédito → débito huérfano. (El estado físico tampoco debe egresar.)
   if (entrega.venta.estado !== VentaEstado.EMITIDA) {
     throw new AsientoError(

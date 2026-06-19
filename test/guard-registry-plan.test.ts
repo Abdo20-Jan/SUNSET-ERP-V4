@@ -31,9 +31,10 @@ function registryDefs(): Def[] {
   return defs;
 }
 
-// ETAPA 1/3 (plan nuevo): el registry del motor todavía apunta a códigos del
-// plan viejo; este guard se reactiva al reapuntar el motor en la etapa 3 (flujos).
-describe.skip("guard registry ↔ PLAN_RT9", () => {
+// ETAPA 3/3: el motor fue reapuntado a los códigos del plano de 9 clases
+// (FLUJOS CONTABLES). Guard ACTIVO: todo código del registry debe existir en
+// PLAN_RT9 como ANALÍTICA con la categoría de su clase.
+describe("guard registry ↔ PLAN_RT9", () => {
   const plan = new Map(PLAN_RT9.map((c) => [c.codigo, c]));
   const defs = registryDefs();
 

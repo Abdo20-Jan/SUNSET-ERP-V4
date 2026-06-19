@@ -23,6 +23,7 @@ import {
   listarProveedoresParaIntermediario,
   type CxPRow,
 } from "@/lib/services/cuentas-a-pagar";
+import { CODIGO_SALDO_PENDIENTE_ADUANA } from "@/lib/services/prefijos-plan";
 import { listarCuentasBancariasParaVep } from "@/lib/actions/vep-embarque";
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
 import { listarVepDespachosPendientes } from "@/lib/actions/vep-despacho";
@@ -90,9 +91,11 @@ export default async function CuentasAPagarPage({ searchParams }: { searchParams
       }
     : null;
 
-  // Filtrar 2.1.4.4.99 de la sección Aduana genérica — el saldo pendiente
-  // de refuerzo se gestiona en la sección VEP con flujo dedicado.
-  const aduanaSinRefuerzo = data.aduana.filter((r) => r.cuentaCodigo !== "2.1.4.4.99");
+  // Filtrar el saldo pendiente de aduana (2.1.3.4.99) de la sección Aduana
+  // genérica — el refuerzo se gestiona en la sección VEP con flujo dedicado.
+  const aduanaSinRefuerzo = data.aduana.filter(
+    (r) => r.cuentaCodigo !== CODIGO_SALDO_PENDIENTE_ADUANA,
+  );
 
   // Retenciones de Ganancias practicadas pendientes de depósito en ARCA —
   // recordatorio del VEP (sólo si la feature está activa).

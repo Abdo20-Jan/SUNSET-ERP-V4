@@ -5,7 +5,7 @@ import { createTestDb, type TestDb } from "./db";
 
 // Fix Comex "Modelo Y" / despacho parcial cruzado:
 //  (1) Tributos capitalizables (DIE + Tasa + Arancel) + subtotal de facturas
-//      DESPACHO integran el costo de la mercadería (DEBE 1.1.5.01), no egreso.
+//      DESPACHO integran el costo de la mercadería (DEBE 1.1.7.01), no egreso.
 //      IVA/IVA adicional/IIBB/Ganancias siguen como crédito fiscal.
 //  (2) Producto.stockActual / costoPromedio reflejan SÓLO el stock en
 //      depósitos NACIONAL (vendable), usando el costo LANDED.
@@ -88,7 +88,7 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
   // Nacionalizado: costoFC 12.50 × TC 1000 × 30 = 375000.
   // Capitalizables: (DIE 100 + Tasa 10 + Arancel 20) × 1000 = 130000
   //               + factura DESPACHO subtotal 40 × TC 1000 = 40000  ⇒ 170000.
-  // DEBE 1.1.5.01 = 545000 ; HABER 1.1.5.05 = 375000.
+  // DEBE 1.1.7.01 = 545000 ; HABER 1.1.7.03 = 375000.
   // Crédito fiscal (no capitaliza): IVA 5 + IVAad 3 + IIBB 1 + Gan 2.
   async function seed(): Promise<Seed> {
     await db.prisma.periodoContable.create({
@@ -237,7 +237,7 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
     };
   }
 
-  it("capitaliza DIE+Tasa+Arancel+factura DESPACHO en 1.1.5.01 y el asiento balancea", async () => {
+  it("capitaliza DIE+Tasa+Arancel+factura DESPACHO en 1.1.7.01 y el asiento balancea", async () => {
     const s = await seed();
     const res = await contabilizarDespachoAction(s.despachoId);
     expect(res.ok).toBe(true);
@@ -254,10 +254,10 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
       if (l.haber.gt(0)) haberPorCuenta.set(l.cuenta.codigo, Number(l.haber));
     }
 
-    // DEBE 1.1.5.01 = nacionalizado 375000 + capitalizables 170000 = 545000.
+    // DEBE 1.1.7.01 = nacionalizado 375000 + capitalizables 170000 = 545000.
     expect(debePorCuenta.get("1.1.7.01")).toBeCloseTo(545000, 2);
-    // HABER 1.1.5.05 = sólo nacionalizado 375000.
-    expect(haberPorCuenta.get("1.1.7.04")).toBeCloseTo(375000, 2);
+    // HABER 1.1.7.03 = sólo nacionalizado 375000.
+    expect(haberPorCuenta.get("1.1.7.03")).toBeCloseTo(375000, 2);
 
     // Tributos capitalizables YA NO van a egreso 5.7.1.x.
     expect(debePorCuenta.has("5.7.1.01")).toBe(false); // DIE
@@ -267,9 +267,9 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
     expect(debePorCuenta.has("5.7.2.99")).toBe(false);
 
     // Pasivos aduaneros por pagar PERMANECEN (la obligación a pagar).
-    expect(haberPorCuenta.get("2.1.4.4.01")).toBeCloseTo(100000, 2); // DIE por pagar
-    expect(haberPorCuenta.get("2.1.4.4.02")).toBeCloseTo(10000, 2); // Tasa por pagar
-    expect(haberPorCuenta.get("2.1.4.4.03")).toBeCloseTo(20000, 2); // Arancel por pagar
+    expect(haberPorCuenta.get("2.1.3.4.01")).toBeCloseTo(100000, 2); // DIE por pagar
+    expect(haberPorCuenta.get("2.1.3.4.02")).toBeCloseTo(10000, 2); // Tasa por pagar
+    expect(haberPorCuenta.get("2.1.3.4.03")).toBeCloseTo(20000, 2); // Arancel por pagar
 
     // Factura DESPACHO: HABER al proveedor (CxP) por el total ARS.
     const provCodigo = (
@@ -328,7 +328,7 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
   //   round2(DIE×TC), round2(Tasa×TC), round2(Arancel×TC).
   // Si el helper de costo landed suma USD primero y redondea una vez al
   // final, con TC decimal los medios centavos (half-up) divergen y la
-  // suma de HABERs aduana queda 0.01 arriba del DEBE 1.1.5.01.
+  // suma de HABERs aduana queda 0.01 arriba del DEBE 1.1.7.01.
   // Este test fuerza ese half-up y asserta DEBE == HABER al centavo.
   //
   // Aritmética exacta (D4):
@@ -460,7 +460,7 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
     const totalHaber = lineas.reduce((acc, l) => acc.plus(l.haber.toString()), new Decimal(0));
     expect(totalDebe.toFixed(2)).toBe(totalHaber.toFixed(2));
 
-    // DEBE 1.1.5.01 = nacionalizado 17,008,398.00 + tributos capitalizables
+    // DEBE 1.1.7.01 = nacionalizado 17,008,398.00 + tributos capitalizables
     //   2,952,665.11 = 19,961,063.11 (NO 19,961,063.10 del agregado).
     const debePorCuenta = new Map<string, string>();
     const haberPorCuenta = new Map<string, string>();
@@ -471,12 +471,12 @@ describe("despacho cruzado — capitalización de tributos/facturas + stock NACI
       if (haber.gt(0)) haberPorCuenta.set(l.cuenta.codigo, haber.toFixed(2));
     }
     expect(debePorCuenta.get("1.1.7.01")).toBe("19961063.11");
-    expect(haberPorCuenta.get("1.1.7.04")).toBe("17008398.00");
+    expect(haberPorCuenta.get("1.1.7.03")).toBe("17008398.00");
 
     // Pasivos aduaneros por separado (cada uno round2(tributo×TCdsp)).
-    expect(haberPorCuenta.get("2.1.4.4.01")).toBe("2474665.88"); // DIE
-    expect(haberPorCuenta.get("2.1.4.4.02")).toBe("464004.23"); // Tasa
-    expect(haberPorCuenta.get("2.1.4.4.03")).toBe("13995.00"); // Arancel
+    expect(haberPorCuenta.get("2.1.3.4.01")).toBe("2474665.88"); // DIE
+    expect(haberPorCuenta.get("2.1.3.4.02")).toBe("464004.23"); // Tasa
+    expect(haberPorCuenta.get("2.1.3.4.03")).toBe("13995.00"); // Arancel
   });
 
   it("TC decimal + factura DESPACHO en USD con TC ≠ embarque: balancea y capitaliza", async () => {

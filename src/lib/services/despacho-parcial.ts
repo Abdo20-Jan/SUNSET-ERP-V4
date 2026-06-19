@@ -766,11 +766,11 @@ function parsePayloadLineas(value: Prisma.JsonValue | null): LineaBorrador[] {
 // Decisión (Modelo Y / despacho parcial cruzado): los tributos aduaneros
 // CAPITALIZABLES (DIE + Tasa Estadística + Arancel SIM) y el subtotal de
 // las facturas DESPACHO linkadas integran el COSTO de la mercadería
-// nacionalizada (DEBE 1.1.5.01), no un egreso 5.7.1.x. IVA / IVA adicional
+// nacionalizada (DEBE 1.1.7.01), no un egreso 5.7.1.x. IVA / IVA adicional
 // / IIBB / Ganancias siguen como crédito fiscal (NO capitalizan).
 //
 // `calcularCostoLandedDespacho` es la FUENTE ÚNICA de costo: la usa tanto
-// `crearAsientoDespachoCruzado` (para el DEBE 1.1.5.01) como el flujo de
+// `crearAsientoDespachoCruzado` (para el DEBE 1.1.7.01) como el flujo de
 // stock (costo del ingreso al depósito NACIONAL al nacionalizar). Replica
 // el patrón de rateio de `calcularRateioZonaPrimaria`: prorratea los
 // capitalizables proporcional a la base de costo FOB de cada ítem
@@ -825,7 +825,7 @@ export interface ItemLandedResult {
 }
 
 export interface CostoLandedResult {
-  /** Σ (costoFC × cantidad × TCembarque) — sale del DF (HABER 1.1.5.05). */
+  /** Σ (costoFC × cantidad × TCembarque) — sale del DF (HABER 1.1.7.03). */
   nacionalizadoArs: Decimal;
   /** Tributos capitalizables en ARS (DIE + Tasa + Arancel) × TCdespacho. */
   tributosCapitalizablesArs: Decimal;
@@ -833,7 +833,7 @@ export interface CostoLandedResult {
   facturasCapitalizablesArs: Decimal;
   /** Total capitalizable ARS = tributos + facturas. */
   capitalizablesArs: Decimal;
-  /** DEBE 1.1.5.01 = nacionalizadoArs + capitalizablesArs. */
+  /** DEBE 1.1.7.01 = nacionalizadoArs + capitalizablesArs. */
   costoTotalArs: Decimal;
   /** Resultado por ItemDespacho. */
   porItem: ItemLandedResult[];
@@ -868,10 +868,10 @@ export function calcularCostoLandedDespacho(input: CostoLandedInput): CostoLande
 
   // Importante: arredondar cada tributo separadamente em ARS antes de somar,
   // espelhando exatamente o critério do asiento (`crearAsientoDespachoCruzado`),
-  // que credita 2.1.5.01/02/03 com `toDecimal(x).times(tcDsp).toDecimalPlaces(2)`
+  // que credita 2.1.3.4.01/02/03 com `toDecimal(x).times(tcDsp).toDecimalPlaces(2)`
   // por tributo. Se aqui somássemos USD e arredondássemos uma vez só, com TCdsp
   // decimal (ex.: 1399.5) os meios centavos (half-up) divergiriam e o asiento
-  // ficaria 0,01 fora de balanço (DEBE 1.1.5.01 vs. suma HABERs aduana).
+  // ficaria 0,01 fora de balanço (DEBE 1.1.7.05 vs. suma HABERs aduana).
   const dieArs = round2(toDecimal(input.die).times(tcDsp));
   const teArs = round2(toDecimal(input.tasaEstadistica).times(tcDsp));
   const arancelSimArs = round2(toDecimal(input.arancelSim).times(tcDsp));

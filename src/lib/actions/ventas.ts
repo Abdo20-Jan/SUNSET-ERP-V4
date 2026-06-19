@@ -838,7 +838,7 @@ export async function emitirVentaAction(
       }
       // Stock-dual: deja una entrega BORRADOR (100% de los items, por depósito)
       // pendiente de confirmar. Hace visible el remito en la venta y evita que
-      // la cuenta-puente 1.1.5.03 acumule olvidada. El asiento de baja se genera
+      // la cuenta-puente 1.1.7.90 acumule olvidada. El asiento de baja se genera
       // recién al CONFIRMAR la entrega.
       if (isStockDualEnabled()) {
         await crearEntregaBorradorPorDefecto(tx, ventaId, v.fecha);

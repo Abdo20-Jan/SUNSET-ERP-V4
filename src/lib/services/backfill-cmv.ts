@@ -1,21 +1,21 @@
 /**
  * Onda E #4 — lógica pura del backfill de `ItemVenta.costoUnitarioCmv` para las
- * ventas legacy (snapshot 0) con la cuenta-puente 1.1.5.03 MERCADERÍAS A
+ * ventas legacy (snapshot 0) con la cuenta-puente 1.1.7.90 MERCADERÍAS A
  * ENTREGAR abierta (stock-dual W3).
  *
- * Contexto: al emitir, crearAsientoVenta hace DEBE CMV / HABER 1.1.5.03 por
+ * Contexto: al emitir, crearAsientoVenta hace DEBE CMV / HABER 1.1.7.90 por
  * `Σ cantidad × Producto.costoPromedio` y guarda ese costoPromedio por ítem en
- * `ItemVenta.costoUnitarioCmv`. La entrega cancela 1.1.5.03 por ESE snapshot,
+ * `ItemVenta.costoUnitarioCmv`. La entrega cancela 1.1.7.90 por ESE snapshot,
  * así el puente cierra exacto sin importar cómo evolucionó el costoPromedio.
  * Las ventas anteriores al snapshot tienen `costoUnitarioCmv = 0` (default) y la
  * entrega cae al costo SPD del momento → si el costoPromedio derivó, deja un
- * residuo en 1.1.5.03.
+ * residuo en 1.1.7.90.
  *
  * El valor FIEL al runtime es el `Producto.costoPromedio AL MOMENTO DE LA
  * EMISIÓN`. Se reproduce replayando los MovimientoStock NACIONAL hasta la fecha
  * de emisión (reusa `replayStockNacional` del #14, única fuente de verdad del
  * replay). El total por venta se AUTO-VERIFICA contra la provisión que la
- * emisión acreditó a 1.1.5.03 (g.haber): si no coincide, hay drift de datos y
+ * emisión acreditó a 1.1.7.90 (g.haber): si no coincide, hay drift de datos y
  * la venta se marca para revisión manual en vez de backfillearse a ciegas.
  *
  * Sin `import "server-only"`: este módulo se importa desde scripts de `prisma/`
@@ -62,7 +62,7 @@ export type ReconciliacionVenta = {
   totalEmision: Decimal;
   /** Σ cantidad × costoUnitarioActual — referencia (comportamiento sin backfill). */
   totalActual: Decimal;
-  /** g.haber: lo que la emisión acreditó a 1.1.5.03 para esta venta. */
+  /** g.haber: lo que la emisión acreditó a 1.1.7.90 para esta venta. */
   provisionEsperada: Decimal;
   /** totalEmision − provisionEsperada. Cero ⇒ el backfill cierra el puente exacto. */
   delta: Decimal;
@@ -72,7 +72,7 @@ export type ReconciliacionVenta = {
 
 /**
  * Verifica que backfillear `costoUnitarioEmision` por ítem deja la venta
- * cerrando 1.1.5.03 exacto contra su provisión de emisión. La tolerancia
+ * cerrando 1.1.7.90 exacto contra su provisión de emisión. La tolerancia
  * absorbe redondeos de centavo acumulados al sumar por ítem.
  */
 export function reconciliarVenta(

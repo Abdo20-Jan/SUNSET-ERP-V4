@@ -24,8 +24,13 @@ import {
   VENTA_CODIGOS,
 } from "@/lib/services/cuenta-registry";
 import {
+  CODIGO_RESULTADO_EJERCICIO_IMPUTABLE,
+  CODIGO_RESULTADOS_NO_ASIGNADOS,
+} from "@/lib/services/prefijos-plan";
+import {
   AsientoEstado,
   AsientoOrigen,
+  CuentaCategoria,
   CuentaTipo,
   DivergenciaCausa,
   EmbarqueEstado,
@@ -1598,9 +1603,9 @@ export async function crearAsientoEmbarque(
 // contra el proveedor exterior + facturas con momento === ZONA_PRIMARIA
 // (puerto, frete terrestre, op. logístico, gastos línea marítima).
 //
-// La mercadería NO se nacionaliza acá — queda en 1.1.5.02 MERCADERÍAS EN
+// La mercadería NO se nacionaliza acá — queda en 1.1.7.05 MERCADERÍAS EN
 // TRÁNSITO sin disponibilidad de stock. El despacho posterior (cierre)
-// transfiere a 1.1.5.01 MERCADERÍAS y aplica el ingreso al depósito.
+// transfiere a 1.1.7.01 MERCADERÍAS y aplica el ingreso al depósito.
 
 export async function crearAsientoZonaPrimaria(
   embarqueId: string,
@@ -1848,8 +1853,8 @@ export async function crearAsientoZonaPrimaria(
 //
 // Variante de `crearAsientoZonaPrimaria` para embarques CON contenedores
 // (flag CONTENEDOR_DESCONSOLIDACION_ENABLED). A diferencia del flujo legacy
-// (que DEBE 1.1.5.02 EN TRÁNSITO + ingresa stock al depósito ZPA), acá el
-// costo total rateable se capitaliza directamente en **1.1.5.04 MERCADERÍAS
+// (que DEBE 1.1.7.05 EN TRÁNSITO + ingresa stock al depósito ZPA), acá el
+// costo total rateable se capitaliza directamente en **1.1.7.04 MERCADERÍAS
 // EN ZONA PRIMARIA** y NO se mueve stock. El primer ingreso de stock recién
 // ocurre en la desconsolidación (depósito fiscal), evitando la doble
 // contabilización de inventario (ZPA + DF) — ver runbook comex-ativacao.md.
@@ -1857,11 +1862,11 @@ export async function crearAsientoZonaPrimaria(
 // La base capitalizada = la misma que `calcularRateioZonaPrimaria`: FOB +
 // flete/seguro origen + Σ subtotales de facturas momento=ZONA_PRIMARIA (todo
 // en ARS). Esto garantiza la reconciliación Σ costoFCUnitario×cant×TC ==
-// débito 1.1.5.04. IVA/IIBB son créditos fiscales (no se capitalizan).
+// débito 1.1.7.04. IVA/IIBB son créditos fiscales (no se capitalizan).
 //
 // Las facturas ZP pueden llegar ya EMITIDAS (la edición del embarque las
 // auto-emite a gasto 5.x en su fecha). Para no perder ni duplicar el costo,
-// este asiento RECLASIFICA las EMITIDA (DEBE 1.1.5.04 / HABER su cuenta 5.x,
+// este asiento RECLASIFICA las EMITIDA (DEBE 1.1.7.04 / HABER su cuenta 5.x,
 // neteándola) y hace el booking completo de las BORRADOR. Así el costo de ZP
 // siempre termina capitalizado, sea cual sea el estado de la factura.
 
@@ -1950,7 +1955,7 @@ export async function crearAsientoArriboComex(
       lineas.push({ cuentaId, debe: toDecimal(0), haber: valor, descripcion });
     };
 
-    // Costo rateable capitalizado en 1.1.5.04. Arranca con FOB+flete+seguro;
+    // Costo rateable capitalizado en 1.1.7.04. Arranca con FOB+flete+seguro;
     // los subtotales de facturas ZP se suman abajo.
     let costoRateableArs = totalProveedorExteriorArs;
     const detalleOrigen =
@@ -1969,13 +1974,13 @@ export async function crearAsientoArriboComex(
     );
 
     // Facturas momento=ZONA_PRIMARIA (treatment A: el subtotal capitaliza en
-    // 1.1.5.04). Dos caminos según el estado, para que el costo SIEMPRE termine
+    // 1.1.7.04). Dos caminos según el estado, para que el costo SIEMPRE termine
     // en inventario sin doble contabilizar:
     //   - BORRADOR/LEGACY_BUNDLED: no tienen asiento propio → booking completo
-    //     acá (subtotal vía 1.1.5.04 + IVA/IIBB crédito / HABER proveedor).
+    //     acá (subtotal vía 1.1.7.04 + IVA/IIBB crédito / HABER proveedor).
     //   - EMITIDA: ya tienen asiento standalone (DEBE gasto 5.x + IVA/IIBB /
     //     HABER proveedor) en la fecha de la factura. Acá sólo RECLASIFICAMOS
-    //     el costo de gasto → inventario: DEBE 1.1.5.04 / HABER la cuenta 5.x
+    //     el costo de gasto → inventario: DEBE 1.1.7.04 / HABER la cuenta 5.x
     //     que debitó la emisión (neteándola a cero). El IVA crédito y el CxP del
     //     proveedor quedan como los dejó la emisión (timing fiscal correcto).
     // Las ANULADA se ignoran (no aportan costo).
@@ -1999,7 +2004,7 @@ export async function crearAsientoArriboComex(
           pushHaber(
             linea.cuentaContableGastoId,
             subtotalArs,
-            `${facturaLabel} — reclasificación gasto → 1.1.5.04 (arribo ZP)`,
+            `${facturaLabel} — reclasificación gasto → 1.1.7.04 (arribo ZP)`,
           );
         }
       }
@@ -2045,7 +2050,7 @@ export async function crearAsientoArriboComex(
       );
     }
 
-    // DEBE 1.1.5.04 con el costo total rateable capitalizado.
+    // DEBE 1.1.7.04 con el costo total rateable capitalizado.
     pushDebe(
       cuentaZpaId,
       costoRateableArs,
@@ -2104,10 +2109,10 @@ export async function crearAsientoArriboComex(
 
 /** Flujo de mercadería entre subcuentas de bienes de cambio (1.1.5.x). */
 export type FlujoSubcuentaComex =
-  | "ARRIBO_ZONA_PRIMARIA" // DEBE 1.1.5.04 / HABER 1.1.5.02 (tránsito → ZPA)
-  | "TRASLADO_DEPOSITO_FISCAL" // DEBE 1.1.5.05 / HABER 1.1.5.04 (ZPA → DF)
-  | "NACIONALIZACION_VIA_DF" // DEBE 1.1.5.01 / HABER 1.1.5.05 (DF → nacional)
-  | "NACIONALIZACION_DIRECTA"; // DEBE 1.1.5.01 / HABER 1.1.5.04 (ZPA → nacional)
+  | "ARRIBO_ZONA_PRIMARIA" // DEBE 1.1.7.04 / HABER 1.1.7.05 (tránsito → ZPA)
+  | "TRASLADO_DEPOSITO_FISCAL" // DEBE 1.1.7.03 / HABER 1.1.7.04 (ZPA → DF)
+  | "NACIONALIZACION_VIA_DF" // DEBE 1.1.7.01 / HABER 1.1.7.03 (DF → nacional)
+  | "NACIONALIZACION_DIRECTA"; // DEBE 1.1.7.01 / HABER 1.1.7.04 (ZPA → nacional)
 
 const FLUJO_SUBCUENTA: Record<
   FlujoSubcuentaComex,
@@ -2229,7 +2234,7 @@ export interface AsientoDivergenciaInput {
  * despacho NO es resultado: es a regularizar con el proveedor (decisión #6):
  *  - SOBRA (sobraMonto > 0): DEBE subcuenta stock / HABER 2.1.1.08
  *    (diferencia a regularizar — a pagar; deuda con el proveedor).
- *  - FALTA sin responsable (causa NAO_IDENTIFICADA): DEBE 1.1.5.07
+ *  - FALTA sin responsable (causa NAO_IDENTIFICADA): DEBE 1.1.6.05
  *    (saldo a favor proveedor a regularizar) / HABER subcuenta stock.
  *  - FALTA con responsable: DEBE `cuentaPorCobrarId` / HABER subcuenta stock.
  *
@@ -2378,14 +2383,14 @@ export async function crearAsientoDivergencia(
 //
 // Pre-requisito: el embarque DEBE tener Zona Primaria confirmada
 // (`asientoZonaPrimariaId` no nulo). Sin ZP, la mercadería no está en
-// 1.1.5.02 todavía y no hay nada para transferir.
+// 1.1.7.05 todavía y no hay nada para transferir.
 // Restricción: el embarque NO puede tener `asientoId` (cierre legacy
 // monolítico) — ambos flujos son mutuamente excluyentes.
 //
 // Asiento del despacho:
 //
-//   DEBE  1.1.5.01 MERCADERÍAS                    cant_dsp × costoUnit_enTransito
-//   HABER 1.1.5.02 MERCADERÍAS EN TRÁNSITO         mismo
+//   DEBE  1.1.7.01 MERCADERÍAS                    cant_dsp × costoUnit_enTransito
+//   HABER 1.1.7.05 MERCADERÍAS EN TRÁNSITO         mismo
 //
 //   DEBE  5.4.1.40 DIE EGRESO                      die × tc_dsp
 //   HABER 2.1.5.10 ARCA tributos por pagar         mismo (consolidado)
@@ -2518,7 +2523,7 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
     const tcEmb = toDecimal(embarque.tipoCambio);
     const tcDsp = toDecimal(despacho.tipoCambio);
 
-    // Costo en tránsito total del embarque (lo que cargó 1.1.5.02 entre
+    // Costo en tránsito total del embarque (lo que cargó 1.1.7.05 entre
     // FOB+origen y facturas ZP). Convertido a ARS.
     const fobArs = toDecimal(embarque.fobTotal).times(tcEmb).toDecimalPlaces(2);
     const fleteOrigenArs = embarque.valorFleteOrigen
@@ -2530,8 +2535,8 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
     // Sólo BORRADOR y LEGACY_BUNDLED capitalizan acá (igual que el confirm de
     // zona primaria y que las facturas de despacho). Las EMITIDA tienen asiento
     // standalone propio (DEBE gasto 5.x / HABER proveedor) y NUNCA se cargaron
-    // en 1.1.5.02 — incluirlas en el traslado las duplicaría (gasto + costo) y
-    // dejaría 1.1.5.02 en saldo ACREEDOR.
+    // en 1.1.7.05 — incluirlas en el traslado las duplicaría (gasto + costo) y
+    // dejaría 1.1.7.05 en saldo ACREEDOR.
     const facturasZP = embarque.costos.filter(
       (f) =>
         f.momento === "ZONA_PRIMARIA" && (f.estado === "BORRADOR" || f.estado === "LEGACY_BUNDLED"),
@@ -2596,7 +2601,7 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
       lineas.push({ cuentaId, debe: toDecimal(0), haber: valor, descripcion });
     };
 
-    // 1) Transferencia 1.1.5.02 → 1.1.5.01 por la porción del despacho.
+    // 1) Transferencia 1.1.7.05 → 1.1.7.01 por la porción del despacho.
     let transferidoArs = toDecimal(0);
     const itemDespachoCostoUnit = new Map<number, import("decimal.js").Decimal>();
     for (const id of despacho.items) {
@@ -2810,8 +2815,8 @@ export async function crearAsientoDespacho(despachoId: string, tx?: TxClient): P
 /**
  * Asiento del despacho parcial CRUZADO (Fase 4, flag CONTENEDOR_DESCONSOLIDACION
  * _ENABLED). Espeja `crearAsientoDespacho` pero:
- *  - La transferencia de subcuenta es 1.1.5.05 (DF) → 1.1.5.01 (mercaderías
- *    nacionalizadas) — flujo NACIONALIZACION_VIA_DF — en vez de 1.1.5.02→01.
+ *  - La transferencia de subcuenta es 1.1.7.03 (DF) → 1.1.7.01 (mercaderías
+ *    nacionalizadas) — flujo NACIONALIZACION_VIA_DF — en vez de 1.1.7.05→01.
  *  - El costo landed por línea sale del `ItemContenedor.costoFCUnitario`
  *    (snapshot FC en USD, ya rateado en ZP) × cantidad × TC del embarque, no
  *    del rateo FOB del ItemEmbarque.
@@ -2942,11 +2947,11 @@ export async function crearAsientoDespachoCruzado(
           `Despacho ${despacho.codigo}: el ItemContenedor ${ic.id} no tiene costo FC (cerrá costos antes de nacionalizar).`,
         );
       }
-      // Guard de coherencia de camino (Onda A #1): el cruzado credita 1.1.5.05
+      // Guard de coherencia de camino (Onda A #1): el cruzado credita 1.1.7.03
       // (depósito fiscal), subcuenta que SÓLO queda financiada por el traslado
-      // 1.1.5.04 → 1.1.5.05 que corre en la desconsolidación (deja el contenedor
-      // DESCONSOLIDADO). Nacionalizar sin ese traslado dejaría 1.1.5.05 con saldo
-      // acreedor — raíz de la anomalía de 1.1.5.05. Espeja el guard de zona
+      // 1.1.7.04 → 1.1.7.03 que corre en la desconsolidación (deja el contenedor
+      // DESCONSOLIDADO). Nacionalizar sin ese traslado dejaría 1.1.7.03 con saldo
+      // acreedor — raíz de la anomalía de 1.1.7.03. Espeja el guard de zona
       // primaria del legacy (`crearAsientoDespacho`).
       if (ic.contenedor.estado !== "DESCONSOLIDADO") {
         throw new AsientoError(
@@ -2957,7 +2962,7 @@ export async function crearAsientoDespachoCruzado(
     }
 
     // FUENTE ÚNICA de costo: capitaliza DIE + Tasa + Arancel + subtotal de
-    // las facturas DESPACHO al costo de la mercadería (DEBE 1.1.5.01). El
+    // las facturas DESPACHO al costo de la mercadería (DEBE 1.1.7.01). El
     // mismo helper alimenta el costo landed del ingreso de stock NACIONAL.
     const landed = calcularCostoLandedDespacho({
       tipoCambioEmbarque: tcEmb,
@@ -2983,8 +2988,8 @@ export async function crearAsientoDespachoCruzado(
       itemDespachoCostoUnit.set(r.itemDespachoId, r.costoUnitarioLandedArs);
     }
 
-    // 1) DEBE 1.1.5.01 (mercaderías) = nacionalizado + capitalizables.
-    //    HABER 1.1.5.05 (DF) = sólo el costo FC nacionalizado (sin tributos).
+    // 1) DEBE 1.1.7.01 (mercaderías) = nacionalizado + capitalizables.
+    //    HABER 1.1.7.03 (DF) = sólo el costo FC nacionalizado (sin tributos).
     pushDebe(
       porCodigo.get(EMBARQUE_CODIGOS.MERCADERIAS.codigo)!,
       landed.costoTotalArs,
@@ -2997,7 +3002,7 @@ export async function crearAsientoDespachoCruzado(
     );
 
     // 2) Tributos aduaneros del despacho. DIE + Tasa + Arancel SON
-    //    CAPITALIZABLES: su contravalor ya está en el DEBE 1.1.5.01, así que
+    //    CAPITALIZABLES: su contravalor ya está en el DEBE 1.1.7.01, así que
     //    NO se debitan a egreso 5.7.1.x. Sólo se mantiene el HABER de los
     //    pasivos aduaneros (la obligación a pagar a la Aduana).
     //    IVA / IVA adicional / IIBB / Ganancias siguen como crédito fiscal.
@@ -3057,7 +3062,7 @@ export async function crearAsientoDespachoCruzado(
     );
 
     // 3) Facturas DESPACHO linkadas (filtradas arriba). El SUBTOTAL de cada
-    //    línea YA fue capitalizado en el DEBE 1.1.5.01 (vía el helper de costo
+    //    línea YA fue capitalizado en el DEBE 1.1.7.01 (vía el helper de costo
     //    landed) — por eso NO se debita a la cuenta de gasto. Acá sólo se
     //    contabilizan IVA/IIBB como crédito fiscal, los `otros` como gasto y el
     //    HABER total al proveedor (CxP).
@@ -3250,8 +3255,8 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
     const total = subtotal.plus(iva).plus(iibb).plus(otros);
 
     // #10 — con stock dual, un ítem sin costo (costoPromedio 0) omitiría su CMV
-    // (el bloque `if (totalCosto.gt(0))` no corre) y NO acreditaría 1.1.5.03;
-    // al confirmar la entrega después, se DEBITA 1.1.5.03 nunca acreditada →
+    // (el bloque `if (totalCosto.gt(0))` no corre) y NO acreditaría 1.1.7.90;
+    // al confirmar la entrega después, se DEBITA 1.1.7.90 nunca acreditada →
     // débito huérfano que no cierra. Exigir costo cargado antes de emitir.
     if (isStockDualEnabled()) {
       const tieneItemSinCosto = venta.items.some(
@@ -3260,7 +3265,7 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
       if (tieneItemSinCosto) {
         throw new AsientoError(
           "DOMINIO_INVALIDO",
-          `Venta ${venta.numero}: hay un producto sin costo promedio cargado (costoPromedio 0) — no se puede emitir sin CMV (dejaría 1.1.5.03 sin acreditar). Cargá el costo (ingreso/importación) antes de vender.`,
+          `Venta ${venta.numero}: hay un producto sin costo promedio cargado (costoPromedio 0) — no se puede emitir sin CMV (dejaría 1.1.7.90 sin acreditar). Cargá el costo (ingreso/importación) antes de vender.`,
         );
       }
     }
@@ -3276,7 +3281,7 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
       .toDecimalPlaces(2);
 
     // Snapshot del costoPromedio usado para el CMV — la entrega cancelará
-    // 1.1.5.03 (stock dual) por ESTE valor para que la cuenta-puente cierre
+    // 1.1.7.90 (stock dual) por ESTE valor para que la cuenta-puente cierre
     // exacto, sin importar cómo evolucione el costoPromedio entre emisión y
     // entrega. Persistido por ítem en ItemVenta.costoUnitarioCmv.
     for (const it of venta.items) {
@@ -3351,9 +3356,9 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
     const clienteCuentaId =
       venta.cliente.cuentaContableId ?? porCodigo.get(VENTA_CODIGOS.CLIENTE_FALLBACK.codigo)!;
 
-    // Cheques recibidos como cobro: DEBE 1.1.4.20 por el valor REAL de
-    // los cheques (no por el total facturado). Si los cheques exceden
-    // el total, el sobrante queda en 2.1.7.01 ANTICIPOS DE CLIENTES
+    // Cheques recibidos como cobro: DEBE 1.1.1.03.01 (valores a cobrar) por el
+    // valor REAL de los cheques (no por el total facturado). Si los cheques
+    // exceden el total, el sobrante queda en 2.1.5.01 ANTICIPOS DE CLIENTES
     // (pasivo) — saldo a favor del cliente aplicable a facturas futuras.
     // Si los cheques cubren menos que el total, el residual queda como
     // saldo deudor del cliente (cuenta corriente).
@@ -3417,7 +3422,7 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
       });
     }
     // IIBB jurisdiccional embutido — Sunset absorbe el IIBB de la
-    // jurisdicción del cliente como gasto. DEBE 5.5.02 / HABER 2.1.3.05.
+    // jurisdicción del cliente como gasto. DEBE 6.5.01 / HABER 2.1.3.2.02.
     // El cliente NO paga este monto adicional (ya está en el subtotal).
     if (percepcionIIBB.gt(0)) {
       lineas.push({
@@ -3445,8 +3450,8 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
     // CMV: DEBE costo / HABER mercaderías. Solo si hay costo registrado.
     //
     // W3 stock dual (gated): cuando STOCK_DUAL_ENABLED=true la contrapartida
-    // HABER se hace contra `MERCADERIAS_A_ENTREGAR` (1.1.5.03), una cuenta
-    // provisória que se cancela contra MERCADERIAS (1.1.5.01) cuando se
+    // HABER se hace contra `MERCADERIAS_A_ENTREGAR` (1.1.7.90), una cuenta
+    // provisória que se cancela contra MERCADERIAS (1.1.7.01) cuando se
     // confirma la entrega. Esto mantiene contable y físico alineados durante
     // la ventana emisión→entrega.
     if (totalCosto.gt(0)) {
@@ -3524,8 +3529,8 @@ export async function crearAsientoVenta(ventaId: string, tx?: TxClient): Promise
 // Entrega de venta (W3) — asiento de baja física
 // ============================================================
 //
-// DEBE  1.1.5.03 MERCADERIAS A ENTREGAR    Σ(cantidad × costoUnitario)
-// HABER 1.1.5.01 MERCADERIAS                ídem
+// DEBE  1.1.7.90 MERCADERIAS A ENTREGAR    Σ(cantidad × costoUnitario)
+// HABER 1.1.7.01 MERCADERIAS                ídem
 //
 // Cancela la cuenta provisória que crearAsientoVenta había debitado
 // contra CMV. Después de este asiento, el contable está alineado con
@@ -3561,7 +3566,7 @@ export async function crearAsientoEntrega(entregaId: string, tx?: TxClient): Pro
     }
 
     // Egreso físico real: lo que sale del stock, valuado al costo del depósito
-    // (SPD) capturado en la entrega. Acredita 1.1.5.01 MERCADERÍAS.
+    // (SPD) capturado en la entrega. Acredita 1.1.7.01 MERCADERÍAS.
     const egresoReal = entrega.items
       .reduce((acc, it) => acc.plus(toDecimal(it.costoUnitario).times(it.cantidad)), toDecimal(0))
       .toDecimalPlaces(2);
@@ -3573,8 +3578,8 @@ export async function crearAsientoEntrega(entregaId: string, tx?: TxClient): Pro
       );
     }
 
-    // Base de cancelación de 1.1.5.03: el snapshot del costo con el que la venta
-    // ACREDITÓ la cuenta-puente (ItemVenta.costoUnitarioCmv). Así 1.1.5.03 cierra
+    // Base de cancelación de 1.1.7.90: el snapshot del costo con el que la venta
+    // ACREDITÓ la cuenta-puente (ItemVenta.costoUnitarioCmv). Así 1.1.7.90 cierra
     // exacto contra lo que la venta provisionó, sin importar cómo evolucionó el
     // costoPromedio entre emisión y entrega. Ventas legacy (snapshot 0) caen al
     // costo SPD → cancela igual que el egreso, sin variación (comportamiento previo).
@@ -3588,7 +3593,7 @@ export async function crearAsientoEntrega(entregaId: string, tx?: TxClient): Pro
 
     // Diferencia entre lo provisionado por la venta y el egreso físico real →
     // variación de costo de inventario (resultado). Cierra el asiento y deja
-    // 1.1.5.03 en cero contra la venta.
+    // 1.1.7.90 en cero contra la venta.
     const variacion = cancelacionPuente.minus(egresoReal);
 
     const porCodigo = await ensureCuentasMap(inner, {
@@ -3653,10 +3658,205 @@ export async function crearAsientoEntrega(entregaId: string, tx?: TxClient): Pro
 }
 
 // ============================================================
+// Cierre de resultados y destino del resultado (FLUJOS CONTABLES)
+// ============================================================
+//
+// Cierre de resultados: salda TODAS las cuentas de resultado (clases 4-9,
+// categoría INGRESO/EGRESO) del rango del ejercicio contra la cuenta de cierre
+// 3.4.01 (Resultado del Ejercicio). El neto Σ(haber − debe) es el resultado:
+//   ganancia → HABER 3.4.01 ; pérdida → DEBE 3.4.01.
+// Tras el cierre las cuentas de resultado quedan en cero.
+//
+// Destino del resultado: transfiere el saldo de 3.4.01 a 3.3.01 (Resultados no
+// asignados — ejercicios anteriores) previa aprobación societaria.
+//
+// Ambos asientos se CONTABILIZAN (la baja de resultados sólo cuenta
+// CONTABILIZADO) con origen AJUSTE. El cierre es idempotente por rango.
+
+const DESC_CIERRE = "Cierre de resultados";
+const DESC_DESTINO = "Destino del resultado";
+
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+
+export type CierreEjercicioInput = {
+  /** Inicio del ejercicio (inclusive). */
+  fechaDesde: Date;
+  /** Cierre del ejercicio (inclusive). El asiento se fecha acá. */
+  fechaHasta: Date;
+};
+
+/**
+ * Asiento de cierre de resultados: salda clases 4-9 (categoría INGRESO/EGRESO)
+ * del rango contra 3.4.01. Sólo considera asientos CONTABILIZADOS. Idempotente:
+ * si ya existe un cierre en el rango, falla. Devuelve el asiento CONTABILIZADO.
+ */
+export async function crearAsientoCierre(
+  input: CierreEjercicioInput,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const yaCerrado = await inner.asiento.findFirst({
+      where: {
+        origen: AsientoOrigen.AJUSTE,
+        estado: { not: AsientoEstado.ANULADO },
+        descripcion: { startsWith: DESC_CIERRE },
+        fecha: { gte: input.fechaDesde, lte: input.fechaHasta },
+      },
+      select: { id: true },
+    });
+    if (yaCerrado) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `Ya existe un asiento de cierre en el rango ${ymd(input.fechaDesde)}..${ymd(input.fechaHasta)}.`,
+      );
+    }
+
+    // Saldos de las cuentas de resultado (clases 4-9) en el rango. Cada saldo
+    // (debe/haber Decimal(18,2)) es exacto a 2 decimales → la suma no arrastra
+    // error de redondeo y el asiento cuadra por construcción.
+    const agregados = await inner.lineaAsiento.groupBy({
+      by: ["cuentaId"],
+      where: {
+        asiento: {
+          estado: AsientoEstado.CONTABILIZADO,
+          fecha: { gte: input.fechaDesde, lte: input.fechaHasta },
+        },
+        cuenta: { categoria: { in: [CuentaCategoria.INGRESO, CuentaCategoria.EGRESO] } },
+      },
+      _sum: { debe: true, haber: true },
+    });
+
+    const lineas: LineaInput[] = [];
+    let resultado = new Decimal(0); // Σ(haber − debe)
+    for (const a of agregados) {
+      const saldo = toDecimal(a._sum.haber ?? 0).minus(toDecimal(a._sum.debe ?? 0));
+      if (saldo.isZero()) continue;
+      resultado = resultado.plus(saldo);
+      // Contra-asiento que salda la cuenta: saldo acreedor (ingreso) → DEBE;
+      // saldo deudor (egreso) → HABER.
+      lineas.push({
+        cuentaId: a.cuentaId,
+        debe: saldo.gt(0) ? money(saldo).toString() : 0,
+        haber: saldo.lt(0) ? money(saldo.abs()).toString() : 0,
+        descripcion: DESC_CIERRE,
+      });
+    }
+
+    if (lineas.length === 0) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        `No hay resultados que cerrar en el rango ${ymd(input.fechaDesde)}..${ymd(input.fechaHasta)}.`,
+      );
+    }
+
+    resultado = resultado.toDecimalPlaces(2);
+    if (!resultado.isZero()) {
+      const cierreId = await getOrCreateCuenta(inner, {
+        codigo: CODIGO_RESULTADO_EJERCICIO_IMPUTABLE,
+        nombre: "RESULTADO DEL EJERCICIO",
+        categoria: CuentaCategoria.PATRIMONIO,
+      });
+      lineas.push({
+        cuentaId: cierreId,
+        debe: resultado.lt(0) ? money(resultado.abs()).toString() : 0,
+        haber: resultado.gt(0) ? money(resultado).toString() : 0,
+        descripcion: "Resultado del ejercicio",
+      });
+    }
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: input.fechaHasta,
+      descripcion: `${DESC_CIERRE} — ${ymd(input.fechaDesde)} a ${ymd(input.fechaHasta)}`,
+      origen: AsientoOrigen.AJUSTE,
+      moneda: Moneda.ARS,
+      tipoCambio: 1,
+      lineas,
+    });
+    return contabilizarEnTx(inner, asiento.id);
+  };
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+export type DestinoResultadoInput = {
+  /** Fecha del asiento de destino (≥ fecha de cierre). */
+  fecha: Date;
+};
+
+/**
+ * Asiento de destino del resultado: transfiere el saldo de 3.4.01 (Resultado
+ * del Ejercicio) a 3.3.01 (Resultados no asignados). Sólo considera asientos
+ * CONTABILIZADOS hasta `fecha`. Falla si 3.4.01 está en cero. Devuelve el
+ * asiento CONTABILIZADO.
+ */
+export async function crearAsientoDestinoResultado(
+  input: DestinoResultadoInput,
+  tx?: TxClient,
+): Promise<Asiento> {
+  const run = async (inner: TxClient) => {
+    const cierreId = await getOrCreateCuenta(inner, {
+      codigo: CODIGO_RESULTADO_EJERCICIO_IMPUTABLE,
+      nombre: "RESULTADO DEL EJERCICIO",
+      categoria: CuentaCategoria.PATRIMONIO,
+    });
+    const noAsignadosId = await getOrCreateCuenta(inner, {
+      codigo: CODIGO_RESULTADOS_NO_ASIGNADOS,
+      nombre: "RESULTADOS NO ASIGNADOS — EJERCICIOS ANTERIORES",
+      categoria: CuentaCategoria.PATRIMONIO,
+    });
+
+    const agg = await inner.lineaAsiento.aggregate({
+      where: {
+        cuentaId: cierreId,
+        asiento: { estado: AsientoEstado.CONTABILIZADO, fecha: { lte: input.fecha } },
+      },
+      _sum: { debe: true, haber: true },
+    });
+    const saldo = toDecimal(agg._sum.haber ?? 0)
+      .minus(toDecimal(agg._sum.debe ?? 0))
+      .toDecimalPlaces(2);
+    if (saldo.isZero()) {
+      throw new AsientoError(
+        "DOMINIO_INVALIDO",
+        "El resultado del ejercicio (3.4.01) está en cero; nada que destinar.",
+      );
+    }
+
+    // Ganancia (saldo acreedor): DEBE 3.4.01 / HABER 3.3.01. Pérdida: al revés.
+    const lineas: LineaInput[] = [
+      {
+        cuentaId: cierreId,
+        debe: saldo.gt(0) ? money(saldo).toString() : 0,
+        haber: saldo.lt(0) ? money(saldo.abs()).toString() : 0,
+        descripcion: DESC_DESTINO,
+      },
+      {
+        cuentaId: noAsignadosId,
+        debe: saldo.lt(0) ? money(saldo.abs()).toString() : 0,
+        haber: saldo.gt(0) ? money(saldo).toString() : 0,
+        descripcion: "Resultados no asignados",
+      },
+    ];
+
+    const asiento = await crearAsientoEnTx(inner, {
+      fecha: input.fecha,
+      descripcion: `${DESC_DESTINO} — ${ymd(input.fecha)}`,
+      origen: AsientoOrigen.AJUSTE,
+      moneda: Moneda.ARS,
+      tipoCambio: 1,
+      lineas,
+    });
+    return contabilizarEnTx(inner, asiento.id);
+  };
+  if (tx) return run(tx);
+  return withNumeracionRetry(() => db.$transaction(run));
+}
+
+// ============================================================
 // Compras locales — asiento automático
 // ============================================================
 //
-// DEBE  1.1.5.01 Mercaderías                  subtotal × TC
+// DEBE  1.1.7.01 Mercaderías                  subtotal × TC
 // DEBE  1.1.4.08 IVA Crédito Fiscal Compras   iva × TC (si > 0)
 // DEBE  1.1.4.11 Crédito IIBB Compras         iibb × TC (si > 0)
 // HABER proveedor.cuentaContableId (or 2.1.1.01)   total × TC

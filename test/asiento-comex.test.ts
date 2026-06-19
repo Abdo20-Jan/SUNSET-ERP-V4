@@ -63,10 +63,10 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       debe: string;
       haber: string;
     }> = [
-      { flujo: "ARRIBO_ZONA_PRIMARIA", debe: "1.1.7.03", haber: "1.1.7.02" },
-      { flujo: "TRASLADO_DEPOSITO_FISCAL", debe: "1.1.7.04", haber: "1.1.7.03" },
-      { flujo: "NACIONALIZACION_VIA_DF", debe: "1.1.7.01", haber: "1.1.7.04" },
-      { flujo: "NACIONALIZACION_DIRECTA", debe: "1.1.7.01", haber: "1.1.7.03" },
+      { flujo: "ARRIBO_ZONA_PRIMARIA", debe: "1.1.7.04", haber: "1.1.7.05" },
+      { flujo: "TRASLADO_DEPOSITO_FISCAL", debe: "1.1.7.03", haber: "1.1.7.04" },
+      { flujo: "NACIONALIZACION_VIA_DF", debe: "1.1.7.01", haber: "1.1.7.03" },
+      { flujo: "NACIONALIZACION_DIRECTA", debe: "1.1.7.01", haber: "1.1.7.04" },
     ];
 
     for (const caso of casos) {
@@ -101,8 +101,8 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       const codigos = (await db.prisma.cuentaContable.findMany({ select: { codigo: true } })).map(
         (c) => c.codigo,
       );
-      expect(codigos).toContain("1.1.7.03");
       expect(codigos).toContain("1.1.7.04");
+      expect(codigos).toContain("1.1.7.03");
     });
 
     it("rechaza monto <= 0", async () => {
@@ -122,8 +122,8 @@ describe("asientos comex ZPA (PR 3.1)", () => {
 
     // Sobrante de despacho = bultos recibidos de más → no es ingreso: es deuda
     // con el proveedor (a regularizar rectificando factura/proforma). HABER al
-    // pasivo-puente 2.1.1.08 (decisión contador #6).
-    it("SOBRA: DEBE subcuenta DF / HABER 2.1.1.08 (diferencia a regularizar — a pagar)", async () => {
+    // pasivo-puente 2.1.1.07 (decisión contador #6).
+    it("SOBRA: DEBE subcuenta DF / HABER 2.1.1.07 (diferencia a regularizar — a pagar)", async () => {
       const asiento = await tx((t) =>
         crearAsientoDivergencia(
           {
@@ -136,14 +136,14 @@ describe("asientos comex ZPA (PR 3.1)", () => {
         ),
       );
       expect(await lineasDe(asiento.id)).toEqual([
-        { codigo: "1.1.7.04", debe: "750.00", haber: "0.00" },
-        { codigo: "2.1.1.08", debe: "0.00", haber: "750.00" },
+        { codigo: "1.1.7.03", debe: "750.00", haber: "0.00" },
+        { codigo: "2.1.1.07", debe: "0.00", haber: "750.00" },
       ]);
     });
 
     // Faltante de despacho sin responsable = pagamos por bultos no recibidos →
-    // saldo a favor con el proveedor (activo-puente 1.1.5.07), no pérdida directa.
-    it("FALTA sin responsable: DEBE 1.1.5.07 (saldo a favor proveedor) / HABER subcuenta ZPA", async () => {
+    // saldo a favor con el proveedor (activo-puente 1.1.6.05), no pérdida directa.
+    it("FALTA sin responsable: DEBE 1.1.6.05 (saldo a favor proveedor) / HABER subcuenta ZPA", async () => {
       const asiento = await tx((t) =>
         crearAsientoDivergencia(
           { ...base, faltaMonto: "750.00", causa: "NAO_IDENTIFICADA", ubicacion: "ZONA_PRIMARIA" },
@@ -151,8 +151,8 @@ describe("asientos comex ZPA (PR 3.1)", () => {
         ),
       );
       expect(await lineasDe(asiento.id)).toEqual([
-        { codigo: "1.1.5.07", debe: "750.00", haber: "0.00" },
-        { codigo: "1.1.7.03", debe: "0.00", haber: "750.00" },
+        { codigo: "1.1.6.05", debe: "750.00", haber: "0.00" },
+        { codigo: "1.1.7.04", debe: "0.00", haber: "750.00" },
       ]);
     });
 
@@ -181,7 +181,7 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       );
       expect(await lineasDe(asiento.id)).toEqual([
         { codigo: "1.1.2.99", debe: "750.00", haber: "0.00" },
-        { codigo: "1.1.7.04", debe: "0.00", haber: "750.00" },
+        { codigo: "1.1.7.03", debe: "0.00", haber: "750.00" },
       ]);
     });
 
@@ -199,14 +199,14 @@ describe("asientos comex ZPA (PR 3.1)", () => {
         ),
       );
       // Sobrante bruto (500) primero, faltante bruto (300) después; el stock
-      // 1.1.7.04 aparece 2× (DEBE por la sobra, HABER por la falta). El pasivo a
+      // 1.1.7.03 aparece 2× (DEBE por la sobra, HABER por la falta). El pasivo a
       // regularizar (500) y el saldo a favor proveedor (300) reciben el BRUTO,
       // no el neto (200).
       expect(await lineasDe(asiento.id)).toEqual([
-        { codigo: "1.1.7.04", debe: "500.00", haber: "0.00" },
-        { codigo: "2.1.1.08", debe: "0.00", haber: "500.00" },
-        { codigo: "1.1.5.07", debe: "300.00", haber: "0.00" },
-        { codigo: "1.1.7.04", debe: "0.00", haber: "300.00" },
+        { codigo: "1.1.7.03", debe: "500.00", haber: "0.00" },
+        { codigo: "2.1.1.07", debe: "0.00", haber: "500.00" },
+        { codigo: "1.1.6.05", debe: "300.00", haber: "0.00" },
+        { codigo: "1.1.7.03", debe: "0.00", haber: "300.00" },
       ]);
     });
 
@@ -243,7 +243,7 @@ describe("asientos comex ZPA (PR 3.1)", () => {
       ).rejects.toMatchObject({ code: "LINEA_INVALIDA" });
     });
 
-    it("ubicacion ZONA_PRIMARIA usa 1.1.7.03 en SOBRA", async () => {
+    it("ubicacion ZONA_PRIMARIA usa 1.1.7.04 en SOBRA", async () => {
       const asiento = await tx((t) =>
         crearAsientoDivergencia(
           { ...base, sobraMonto: "750.00", causa: "NAO_IDENTIFICADA", ubicacion: "ZONA_PRIMARIA" },
@@ -251,7 +251,7 @@ describe("asientos comex ZPA (PR 3.1)", () => {
         ),
       );
       const lineas = await lineasDe(asiento.id);
-      expect(lineas[0]?.codigo).toBe("1.1.7.03");
+      expect(lineas[0]?.codigo).toBe("1.1.7.04");
     });
   });
 });

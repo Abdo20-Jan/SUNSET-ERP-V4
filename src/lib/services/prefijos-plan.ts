@@ -45,21 +45,27 @@ export const PREFIJOS_PROVEEDORES = [
   PREFIJO_PROVEEDORES_EXTERIOR,
 ] as const;
 
-// Cargas fiscales (2.1.4) y tributos aduaneros por pagar (2.1.4.4).
-export const PREFIJO_DEUDAS_FISCALES = "2.1.4.";
-export const PREFIJO_ADUANA = "2.1.4.4.";
-export const CODIGO_SALDO_PENDIENTE_ADUANA = "2.1.4.4.99";
+// Cargas fiscales a pagar (2.1.3) y tributos aduaneros por pagar (2.1.3.4).
+export const PREFIJO_DEUDAS_FISCALES = "2.1.3.";
+export const PREFIJO_ADUANA = "2.1.3.4.";
+export const CODIGO_SALDO_PENDIENTE_ADUANA = "2.1.3.4.99";
 // Filtro de tributos en despacho (aduana + fiscales).
 export const PREFIJOS_TRIBUTOS_DESPACHO = [PREFIJO_ADUANA, PREFIJO_DEUDAS_FISCALES] as const;
 
-// Préstamos — deudas financieras corrientes 2.1.5, no corrientes 2.2.2.
-export const PREFIJO_PRESTAMO_CORTO_PLAZO = "2.1.5.";
-export const PREFIJO_PRESTAMO_LARGO_PLAZO = "2.2.2.";
+// Préstamos bancarios — corrientes 2.1.2.02, no corrientes 2.2.1.01. Se acota
+// al subárbol BANCARIO (no overdrafts 2.1.2.01 ni tarjetas/intereses) porque
+// `prestamos` lista/crea cuentas analíticas de préstamo bajo estos padres.
+export const PREFIJO_PRESTAMO_CORTO_PLAZO = "2.1.2.02.";
+export const PREFIJO_PRESTAMO_LARGO_PLAZO = "2.2.1.01.";
 
 // ----- PATRIMONIO --------------------------------------------
 // Resultado del ejercicio: cuenta de cierre SINTÉTICA (3.4), calculada por el
-// reporte como suma de clases 4-9 (no recibe asientos).
+// reporte como suma de clases 4-9. La ANALÍTICA imputable de cierre es 3.4.01
+// (SOLO_SISTEMA): recibe el asiento de cierre (clases 4-9 → 3.4.01) y se
+// transfiere a resultados no asignados (3.4.01 → 3.3.01) por el destino.
 export const CODIGO_RESULTADO_EJERCICIO = "3.4";
+export const CODIGO_RESULTADO_EJERCICIO_IMPUTABLE = "3.4.01";
+export const CODIGO_RESULTADOS_NO_ASIGNADOS = "3.3.01";
 
 // ----- RESULTADOS: diferencia de cambio (clase 9.2) ----------
 // Realizada: ganancia 9.2.01 / pérdida 9.2.02. No realizada (cierre): 9.2.03 /

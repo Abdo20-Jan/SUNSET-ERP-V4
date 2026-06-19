@@ -6,7 +6,7 @@ import { resumenPendienteVenta } from "./entregas-pendientes";
 // parámetro (la action usa @/lib/db; los tests usan el del contenedor).
 //
 // Importante: el "entregado" cuenta SOLO remitos CONFIRMADA. Un BORRADOR no
-// reduce el pendiente (la cuenta-puente 1.1.5.03 sigue abierta hasta
+// reduce el pendiente (la cuenta-puente 1.1.7.90 sigue abierta hasta
 // confirmar), pero se reporta en `nBorrador` para señalar que sólo falta
 // confirmarlo.
 

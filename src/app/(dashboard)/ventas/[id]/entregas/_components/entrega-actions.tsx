@@ -84,8 +84,8 @@ export function EntregaActions({
           <DialogHeader>
             <DialogTitle>Confirmar remito {numero}</DialogTitle>
             <DialogDescription>
-              Genera el egreso físico de stock y el asiento contable (DEBE 1.1.5.03 / HABER
-              1.1.5.01), cancelando la provisión de mercaderías a entregar. El costo se toma del
+              Genera el egreso físico de stock y el asiento contable (DEBE 1.1.7.90 / HABER
+              1.1.7.01), cancelando la provisión de mercaderías a entregar. El costo se toma del
               promedio actual del depósito.
             </DialogDescription>
           </DialogHeader>
