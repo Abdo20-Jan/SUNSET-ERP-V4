@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 
 import type { SimulacionRow } from "@/lib/actions/simulaciones-importacion";
+import { fmtDate, fmtMontoPres } from "@/lib/format";
 import {
   Table,
   TableBody,
@@ -13,27 +14,25 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-function formatMoney(value: string): string {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return value;
-  return n.toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
 
 function formatDate(value: string): string {
   const d = new Date(value);
   if (!Number.isFinite(d.getTime())) return "—";
-  return d.toLocaleDateString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone: "America/Argentina/Buenos_Aires",
-  });
+  // Delega en fmtDate (timeZone UTC) para que SSR (UTC) y cliente (UTC-3)
+  // rendericen el mismo string y evitar hydration mismatch (React #418).
+  return fmtDate(d);
 }
 
-export function SimulacionesTable({ data }: { data: SimulacionRow[] }) {
+export function SimulacionesTable({
+  data,
+  pres,
+  tc,
+}: {
+  data: SimulacionRow[];
+  pres: Moneda;
+  tc: string | null;
+}) {
   const router = useRouter();
 
   const columns: ColumnDef<SimulacionRow>[] = [
@@ -96,19 +95,22 @@ export function SimulacionesTable({ data }: { data: SimulacionRow[] }) {
     },
     {
       id: "fobTotal",
-      header: () => <span className="block text-right">FOB total</span>,
+      // FOB es nativo en la moneda de la simulación → conversión native-aware.
+      header: () => <span className="block text-right">FOB total ({pres})</span>,
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm tabular-nums">
-          {formatMoney(row.original.fobTotal)}
+          {fmtMontoPres(row.original.fobTotal, row.original.moneda, pres, tc)}
         </span>
       ),
     },
     {
       id: "costoTotalNacionalizado",
-      header: () => <span className="block text-right">Costo nacionalizado (ARS)</span>,
+      // Costo nacionalizado ya viene consolidado en ARS (cada parcela × su TC)
+      // → se trata como ARS-nativo y se convierte al TC de cierre.
+      header: () => <span className="block text-right">Costo nacionalizado ({pres})</span>,
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm font-semibold tabular-nums">
-          {formatMoney(row.original.costoTotalNacionalizado)}
+          {fmtMontoPres(row.original.costoTotalNacionalizado, "ARS", pres, tc)}
         </span>
       ),
     },

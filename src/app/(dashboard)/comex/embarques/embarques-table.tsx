@@ -5,6 +5,7 @@ import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tan
 
 import type { EmbarqueEstado } from "@/generated/prisma/client";
 import type { EmbarqueRow } from "@/lib/actions/embarques";
+import { convertirMonto, fmtMontoPres } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -14,6 +15,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
 
 const ESTADO_LABELS: Record<EmbarqueEstado, string> = {
   BORRADOR: "Borrador",
@@ -37,15 +40,6 @@ function estadoVariant(estado: EmbarqueEstado): "default" | "outline" | "seconda
   }
 }
 
-function formatMoney(value: string): string {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return value;
-  return n.toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
 function formatCosto(value: string): string | null {
   const n = Number(value);
   if (!Number.isFinite(n) || n === 0) return null;
@@ -55,7 +49,15 @@ function formatCosto(value: string): string | null {
   });
 }
 
-export function EmbarquesTable({ data }: { data: EmbarqueRow[] }) {
+export function EmbarquesTable({
+  data,
+  pres,
+  tc,
+}: {
+  data: EmbarqueRow[];
+  pres: Moneda;
+  tc: string | null;
+}) {
   const router = useRouter();
 
   const columns: ColumnDef<EmbarqueRow>[] = [
@@ -110,27 +112,30 @@ export function EmbarquesTable({ data }: { data: EmbarqueRow[] }) {
     },
     {
       id: "fobTotal",
-      header: () => <span className="block text-right">FOB Total</span>,
+      // FOB es nativo en la moneda del embarque → conversión native-aware.
+      header: () => <span className="block text-right">FOB Total ({pres})</span>,
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm tabular-nums">
-          {formatMoney(row.original.fobTotal)}
+          {fmtMontoPres(row.original.fobTotal, row.original.moneda, pres, tc)}
         </span>
       ),
     },
     {
       id: "cifTotal",
-      header: () => <span className="block text-right">CIF Total</span>,
+      // CIF y Costo ya vienen consolidados en ARS (cada parcela × su TC) →
+      // se tratan como ARS-nativos y se convierten al TC de cierre.
+      header: () => <span className="block text-right">CIF Total ({pres})</span>,
       cell: ({ row }) => (
         <span className="block text-right font-mono text-sm tabular-nums">
-          {formatMoney(row.original.cifTotal)}
+          {fmtMontoPres(row.original.cifTotal, "ARS", pres, tc)}
         </span>
       ),
     },
     {
       id: "costoTotal",
-      header: () => <span className="block text-right">Costo Total</span>,
+      header: () => <span className="block text-right">Costo Total ({pres})</span>,
       cell: ({ row }) => {
-        const costo = formatCosto(row.original.costoTotal);
+        const costo = formatCosto(convertirMonto(row.original.costoTotal, "ARS", pres, tc));
         if (!costo) {
           return <span className="block text-right text-xs text-muted-foreground">—</span>;
         }
