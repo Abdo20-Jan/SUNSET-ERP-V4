@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
+import { registrarAuditoria } from "@/lib/services/auditoria";
 import {
   crearCuentaParaEntidad,
   rangoGastoByTipo,
@@ -355,9 +356,24 @@ async function validarCuentaContable(
   return { ok: true };
 }
 
+// Campos JSON-safe del proveedor que se versionan en la auditoría (sin Decimal
+// ni Date). NO exportar: archivo "use server" sólo exporta funciones async.
+const SNAPSHOT_PROVEEDOR = {
+  nombre: true,
+  cuit: true,
+  pais: true,
+  tipoProveedor: true,
+  email: true,
+  telefono: true,
+  condicionPagoDefault: true,
+  diasPagoDefault: true,
+  estado: true,
+  cuentaContableId: true,
+  cuentaGastoContableId: true,
+} as const;
+
 export async function crearProveedorAction(raw: ProveedorInput): Promise<ProveedorActionResult> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
 
   const parsed = proveedorBaseSchema.safeParse(raw);
   if (!parsed.success) {
@@ -392,10 +408,18 @@ export async function crearProveedorAction(raw: ProveedorInput): Promise<Proveed
       const { crearCuentaAuto: _ignore, crearCuentaGastoAuto: _ignore2, ...rest } = parsed.data;
       void _ignore;
       void _ignore2;
-      return tx.proveedor.create({
+      const { id, ...snapshot } = await tx.proveedor.create({
         data: { ...rest, cuentaContableId, cuentaGastoContableId },
-        select: { id: true },
+        select: { id: true, ...SNAPSHOT_PROVEEDOR },
       });
+      await registrarAuditoria(tx, {
+        tabla: "Proveedor",
+        registroId: id,
+        accion: "CREATE",
+        usuarioId,
+        datosNuevos: snapshot,
+      });
+      return { id };
     });
     revalidatePath("/maestros/proveedores");
     revalidatePath("/maestros");
@@ -417,8 +441,7 @@ export async function actualizarProveedorAction(
   id: string,
   raw: ProveedorInput,
 ): Promise<ProveedorActionResult> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
   if (!id) return { ok: false, error: "Id requerido." };
 
   const parsed = proveedorBaseSchema.safeParse(raw);
@@ -434,6 +457,13 @@ export async function actualizarProveedorAction(
 
   try {
     const updated = await db.$transaction(async (tx) => {
+      const antes = await tx.proveedor.findUnique({ where: { id }, select: SNAPSHOT_PROVEEDOR });
+      if (!antes)
+        throw new Prisma.PrismaClientKnownRequestError("No existe", {
+          code: "P2025",
+          clientVersion: "",
+        });
+
       let cuentaGastoContableId = parsed.data.cuentaGastoContableId;
       if (cuentaGastoContableId === null && parsed.data.crearCuentaGastoAuto) {
         const rangoGasto = rangoGastoByTipo(parsed.data.tipoProveedor);
@@ -445,11 +475,20 @@ export async function actualizarProveedorAction(
       const { crearCuentaAuto: _ignore, crearCuentaGastoAuto: _ignore2, ...rest } = parsed.data;
       void _ignore;
       void _ignore2;
-      return tx.proveedor.update({
+      const { id: updatedId, ...despues } = await tx.proveedor.update({
         where: { id },
         data: { ...rest, cuentaGastoContableId },
-        select: { id: true },
+        select: { id: true, ...SNAPSHOT_PROVEEDOR },
       });
+      await registrarAuditoria(tx, {
+        tabla: "Proveedor",
+        registroId: updatedId,
+        accion: "UPDATE",
+        usuarioId,
+        datosAnteriores: antes,
+        datosNuevos: despues,
+      });
+      return { id: updatedId };
     });
     revalidatePath("/maestros/proveedores");
     revalidatePath("/maestros");
@@ -471,8 +510,7 @@ export async function actualizarProveedorAction(
 export async function eliminarProveedorAction(
   id: string,
 ): Promise<{ ok: true; softDeleted: boolean } | { ok: false; error: string }> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
   if (!id) return { ok: false, error: "Id requerido." };
 
   const [embarquesCount, comprasCount] = await Promise.all([
@@ -483,20 +521,47 @@ export async function eliminarProveedorAction(
   const tieneReferencias = embarquesCount > 0 || comprasCount > 0;
 
   try {
-    if (tieneReferencias) {
-      await db.proveedor.update({
-        where: { id },
-        data: { estado: "inactivo" },
-        select: { id: true },
+    const softDeleted = await db.$transaction(async (tx) => {
+      const antes = await tx.proveedor.findUnique({ where: { id }, select: SNAPSHOT_PROVEEDOR });
+      if (!antes) {
+        throw new Prisma.PrismaClientKnownRequestError("No existe", {
+          code: "P2025",
+          clientVersion: "",
+        });
+      }
+
+      if (tieneReferencias) {
+        // Soft delete: tiene movimientos asociados → se marca inactivo.
+        await tx.proveedor.update({
+          where: { id },
+          data: { estado: "inactivo" },
+          select: { id: true },
+        });
+        await registrarAuditoria(tx, {
+          tabla: "Proveedor",
+          registroId: id,
+          accion: "UPDATE",
+          usuarioId,
+          datosAnteriores: antes,
+          datosNuevos: { ...antes, estado: "inactivo" },
+        });
+        return true;
+      }
+
+      await tx.proveedor.delete({ where: { id } });
+      await registrarAuditoria(tx, {
+        tabla: "Proveedor",
+        registroId: id,
+        accion: "DELETE",
+        usuarioId,
+        datosAnteriores: antes,
       });
-      revalidatePath("/maestros/proveedores");
-      revalidatePath("/maestros");
-      return { ok: true, softDeleted: true };
-    }
-    await db.proveedor.delete({ where: { id } });
+      return false;
+    });
+
     revalidatePath("/maestros/proveedores");
     revalidatePath("/maestros");
-    return { ok: true, softDeleted: false };
+    return { ok: true, softDeleted };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
       return { ok: false, error: "El proveedor no existe." };
