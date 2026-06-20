@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { CATALOGO_KPI, kpiPorId, kpisPorCategoria } from "@/lib/services/bi-kpi-catalogo";
 import type { GiroIndicadores } from "@/lib/services/bi-giro-formulas";
+import type { LiquidezIndicadores } from "@/lib/services/bi-liquidez-formulas";
 
 describe("CATALOGO_KPI", () => {
   it("tiene ids únicos", () => {
@@ -35,5 +36,22 @@ describe("CATALOGO_KPI", () => {
       const clave = k.id.replace(/^giro\./, "") as keyof GiroIndicadores;
       expect(claves).toContain(clave);
     }
+  });
+
+  it("drift: cada indicador de liquidez calculado tiene su definición en el catálogo", () => {
+    const claves: (keyof LiquidezIndicadores)[] = [
+      "razonCorriente",
+      "pruebaAcida",
+      "liquidezInmediata",
+      "capitalTrabajo",
+    ];
+    for (const c of claves) {
+      expect(kpiPorId(`liquidez.${c}`), `falta definición de liquidez.${c}`).toBeDefined();
+    }
+    for (const k of kpisPorCategoria("liquidez")) {
+      const clave = k.id.replace(/^liquidez\./, "") as keyof LiquidezIndicadores;
+      expect(claves).toContain(clave);
+    }
+    expect(kpisPorCategoria("liquidez").length).toBe(4);
   });
 });
