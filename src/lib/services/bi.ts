@@ -1353,17 +1353,17 @@ export async function getAnalisisTesoreria(rng: DateRange): Promise<AnalisisTeso
 }
 
 // =====================================================================
-// 6. RENTABILIDAD
+// 6. MÁRGENES DIMENSIONALES (drill-down operativo de la pestaña Lucro)
 // =====================================================================
 
-export type AnalisisRentabilidad = {
-  kpis: {
-    margenBruto: Money;
-    margenBrutoPct: number;
-    margenNetoPct: number;
-    productoTop: string | null;
-    productoBottom: string | null;
-  };
+/**
+ * Márgenes operativos por dimensión (canal / marca / producto), calculados al
+ * `costoPromedio` operativo a nivel de item de venta — la única fuente capaz de
+ * dimensionar. NO es la verdad contable del razón (esa es la cascada RT9, ver
+ * `bi-lucro.ts`): puede divergir del Resultado bruto contable porque usa otro
+ * CMV ("dos verdades de CMV"). Drill-down complementario de la pestaña Lucro.
+ */
+export type MargenesDimensionales = {
   margenPorCanal: RankingRow[];
   margenPorMarca: RankingRow[];
   precioVsCosto: { producto: string; precio: Money; costo: Money }[];
@@ -1372,7 +1372,7 @@ export type AnalisisRentabilidad = {
   vendidosBajoCosto: { producto: string; precio: Money; costo: Money }[];
 };
 
-export async function getAnalisisRentabilidad(rng: DateRange): Promise<AnalisisRentabilidad> {
+export async function getMargenesDimensionales(rng: DateRange): Promise<MargenesDimensionales> {
   const [ventas, productos] = await Promise.all([
     db.venta.findMany({
       where: { estado: VentaEstado.EMITIDA, fecha: dateWhere(rng) },
@@ -1416,7 +1416,7 @@ export async function getAnalisisRentabilidad(rng: DateRange): Promise<AnalisisR
   const margenCanal = new Map<TipoCanal, { ingresos: Decimal; costo: Decimal }>();
   const margenMarca = new Map<string, { ingresos: Decimal; costo: Decimal }>();
   const margenProd = new Map<string, { label: string; ingresos: Decimal; costo: Decimal }>();
-  const vendidosBajoCosto: AnalisisRentabilidad["vendidosBajoCosto"] = [];
+  const vendidosBajoCosto: MargenesDimensionales["vendidosBajoCosto"] = [];
 
   for (const v of ventas) {
     const tc = toDecimal(v.tipoCambio);
@@ -1462,16 +1462,6 @@ export async function getAnalisisRentabilidad(rng: DateRange): Promise<AnalisisR
       }
     }
   }
-
-  const ingresosTotal = Array.from(margenProd.values()).reduce(
-    (a, m) => a.plus(m.ingresos),
-    new Decimal(0),
-  );
-  const costoTotal = Array.from(margenProd.values()).reduce(
-    (a, m) => a.plus(m.costo),
-    new Decimal(0),
-  );
-  const margenBruto = ingresosTotal.minus(costoTotal);
 
   // Margen mensual 12m
   const meses = lastNMonths(12);
@@ -1527,13 +1517,6 @@ export async function getAnalisisRentabilidad(rng: DateRange): Promise<AnalisisR
   }));
 
   return {
-    kpis: {
-      margenBruto: num(margenBruto),
-      margenBrutoPct: ingresosTotal.gt(0) ? Number(margenBruto.div(ingresosTotal).toFixed(4)) : 0,
-      margenNetoPct: ingresosTotal.gt(0) ? Number(margenBruto.div(ingresosTotal).toFixed(4)) : 0,
-      productoTop: margenSorted[0]?.producto ?? null,
-      productoBottom: margenSorted[margenSorted.length - 1]?.producto ?? null,
-    },
     margenPorCanal: Array.from(margenCanal.entries())
       .filter(([, m]) => m.ingresos.gt(0))
       .sort((a, b) => {
