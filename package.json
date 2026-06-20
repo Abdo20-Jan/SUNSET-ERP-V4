@@ -21,6 +21,7 @@
     "db:push:force": "echo 'PELIGRO: --force-reset BORRA TODA la base y DATABASE_URL apunta a PROD por defecto. Para resetear una base LOCAL corré explícito: DATABASE_URL=postgresql://localhost/tu_db_local pnpm exec prisma db push --force-reset' && exit 1",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed-retenciones": "tsx prisma/seed-parametros-retencion.ts",
+    "db:seed-ipc": "tsx prisma/seed-ipc-indec.ts",
     "db:setup": "prisma db push && tsx prisma/seed.ts",
     "db:backfill-stock": "tsx prisma/backfill-stock-por-deposito.ts",
     "db:validar-stock": "tsx prisma/validar-invariantes-stock.ts",

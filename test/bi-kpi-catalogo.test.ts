@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CATALOGO_KPI, kpiPorId, kpisPorCategoria } from "@/lib/services/bi-kpi-catalogo";
 import type { GiroIndicadores } from "@/lib/services/bi-giro-formulas";
 import type { LiquidezIndicadores } from "@/lib/services/bi-liquidez-formulas";
+import type { LucroIndicadores } from "@/lib/services/bi-lucro-formulas";
 
 describe("CATALOGO_KPI", () => {
   it("tiene ids únicos", () => {
@@ -53,5 +54,26 @@ describe("CATALOGO_KPI", () => {
       expect(claves).toContain(clave);
     }
     expect(kpisPorCategoria("liquidez").length).toBe(4);
+  });
+
+  it("drift: cada indicador de rentabilidad calculado tiene su definición en el catálogo", () => {
+    const claves: (keyof LucroIndicadores)[] = [
+      "margenBruto",
+      "margenBrutoPct",
+      "ebit",
+      "margenOperativoPct",
+      "ebitda",
+      "margenEbitdaPct",
+      "resultadoNeto",
+      "margenNetoPct",
+    ];
+    for (const c of claves) {
+      expect(kpiPorId(`rentabilidad.${c}`), `falta definición de rentabilidad.${c}`).toBeDefined();
+    }
+    for (const k of kpisPorCategoria("rentabilidad")) {
+      const clave = k.id.replace(/^rentabilidad\./, "") as keyof LucroIndicadores;
+      expect(claves).toContain(clave);
+    }
+    expect(kpisPorCategoria("rentabilidad").length).toBe(8);
   });
 });
