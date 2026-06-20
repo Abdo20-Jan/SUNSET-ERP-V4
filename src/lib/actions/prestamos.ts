@@ -10,6 +10,7 @@ import {
   PREFIJO_PRESTAMO_CORTO_PLAZO,
   PREFIJO_PRESTAMO_LARGO_PLAZO,
 } from "@/lib/services/prefijos-plan";
+import { COSTOS_FINANCIEROS_CODIGOS } from "@/lib/services/cuenta-registry";
 import {
   AsientoError,
   anularAsiento,
@@ -331,7 +332,7 @@ export type ContextoAmortizacion = {
   saldoPendienteUsd: string | null;
 };
 
-const CODIGO_INTERESES_PAGADOS = "9.1.03";
+const CODIGO_INTERESES_PAGADOS = COSTOS_FINANCIEROS_CODIGOS.INTERESES_PAGADOS.codigo;
 
 export async function obtenerContextoAmortizacion(
   prestamoId: string,

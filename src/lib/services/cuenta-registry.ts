@@ -425,11 +425,6 @@ export const TRANSFERENCIA_CODIGOS = {
     nombre: "DIFERENCIA DE CAMBIO NEGATIVA — REALIZADA",
     categoria: CuentaCategoria.EGRESO,
   },
-  DIFERENCIAS_REDONDEO: {
-    codigo: "9.8.01",
-    nombre: "DIFERENCIAS DE REDONDEO",
-    categoria: CuentaCategoria.EGRESO,
-  },
 } as const satisfies Record<string, CuentaDef>;
 
 // ----- VEP / DESPACHO ADUANERO (diferencia cambiaria) -------
