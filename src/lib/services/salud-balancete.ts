@@ -16,7 +16,7 @@ import { PREFIJO_CLIENTES, PREFIJOS_PROVEEDORES } from "./prefijos-plan";
 //     cuenta (p. ej. Depreciación Acumulada, ACTIVO/ACREEDOR) con saldo acreedor
 //     tiene saldo natural POSITIVO, así que no se marca.
 //  2. Subledger comercial reclasificable por signo (saldos a favor / anticipos):
-//     proveedores (2.1.1./2.1.8.) con saldo deudor y clientes (1.1.4.) con saldo
+//     proveedores (2.1.1.01./2.1.1.02.) con saldo deudor y clientes (1.1.3.) con saldo
 //     acreedor → el Balance General los reclasifica al lado opuesto. Mismos
 //     prefijos que `reclasificarSaldosAFavor` en reportes/balance-general.ts
 //     (fuente canónica; duplicados acá porque ese módulo es server-only).
