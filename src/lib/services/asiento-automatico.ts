@@ -3852,6 +3852,54 @@ export async function crearAsientoDestinoResultado(
   return withNumeracionRetry(() => db.$transaction(run));
 }
 
+export type CierreEjercicioCompletoInput = {
+  /** Inicio del ejercicio (inclusive). */
+  fechaDesde: Date;
+  /** Cierre del ejercicio (inclusive). El asiento de cierre se fecha acá. */
+  fechaHasta: Date;
+  /** Si `true`, destina el resultado (3.4.01 → 3.3.01) en la MISMA transacción. */
+  conDestino?: boolean;
+};
+
+/**
+ * Ejecuta el cierre del ejercicio (y opcionalmente el destino) de forma ATÓMICA
+ * y SERIALIZADA. Envuelve el check+create de ambos asientos en una sola
+ * transacción y toma un `pg_advisory_xact_lock` derivado del rango ANTES del
+ * guard: sin él, dos llamadas concurrentes del MISMO rango pasan ambas el
+ * `findFirst` de `crearAsientoCierre` (race TOCTOU) y generan asientos de
+ * cierre/destino duplicados.
+ *
+ * - Lock POR RANGO (no global): cierres de rangos distintos no se bloquean.
+ * - `pg_advisory_xact_lock` (transaction-scoped) se libera al cerrar la
+ *   transacción → seguro con PgBouncer en transaction-pooling, a diferencia del
+ *   lock de sesión. Mismo patrón que `movimientos-tesoreria.ts` (RG 830).
+ * - Atomicidad: si el destino falla, el cierre NO queda huérfano (rollback).
+ * - `withNumeracionRetry` envuelve la transacción entera: ante colisión de
+ *   numeración (P2002) re-ejecuta toda la tx (re-tomando el lock); un cierre ya
+ *   existente lanza DOMINIO_INVALIDO (no es P2002) y se propaga sin reintento.
+ */
+export async function ejecutarCierreEjercicio(
+  input: CierreEjercicioCompletoInput,
+): Promise<{ cierre: Asiento; destino: Asiento | null }> {
+  const lockKey = `cierre:${ymd(input.fechaDesde)}:${ymd(input.fechaHasta)}`;
+  return withNumeracionRetry(() =>
+    db.$transaction(async (tx) => {
+      // $executeRaw (no $queryRaw): pg_advisory_xact_lock devuelve `void` y el
+      // adapter pg no puede deserializar esa columna en $queryRaw. hashtext()
+      // → int4; se castea a bigint para la firma de 1 argumento del lock.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`;
+      const cierre = await crearAsientoCierre(
+        { fechaDesde: input.fechaDesde, fechaHasta: input.fechaHasta },
+        tx,
+      );
+      const destino = input.conDestino
+        ? await crearAsientoDestinoResultado({ fecha: input.fechaHasta }, tx)
+        : null;
+      return { cierre, destino };
+    }),
+  );
+}
+
 // ============================================================
 // Compras locales — asiento automático
 // ============================================================
