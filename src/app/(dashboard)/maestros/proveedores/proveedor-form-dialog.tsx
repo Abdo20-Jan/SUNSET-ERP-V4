@@ -348,8 +348,8 @@ export function ProveedorFormDialog({
               />
               <p className="text-xs text-muted-foreground">
                 Determina cuenta analítica auto-creada (
-                {nacionalidad === "EXTRANJERO" ? "2.1.8.x" : "2.1.1.10–59"}) y contrapartida natural
-                en compras.
+                {nacionalidad === "EXTRANJERO" ? "2.1.1.02.x" : "2.1.1.01.x"}) y contrapartida
+                natural en compras.
               </p>
             </div>
 
