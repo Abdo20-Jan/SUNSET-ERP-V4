@@ -3,21 +3,39 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { isStockDualEnabled } from "@/lib/features";
+import { fmtDate } from "@/lib/format";
 import { listarProveedoresParaGasto } from "@/lib/actions/gastos";
 import {
   listarClientesParaVenta,
   listarDepositosParaVenta,
   listarProductosParaVenta,
   obtenerVentaPorId,
+  type VentaDetalle,
 } from "@/lib/actions/ventas";
+import { listarEntregasDeVenta } from "@/lib/actions/entregas";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
+import { resolveActiveTab } from "@/lib/record-tabs";
+import { RecordHeader } from "@/components/layout/record-header";
+import { RecordTabs } from "@/components/ui/record-tabs";
+import { StatusBadge } from "@/components/ui/status-badge";
 
 import type { Moneda } from "../../reportes/_components/moneda-toggle";
 import { VentaForm } from "../_components/venta-form";
-import { VentaDetailView } from "../_components/venta-detail-view";
+import { VentaDetailActions } from "../_components/venta-detail-actions";
+import { VentaGeneralView } from "../_components/venta-general-view";
+import { VentaEntregasView } from "../_components/venta-entregas-view";
 
 type PageParams = Promise<{ id: string }>;
-type SearchParams = Promise<{ moneda?: string }>;
+type SearchParams = Promise<{ moneda?: string; tab?: string }>;
+
+const CONDICION_LABELS: Record<string, string> = {
+  CONTADO: "Contado",
+  TRANSFERENCIA: "Transferencia",
+  CHEQUE: "Cheque",
+  TARJETA: "Tarjeta",
+  CUENTA_CORRIENTE: "Cuenta corriente",
+  OTRO: "Otro",
+};
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +47,7 @@ export default async function VentaDetailPage({
   searchParams: SearchParams;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
 
   const venta = await obtenerVentaPorId(id);
   if (!venta) notFound();
@@ -52,15 +71,15 @@ export default async function VentaDetailPage({
     );
   }
 
-  const depositoIds = venta.items.map((it) => it.depositoId).filter((d): d is string => d !== null);
   const stockDualOn = isStockDualEnabled();
+  const tabsDisponibles = stockDualOn ? ["general", "entregas"] : ["general"];
+  const activeTab = resolveActiveTab(sp.tab, tabsDisponibles, "general");
 
-  const [cliente, productos, depositos, asiento, entregasPendientes, params2, session, cotizacion] =
+  const depositoIds = venta.items.map((it) => it.depositoId).filter((d): d is string => d !== null);
+
+  const [cliente, productos, depositos, asiento, entregasCount, session, cotizacion] =
     await Promise.all([
-      db.cliente.findUnique({
-        where: { id: venta.clienteId },
-        select: { nombre: true },
-      }),
+      db.cliente.findUnique({ where: { id: venta.clienteId }, select: { nombre: true } }),
       db.producto.findMany({
         where: { id: { in: venta.items.map((it) => it.productoId) } },
         select: { id: true, codigo: true, nombre: true },
@@ -72,32 +91,23 @@ export default async function VentaDetailPage({
           })
         : Promise.resolve([]),
       venta.asientoId
-        ? db.asiento.findUnique({
-            where: { id: venta.asientoId },
-            select: { numero: true },
-          })
+        ? db.asiento.findUnique({ where: { id: venta.asientoId }, select: { numero: true } })
         : Promise.resolve(null),
-      stockDualOn
-        ? db.entregaVenta.count({ where: { ventaId: id, estado: "BORRADOR" } })
-        : Promise.resolve(0),
-      searchParams,
+      stockDualOn ? db.entregaVenta.count({ where: { ventaId: id } }) : Promise.resolve(0),
       auth(),
       getCotizacionParaFecha(new Date()),
     ]);
 
   const productosMap: Record<string, { codigo: string; nombre: string }> = {};
-  for (const p of productos) {
-    productosMap[p.id] = { codigo: p.codigo, nombre: p.nombre };
-  }
+  for (const p of productos) productosMap[p.id] = { codigo: p.codigo, nombre: p.nombre };
 
   const depositosMap: Record<string, string> = {};
-  for (const d of depositos) {
-    depositosMap[d.id] = d.nombre;
-  }
+  for (const d of depositos) depositosMap[d.id] = d.nombre;
 
+  const clienteNombre = cliente?.nombre ?? "—";
   const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
   const moneda: Moneda =
-    params2.moneda === "ARS" ? "ARS" : params2.moneda === "USD" ? "USD" : monedaPreferida;
+    sp.moneda === "ARS" ? "ARS" : sp.moneda === "USD" ? "USD" : monedaPreferida;
   const tc = cotizacion ? cotizacion.valor.toString() : null;
   const tcInfo = cotizacion
     ? {
@@ -107,18 +117,66 @@ export default async function VentaDetailPage({
       }
     : null;
 
+  const puedeAnular = venta.estado === "EMITIDA" && venta.asientoId !== null;
+
   return (
-    <VentaDetailView
-      venta={venta}
-      clienteNombre={cliente?.nombre ?? "—"}
-      productosMap={productosMap}
-      depositosMap={depositosMap}
-      asientoNumero={asiento?.numero ?? null}
-      stockDualOn={stockDualOn}
-      entregasPendientes={entregasPendientes}
-      moneda={moneda}
-      tc={tc}
-      tcInfo={tcInfo}
-    />
+    <div className="flex flex-col gap-3">
+      <RecordHeader
+        breadcrumb={[{ label: "Ventas", href: "/ventas" }, { label: `Venta ${venta.numero}` }]}
+        title={`Venta ${venta.numero}`}
+        status={<StatusBadge estado={venta.estado} />}
+        subtitle={`${clienteNombre} · ${fmtDate(new Date(venta.fecha))} · ${
+          CONDICION_LABELS[venta.condicionPago] ?? venta.condicionPago
+        }`}
+        actions={
+          <VentaDetailActions
+            ventaId={venta.id}
+            numero={venta.numero}
+            moneda={moneda}
+            tcInfo={tcInfo}
+            puedeAnular={puedeAnular}
+          />
+        }
+      />
+
+      {stockDualOn && (
+        <RecordTabs
+          activeValue={activeTab}
+          tabs={[
+            { value: "general", label: "General" },
+            { value: "entregas", label: "Entregas", count: entregasCount },
+          ]}
+        />
+      )}
+
+      {activeTab === "general" && (
+        <VentaGeneralView
+          venta={venta}
+          productosMap={productosMap}
+          depositosMap={depositosMap}
+          asientoNumero={asiento?.numero ?? null}
+          moneda={moneda}
+          tc={tc}
+        />
+      )}
+      {activeTab === "entregas" && (
+        <EntregasTab ventaId={venta.id} numero={venta.numero} estado={venta.estado} />
+      )}
+    </div>
+  );
+}
+
+async function EntregasTab({
+  ventaId,
+  numero,
+  estado,
+}: {
+  ventaId: string;
+  numero: string;
+  estado: VentaDetalle["estado"];
+}) {
+  const entregas = await listarEntregasDeVenta(ventaId);
+  return (
+    <VentaEntregasView ventaId={ventaId} numero={numero} estado={estado} entregas={entregas} />
   );
 }

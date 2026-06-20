@@ -23,7 +23,7 @@ function Aviso({ id, children }: { id: string; children: React.ReactNode }) {
         <CardContent className="py-6 text-sm text-muted-foreground">{children}</CardContent>
       </Card>
       <Link
-        href={`/ventas/${id}/entregas`}
+        href={`/ventas/${id}?tab=entregas`}
         className={buttonVariants({ variant: "outline", size: "sm" })}
       >
         ← Volver a entregas
@@ -82,7 +82,7 @@ export default async function NuevaEntregaPage({ params }: { params: PageParams 
     <main className="container mx-auto space-y-6 p-6">
       <header className="flex flex-col gap-1">
         <Link
-          href={`/ventas/${id}/entregas`}
+          href={`/ventas/${id}?tab=entregas`}
           className="text-xs text-muted-foreground hover:text-foreground"
         >
           ← Entregas de la venta {venta.numero.trim()}

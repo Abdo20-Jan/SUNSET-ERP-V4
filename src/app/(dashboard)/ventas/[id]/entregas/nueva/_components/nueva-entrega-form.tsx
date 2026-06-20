@@ -88,7 +88,7 @@ export function NuevaEntregaForm({
         return;
       }
       toast.success(`Remito ${result.data.numero} creado (BORRADOR). Confirmalo para despachar.`);
-      router.push(`/ventas/${ventaId}/entregas`);
+      router.push(`/ventas/${ventaId}?tab=entregas`);
       router.refresh();
     });
   };
