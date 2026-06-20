@@ -28,6 +28,10 @@ const SUGGESTED_CUENTA_DEFAULTS: Record<string, { nombre: string; categoria: Cue
     categoria: CuentaCategoria.EGRESO,
   },
   "9.1.03": { nombre: "INTERESES PERDIDOS — PRÉSTAMOS", categoria: CuentaCategoria.EGRESO },
+  "9.1.04": {
+    nombre: "INTERESES PERDIDOS — DESCUBIERTOS Y CAPITAL DE GIRO",
+    categoria: CuentaCategoria.EGRESO,
+  },
   "1.1.4.1.01": {
     nombre: "IVA CRÉDITO FISCAL — COMPRAS LOCALES",
     categoria: CuentaCategoria.ACTIVO,
