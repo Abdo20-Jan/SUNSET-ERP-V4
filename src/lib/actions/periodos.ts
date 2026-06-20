@@ -6,8 +6,8 @@ import { requireAdmin } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import {
   AsientoError,
-  crearAsientoCierre,
   crearAsientoDestinoResultado,
+  ejecutarCierreEjercicio,
 } from "@/lib/services/asiento-automatico";
 import { AsientoEstado, PeriodoEstado } from "@/generated/prisma/client";
 
@@ -180,10 +180,11 @@ export type CerrarEjercicioResult =
 /**
  * Cierra el ejercicio en el rango [fechaDesde, fechaHasta]: genera el asiento
  * de cierre de resultados (clases 4-9 → 3.4.01) y, si `conDestino`, transfiere
- * el resultado a 3.3.01. Operación administrativa (requireAdmin). Cada asiento
- * corre en su propia transacción (cierre primero); el destino es un paso
- * societario posterior y puede dispararse aparte. Idempotente por el guard del
- * generador (un cierre por rango).
+ * el resultado a 3.3.01. Operación administrativa (requireAdmin). Cierre y
+ * destino corren en UNA sola transacción serializada por un advisory lock del
+ * rango (ver `ejecutarCierreEjercicio`): así dos llamadas concurrentes del mismo
+ * rango no duplican asientos (TOCTOU) y el destino no queda sin cierre.
+ * Idempotente por rango: un segundo cierre del mismo rango falla.
  */
 export async function cerrarEjercicio(input: {
   fechaDesde: string;
@@ -206,11 +207,13 @@ export async function cerrarEjercicio(input: {
   }
 
   try {
-    const cierre = await crearAsientoCierre({ fechaDesde, fechaHasta });
-    let destino: { id: string; numero: number } | null = null;
-    if (input.conDestino) {
-      destino = await crearAsientoDestinoResultado({ fecha: fechaHasta });
-    }
+    // Cierre + destino atómicos y serializados por advisory lock del rango.
+    const { cierre, destino } = await ejecutarCierreEjercicio({
+      fechaDesde,
+      fechaHasta,
+      conDestino: input.conDestino,
+    });
+    // Efectos colaterales FUERA de la transacción (ya commiteada).
     revalidatePath("/contabilidad");
     revalidatePath("/reportes");
     return {
