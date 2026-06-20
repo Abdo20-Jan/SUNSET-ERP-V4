@@ -87,7 +87,7 @@ export default async function EntregasHubPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <Link
-                      href={`/ventas/${v.ventaId}/entregas`}
+                      href={`/ventas/${v.ventaId}?tab=entregas`}
                       className={buttonVariants({ variant: "default", size: "sm" })}
                     >
                       Despachar
