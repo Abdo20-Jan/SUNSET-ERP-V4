@@ -51,22 +51,23 @@ CAMPOS DE IDENTIFICACIÓN DE LA LÍNEA — IMPORTANTE distinguir entre dos tipos
 
 - "referenciaBanco": código de referencia INTERNO del banco (también llamado "Cód. Op.", "Nº Operación", "Referencia", "ID Operación", "Origen" o similar). Es el identificador único de la transacción que asigna el banco. Suele ser una secuencia de 6-15 dígitos o alfanumérica que aparece en una columna propia o entre paréntesis junto a la descripción. Si el extracto muestra DOS números (ej: comprobante de cheque + referencia bancaria), poné cada uno en su campo. Si el banco solo provee un único identificador y no es claramente un comprobante de usuario (cheque/factura), tratalo como "referenciaBanco". Si no aparece, null.
 
-PLAN DE CUENTAS — REGLAS DE CLASIFICACIÓN (descripción → codigoCuentaSugerida):
+PLAN DE CUENTAS — REGLAS DE CLASIFICACIÓN (descripción → codigoCuentaSugerida).
+Usá EXACTAMENTE estos códigos del plan vigente (9 clases). NO inventes ni adaptes códigos:
 
-A. IMPUESTOS / RETENCIONES BANCARIAS:
-- "IMP. DEB. LEY 25413" / "Impuesto ley 25.413" / "IDCB" → "5.8.1.05" (IMPUESTO LEY 25413)
-- "IMPUESTO DE SELLOS" / "Imp. Sellos" → "5.8.1.04"
-- "IMP. ING. BRUTOS" / "Regimen recaudacion sircreb" / "Percepcion ingresos brutos" → "1.1.5.2.03" (PERCEPCIÓN IIBB SIRCREB)
-- "PERCEP. IVA" / "Iva percepcion rg 2408" → "1.1.5.1.02" (PERCEPCIÓN IVA RG 2408)
-- "IVA" sobre comisiones bancarias (ej "Iva 21% reg transfsc ley27743") → "1.1.5.1.01" (IVA CRÉDITO FISCAL)
+A. IMPUESTOS / PERCEPCIONES BANCARIAS:
+- "IMP. DEB. LEY 25413" / "IMP. CRED. LEY 25413" / "Impuesto ley 25.413" / "IDCB" / "Imp. al cheque" → "9.6.01" (IMPUESTO LEY 25.413). Sugerí SIEMPRE el monto total del movimiento contra 9.6.01: el sistema separa solo el 33% computable como pago a cuenta de Ganancias al contabilizar. confianza="ALTA".
+- "IMPUESTO DE SELLOS" / "Imp. Sellos" → "9.6.02" (IMPUESTO DE SELLOS S/ OPERACIONES FINANCIERAS)
+- "IMP. ING. BRUTOS" / "Regimen recaudacion sircreb" / "SIRCREB" / "Percepcion ingresos brutos" → "1.1.4.2.03" (IIBB RECAUDACIONES BANCARIAS — SIRCREB)
+- "PERCEP. IVA" / "Iva percepcion rg 2408" / "Percepcion IVA" → "1.1.4.1.06" (IVA PERCEPCIONES BANCARIAS)
+- "IVA" sobre comisiones bancarias (ej "Iva 21% s/comision", "Iva reg transfsc ley27743") → "1.1.4.1.01" (IVA CRÉDITO FISCAL)
 
 B. COSTOS FINANCIEROS:
-- "COMISION SERVICIO" / "Comision compensacion cheques" / "Comision por servicio" / "Comision echeq rechazado" / "COM. GESTION TRANSF" → "5.8.1.01" (COMISIONES BANCARIAS)
-- "INTERESES SOBRE SALDOS DEUDORES" → "5.8.1.07" (INTERESES PAGADOS)
+- "COMISION SERVICIO" / "Comision compensacion cheques" / "Comision por servicio" / "Comision echeq rechazado" / "COM. GESTION TRANSF" / "Mantenimiento de cuenta" → "9.5.01" (COMISIONES BANCARIAS)
+- "INTERESES SOBRE SALDOS DEUDORES" / "Interés por descubierto" / "Interés s/ saldo deudor cta cte" → "9.1.04" (INTERESES PERDIDOS — DESCUBIERTOS). Si el interés es claramente de un préstamo/financiación → "9.1.03" (INTERESES PERDIDOS — PRÉSTAMOS).
 
 C. INVERSIONES (FCI / fondos comunes):
-- "SUSCRIPCION FIMA" / "Suscripción FCI" → "1.1.3.01" (sale del banco, entra al FCI). monto negativo.
-- "RESCATE FIMA" / "Rescate FCI" → "1.1.3.01" (vuelve del FCI al banco). monto positivo.
+- "SUSCRIPCION FIMA" / "Suscripción FCI" → "1.1.2.01" (FONDOS COMUNES DE INVERSIÓN — sale del banco, entra al FCI). monto negativo.
+- "RESCATE FIMA" / "Rescate FCI" → "1.1.2.01" (vuelve del FCI al banco). monto positivo.
 
 D. TRANSFERENCIAS / PAGOS:
 - "TRF INMED PROVEED" + CUIT del beneficiario → tipoEntidad="PROVEEDOR", cuitDetectado=<cuit sin guiones>, codigoCuentaSugerida=null (lo resuelve el sistema). razon="Pago a proveedor — match por CUIT".
