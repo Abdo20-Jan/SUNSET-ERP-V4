@@ -46,6 +46,7 @@ const ESTADO_TONO: Record<string, Tono> = {
   GANADA: "success",
   CERRADO: "success",
   CERRADA: "success",
+  APLICADO_TOTAL: "success",
   // en proceso / atención
   PENDIENTE: "warning",
   EN_TRANSITO: "warning",
@@ -67,6 +68,7 @@ const ESTADO_TONO: Record<string, Tono> = {
   EN_DEPOSITO: "info",
   NUEVO: "info",
   NUEVA: "info",
+  VIGENTE: "info",
   // borradores / neutros
   BORRADOR: "neutral",
 };
