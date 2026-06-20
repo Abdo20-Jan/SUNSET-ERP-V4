@@ -14,7 +14,9 @@ import {
 } from "@/lib/actions/ventas";
 import { listarEntregasDeVenta } from "@/lib/actions/entregas";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
+import { getAuditLog } from "@/lib/services/auditoria";
 import { resolveActiveTab } from "@/lib/record-tabs";
+import { AuditTrail } from "@/components/ui/audit-trail";
 import { RecordHeader } from "@/components/layout/record-header";
 import { RecordTabs } from "@/components/ui/record-tabs";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -72,31 +74,43 @@ export default async function VentaDetailPage({
   }
 
   const stockDualOn = isStockDualEnabled();
-  const tabsDisponibles = stockDualOn ? ["general", "entregas"] : ["general"];
+  // La pestaña Historial aparece siempre; Entregas sólo con stock dual.
+  const tabsDisponibles = stockDualOn
+    ? ["general", "entregas", "historial"]
+    : ["general", "historial"];
   const activeTab = resolveActiveTab(sp.tab, tabsDisponibles, "general");
 
   const depositoIds = venta.items.map((it) => it.depositoId).filter((d): d is string => d !== null);
 
-  const [cliente, productos, depositos, asiento, entregasCount, session, cotizacion] =
-    await Promise.all([
-      db.cliente.findUnique({ where: { id: venta.clienteId }, select: { nombre: true } }),
-      db.producto.findMany({
-        where: { id: { in: venta.items.map((it) => it.productoId) } },
-        select: { id: true, codigo: true, nombre: true },
-      }),
-      depositoIds.length > 0
-        ? db.deposito.findMany({
-            where: { id: { in: depositoIds } },
-            select: { id: true, nombre: true },
-          })
-        : Promise.resolve([]),
-      venta.asientoId
-        ? db.asiento.findUnique({ where: { id: venta.asientoId }, select: { numero: true } })
-        : Promise.resolve(null),
-      stockDualOn ? db.entregaVenta.count({ where: { ventaId: id } }) : Promise.resolve(0),
-      auth(),
-      getCotizacionParaFecha(new Date()),
-    ]);
+  const [
+    cliente,
+    productos,
+    depositos,
+    asiento,
+    entregasCount,
+    historialCount,
+    session,
+    cotizacion,
+  ] = await Promise.all([
+    db.cliente.findUnique({ where: { id: venta.clienteId }, select: { nombre: true } }),
+    db.producto.findMany({
+      where: { id: { in: venta.items.map((it) => it.productoId) } },
+      select: { id: true, codigo: true, nombre: true },
+    }),
+    depositoIds.length > 0
+      ? db.deposito.findMany({
+          where: { id: { in: depositoIds } },
+          select: { id: true, nombre: true },
+        })
+      : Promise.resolve([]),
+    venta.asientoId
+      ? db.asiento.findUnique({ where: { id: venta.asientoId }, select: { numero: true } })
+      : Promise.resolve(null),
+    stockDualOn ? db.entregaVenta.count({ where: { ventaId: id } }) : Promise.resolve(0),
+    db.auditLog.count({ where: { tabla: "Venta", registroId: id } }),
+    auth(),
+    getCotizacionParaFecha(new Date()),
+  ]);
 
   const productosMap: Record<string, { codigo: string; nombre: string }> = {};
   for (const p of productos) productosMap[p.id] = { codigo: p.codigo, nombre: p.nombre };
@@ -139,15 +153,14 @@ export default async function VentaDetailPage({
         }
       />
 
-      {stockDualOn && (
-        <RecordTabs
-          activeValue={activeTab}
-          tabs={[
-            { value: "general", label: "General" },
-            { value: "entregas", label: "Entregas", count: entregasCount },
-          ]}
-        />
-      )}
+      <RecordTabs
+        activeValue={activeTab}
+        tabs={[
+          { value: "general", label: "General" },
+          ...(stockDualOn ? [{ value: "entregas", label: "Entregas", count: entregasCount }] : []),
+          { value: "historial", label: "Historial", count: historialCount },
+        ]}
+      />
 
       {activeTab === "general" && (
         <VentaGeneralView
@@ -162,8 +175,14 @@ export default async function VentaDetailPage({
       {activeTab === "entregas" && (
         <EntregasTab ventaId={venta.id} numero={venta.numero} estado={venta.estado} />
       )}
+      {activeTab === "historial" && <HistorialTab ventaId={venta.id} />}
     </div>
   );
+}
+
+async function HistorialTab({ ventaId }: { ventaId: string }) {
+  const entries = await getAuditLog("Venta", ventaId);
+  return <AuditTrail entries={entries} />;
 }
 
 async function EntregasTab({
