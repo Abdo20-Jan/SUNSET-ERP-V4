@@ -3,6 +3,7 @@ import { format } from "date-fns";
 
 import { db } from "@/lib/db";
 import { getLibroMayor, LibroMayorError } from "@/lib/services/reportes";
+import { documentosOrigenPorAsiento, type DocumentoOrigen } from "@/lib/services/bi-drill-down";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -87,6 +88,12 @@ export default async function LibroMayorPage({ searchParams }: { searchParams: S
       else throw e;
     }
   }
+
+  // Drill-down asiento → documento de origen, resuelto en LOTE (sin N+1):
+  // una sola consulta por los asientoId distintos de las líneas del mayor.
+  const docsPorAsiento: Map<string, DocumentoOrigen | null> = mayor
+    ? await documentosOrigenPorAsiento(mayor.lineas.map((l) => l.asientoId))
+    : new Map();
 
   const moneda: Moneda = params.moneda === "ARS" ? "ARS" : "USD";
   const fechaCorte = fechaHasta ?? new Date();
@@ -178,40 +185,51 @@ export default async function LibroMayorPage({ searchParams }: { searchParams: S
                   </TableCell>
                 </TableRow>
               ) : (
-                mayor.lineas.map((l) => (
-                  <TableRow key={l.lineaId}>
-                    <TableCell className="py-2 font-mono text-xs">
-                      {format(new Date(l.fecha), "yyyy-MM-dd")}
-                    </TableCell>
-                    <TableCell className="py-2">
-                      <Link
-                        href={`/contabilidad/asientos/${l.asientoId}`}
-                        className="font-mono text-xs text-primary underline-offset-2 hover:underline"
-                      >
-                        #{l.asientoNumero}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="py-2 text-xs">
-                      <span className="block">{l.asientoDescripcion}</span>
-                      {l.descripcion ? (
-                        <span className="block text-muted-foreground">{l.descripcion}</span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
-                      {fmt(l.debe.toFixed(2))}
-                    </TableCell>
-                    <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
-                      {fmt(l.haber.toFixed(2))}
-                    </TableCell>
-                    <TableCell className="py-2 text-right text-xs">
-                      <MoneyAmount
-                        value={l.saldoAcumulado.toFixed(2)}
-                        mode="signed"
-                        tcParaUsd={tcParaUsd ?? undefined}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))
+                mayor.lineas.map((l) => {
+                  const doc = docsPorAsiento.get(l.asientoId) ?? null;
+                  return (
+                    <TableRow key={l.lineaId}>
+                      <TableCell className="py-2 font-mono text-xs">
+                        {format(new Date(l.fecha), "yyyy-MM-dd")}
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <Link
+                          href={`/contabilidad/asientos/${l.asientoId}`}
+                          className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+                        >
+                          #{l.asientoNumero}
+                        </Link>
+                        {doc ? (
+                          <Link
+                            href={doc.href}
+                            className="block text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+                          >
+                            {doc.etiqueta}
+                          </Link>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="py-2 text-xs">
+                        <span className="block">{l.asientoDescripcion}</span>
+                        {l.descripcion ? (
+                          <span className="block text-muted-foreground">{l.descripcion}</span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
+                        {fmt(l.debe.toFixed(2))}
+                      </TableCell>
+                      <TableCell className="py-2 text-right font-mono text-xs tabular-nums">
+                        {fmt(l.haber.toFixed(2))}
+                      </TableCell>
+                      <TableCell className="py-2 text-right text-xs">
+                        <MoneyAmount
+                          value={l.saldoAcumulado.toFixed(2)}
+                          mode="signed"
+                          tcParaUsd={tcParaUsd ?? undefined}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
             {mayor.lineas.length > 0 ? (
