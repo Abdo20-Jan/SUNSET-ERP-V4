@@ -4,6 +4,11 @@ import Decimal from "decimal.js";
 
 import { db } from "@/lib/db";
 import { toDecimal } from "@/lib/decimal";
+import {
+  type EmbarqueComprasInput,
+  agregarComprasMoneda,
+  fobAUsd,
+} from "@/lib/services/bi-compras-moneda";
 import { getSaldosBancarios } from "@/lib/services/dashboard";
 import { isContenedorDesconsolidacionEnabled } from "@/lib/features";
 import {
@@ -601,6 +606,7 @@ export type AnalisisCompras = {
   tributosPorEmbarque: {
     label: string;
     die: number;
+    tasaEstadistica: number;
     arancel: number;
     iva: number;
     ivaAdicional: number;
@@ -634,15 +640,16 @@ export async function getAnalisisCompras(rng: DateRange): Promise<AnalisisCompra
           gte: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 11, 1)),
         },
       },
-      select: { createdAt: true, fobTotal: true },
+      select: { createdAt: true, fobTotal: true, moneda: true, tipoCambio: true },
     }),
     db.embarque.findMany({
       where: { createdAt: dateWhere(rng) },
       select: {
         id: true,
         codigo: true,
+        moneda: true,
+        tipoCambio: true,
         fobTotal: true,
-        cifTotal: true,
         die: true,
         tasaEstadistica: true,
         arancelSim: true,
@@ -657,6 +664,8 @@ export async function getAnalisisCompras(rng: DateRange): Promise<AnalisisCompra
         costos: {
           where: { estado: { not: "ANULADA" } },
           select: {
+            moneda: true,
+            tipoCambio: true,
             lineas: { select: { tipo: true, subtotal: true } },
           },
         },
@@ -698,25 +707,36 @@ export async function getAnalisisCompras(rng: DateRange): Promise<AnalisisCompra
     }),
   ]);
 
-  // KPIs
-  let importadoUsd = new Decimal(0);
-  let costoTotal = new Decimal(0);
-  let fobTotal = new Decimal(0);
+  // Montos native-aware: FOB en USD nativo, costos/tributos en ARS, % de
+  // nacionalización comparando misma moneda. Ver bi-compras-moneda.ts.
+  const inputs: EmbarqueComprasInput[] = embarquesRng.map((e) => ({
+    codigo: e.codigo,
+    proveedorNombre: e.proveedor.nombre,
+    moneda: e.moneda,
+    tipoCambio: e.tipoCambio.toString(),
+    fobTotal: e.fobTotal.toString(),
+    costoTotal: e.costoTotal.toString(),
+    tributos: {
+      die: e.die.toString(),
+      tasaEstadistica: e.tasaEstadistica.toString(),
+      arancel: e.arancelSim.toString(),
+      iva: e.iva.toString(),
+      ivaAdicional: e.ivaAdicional.toString(),
+      ganancias: e.ganancias.toString(),
+      iibb: e.iibb.toString(),
+    },
+    costos: e.costos.map((c) => ({
+      moneda: c.moneda,
+      tipoCambio: c.tipoCambio.toString(),
+      lineas: c.lineas.map((l) => ({ tipo: l.tipo, subtotal: l.subtotal.toString() })),
+    })),
+  }));
+  const m = agregarComprasMoneda(inputs);
+
+  // Ciclo promedio (empaque → cierre) — no monetario.
   let cicloDiasSum = 0;
   let cicloDiasCount = 0;
-  const porProveedor = new Map<string, Decimal>();
-  const tributosPorEmbarque: AnalisisCompras["tributosPorEmbarque"] = [];
-  const porTipoCosto = new Map<TipoCostoEmbarque, Decimal>();
-
   for (const e of embarquesRng) {
-    const fob = toDecimal(e.fobTotal);
-    fobTotal = fobTotal.plus(fob);
-    importadoUsd = importadoUsd.plus(fob);
-    costoTotal = costoTotal.plus(toDecimal(e.costoTotal));
-    porProveedor.set(
-      e.proveedor.nombre,
-      (porProveedor.get(e.proveedor.nombre) ?? new Decimal(0)).plus(fob),
-    );
     if (e.fechaEmpaque && e.fechaCierre) {
       const dias = Math.round((e.fechaCierre.getTime() - e.fechaEmpaque.getTime()) / 86_400_000);
       if (dias >= 0 && dias < 365) {
@@ -724,54 +744,36 @@ export async function getAnalisisCompras(rng: DateRange): Promise<AnalisisCompra
         cicloDiasCount += 1;
       }
     }
-    tributosPorEmbarque.push({
-      label: e.codigo,
-      die: num(e.die),
-      arancel: num(e.arancelSim),
-      iva: num(e.iva),
-      ivaAdicional: num(e.ivaAdicional),
-      ganancias: num(e.ganancias),
-      iibb: num(e.iibb),
-    });
-    for (const c of e.costos) {
-      for (const l of c.lineas) {
-        porTipoCosto.set(
-          l.tipo,
-          (porTipoCosto.get(l.tipo) ?? new Decimal(0)).plus(toDecimal(l.subtotal)),
-        );
-      }
-    }
   }
 
-  // Importación USD 12m
+  // Importación USD 12m — FOB convertido a USD nativo por embarque.
   const meses = lastNMonths(12);
   const impPorMes = new Map<string, Decimal>();
-  for (const m of meses) impPorMes.set(m.key, new Decimal(0));
+  for (const mes of meses) impPorMes.set(mes.key, new Decimal(0));
   for (const e of embarques12m) {
     const k = monthKey(e.createdAt);
-    impPorMes.set(k, (impPorMes.get(k) ?? new Decimal(0)).plus(toDecimal(e.fobTotal)));
+    const usd = new Decimal(fobAUsd(e.fobTotal.toString(), e.moneda, e.tipoCambio.toString()));
+    impPorMes.set(k, (impPorMes.get(k) ?? new Decimal(0)).plus(usd));
   }
 
   return {
     kpis: {
-      importadoUsd: num(importadoUsd),
-      costoNacionalizadoPct: fobTotal.gt(0) ? Number(costoTotal.div(fobTotal).toFixed(4)) : 0,
+      importadoUsd: m.importadoUsd,
+      costoNacionalizadoPct: m.costoNacionalizadoPct,
       cicloPromedioDias: cicloDiasCount > 0 ? Math.round(cicloDiasSum / cicloDiasCount) : 0,
       embarquesActivos: activos,
     },
     embarquesPorEstado: estadosCount.map((r) => ({ estado: r.estado, cantidad: r._count._all })),
-    importacionUsdMensal: meses.map((m) => ({
-      label: m.label,
-      value: num(impPorMes.get(m.key) ?? 0),
+    importacionUsdMensal: meses.map((mes) => ({
+      label: mes.label,
+      value: num(impPorMes.get(mes.key) ?? 0),
     })),
-    topProveedoresExterior: Array.from(porProveedor.entries())
-      .sort((a, b) => b[1].cmp(a[1]))
-      .slice(0, 10)
-      .map(([k, v]) => ({ label: k, value: num(v) })),
-    distribucionCostos: Array.from(porTipoCosto.entries())
-      .sort((a, b) => b[1].cmp(a[1]))
-      .map(([k, v]) => ({ label: TIPO_COSTO_LABEL[k], value: num(v) })),
-    tributosPorEmbarque: tributosPorEmbarque.slice(-12),
+    topProveedoresExterior: m.porProveedorUsd.slice(0, 10),
+    distribucionCostos: m.distribucionArs.map((d) => ({
+      label: TIPO_COSTO_LABEL[d.tipo as TipoCostoEmbarque],
+      value: d.value,
+    })),
+    tributosPorEmbarque: m.tributosArs.slice(-12),
     pedidosCompraPorEstado: pedidosCount.map((r) => ({
       estado: r.estado,
       cantidad: r._count._all,

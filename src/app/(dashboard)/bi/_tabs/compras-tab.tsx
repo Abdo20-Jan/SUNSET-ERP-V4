@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fmtDateOrDash, fmtInt, fmtMoney, convertirAUsd } from "@/lib/format";
+import { convertirMonto, fmtDateOrDash, fmtInt, fmtMoney } from "@/lib/format";
 import { getAnalisisCompras } from "@/lib/services/bi";
 
 import { KpiCard } from "../../dashboard/_components/kpi-card";
@@ -33,21 +33,31 @@ const pctFmt = new Intl.NumberFormat("es-AR", {
 export async function ComprasTab({
   desde,
   hasta,
-  tc,
+  moneda,
+  tcCierre,
 }: {
   desde?: Date | null;
   hasta?: Date | null;
-  tc?: string | null;
+  /** Moneda de presentación (toggle). Default "USD". */
+  moneda?: "ARS" | "USD";
+  /** TC de cierre sin gatear (convierte FOB USD nativo ↔ costos/tributos ARS). */
+  tcCierre?: string | null;
 }) {
   const r = await getAnalisisCompras({ desde, hasta });
-  const money = (n: number) => fmtMoney(convertirAUsd(n.toString(), tc ?? null));
+  // FOB es USD nativo; costos/tributos son ARS. Sólo presentamos en USD si hay
+  // TC para convertir la parte ARS; si no, caemos a ARS (degradación segura).
+  const tcConv = tcCierre ?? null;
+  const monedaEff: "ARS" | "USD" = moneda === "USD" && tcConv ? "USD" : "ARS";
+  const symbol = monedaEff === "USD" ? "USD " : "$ ";
+  const pres = (value: number, nativa: "ARS" | "USD") =>
+    Number(convertirMonto(value.toString(), nativa, monedaEff, tcConv));
 
   return (
     <div className="flex flex-col gap-3">
       <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <KpiCard
           label="Importado período"
-          value={`USD ${fmtMoney(r.kpis.importadoUsd.toString())}`}
+          value={`${symbol}${fmtMoney(pres(r.kpis.importadoUsd, "USD").toString())}`}
           icon={CargoShipIcon}
           accent="info"
           hint="Σ FOB embarques creados en rango"
@@ -57,7 +67,7 @@ export async function ComprasTab({
           value={pctFmt.format(r.kpis.costoNacionalizadoPct || 0)}
           icon={PercentSquareIcon}
           accent="warning"
-          hint="costoTotal / FOB"
+          hint="costo landed / FOB (misma moneda)"
         />
         <KpiCard
           label="Ciclo promedio"
@@ -95,38 +105,51 @@ export async function ComprasTab({
       </Card>
 
       <LineChartMoneyLazy
-        title="Importación USD · 12 meses"
+        title={`Importación · 12 meses (${monedaEff})`}
         description="FOB total de embarques creados por mes"
-        data={r.importacionUsdMensal.map((d) => ({ label: d.label, fob: d.value }))}
-        series={[{ key: "fob", label: "FOB USD", color: "var(--chart-4)" }]}
+        data={r.importacionUsdMensal.map((d) => ({ label: d.label, fob: pres(d.value, "USD") }))}
+        series={[{ key: "fob", label: `FOB ${monedaEff}`, color: "var(--chart-4)" }]}
       />
 
       <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <HorizontalBarRankingLazy
           title="Top 10 proveedores exterior"
-          description="Suma FOB por proveedor en el período"
-          data={r.topProveedoresExterior}
+          description={`Suma FOB por proveedor en el período (${monedaEff})`}
+          data={r.topProveedoresExterior.map((p) => ({
+            label: p.label,
+            value: pres(p.value, "USD"),
+          }))}
           color="var(--chart-4)"
         />
         <PieChartDistributionLazy
           title="Distribución de costos de nacionalización"
-          description="Por tipo (flete, seguro, despachante, etc.)"
-          data={r.distribucionCostos}
+          description={`Por tipo (flete, seguro, despachante, etc.) · ${monedaEff}`}
+          data={r.distribucionCostos.map((d) => ({ label: d.label, value: pres(d.value, "ARS") }))}
         />
       </section>
 
       {r.tributosPorEmbarque.length > 0 ? (
         <StackedBarChartLazy
           title="Composición tributaria por embarque"
-          description="Últimos 12 embarques · DIE / arancel / IVA / IIBB / Ganancias"
-          data={r.tributosPorEmbarque}
+          description={`Últimos 12 embarques · DIE / tasa est. / arancel / IVA / IIBB / Ganancias · ${monedaEff}`}
+          data={r.tributosPorEmbarque.map((t) => ({
+            label: t.label,
+            die: pres(t.die, "ARS"),
+            tasaEstadistica: pres(t.tasaEstadistica, "ARS"),
+            arancel: pres(t.arancel, "ARS"),
+            iva: pres(t.iva, "ARS"),
+            ivaAdicional: pres(t.ivaAdicional, "ARS"),
+            ganancias: pres(t.ganancias, "ARS"),
+            iibb: pres(t.iibb, "ARS"),
+          }))}
           series={[
             { key: "die", label: "DIE", color: "var(--chart-1)" },
-            { key: "arancel", label: "Arancel", color: "var(--chart-2)" },
-            { key: "iva", label: "IVA", color: "var(--chart-3)" },
-            { key: "ivaAdicional", label: "IVA Ad.", color: "var(--chart-4)" },
-            { key: "ganancias", label: "Ganancias", color: "var(--chart-5)" },
-            { key: "iibb", label: "IIBB", color: "var(--chart-1)" },
+            { key: "tasaEstadistica", label: "Tasa est.", color: "var(--chart-2)" },
+            { key: "arancel", label: "Arancel", color: "var(--chart-3)" },
+            { key: "iva", label: "IVA", color: "var(--chart-4)" },
+            { key: "ivaAdicional", label: "IVA Ad.", color: "var(--chart-5)" },
+            { key: "ganancias", label: "Ganancias", color: "var(--chart-1)" },
+            { key: "iibb", label: "IIBB", color: "var(--chart-2)" },
           ]}
           height={260}
         />
