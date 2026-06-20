@@ -12,6 +12,7 @@ import {
   crearAsientoCompra,
 } from "@/lib/services/asiento-automatico";
 import { categoriaCapitalizaEstoque } from "@/lib/services/cuenta-registry";
+import { PREFIJO_BIENES_DE_CAMBIO } from "@/lib/services/prefijos-plan";
 import { aplicarIngresoCompra } from "@/lib/services/stock";
 import {
   CompraEstado,
@@ -237,7 +238,7 @@ export async function listarCategoriasCompra(): Promise<CategoriaCompraOption[]>
     .filter(
       (c) =>
         c.tipo === CuentaTipo.ANALITICA &&
-        (c.categoria === CuentaCategoria.EGRESO || c.codigo.startsWith("1.1.7")),
+        (c.categoria === CuentaCategoria.EGRESO || c.codigo.startsWith(PREFIJO_BIENES_DE_CAMBIO)),
     )
     .map((c) => ({
       id: c.id,
