@@ -3,9 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { requireSessionUser } from "@/lib/auth-guard";
+import { serializarSnapshot } from "@/lib/auditoria-snapshot";
 import { db } from "@/lib/db";
 import { money, precioUnitario as toPrecioUnitario, toDecimal } from "@/lib/decimal";
 import { isStockDualEnabled } from "@/lib/features";
+import { registrarAuditoria } from "@/lib/services/auditoria";
 import {
   AsientoError,
   anularAsiento,
@@ -589,6 +592,22 @@ async function upsertFleteGasto(
   });
 }
 
+// Campos JSON-safe de la venta que se versionan en la auditoría. Decimal/Date
+// se serializan con serializarSnapshot antes de escribir. NO exportar: archivo
+// "use server" sólo exporta funciones async.
+const SNAPSHOT_VENTA_SELECT = {
+  numero: true,
+  clienteId: true,
+  estado: true,
+  condicionPago: true,
+  moneda: true,
+  fecha: true,
+  subtotal: true,
+  iva: true,
+  total: true,
+  tipoCambio: true,
+} as const;
+
 export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionResult> {
   const parsed = ventaInputSchema.safeParse(raw);
   if (!parsed.success) {
@@ -596,6 +615,10 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
     return { ok: false, error: `${first.path.join(".")}: ${first.message}` };
   }
   const input = parsed.data;
+  // Captura el usuario ANTES del try (requireSessionUser redirige en sesión
+  // inválida; un catch genérico se tragaría el NEXT_REDIRECT) y valida la FK
+  // AuditLog.usuarioId antes de escribir dentro de la transacción.
+  const usuarioId = await requireSessionUser();
 
   const itemsCalc = input.items.map((it) => ({
     ...it,
@@ -680,21 +703,41 @@ export async function guardarVentaAction(raw: VentaInput): Promise<VentaActionRe
       if (input.id) {
         const actual = await tx.venta.findUnique({
           where: { id: input.id },
-          select: { estado: true, asientoId: true },
+          select: { asientoId: true, ...SNAPSHOT_VENTA_SELECT },
         });
         if (!actual) throw new Error("Venta no existe.");
-        if (actual.asientoId) {
+        const { asientoId, ...antes } = actual;
+        if (asientoId) {
           throw new Error("Venta ya emitida; anule el asiento para editar.");
         }
-        const v = await tx.venta.update({
+        const { id: ventaId, ...despues } = await tx.venta.update({
           where: { id: input.id },
           data,
+          select: { id: true, ...SNAPSHOT_VENTA_SELECT },
         });
-        await tx.itemVenta.deleteMany({ where: { ventaId: v.id } });
-        id = v.id;
+        await tx.itemVenta.deleteMany({ where: { ventaId } });
+        id = ventaId;
+        await registrarAuditoria(tx, {
+          tabla: "Venta",
+          registroId: ventaId,
+          accion: "UPDATE",
+          usuarioId,
+          datosAnteriores: serializarSnapshot(antes),
+          datosNuevos: serializarSnapshot(despues),
+        });
       } else {
-        const v = await tx.venta.create({ data });
-        id = v.id;
+        const { id: ventaId, ...nuevos } = await tx.venta.create({
+          data,
+          select: { id: true, ...SNAPSHOT_VENTA_SELECT },
+        });
+        id = ventaId;
+        await registrarAuditoria(tx, {
+          tabla: "Venta",
+          registroId: ventaId,
+          accion: "CREATE",
+          usuarioId,
+          datosNuevos: serializarSnapshot(nuevos),
+        });
       }
 
       await tx.itemVenta.createMany({
@@ -808,14 +851,14 @@ async function liberarReservasAnulacion(
 export async function emitirVentaAction(
   ventaId: string,
 ): Promise<{ ok: true; numeroAsiento: number } | { ok: false; error: string }> {
+  const usuarioId = await requireSessionUser();
   try {
     const result = await db.$transaction(async (tx) => {
       const v = await tx.venta.findUnique({
         where: { id: ventaId },
         select: {
+          ...SNAPSHOT_VENTA_SELECT,
           asientoId: true,
-          numero: true,
-          fecha: true,
           items: {
             select: { productoId: true, cantidad: true, depositoId: true },
           },
@@ -824,16 +867,19 @@ export async function emitirVentaAction(
         },
       });
       if (!v) throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
-      if (v.asientoId) {
+      // `antes` = sólo los campos del snapshot (numero/estado/total/…); los
+      // extras (asientoId/items/fleteGasto) se usan abajo y no se auditan.
+      const { asientoId, items, fleteGasto, ...antes } = v;
+      if (asientoId) {
         throw new AsientoError("DOMINIO_INVALIDO", `Venta ${v.numero} ya tiene asiento.`);
       }
-      await reservarStockEmision(tx, v.items);
+      await reservarStockEmision(tx, items);
       const asiento = await crearAsientoVenta(ventaId, tx);
       const cont = await contabilizarAsiento(asiento.id, tx);
       // Contabilizar la factura de flete vinculada (DEBE flete + IVA crédito /
       // HABER proveedor → CxP real). Solo si está en BORRADOR sin asiento.
-      if (v.fleteGasto && !v.fleteGasto.asientoId && v.fleteGasto.estado === "BORRADOR") {
-        const asientoGasto = await crearAsientoGasto(v.fleteGasto.id, tx);
+      if (fleteGasto && !fleteGasto.asientoId && fleteGasto.estado === "BORRADOR") {
+        const asientoGasto = await crearAsientoGasto(fleteGasto.id, tx);
         await contabilizarAsiento(asientoGasto.id, tx);
       }
       // Stock-dual: deja una entrega BORRADOR (100% de los items, por depósito)
@@ -846,6 +892,14 @@ export async function emitirVentaAction(
       await tx.venta.update({
         where: { id: ventaId },
         data: { estado: VentaEstado.EMITIDA },
+      });
+      await registrarAuditoria(tx, {
+        tabla: "Venta",
+        registroId: ventaId,
+        accion: "UPDATE",
+        usuarioId,
+        datosAnteriores: serializarSnapshot(antes),
+        datosNuevos: serializarSnapshot({ ...antes, estado: VentaEstado.EMITIDA }),
       });
       return cont.numero;
     });
@@ -870,11 +924,13 @@ function ensureSinEntregasConfirmadas(entregas: readonly { numero: string }[]): 
 export async function anularVentaAction(
   ventaId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const usuarioId = await requireSessionUser();
   try {
     await db.$transaction(async (tx) => {
       const v = await tx.venta.findUnique({
         where: { id: ventaId },
         select: {
+          ...SNAPSHOT_VENTA_SELECT,
           asientoId: true,
           items: {
             select: { productoId: true, cantidad: true, depositoId: true },
@@ -898,16 +954,18 @@ export async function anularVentaAction(
       if (!v) {
         throw new AsientoError("DOMINIO_INVALIDO", "Venta no existe.");
       }
-      ensureSinEntregasConfirmadas(v.entregas);
+      // `antes` = sólo los campos del snapshot; los extras se usan abajo.
+      const { asientoId, items, entregas, chequesRecibidos, fleteGasto, ...antes } = v;
+      ensureSinEntregasConfirmadas(entregas);
 
       // Anular la factura de flete vinculada: reversa su asiento (CxP + IVA
       // crédito) y marca el gasto ANULADO. Espeja anularGastoAction.
-      if (v.fleteGasto && v.fleteGasto.estado !== "ANULADO") {
-        if (v.fleteGasto.asientoId) {
-          await anularAsiento(v.fleteGasto.asientoId, tx);
+      if (fleteGasto && fleteGasto.estado !== "ANULADO") {
+        if (fleteGasto.asientoId) {
+          await anularAsiento(fleteGasto.asientoId, tx);
         }
         await tx.gasto.update({
-          where: { id: v.fleteGasto.id },
+          where: { id: fleteGasto.id },
           data: { estado: GastoEstado.ANULADO },
         });
       }
@@ -916,7 +974,7 @@ export async function anularVentaAction(
       // Se o cheque já foi acreditado (ACREDITADO/DEPOSITADO), o
       // asiento de cobro reverte o crédito bancário — efeito desejado
       // ao anular a venda.
-      for (const cheque of v.chequesRecibidos) {
+      for (const cheque of chequesRecibidos) {
         if (cheque.asientoCobroId) {
           await anularAsiento(cheque.asientoCobroId, tx);
         }
@@ -926,15 +984,25 @@ export async function anularVentaAction(
         });
       }
 
-      if (!v.asientoId) {
+      if (!asientoId) {
         await tx.venta.update({
           where: { id: ventaId },
           data: { estado: VentaEstado.CANCELADA },
         });
-        return;
+      } else {
+        // anularAsiento desvincula el asiento y deja la venta CANCELADA
+        // (updateMany dentro de anularEnTx).
+        await liberarReservasAnulacion(tx, items);
+        await anularAsiento(asientoId, tx);
       }
-      await liberarReservasAnulacion(tx, v.items);
-      await anularAsiento(v.asientoId, tx);
+      await registrarAuditoria(tx, {
+        tabla: "Venta",
+        registroId: ventaId,
+        accion: "UPDATE",
+        usuarioId,
+        datosAnteriores: serializarSnapshot(antes),
+        datosNuevos: serializarSnapshot({ ...antes, estado: VentaEstado.CANCELADA }),
+      });
     });
     revalidatePath("/ventas");
     revalidatePath(`/ventas/${ventaId}`);

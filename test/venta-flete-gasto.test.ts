@@ -36,6 +36,9 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/db", () => ({ db: h.dbProxy }));
+// Las actions de venta ahora capturan al usuario (requireSessionUser) para la
+// auditoría; createTestDb siembra el User "user-uuid" que el guard valida.
+vi.mock("@/lib/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "user-uuid" } })) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import {
