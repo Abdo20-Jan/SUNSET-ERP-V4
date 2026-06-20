@@ -12,6 +12,7 @@ export type BiTabId =
   | "stock"
   | "tesoreria"
   | "giro"
+  | "liquidez"
   | "rentabilidad"
   | "fiscal";
 
@@ -22,6 +23,7 @@ const TABS: { id: BiTabId; label: string; emoji: string }[] = [
   { id: "stock", label: "Stock", emoji: "📦" },
   { id: "tesoreria", label: "Tesorería", emoji: "💳" },
   { id: "giro", label: "Giro", emoji: "🔄" },
+  { id: "liquidez", label: "Liquidez", emoji: "💧" },
   { id: "rentabilidad", label: "Rentabilidad", emoji: "📈" },
   { id: "fiscal", label: "Fiscal", emoji: "🧾" },
 ];
