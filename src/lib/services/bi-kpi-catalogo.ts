@@ -8,7 +8,7 @@
  * de drift garantiza que cada indicador calculado tenga su definición.
  */
 
-export const CATALOGO_KPI_VERSION = "2026-06-19";
+export const CATALOGO_KPI_VERSION = "2026-06-20";
 
 export type KpiCategoria = "giro" | "liquidez" | "rentabilidad" | "valor";
 export type KpiUnidad = "dias" | "monto" | "porcentaje" | "ratio";
@@ -120,6 +120,86 @@ export const CATALOGO_KPI: readonly KpiDef[] = [
     unidad: "monto",
     descripcion: "Colchón operativo: activo corriente menos pasivo corriente.",
     formula: "Activo corriente − Pasivo corriente",
+    direccionIdeal: "mayor-mejor",
+  },
+  {
+    id: "rentabilidad.margenBruto",
+    label: "Resultado bruto",
+    sigla: "RB",
+    categoria: "rentabilidad",
+    unidad: "monto",
+    descripcion: "Ventas netas menos el costo de la mercadería vendida.",
+    formula: "Ingresos netos − Costo de ventas",
+    direccionIdeal: "mayor-mejor",
+  },
+  {
+    id: "rentabilidad.margenBrutoPct",
+    label: "Margen bruto",
+    sigla: "MB%",
+    categoria: "rentabilidad",
+    unidad: "porcentaje",
+    descripcion: "Resultado bruto como porcentaje de las ventas netas.",
+    formula: "Resultado bruto ÷ Ingresos netos",
+    direccionIdeal: "mayor-mejor",
+  },
+  {
+    id: "rentabilidad.ebit",
+    label: "Resultado operativo",
+    sigla: "EBIT",
+    categoria: "rentabilidad",
+    unidad: "monto",
+    descripcion: "Ganancia operativa antes de resultados financieros e impuestos.",
+    formula: "Resultado bruto − Comercialización − Administración − Otros gastos operativos",
+    direccionIdeal: "mayor-mejor",
+  },
+  {
+    id: "rentabilidad.margenOperativoPct",
+    label: "Margen operativo",
+    sigla: "MO%",
+    categoria: "rentabilidad",
+    unidad: "porcentaje",
+    descripcion: "Resultado operativo (EBIT) como porcentaje de las ventas netas.",
+    formula: "EBIT ÷ Ingresos netos",
+    direccionIdeal: "mayor-mejor",
+  },
+  {
+    id: "rentabilidad.ebitda",
+    label: "EBITDA",
+    sigla: "EBITDA",
+    categoria: "rentabilidad",
+    unidad: "monto",
+    descripcion: "Resultado operativo antes de depreciaciones y amortizaciones.",
+    formula: "EBIT + Depreciación y amortización (7.7.)",
+    direccionIdeal: "mayor-mejor",
+  },
+  {
+    id: "rentabilidad.margenEbitdaPct",
+    label: "Margen EBITDA",
+    sigla: "ME%",
+    categoria: "rentabilidad",
+    unidad: "porcentaje",
+    descripcion: "EBITDA como porcentaje de las ventas netas.",
+    formula: "EBITDA ÷ Ingresos netos",
+    direccionIdeal: "mayor-mejor",
+  },
+  {
+    id: "rentabilidad.resultadoNeto",
+    label: "Resultado neto",
+    sigla: "RN",
+    categoria: "rentabilidad",
+    unidad: "monto",
+    descripcion: "Resultado del ejercicio, después de impuestos.",
+    formula: "Σ (haber − debe) de las cuentas de resultado",
+    direccionIdeal: "mayor-mejor",
+  },
+  {
+    id: "rentabilidad.margenNetoPct",
+    label: "Margen neto",
+    sigla: "MN%",
+    categoria: "rentabilidad",
+    unidad: "porcentaje",
+    descripcion: "Resultado neto como porcentaje de las ventas netas.",
+    formula: "Resultado neto ÷ Ingresos netos",
     direccionIdeal: "mayor-mejor",
   },
 ] as const;
