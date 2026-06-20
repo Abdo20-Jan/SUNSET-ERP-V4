@@ -165,8 +165,8 @@ import type { TipoCanal, TipoProveedor } from "@/generated/prisma/client";
  *
  * Cliente: por canal (`tipoCanal`).
  * Proveedor: por tipo (`tipoProveedor`). Extranjeros viven en
- * `2.1.8 PROVEEDORES DEL EXTERIOR` (sintetica nueva, separada
- * de `2.1.1 DEUDAS COMERCIALES`).
+ * `2.1.1.02 PROVEEDORES DEL EXTERIOR` (separada de los proveedores
+ * locales `2.1.1.01`).
  */
 const RANGES = {
   // Cliente — por canal, bajo 1.1.3.01 (nacional) / 1.1.3.02 (exterior).
@@ -417,9 +417,4 @@ export function rangoClienteByCanal(canal: TipoCanal): RangoCuentaAuto {
 
 export function esTipoProveedorExtranjero(tipo: TipoProveedor): boolean {
   return tipo === "MERCADERIA_EXTERIOR" || tipo === "SERVICIOS_EXTERIOR";
-}
-
-/** @deprecated use rangoProveedorByTipo. Kept for backwards compat during refactor. */
-export function rangoProveedor(pais: string): RangoCuentaAuto {
-  return pais === "AR" ? "PROVEEDOR_MERCADERIA_LOCAL" : "PROVEEDOR_MERCADERIA_EXTERIOR";
 }
