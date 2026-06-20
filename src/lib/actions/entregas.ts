@@ -162,7 +162,6 @@ export async function crearEntregaAction(
       });
     });
     revalidatePath(`/ventas/${input.ventaId}`);
-    revalidatePath(`/ventas/${input.ventaId}/entregas`);
     return { ok: true, data: { entregaId: result.id, numero: result.numero } };
   } catch (err) {
     if (err instanceof AsientoError) return { ok: false, error: err.message };
@@ -302,7 +301,6 @@ export async function confirmarEntregaAction(
       return { ventaId: entrega.ventaId, numeroAsiento: cont.numero };
     });
     revalidatePath(`/ventas/${result.ventaId}`);
-    revalidatePath(`/ventas/${result.ventaId}/entregas`);
     revalidatePath("/ventas");
     return { ok: true, data: { numeroAsiento: result.numeroAsiento } };
   } catch (err) {

@@ -1,26 +1,8 @@
-"use client";
-
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { CancelCircleIcon, TruckDeliveryIcon } from "@hugeicons/core-free-icons";
-
-import { anularVentaAction, type VentaDetalle } from "@/lib/actions/ventas";
+import type { VentaDetalle } from "@/lib/actions/ventas";
 import { fmtDate, fmtMontoPres, fmtTipoCambio } from "@/lib/format";
-import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import type { Moneda } from "../../reportes/_components/moneda-toggle";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateBadge } from "@/components/ui/date-badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -32,103 +14,26 @@ import {
 
 type Props = {
   venta: VentaDetalle;
-  clienteNombre: string;
   productosMap: Record<string, { codigo: string; nombre: string }>;
   depositosMap: Record<string, string>;
   asientoNumero: number | null;
-  stockDualOn: boolean;
-  entregasPendientes: number;
   moneda: Moneda;
   tc: string | null;
-  tcInfo: { valor: string; fecha: string; fuente: string | null } | null;
 };
 
-const CONDICION_LABELS: Record<string, string> = {
-  CONTADO: "Contado",
-  TRANSFERENCIA: "Transferencia",
-  CHEQUE: "Cheque",
-  TARJETA: "Tarjeta",
-  CUENTA_CORRIENTE: "Cuenta corriente",
-  OTRO: "Otro",
-};
-
-function estadoVariant(
-  estado: VentaDetalle["estado"],
-): "default" | "outline" | "secondary" | "destructive" {
-  switch (estado) {
-    case "BORRADOR":
-      return "outline";
-    case "EMITIDA":
-      return "default";
-    case "CANCELADA":
-      return "destructive";
-  }
-}
-
-export function VentaDetailView({
+// Tab "General" del detalle de venta: totales (Stats), campos y la tabla de
+// ítems. Presentacional (sólo formatea con `moneda`/`tc` ya resueltos por la
+// página) → server component, fuera del bundle client.
+export function VentaGeneralView({
   venta,
-  clienteNombre,
   productosMap,
   depositosMap,
   asientoNumero,
-  stockDualOn,
-  entregasPendientes,
   moneda,
   tc,
-  tcInfo,
 }: Props) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [confirmOpen, setConfirmOpen] = useState(false);
-
-  const puedeAnular = venta.estado === "EMITIDA" && venta.asientoId !== null;
-
-  const handleAnular = () => {
-    startTransition(async () => {
-      const result = await anularVentaAction(venta.id);
-      if (result.ok) {
-        toast.success("Venta anulada.");
-        setConfirmOpen(false);
-        router.refresh();
-      } else {
-        toast.error(result.error);
-      }
-    });
-  };
-
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <h1 className="text-[15px] font-semibold tracking-tight">Venta {venta.numero}</h1>
-            <Badge variant={estadoVariant(venta.estado)}>{venta.estado}</Badge>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {clienteNombre} · {fmtDate(new Date(venta.fecha))} ·{" "}
-            {CONDICION_LABELS[venta.condicionPago] ?? venta.condicionPago}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <MonedaToggle current={moneda} tcInfo={tcInfo} />
-          {stockDualOn && venta.estado === "EMITIDA" && (
-            <Button variant="outline" onClick={() => router.push(`/ventas/${venta.id}/entregas`)}>
-              <HugeiconsIcon icon={TruckDeliveryIcon} strokeWidth={2} />
-              Entregas
-              {entregasPendientes > 0 && (
-                <Badge variant="secondary">{entregasPendientes} pend.</Badge>
-              )}
-            </Button>
-          )}
-          {puedeAnular && (
-            <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={isPending}>
-              <HugeiconsIcon icon={CancelCircleIcon} strokeWidth={2} />
-              Anular
-            </Button>
-          )}
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
         <Stat
           label="Subtotal"
@@ -239,31 +144,6 @@ export function VentaDetailView({
           </TableBody>
         </Table>
       </Card>
-
-      <Dialog
-        open={confirmOpen}
-        onOpenChange={(open) => {
-          if (!open && !isPending) setConfirmOpen(false);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Anular venta {venta.numero}</DialogTitle>
-            <DialogDescription>
-              Esta acción genera un asiento de reverso, marca la venta como CANCELADA y desvincula
-              el asiento original. El número de venta se mantiene para auditoría.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={isPending}>
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={handleAnular} disabled={isPending}>
-              {isPending ? "Procesando…" : "Anular"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
