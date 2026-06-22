@@ -15,13 +15,13 @@ vi.mock("@/lib/services/cuentas-a-pagar", () => ({ getCuentasAPagar }));
 
 import { getReconciliacionSubledger } from "@/lib/services/bi-reconciliacion";
 
-// Helpers para montar respostas mínimas dos mocks.
-// biome-ignore lint/suspicious/noExplicitAny: mocks parciais — só os campos lidos pelo service.
-function balanceConNodos(nodos: Array<{ codigo: string; saldoFinal: string }>): any {
+// Helpers para montar respostas mínimas dos mocks (só os campos lidos pelo service).
+// Sem anotação de retorno: a inferência tipa o literal e os mocks (`vi.fn()`) aceitam
+// qualquer objeto — evita o `any` (que é ERRO no ESLint do repo, não só warning no Biome).
+function balanceConNodos(nodos: Array<{ codigo: string; saldoFinal: string }>) {
   return { rango: { fechaDesde: null, fechaHasta: null }, root: nodos };
 }
-// biome-ignore lint/suspicious/noExplicitAny: idem.
-function row(codigo: string, saldo: string): any {
+function row(codigo: string, saldo: string) {
   return { cuentaId: 1, cuentaCodigo: codigo, cuentaNombre: codigo, saldo };
 }
 
