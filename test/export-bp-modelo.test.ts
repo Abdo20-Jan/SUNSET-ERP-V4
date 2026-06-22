@@ -67,6 +67,9 @@ function bgFixture() {
     totalActivo: new Decimal(6000),
     totalPasivo: new Decimal(3500),
     totalPatrimonioAjustado: new Decimal(2500),
+    totalSaldoInicialActivo: new Decimal(0),
+    totalSaldoInicialPasivo: new Decimal(0),
+    totalSaldoInicialPatrimonio: new Decimal(0),
     resultadoEjercicio: new Decimal(500),
     diferencia: new Decimal(0),
     cuadra: true,
@@ -129,6 +132,20 @@ describe("construirModeloBP", () => {
   it("omite blocos sem linhas (saldo zero)", () => {
     const m = construirModeloBP(bgFixture(), { tc: "10", fecha: "2025-12-31" });
     expect(m.ativo.some((b) => b.key === "IMOBILIZADO")).toBe(false);
+  });
+
+  it("expõe saldo inicial (data inicial) e datas do cabeçalho", () => {
+    const m = construirModeloBP(bgFixture(), {
+      tc: "10",
+      fecha: "2025-12-31",
+      fechaInicial: "2025-01-01",
+    });
+    expect(m.fechaInicial).toBe("2025-01-01");
+    expect(m.fechaFinal).toBe("2025-12-31");
+    expect(m.totalAtivoUsdInicial).toBe("0.00");
+    const disp = m.ativo.find((b) => b.key === "DISPONIBILIDADE");
+    expect(disp?.subtotalArsInicial).toBe("0.00");
+    expect(disp?.lineas[0]?.usdInicial).toBe("0.00");
   });
 });
 

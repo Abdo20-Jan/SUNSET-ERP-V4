@@ -22,8 +22,14 @@ import {
 export type LineaBP = {
   codigo: string;
   descripcion: string;
+  // SALDO FINAL (data final) — fechamento.
   usd: string; // toFixed(2)
   ars: string; // toFixed(2)
+  // SALDO INICIAL (data inicial) — abertura (saldo acumulado anterior a
+  // fechaDesde; 0 quando o relatório é só "saldo al hasta"). A diferença
+  // final − inicial é o movimento do período, exibido nas colunas do meio.
+  usdInicial: string; // toFixed(2)
+  arsInicial: string; // toFixed(2)
 };
 
 export type BloqueModelo = {
@@ -32,6 +38,8 @@ export type BloqueModelo = {
   lineas: LineaBP[];
   subtotalUsd: string;
   subtotalArs: string;
+  subtotalUsdInicial: string;
+  subtotalArsInicial: string;
   // Detalhe por embarque (sub-linhas informativas; NÃO entram no subtotal nem
   // nos totais — preserva o cuadre contável). Ver balance-bp-detalle.ts.
   detalle?: DetalleEmbarqueBP[];
@@ -45,10 +53,19 @@ export type BalanceBPModelo = {
   pl: BloqueModelo[];
   totalAtivoUsd: string;
   totalAtivoArs: string;
+  totalAtivoUsdInicial: string;
+  totalAtivoArsInicial: string;
   totalPasivoUsd: string;
   totalPasivoArs: string;
+  totalPasivoUsdInicial: string;
+  totalPasivoArsInicial: string;
   totalPlUsd: string;
   totalPlArs: string;
+  totalPlUsdInicial: string;
+  totalPlArsInicial: string;
+  // Datas do cabeçalho: inicial (abertura) e final (fechamento).
+  fechaInicial: string | null; // YYYY-MM-DD ou null (só "saldo al hasta")
+  fechaFinal: string; // YYYY-MM-DD
   checkUsd: string; // ATIVO − (PASIVO + PL); 0 quando cuadra
   checkArs: string;
   cuadra: boolean;
@@ -67,6 +84,9 @@ type BalanceInput = Pick<
   | "totalActivo"
   | "totalPasivo"
   | "totalPatrimonioAjustado"
+  | "totalSaldoInicialActivo"
+  | "totalSaldoInicialPasivo"
+  | "totalSaldoInicialPatrimonio"
   | "resultadoEjercicio"
   | "cuadra"
   | "diferencia"
@@ -81,9 +101,23 @@ function recolectarHojas(nodes: CuentaTreeNode[]): CuentaTreeNode[] {
   return out;
 }
 
-function linea(codigo: string, descripcion: string, saldoArs: Decimal, tc: string | null): LineaBP {
+function linea(
+  codigo: string,
+  descripcion: string,
+  saldoArs: Decimal,
+  saldoInicialArs: Decimal,
+  tc: string | null,
+): LineaBP {
   const ars = saldoArs.toFixed(2);
-  return { codigo, descripcion, ars, usd: convertirAUsd(ars, tc) };
+  const arsInicial = saldoInicialArs.toFixed(2);
+  return {
+    codigo,
+    descripcion,
+    ars,
+    usd: convertirAUsd(ars, tc),
+    arsInicial,
+    usdInicial: convertirAUsd(arsInicial, tc),
+  };
 }
 
 function construirLado(nodes: CuentaTreeNode[], lado: LadoBP, tc: string | null): BloqueModelo[] {
@@ -99,14 +133,17 @@ function construirLado(nodes: CuentaTreeNode[], lado: LadoBP, tc: string | null)
   for (const def of bloquesPorLado(lado)) {
     const hojas = (porBloque.get(def.key) ?? []).filter((h) => !h.saldo.isZero());
     if (hojas.length === 0) continue; // não emite bloco vazio (v1)
-    const lineas = hojas.map((h) => linea(h.codigo, h.nombre, h.saldo, tc));
+    const lineas = hojas.map((h) => linea(h.codigo, h.nombre, h.saldo, h.saldoInicial, tc));
     const subtotalArs = sumMoney(hojas.map((h) => h.saldo)).toFixed(2);
+    const subtotalArsInicial = sumMoney(hojas.map((h) => h.saldoInicial)).toFixed(2);
     modelos.push({
       key: def.key,
       titulo: def.titulo,
       lineas,
       subtotalArs,
       subtotalUsd: convertirAUsd(subtotalArs, tc),
+      subtotalArsInicial,
+      subtotalUsdInicial: convertirAUsd(subtotalArsInicial, tc),
     });
   }
   return modelos;
@@ -137,6 +174,8 @@ function adjuntarDetalle(
     lineas: [],
     subtotalArs: "0.00",
     subtotalUsd: convertirAUsd("0.00", tc),
+    subtotalArsInicial: "0.00",
+    subtotalUsdInicial: convertirAUsd("0.00", tc),
     detalle,
   });
   bloques.sort((a, b) => (ORDEN_BLOQUE.get(a.key) ?? 0) - (ORDEN_BLOQUE.get(b.key) ?? 0));
@@ -146,7 +185,8 @@ export function construirModeloBP(
   bg: BalanceInput,
   opts: {
     tc: string | null;
-    fecha: string;
+    fecha: string; // data final (fechaHasta) — fechamento
+    fechaInicial?: string | null; // data inicial (fechaDesde) — abertura
     // Sub-linhas por embarque (lado passivo / ativo). Mapeadas pela rota a
     // partir de getSaldosExteriorPorProveedor / getStockEnTransitoPorEmbarque.
     detalleExterior?: DetalleEmbarqueBP[];
@@ -165,7 +205,9 @@ export function construirModeloBP(
   // RESULTADO DEL EJERCICIO: vem do Estado de Resultados (não é uma hoja da
   // árvore patrimonial). Soma-se ao PL para que o total bata com o ajustado.
   if (!bg.resultadoEjercicio.isZero()) {
-    const ln = linea("3.4", "RESULTADO DEL EJERCICIO", bg.resultadoEjercicio, tc);
+    // Resultado é movimento do período → saldo inicial 0 (aparece como
+    // movimento entre data inicial e data final).
+    const ln = linea("3.4", "RESULTADO DEL EJERCICIO", bg.resultadoEjercicio, new Decimal(0), tc);
     let blk = pl.find((b) => b.key === "PATRIMONIO_LIQUIDO");
     if (!blk) {
       blk = {
@@ -174,6 +216,8 @@ export function construirModeloBP(
         lineas: [],
         subtotalArs: "0.00",
         subtotalUsd: convertirAUsd("0.00", tc),
+        subtotalArsInicial: "0.00",
+        subtotalUsdInicial: convertirAUsd("0.00", tc),
       };
       pl.push(blk);
     }
@@ -191,6 +235,9 @@ export function construirModeloBP(
   const totalAtivoArs = bg.totalActivo.toFixed(2);
   const totalPasivoArs = bg.totalPasivo.toFixed(2);
   const totalPlArs = bg.totalPatrimonioAjustado.toFixed(2);
+  const totalAtivoArsInicial = bg.totalSaldoInicialActivo.toFixed(2);
+  const totalPasivoArsInicial = bg.totalSaldoInicialPasivo.toFixed(2);
+  const totalPlArsInicial = bg.totalSaldoInicialPatrimonio.toFixed(2);
   const checkArs = bg.diferencia.toFixed(2);
 
   // Bloco DRE (opcional): conferência ▲ = RESULTADO do DRE − RESULTADO do PL.
@@ -204,15 +251,23 @@ export function construirModeloBP(
   return {
     fecha,
     tc,
+    fechaInicial: opts.fechaInicial ?? null,
+    fechaFinal: fecha,
     ativo,
     pasivo,
     pl,
     totalAtivoArs,
     totalAtivoUsd: convertirAUsd(totalAtivoArs, tc),
+    totalAtivoArsInicial,
+    totalAtivoUsdInicial: convertirAUsd(totalAtivoArsInicial, tc),
     totalPasivoArs,
     totalPasivoUsd: convertirAUsd(totalPasivoArs, tc),
+    totalPasivoArsInicial,
+    totalPasivoUsdInicial: convertirAUsd(totalPasivoArsInicial, tc),
     totalPlArs,
     totalPlUsd: convertirAUsd(totalPlArs, tc),
+    totalPlArsInicial,
+    totalPlUsdInicial: convertirAUsd(totalPlArsInicial, tc),
     checkArs,
     checkUsd: convertirAUsd(checkArs, tc),
     cuadra: bg.cuadra,

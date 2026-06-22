@@ -10,25 +10,47 @@ import type { BalanceBPModelo } from "@/lib/services/reportes/export/balance-bp-
 
 const modelo: BalanceBPModelo = {
   fecha: "2025-12-31",
+  fechaInicial: "2025-01-01",
+  fechaFinal: "2025-12-31",
   tc: "1390.11",
   ativo: [
     {
       key: "DISPONIBILIDADE",
       titulo: "DISPONIBILIDADE",
       lineas: [
-        { codigo: "1.1.1.01.01", descripcion: "CAJA GENERAL", usd: "100.00", ars: "139011.00" },
+        {
+          codigo: "1.1.1.01.01",
+          descripcion: "CAJA GENERAL",
+          usd: "100.00",
+          ars: "139011.00",
+          usdInicial: "60.00",
+          arsInicial: "83406.60",
+        },
       ],
       subtotalUsd: "100.00",
       subtotalArs: "139011.00",
+      subtotalUsdInicial: "60.00",
+      subtotalArsInicial: "83406.60",
     },
   ],
   pasivo: [
     {
       key: "PROVEDORES_EXTERIOR",
       titulo: "PROVEDORES DO EXTERIOR",
-      lineas: [{ codigo: "2.1.1.02.01", descripcion: "PROVEEDOR", usd: "60.00", ars: "83406.60" }],
+      lineas: [
+        {
+          codigo: "2.1.1.02.01",
+          descripcion: "PROVEEDOR",
+          usd: "60.00",
+          ars: "83406.60",
+          usdInicial: "0.00",
+          arsInicial: "0.00",
+        },
+      ],
       subtotalUsd: "60.00",
       subtotalArs: "83406.60",
+      subtotalUsdInicial: "0.00",
+      subtotalArsInicial: "0.00",
       detalle: [
         {
           embarqueCodigo: "BR-250827-015CN",
@@ -44,19 +66,41 @@ const modelo: BalanceBPModelo = {
       key: "PATRIMONIO_LIQUIDO",
       titulo: "PATRIMONIO LÍQUIDO",
       lineas: [
-        { codigo: "3.1.01", descripcion: "CAPITAL SOCIAL", usd: "0.00", ars: "0.00" },
-        { codigo: "3.4", descripcion: "RESULTADO DEL EJERCICIO", usd: "40.00", ars: "55604.40" },
+        {
+          codigo: "3.1.01",
+          descripcion: "CAPITAL SOCIAL",
+          usd: "0.00",
+          ars: "0.00",
+          usdInicial: "0.00",
+          arsInicial: "0.00",
+        },
+        {
+          codigo: "3.4",
+          descripcion: "RESULTADO DEL EJERCICIO",
+          usd: "40.00",
+          ars: "55604.40",
+          usdInicial: "0.00",
+          arsInicial: "0.00",
+        },
       ],
       subtotalUsd: "40.00",
       subtotalArs: "55604.40",
+      subtotalUsdInicial: "0.00",
+      subtotalArsInicial: "0.00",
     },
   ],
   totalAtivoUsd: "100.00",
   totalAtivoArs: "139011.00",
+  totalAtivoUsdInicial: "60.00",
+  totalAtivoArsInicial: "83406.60",
   totalPasivoUsd: "60.00",
   totalPasivoArs: "83406.60",
+  totalPasivoUsdInicial: "0.00",
+  totalPasivoArsInicial: "0.00",
   totalPlUsd: "40.00",
   totalPlArs: "55604.40",
+  totalPlUsdInicial: "0.00",
+  totalPlArsInicial: "0.00",
   checkUsd: "0.00",
   checkArs: "0.00",
   cuadra: true,
@@ -106,7 +150,7 @@ const modelo: BalanceBPModelo = {
 };
 
 describe("generarBalanceBPExcel", () => {
-  it("gera um .xlsx válido e relegível com blocos, totais e conferência", async () => {
+  it("gera um .xlsx no formato do modelo (data inicial · movimentos · data final)", async () => {
     const bytes = await generarBalanceBPExcel(modelo);
     expect(bytes.length).toBeGreaterThan(0);
 
@@ -121,10 +165,17 @@ describe("generarBalanceBPExcel", () => {
 
     const textos: string[] = [];
     const formulas: string[] = [];
+    const numFmts: string[] = [];
+    const fills: string[] = [];
+    const fonts: string[] = [];
     ws?.eachRow((row) => {
       row.eachCell((cell) => {
         if (typeof cell.value === "string") textos.push(cell.value);
         if (cell.formula) formulas.push(cell.formula);
+        if (cell.numFmt) numFmts.push(cell.numFmt);
+        const fill = cell.fill as { fgColor?: { argb?: string } } | undefined;
+        if (fill?.fgColor?.argb) fills.push(fill.fgColor.argb);
+        if (cell.font?.name) fonts.push(cell.font.name);
       });
     });
     const blob = textos.join(" | ");
@@ -133,6 +184,7 @@ describe("generarBalanceBPExcel", () => {
     expect(blob).toContain("PROVEDORES DO EXTERIOR");
     expect(blob).toContain("PATRIMONIO LÍQUIDO");
     expect(blob).toContain("TOTAL ATIVO");
+    expect(blob).toContain("SALDO CREDOR");
     expect(blob).toContain("CONFERE");
     // Detalhe por embarque (PR2): sub-seção + código do embarque renderizados.
     expect(blob).toContain("Detalle por embarque (informativo)");
@@ -142,8 +194,25 @@ describe("generarBalanceBPExcel", () => {
     expect(blob).toContain("Ingresos por ventas");
     expect(blob).toContain("Impuestos del ejercicio (detalle AR)");
     expect(blob).toContain("CONFERE (DRE = Resultado del PL)");
-    // Fórmulas vivas: SUM nos subtotais + subtração da conferência ▲.
+
+    // ----- Estrutura do modelo: data inicial · 6 movimentos · data final -----
+    // Cabeçalho "BP DÓLARES" sobre as colunas de movimento + coluna SALDO.
+    expect(blob).toContain("BP DÓLARES");
+    expect(blob).toContain("SALDO");
+    // DATA FINAL = SUM(I:O) — soma abertura + 6 colunas de movimento.
+    expect(formulas.some((f) => /SUM\(I\d+:O\d+\)/.test(f))).toBe(true);
+    // Datas (inicial/final) com formato d-mmm.
+    expect(numFmts.some((f) => f === "d-mmm")).toBe(true);
+    // Subtotais/totais por SUM + conferência por subtração.
     expect(formulas.some((f) => f.startsWith("SUM("))).toBe(true);
     expect(formulas.some((f) => f.includes("-"))).toBe(true);
+
+    // ----- Fidelidade visual (paleta do modelo) -----
+    expect(fills.some((c) => c.toUpperCase().endsWith("CCFFFF"))).toBe(true); // ciano
+    expect(numFmts.some((f) => f.includes("[$ARS]"))).toBe(true);
+    expect(numFmts.some((f) => f.includes("[$$-409]"))).toBe(true);
+    expect(fonts.some((f) => f === "Arial")).toBe(true);
+    // ARS = USD × TC (âncora $O$1).
+    expect(formulas.some((f) => f.includes("*$O$1"))).toBe(true);
   });
 });
