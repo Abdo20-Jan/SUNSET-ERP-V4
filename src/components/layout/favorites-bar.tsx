@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  * breadcrumb. Inativo quando não há rótulo derivável para a rota.
  */
 export function FavoriteToggle({ href, label }: { href: string; label: string }) {
-  const { isFavorite, toggleFavorite, hydrated } = useShell();
+  const { isFavorite, toggleFavorite } = useShell();
   const active = isFavorite(href);
   const disabled = !label;
 
@@ -30,8 +30,7 @@ export function FavoriteToggle({ href, label }: { href: string; label: string })
       onClick={() => label && toggleFavorite({ href, label })}
       className={cn(
         "shrink-0",
-        // evita flash antes de hidratar o estado persistido
-        hydrated && active ? "text-amber-500 hover:text-amber-500" : "text-muted-foreground",
+        active ? "text-amber-500 hover:text-amber-500" : "text-muted-foreground",
       )}
     >
       <HugeiconsIcon icon={StarIcon} className="size-3.5" />
@@ -44,10 +43,10 @@ export function FavoriteToggle({ href, label }: { href: string; label: string })
  * Só aparece quando há favoritos (após hidratar do localStorage).
  */
 export function FavoritesBar() {
-  const { favorites, hydrated, removeFavorite } = useShell();
+  const { favorites, removeFavorite } = useShell();
   const pathname = usePathname();
 
-  if (!hydrated || favorites.length === 0) return null;
+  if (favorites.length === 0) return null;
 
   return (
     <nav
