@@ -22,9 +22,13 @@ status: vigente
 
 ## Estado
 
-- **Próxima etapa:** E4 (Fase 2 em pago multi-contrapartida/intermediario + dif. cambiaria no pagarFacturaExteriorAction + préstamo USD — movimientos-tesoreria.ts)
-- **Última concluída:** E3 (2026-06-11, PR #202)
-- **Branch base:** origin/main (`afe7780`, pós-#201). O branch `feat/comex-simulacion-margen-y-nombre-completo` já foi mesclado (#178) — não usar.
+> ⚠️ **Esta seção e vários checkboxes ☐ abaixo ficaram MUITO desatualizados.** O **git é a fonte da verdade**.
+> Reconciliação completa (2026-06-22) na nota do vault **`pendencias a corrigir`**.
+
+- **Realidade (git):** **FASE A completa** (E1–E7, incl. E4a/b/c/d) · FASE B/C com E8/E10/E11/E13/E16/E18 mergeadas + Ondas A–E · **FASE F (UI NetSuite) majoritariamente entregue** (NS-1…NS-4, overviews por center, dark mode, ⌘K, data-table-advanced, export CSV/XLSX, record-shell + audit-trail).
+- **Pendentes reais:** E14 · E19 · E20 · E21 · E12 (resto) · E22–E29 (estrutural + docs) · E40–E43 (portlets, sweep es-AR, performance, observabilidade) · faixas backend TRACK-B1/B2/B3 · cauda de BI (RECPAM, forecast 13s, ROIC/EVA/WACC, score, alertas).
+- **Higiene aberta:** PR #311 (BI reconciliação razão↔subledger) + 11 PRs do dependabot.
+- **Branch base:** origin/main (atual). *(Histórico: o plano nasceu em `afe7780` pós-#201.)*
 
 ---
 
@@ -35,10 +39,10 @@ status: vigente
 | ☑ | **E1** | PE.1+PE.2: `monedaOrigen/montoOrigen/tipoCambioOrigen` na línea DEBE do pago exterior + saldos exterior por montoOrigen/aplicaciones (matar leitura de debe cru) + testes | pago-exterior.ts:277, cuentas-a-pagar.ts:1650-1700 | M | **PR #200** (merged `29fa473`) — helper compartilhado `getPagosUsdPorCuenta`/`pagadoUsdParaFactura` (montoOrigen → fallback legacy 1-DEBE=mov.monto / multi-DEBE=USD cru; AplicacionPago* layer 0 com prorrateio, tokens só fallback); action e vista usam o mesmo algoritmo; +6 testes serviço, 264 verdes; review adversarial incorporada |
 | ☑ | **E2** | PE.5: TC real obrigatório no extrato USD (fix ternário `"1":"1"`, cotización ou input na UI de revisão) + teste | extractos.ts:137, lineas-review.tsx | S | **PR #201** — ARS→TC=1; extranjera→TC manual (dialog, parsing es-AR) → `getCotizacionParaFecha(fecha, tx)` → erro claro (línea PENDIENTE); asiento herda TC real; +6 testes (270 verdes); review: dialog inicia vazio (default = cotización por fecha) |
 | ☑ | **E3** | PE.4: COBRO/PAGO/TRANSFERENCIA USD gravam ARS (monto×TC) usando a `usdOrigen` pronta; bloquear línea com moeda ≠ ARS no motor | asiento-automatico.ts:763-925 | M | **PR #202** — guard `MONEDA_INVALIDA` no motor (moneda≠ARS e TC≠1); caso simples + Ley 25413 convertem a ARS c/ metadata (split 33/67 sobre ARS); path Ley 25413 duplicado do extracto removido (tudo via motor); pago exterior header ARS/1; multi-contrapartida/intermediario por parcela round 2 + banco = Σ exata; gasto fijo + transferencias c/ metadata (achados do review adversarial, 8 agentes); saldo bancário na moneda da cuenta (`calcularSaldosCuentasBancariasEnMonedaCuenta`: USD = Σ±montoOrigen + fallback legado cru) em cuentas/dashboard/BI; asiento manual só ARS; +8 testes (278 verdes) |
-| ☐ | **E4** | PE.3: Fase 2 (dif. cambiaria) em pago multi-contrapartida e intermediario + fix validação de préstamo USD (validar em USD, não TC do dia) | movimientos-tesoreria.ts:344,409,671 | M/L | |
-| ☐ | **E5** | PE.6: relatórios USD só de montoOrigen (nunca ÷TC; sem metadata = "—") + balancete: saldo inicial de volta a groupBy SQL + prune considera campos USD | balance-sumas-saldos.ts:64,117,172 | M | |
-| ☐ | **E6** | PE.7: script de migração de asientos USD legados (uma vez, com dry-run) + validador de invariante no CI (moeda única ARS, saldo USD = Σ montoOrigen, partida doble) espelhando validar-stock.yml | prisma/scripts + .github/workflows | L | |
-| ☐ | **E7** | PE.8: teste E2E ciclo canônico (factura USD 25.000 TC 1.200 → pago TC 1.300 → saldo USD 0, pérdida 2.500.000, balancete invariante) + smoke dos 4 paths de pago | test/ | M | |
+| ☑ | **E4** | PE.3: Fase 2 (dif. cambiaria) em pago multi-contrapartida e intermediario + fix validação de préstamo USD (validar em USD, não TC do dia) | movimientos-tesoreria.ts:344,409,671 | M/L | **PRs #250 (E4a multi-contrapartida) · #252 (E4b intermediario) · #255 (E4c single) · #257 (E4d préstamo USD validar/exhibir)** |
+| ☑ | **E5** | PE.6: relatórios USD só de montoOrigen (nunca ÷TC; sem metadata = "—") + balancete: saldo inicial de volta a groupBy SQL + prune considera campos USD | balance-sumas-saldos.ts:64,117,172 | M | **PR #249** (balancete USD por lado + saldo inicial groupBy + prune-USD) |
+| ☑ | **E6** | PE.7: script de migração de asientos USD legados (uma vez, com dry-run) + validador de invariante no CI (moeda única ARS, saldo USD = Σ montoOrigen, partida doble) espelhando validar-stock.yml | prisma/scripts + .github/workflows | L | **PR #258** (validador de invariante del ledger en CI) |
+| ☑ | **E7** | PE.8: teste E2E ciclo canônico (factura USD 25.000 TC 1.200 → pago TC 1.300 → saldo USD 0, pérdida 2.500.000, balancete invariante) + smoke dos 4 paths de pago | test/ | M | **PR #259** (ciclo canónico de pago exterior USD + smoke 4 paths) |
 
 ## FASE B — Correções críticas restantes + fundação
 
