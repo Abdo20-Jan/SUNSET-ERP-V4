@@ -35,11 +35,15 @@ import {
   AsientoError,
   crearAsientoCierre,
   crearAsientoDestinoResultado,
+  ejecutarCierreEjercicio,
 } from "@/lib/services/asiento-automatico";
 
 const DESDE = new Date("2025-01-01T00:00:00.000Z");
 const HASTA = new Date("2025-12-31T00:00:00.000Z");
 const FECHA_MOV = new Date("2025-06-10T12:00:00.000Z");
+
+// Misma derivación de clave que ejecutarCierreEjercicio (asiento-automatico.ts).
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
 type Cat = "ACTIVO" | "PASIVO" | "PATRIMONIO" | "EGRESO" | "INGRESO";
 
@@ -233,5 +237,140 @@ describe("Cierre y destino del resultado (FLUJOS CONTABLES)", () => {
     await expect(
       crearAsientoCierre({ fechaDesde: DESDE, fechaHasta: HASTA }, db.prisma),
     ).rejects.toBeInstanceOf(AsientoError);
+  });
+
+  // --- Onda 2: serialización del cierre (advisory lock, anti-TOCTOU) ---
+
+  it("ejecutarCierreEjercicio serializa cierres concurrentes del mismo rango: 1 cierre + 1 destino", async () => {
+    const caja = await mkCuenta("1.1.1.01.01", "CAJA", "ACTIVO", "DEUDOR");
+    const capital = await mkCuenta("3.1.01", "CAPITAL", "PATRIMONIO", "ACREEDOR");
+    const ventas = await mkCuenta("4.1.01.01", "VENTAS", "INGRESO", "ACREEDOR");
+    const gasto = await mkCuenta("7.1.01", "SUELDOS", "EGRESO", "DEUDOR");
+
+    await mkAsiento([
+      { cuentaId: caja, debe: "5000.00" },
+      { cuentaId: capital, haber: "5000.00" },
+    ]);
+    await mkAsiento([
+      { cuentaId: caja, debe: "1000.00" },
+      { cuentaId: ventas, haber: "1000.00" },
+    ]);
+    await mkAsiento([
+      { cuentaId: gasto, debe: "300.00" },
+      { cuentaId: caja, haber: "300.00" },
+    ]);
+
+    // Dos cierres del MISMO rango en paralelo: cada $transaction toma una
+    // conexión física distinta del pool (default max=10). El advisory lock los
+    // serializa — el ganador crea cierre+destino, el perdedor ve el cierre ya
+    // hecho y falla con DOMINIO_INVALIDO. Sin el lock, ambos pasarían el guard
+    // findFirst y duplicarían los asientos (TOCTOU).
+    const resultados = await Promise.allSettled([
+      ejecutarCierreEjercicio({ fechaDesde: DESDE, fechaHasta: HASTA, conDestino: true }),
+      ejecutarCierreEjercicio({ fechaDesde: DESDE, fechaHasta: HASTA, conDestino: true }),
+    ]);
+
+    const ok = resultados.filter((r) => r.status === "fulfilled");
+    const fail = resultados.filter((r) => r.status === "rejected");
+    expect(ok).toHaveLength(1);
+    expect(fail).toHaveLength(1);
+    expect((fail[0] as PromiseRejectedResult).reason).toBeInstanceOf(AsientoError);
+
+    // Exactamente 1 asiento de cierre y 1 de destino (no duplicados).
+    const cierres = await db.prisma.asiento.count({
+      where: {
+        descripcion: { startsWith: "Cierre de resultados" },
+        estado: { not: "ANULADO" },
+        fecha: { gte: DESDE, lte: HASTA },
+      },
+    });
+    expect(cierres).toBe(1);
+    const destinos = await db.prisma.asiento.count({
+      where: {
+        descripcion: { startsWith: "Destino del resultado" },
+        estado: { not: "ANULADO" },
+      },
+    });
+    expect(destinos).toBe(1);
+
+    // El resultado quedó destinado: 3.4.01 en cero, 3.3.01 con la ganancia 700.
+    expect(await saldo("3.4.01")).toBeCloseTo(0, 2);
+    expect(await saldo("3.3.01")).toBeCloseTo(700, 2);
+  });
+
+  it("ejecutarCierreEjercicio es idempotente: el segundo cierre del mismo rango falla (secuencial)", async () => {
+    const caja = await mkCuenta("1.1.1.01.01", "CAJA", "ACTIVO", "DEUDOR");
+    const ventas = await mkCuenta("4.1.01.01", "VENTAS", "INGRESO", "ACREEDOR");
+    await mkAsiento([
+      { cuentaId: caja, debe: "500.00" },
+      { cuentaId: ventas, haber: "500.00" },
+    ]);
+
+    const primero = await ejecutarCierreEjercicio({ fechaDesde: DESDE, fechaHasta: HASTA });
+    expect(primero.cierre.estado).toBe("CONTABILIZADO");
+    expect(primero.destino).toBeNull();
+
+    await expect(
+      ejecutarCierreEjercicio({ fechaDesde: DESDE, fechaHasta: HASTA }),
+    ).rejects.toBeInstanceOf(AsientoError);
+
+    const cierres = await db.prisma.asiento.count({
+      where: {
+        descripcion: { startsWith: "Cierre de resultados" },
+        estado: { not: "ANULADO" },
+        fecha: { gte: DESDE, lte: HASTA },
+      },
+    });
+    expect(cierres).toBe(1);
+  });
+
+  // Guardián real del lock: a diferencia del test de concurrencia (que el unique
+  // de numeración + retry enmascaran), éste detecta de forma DETERMINÍSTICA si
+  // ejecutarCierreEjercicio dejara de tomar el advisory lock del rango.
+  it("ejecutarCierreEjercicio espera el advisory lock del rango mientras está tomado", async () => {
+    const caja = await mkCuenta("1.1.1.01.01", "CAJA", "ACTIVO", "DEUDOR");
+    const ventas = await mkCuenta("4.1.01.01", "VENTAS", "INGRESO", "ACREEDOR");
+    await mkAsiento([
+      { cuentaId: caja, debe: "500.00" },
+      { cuentaId: ventas, haber: "500.00" },
+    ]);
+
+    const lockKey = `cierre:${ymd(DESDE)}:${ymd(HASTA)}`;
+    let liberar!: () => void;
+    const sostener = new Promise<void>((r) => {
+      liberar = r;
+    });
+    let avisarTomado!: () => void;
+    const tomado = new Promise<void>((r) => {
+      avisarTomado = r;
+    });
+
+    // Conexión A (otra del pool): toma el MISMO lock y lo sostiene abierto.
+    const probe = db.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`;
+        avisarTomado();
+        await sostener;
+      },
+      { timeout: 15_000 },
+    );
+    await tomado; // A ya tiene el lock
+
+    // Disparamos el cierre: debe BLOQUEARSE esperando el lock (no avanza).
+    let resuelto = false;
+    const cierre = ejecutarCierreEjercicio({ fechaDesde: DESDE, fechaHasta: HASTA }).then((r) => {
+      resuelto = true;
+      return r;
+    });
+
+    await new Promise((r) => setTimeout(r, 600));
+    expect(resuelto).toBe(false); // sin lock, el cierre ya habría terminado acá
+
+    // Liberamos A → el cierre adquiere el lock y completa.
+    liberar();
+    await probe;
+    const r = await cierre;
+    expect(resuelto).toBe(true);
+    expect(r.cierre.estado).toBe("CONTABILIZADO");
   });
 });

@@ -11,12 +11,14 @@ import { CenterMegaMenu } from "@/components/layout/center-mega-menu";
 import { TopnavUserMenu } from "@/components/layout/topnav-user-menu";
 import { NavDrawer } from "@/components/layout/nav-drawer";
 import { CommandMenu } from "@/components/layout/command-menu";
+import { FavoritesBar, FavoriteToggle } from "@/components/layout/favorites-bar";
 import { Menubar } from "@/components/ui/menubar";
 
 export function AppTopnav({ user }: { user: { nombre: string; username: string; role: string } }) {
   const pathname = usePathname();
   const activeId = getCenterActivo(pathname);
   const crumbs = getBreadcrumb(pathname);
+  const favLabel = crumbs.map((c) => c.label).join(" · ");
   const barCenters = CENTERS.filter((c) => !c.inUserMenu);
   const config = CENTERS.find((c) => c.id === "configuracion")!;
 
@@ -45,41 +47,45 @@ export function AppTopnav({ user }: { user: { nombre: string; username: string; 
         </div>
       </div>
       {crumbs.length > 0 ? (
-        <nav
-          aria-label="breadcrumb"
-          className="flex h-8 items-center gap-1 border-t border-border/60 px-3 text-[12px]"
-        >
-          {crumbs.map((c, i) => {
-            const isLast = i === crumbs.length - 1;
-            return (
-              <span key={`${c.label}-${c.href ?? ""}`} className="flex items-center gap-1">
-                {c.href && !isLast ? (
-                  <Link
-                    href={c.href}
-                    className="text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    {c.label}
-                  </Link>
-                ) : (
-                  <span
-                    className={isLast ? "font-medium text-foreground" : "text-muted-foreground"}
-                    aria-current={isLast ? "page" : undefined}
-                  >
-                    {c.label}
-                  </span>
-                )}
-                {!isLast ? (
-                  <HugeiconsIcon
-                    icon={ArrowRight01Icon}
-                    strokeWidth={2}
-                    className="size-3 text-muted-foreground/50"
-                  />
-                ) : null}
-              </span>
-            );
-          })}
-        </nav>
+        <div className="flex h-8 items-center justify-between gap-2 border-t border-border/60 px-3">
+          <nav
+            aria-label="breadcrumb"
+            className="flex min-w-0 items-center gap-1 overflow-hidden text-[12px]"
+          >
+            {crumbs.map((c, i) => {
+              const isLast = i === crumbs.length - 1;
+              return (
+                <span key={`${c.label}-${c.href ?? ""}`} className="flex items-center gap-1">
+                  {c.href && !isLast ? (
+                    <Link
+                      href={c.href}
+                      className="text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {c.label}
+                    </Link>
+                  ) : (
+                    <span
+                      className={isLast ? "font-medium text-foreground" : "text-muted-foreground"}
+                      aria-current={isLast ? "page" : undefined}
+                    >
+                      {c.label}
+                    </span>
+                  )}
+                  {!isLast ? (
+                    <HugeiconsIcon
+                      icon={ArrowRight01Icon}
+                      strokeWidth={2}
+                      className="size-3 text-muted-foreground/50"
+                    />
+                  ) : null}
+                </span>
+              );
+            })}
+          </nav>
+          <FavoriteToggle href={pathname} label={favLabel} />
+        </div>
       ) : null}
+      <FavoritesBar />
     </header>
   );
 }
