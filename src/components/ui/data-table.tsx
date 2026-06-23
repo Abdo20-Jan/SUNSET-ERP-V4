@@ -10,12 +10,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 type DataTableProps<T> = {
   table: TanstackTable<T>;
   emptyMessage?: string;
   emptyFilteredMessage?: string;
   isFiltered?: boolean;
+  /**
+   * Densidade da tabela (PR-001 Design Foundation). `comfortable` (default)
+   * preserva o comportamento atual; `dense` aplica a altura tokenizada
+   * (linha 32px / cabeçalho 34px) preparando worklists para ~28-30 linhas/1080p.
+   */
+  density?: "comfortable" | "dense";
+  /** Zebra sutil opt-in nas linhas pares do corpo. */
+  zebra?: boolean;
 };
 
 export function DataTable<T>({
@@ -23,6 +32,8 @@ export function DataTable<T>({
   emptyMessage = "Sin registros.",
   emptyFilteredMessage,
   isFiltered = false,
+  density = "comfortable",
+  zebra = false,
 }: DataTableProps<T>) {
   const rows = table.getRowModel().rows;
   const columnCount = table.getAllLeafColumns().length;
@@ -30,7 +41,7 @@ export function DataTable<T>({
   const filteredMsg = emptyFilteredMessage ?? emptyMessage;
 
   return (
-    <Table>
+    <Table className={cn(density === "dense" && "table-dense", zebra && "table-zebra")}>
       <TableHeader>
         {table.getHeaderGroups().map((headerGroup) => (
           <TableRow key={headerGroup.id}>

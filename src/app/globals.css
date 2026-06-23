@@ -30,6 +30,15 @@
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-destructive: var(--destructive);
+  /* Cores semânticas de status/severidade (PR-001 Design Foundation) */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-process: var(--process);
+  --color-process-foreground: var(--process-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -82,6 +91,25 @@
 
   --destructive: oklch(0.585 0.215 27);
 
+  /* Status/severidade — tons sóbrios, legíveis como TEXTO sobre fundo claro.
+     critical = --destructive (vermelho controlado). PR-001 Design Foundation:
+     success=verde discreto (finalizado) · warning=âmbar (pendência) ·
+     info=azul · process=cinza-azulado (em processo). */
+  --success: oklch(0.55 0.11 155);
+  --success-foreground: oklch(0.99 0.01 150);
+  --warning: oklch(0.56 0.11 70);
+  --warning-foreground: oklch(0.99 0.01 95);
+  --info: oklch(0.52 0.12 248);
+  --info-foreground: oklch(0.99 0.01 250);
+  --process: oklch(0.5 0.035 248);
+  --process-foreground: oklch(0.99 0.005 250);
+
+  /* Densidade de tabela (ERP denso): linha 32px, cabeçalho 34px, padding-x de célula.
+     Consumidos pelos utilitários opt-in .table-dense / .table-zebra. */
+  --density-row-h: 32px;
+  --density-row-h-header: 34px;
+  --density-cell-px: 0.625rem;
+
   /* Bordas warm */
   --border: oklch(0.895 0.014 82);
   --border-strong: oklch(0.82 0.018 80);
@@ -130,6 +158,16 @@
 
   --destructive: oklch(0.7 0.19 22);
 
+  /* Status/severidade — variantes claras para dark (texto sobre fundo escuro). */
+  --success: oklch(0.72 0.14 155);
+  --success-foreground: oklch(0.18 0.02 150);
+  --warning: oklch(0.76 0.13 75);
+  --warning-foreground: oklch(0.18 0.02 90);
+  --info: oklch(0.7 0.13 250);
+  --info-foreground: oklch(0.18 0.02 250);
+  --process: oklch(0.7 0.04 250);
+  --process-foreground: oklch(0.18 0.01 250);
+
   --border: oklch(1 0 0 / 12%);
   --border-strong: oklch(1 0 0 / 22%);
   --input: oklch(1 0 0 / 16%);
@@ -177,5 +215,34 @@
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong) transparent;
+  }
+
+  /*
+   * Densidade de tabela (OPT-IN) — PR-001 Design Foundation.
+   * Aplicar na <table> (via className do componente Table/DataTable).
+   * Só afeta tabelas que recebem a classe; demais permanecem inalteradas.
+   * Prepara worklists para ~28-30 linhas visíveis em 1080p.
+   */
+  .table-dense [data-slot="table-head"] {
+    height: var(--density-row-h-header);
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .table-dense [data-slot="table-row"] {
+    height: var(--density-row-h);
+  }
+  .table-dense [data-slot="table-cell"] {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  /*
+   * Zebra sutil (OPT-IN) — só linhas pares do CORPO; exclui hover/selecionada
+   * para não competir com os estados interativos do TableRow.
+   */
+  .table-zebra
+    [data-slot="table-body"]
+    [data-slot="table-row"]:nth-child(even):not(:hover):not([data-state="selected"]) {
+    background-color: color-mix(in oklab, var(--muted) 45%, transparent);
   }
 }
