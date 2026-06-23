@@ -61,6 +61,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   const modelo = construirModeloBP(bg, {
     tc,
     fecha,
+    fechaInicial: desdeStr && DATE_RE.test(desdeStr) ? desdeStr : null,
     detalleExterior: agruparDetalleExterior(exterior, tc),
     detalleStockTransito: mapearDetalleStockTransito(stockTransito, tc),
     dre: construirModeloDRE(er.rt9.conceptos, impuestos, tc),
