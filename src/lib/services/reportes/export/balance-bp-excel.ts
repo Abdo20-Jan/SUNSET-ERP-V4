@@ -18,12 +18,14 @@ import type { BalanceBPModelo, BloqueModelo, LineaBP } from "./balance-bp-modelo
 
 type ModeloDREConCheck = NonNullable<BalanceBPModelo["dre"]>;
 
-// Âncora da TC de cierre (ARS por USD), em O1 — espelha o modelo (H = USD × O1).
-const TC_CELL = "$O$1";
-// Primeira coluna de movimento (das 6 entre data inicial e data final). O
-// movimento líquido do período (final − inicial) é gravado aqui; as demais
-// (K..O) ficam livres para lançamentos manuais, como na planilha do dono.
-const COL_MOV1 = COL.USD_IN + 1; // J
+// Âncora da TC de cierre (ARS por USD), em M1 — exatamente como no modelo
+// BALANÇO PATRIMONIAL NASSER.xlsx. As fórmulas ARS usam N{linha}*$M$1.
+const TC_CELL = "$M$1";
+
+// Primeira coluna de movimento. O template possui 6 colunas entre a data inicial
+// e a data final: H, I, J, K, L, M. Por enquanto o sistema grava o movimento
+// líquido do período na primeira coluna (H) e preserva as demais livres.
+const COL_MOV1 = COL.USD_IN + 1; // H
 
 function num(s: string): number {
   return Number(s);
@@ -47,12 +49,9 @@ function aData(iso: string | null): Date | null {
 }
 
 /**
- * Gera o .xlsx do Balanço Patrimonial reproduzindo 1:1 a planilha artesanal do
- * dono ("BP SUNSET SAS | DÓLAR"): grade boxed (cols C..Q), cabeçalho com
- * DATA INICIAL · 6 colunas de movimento ("BP DÓLARES") · DATA FINAL · SALDO,
- * cabeçalhos de seção ciano, fonte Arial/Tahoma, formatos [$ARS]/[$$-409],
- * valores em azul, código de embarque em vermelho, e fórmulas vivas:
- *   H (ARS) = P × $O$1 · P (data final) = SUM(I:O) · subtotais/totais via SUM.
+ * Gera o .xlsx do Balanço Patrimonial reproduzindo a grade do modelo artesanal
+ * em A:O: DATA INICIAL (G), 6 colunas de movimento (H:M), DATA FINAL (N) e
+ * SALDO (O). Corrige a versão anterior, que deslocava a planilha para C:Q.
  */
 export async function generarBalanceBPExcel(modelo: BalanceBPModelo): Promise<Uint8Array> {
   const wb = new ExcelJS.Workbook();
@@ -69,7 +68,7 @@ export async function generarBalanceBPExcel(modelo: BalanceBPModelo): Promise<Ui
   const ativoSecs = modelo.ativo.map((b) => renderBloque(ctx, b, true));
   const totalAtivoRow = renderTotal(ctx, "TOTAL ATIVO", ativoSecs, modelo);
 
-  // Cabeçalho do PASIVO (espelha a linha 58 do modelo).
+  // Cabeçalho do PASIVO (espelha a segunda metade do modelo).
   ws.addRow([]);
   renderCabecalhoLinha(ctx, modelo, "OBRIGAÇÕES + ORIGENS + PATRIMONIO LÍQUIDO", true);
 
@@ -111,13 +110,15 @@ function renderCabecalhoLinha(
     setText(ws, n, COL.CODIGO, "CUENTA", { font: fonte({ bold: true, size: 8 }) });
     setText(ws, n, COL.DESC, tituloMeio, { font: fonte({ bold: true, size: 9 }) });
   }
-  // TC nas duas células do modelo (H1 e O1); só O1 é referenciada.
+
+  // TC nas duas células do modelo (F1 e M1); só M1 é referenciada.
   const tcNum = modelo.tc ? num(modelo.tc) : null;
   setCell(ws, n, COL.ARS, tcNum, {
     font: fonte({ bold: true, size: 9 }),
     numFmt: FMT.CONTABIL,
     align: { horizontal: "center", vertical: "middle" },
   });
+
   // DATA INICIAL
   const dIni = aData(modelo.fechaInicial);
   setCell(ws, n, COL.USD_IN, dIni ?? "—", {
@@ -125,20 +126,23 @@ function renderCabecalhoLinha(
     numFmt: dIni ? FMT.DATA : undefined,
     align: { horizontal: "center", vertical: "middle" },
   });
-  // "BP DÓLARES" sobre as 6 colunas de movimento (J..N) — só no cabeçalho ativo.
+
+  // "BP DÓLARES" sobre H..L. A 6ª coluna do miolo é M, usada no cabeçalho como TC.
   if (!ladoPasivo) {
     setText(ws, n, COL_MOV1, tituloMeio, {
       font: fonte({ bold: true }),
       align: { horizontal: "center", vertical: "middle" },
     });
-    ws.mergeCells(n, COL_MOV1, n, COL.TC - 1); // J..N
+    ws.mergeCells(n, COL_MOV1, n, COL.TC - 1); // H..L
   }
-  // TC (âncora) em O1
+
+  // TC (âncora) em M1
   setCell(ws, n, COL.TC, tcNum, {
     font: fonte({ bold: true, size: 9, color: { argb: COR.VERMELHO } }),
     numFmt: FMT.CONTABIL,
     align: { horizontal: "center", vertical: "middle" },
   });
+
   // DATA FINAL
   const dFim = aData(modelo.fechaFinal);
   setCell(ws, n, COL.USD, dFim ?? modelo.fechaFinal, {
@@ -146,11 +150,13 @@ function renderCabecalhoLinha(
     numFmt: dFim ? FMT.DATA : undefined,
     align: { horizontal: "center", vertical: "middle" },
   });
+
   // SALDO
   setText(ws, n, COL.SALDO, "SALDO", {
     font: fonte({ bold: true, size: 8 }),
     align: { horizontal: "right", vertical: "middle" },
   });
+
   for (let c = COL.CODIGO; c <= COL.SALDO; c++) {
     ws.getRow(n).getCell(c).border = mesclarBordas(bordaCaixa(c), { bottom: { style: "double" } });
   }
@@ -162,6 +168,9 @@ function renderBloque(ctx: Ctx, bloque: BloqueModelo, ativo: boolean): SeccionRe
 
   const header = ws.addRow([]);
   const headerRow = header.number;
+  setText(ws, headerRow, COL.CODIGO, abreviarCodigo(bloque.key), {
+    font: fonte({ bold: true, size: 9 }),
+  });
   setText(ws, headerRow, COL.DESC, bloque.titulo, {
     font: { name: FONTE_TITULO, size: 8, italic: true },
     align: { horizontal: "left", vertical: "middle" },
@@ -207,6 +216,7 @@ function renderBloque(ctx: Ctx, bloque: BloqueModelo, ativo: boolean): SeccionRe
         align: { horizontal: "right", vertical: "middle" },
       },
     );
+    // No modelo, a coluna SALDO dos subtotais referencia os saldos finais em USD.
     setCell(
       ws,
       headerRow,
@@ -239,8 +249,19 @@ function renderBloque(ctx: Ctx, bloque: BloqueModelo, ativo: boolean): SeccionRe
   return { headerRow };
 }
 
-// Linha de detalhe: I=saldo inicial (data inicial) · J=movimento líquido ·
-// K..O livres · P=SUM(I:O) (data final) · H=P×TC (ARS).
+function abreviarCodigo(key: string): string {
+  const map: Record<string, string> = {
+    DISPONIBILIDADE: "DIS",
+    REALIZAVEL_CURTO_PRAZO: "RCP",
+    STOCK: "STO",
+    PROVEDORES_EXTERIOR: "EXT",
+    PATRIMONIO_LIQUIDO: "PL",
+  };
+  return map[key] ?? key.slice(0, 3).toUpperCase();
+}
+
+// Linha de detalhe: G=saldo inicial · H=movimento líquido · I..M livres ·
+// N=SUM(G:M) · F=N×TC · O=N×TC, reproduzindo as fórmulas centrais do modelo.
 function renderLinha(ctx: Ctx, ln: LineaBP): void {
   const { ws, tcCell } = ctx;
   const r = ws.addRow([]);
@@ -254,14 +275,16 @@ function renderLinha(ctx: Ctx, ln: LineaBP): void {
     numFmt: FMT.CONTABIL,
     align: { horizontal: "right", vertical: "middle" },
   });
-  // MOVIMENTO do período (final − inicial) em USD, na 1ª coluna de movimento.
+
+  // MOVIMENTO do período (final − inicial) em USD, na 1ª das 6 colunas H:M.
   const mov = num(ln.usd) - num(ln.usdInicial);
   setCell(ws, n, COL_MOV1, Number(mov.toFixed(2)), {
     font: fonte(),
     numFmt: FMT.CONTABIL,
     align: { horizontal: "right", vertical: "middle" },
   });
-  // DATA FINAL (fechamento) = SUM(I:O)
+
+  // DATA FINAL (fechamento) = SUM(G:M)
   setCell(
     ws,
     n,
@@ -273,7 +296,8 @@ function renderLinha(ctx: Ctx, ln: LineaBP): void {
       align: { horizontal: "right", vertical: "middle" },
     },
   );
-  // ARS = P × TC (ou valor quando sem TC)
+
+  // ARS = N × $M$1 (ou valor quando sem TC)
   const arsVal = tcCell
     ? { formula: `${colLetra(COL.USD)}${n}*${tcCell}`, result: num(ln.ars) }
     : num(ln.ars);
@@ -282,14 +306,22 @@ function renderLinha(ctx: Ctx, ln: LineaBP): void {
     numFmt: FMT.ARS,
     align: { horizontal: "right", vertical: "middle" },
   });
+
+  // Coluna SALDO do modelo: detalhe convertido pela mesma TC.
+  setCell(ws, n, COL.SALDO, arsVal, {
+    font: fonte({ size: 9, color: { argb: COR.AZUL } }),
+    numFmt: FMT.ARS,
+    align: { horizontal: "right", vertical: "middle" },
+  });
+
   for (let c = COL.CODIGO; c <= COL.SALDO; c++) {
     ws.getRow(n).getCell(c).border = mesclarBordas(bordaCaixa(c), BORDA.hair);
   }
   if (ln.codigo === "3.4") ctx.resultadoRow = n;
 }
 
-// Detalhe por embarque (informativo): código em vermelho; valor em P (data
-// final) e H (ARS). Sem saldo inicial (abertura 0). NÃO soma ao subtotal.
+// Detalhe por embarque (informativo): código em vermelho; valor em N (data
+// final), F/O em ARS. Sem saldo inicial (abertura 0). NÃO soma ao subtotal.
 function renderDetalle(ctx: Ctx, bloque: BloqueModelo): void {
   const { ws, tcCell } = ctx;
   const detalle = bloque.detalle;
@@ -315,6 +347,11 @@ function renderDetalle(ctx: Ctx, bloque: BloqueModelo): void {
       ? { formula: `${colLetra(COL.USD)}${n}*${tcCell}`, result: num(d.ars) }
       : num(d.ars);
     setCell(ws, n, COL.ARS, arsVal, {
+      font: fonte({ size: 9, color: { argb: COR.AZUL } }),
+      numFmt: FMT.ARS,
+      align: { horizontal: "right", vertical: "middle" },
+    });
+    setCell(ws, n, COL.SALDO, arsVal, {
       font: fonte({ size: 9, color: { argb: COR.AZUL } }),
       numFmt: FMT.ARS,
       align: { horizontal: "right", vertical: "middle" },
@@ -365,7 +402,7 @@ function renderSaldoCredor(
   return n;
 }
 
-// Escreve H (ARS), I (saldo inicial USD), P (data final USD) e Q (SALDO USD)
+// Escreve F (ARS), G (saldo inicial USD), N (data final USD) e O (SALDO USD)
 // como somas das células referenciadas, com resultados em cache.
 function somaCols(
   ws: ExcelJS.Worksheet,
