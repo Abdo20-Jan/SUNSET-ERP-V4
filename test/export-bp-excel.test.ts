@@ -150,7 +150,7 @@ const modelo: BalanceBPModelo = {
 };
 
 describe("generarBalanceBPExcel", () => {
-  it("gera um .xlsx no formato do modelo (data inicial · movimentos · data final)", async () => {
+  it("gera um .xlsx no formato do modelo Nasser A:O (data inicial · 6 movimentos · data final)", async () => {
     const bytes = await generarBalanceBPExcel(modelo);
     expect(bytes.length).toBeGreaterThan(0);
 
@@ -195,12 +195,21 @@ describe("generarBalanceBPExcel", () => {
     expect(blob).toContain("Impuestos del ejercicio (detalle AR)");
     expect(blob).toContain("CONFERE (DRE = Resultado del PL)");
 
-    // ----- Estrutura do modelo: data inicial · 6 movimentos · data final -----
-    // Cabeçalho "BP DÓLARES" sobre as colunas de movimento + coluna SALDO.
+    // ----- Estrutura do modelo real: A:O -----
+    expect(ws?.actualColumnCount).toBeLessThanOrEqual(15);
+    expect(ws?.getCell("F1").value).toBe(1390.11); // TC espelhada do modelo
+    expect(ws?.getCell("M1").value).toBe(1390.11); // TC âncora usada em fórmulas
+    expect(ws?.getCell("O1").value).toBe("SALDO");
     expect(blob).toContain("BP DÓLARES");
     expect(blob).toContain("SALDO");
-    // DATA FINAL = SUM(I:O) — soma abertura + 6 colunas de movimento.
-    expect(formulas.some((f) => /SUM\(I\d+:O\d+\)/.test(f))).toBe(true);
+
+    // DATA FINAL = SUM(G:M) — soma abertura + 6 colunas de movimento.
+    expect(formulas.some((f) => /SUM\(G\d+:M\d+\)/.test(f))).toBe(true);
+    expect(formulas.some((f) => /SUM\(I\d+:O\d+\)/.test(f))).toBe(false);
+    // ARS = USD final × TC do modelo, ancorada em $M$1.
+    expect(formulas.some((f) => f.includes("*$M$1"))).toBe(true);
+    expect(formulas.some((f) => f.includes("*$O$1"))).toBe(false);
+
     // Datas (inicial/final) com formato d-mmm.
     expect(numFmts.some((f) => f === "d-mmm")).toBe(true);
     // Subtotais/totais por SUM + conferência por subtração.
@@ -212,7 +221,5 @@ describe("generarBalanceBPExcel", () => {
     expect(numFmts.some((f) => f.includes("[$ARS]"))).toBe(true);
     expect(numFmts.some((f) => f.includes("[$$-409]"))).toBe(true);
     expect(fonts.some((f) => f === "Arial")).toBe(true);
-    // ARS = USD × TC (âncora $O$1).
-    expect(formulas.some((f) => f.includes("*$O$1"))).toBe(true);
   });
 });
