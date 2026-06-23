@@ -19,7 +19,15 @@ import type { BalanceBPModelo, BloqueModelo, LineaBP } from "./balance-bp-modelo
 type ModeloDREConCheck = NonNullable<BalanceBPModelo["dre"]>;
 type DREConceptId = ModeloDREConCheck["lineas"][number]["id"];
 type DREValue = { ars: string; usd: string };
-type DRECellRef = { row: number; ars: string; usd: string; saldo: string };
+type DRECellRef = {
+  row: number;
+  ars: string;
+  usd: string;
+  saldo: string;
+  arsResult: number;
+  usdResult: number;
+  saldoResult: number;
+};
 
 // Âncora da TC de cierre (ARS por USD), em M1 — exatamente como no modelo
 // BALANÇO PATRIMONIAL NASSER.xlsx. As fórmulas ARS usam N{linha}*$M$1.
@@ -162,7 +170,9 @@ function renderCabecalhoLinha(
   });
 
   for (let c = COL.CODIGO; c <= COL.SALDO; c++) {
-    ws.getRow(n).getCell(c).border = mesclarBordas(bordaCaixa(c), { bottom: { style: "double" } });
+    ws.getRow(n).getCell(c).border = mesclarBordas(bordaCaixa(c), {
+      bottom: { style: "double" },
+    });
   }
 }
 
@@ -341,7 +351,9 @@ function renderDetalle(ctx: Ctx, bloque: BloqueModelo): void {
     setText(ws, n, COL.CODIGO, d.embarqueCodigo, {
       font: fonte({ color: { argb: COR.VERMELHO } }),
     });
-    setText(ws, n, COL.DESC, d.descripcion, { font: fonte({ color: { argb: COR.CINZA } }) });
+    setText(ws, n, COL.DESC, d.descripcion, {
+      font: fonte({ color: { argb: COR.CINZA } }),
+    });
     setCell(ws, n, COL.USD, num(d.usd), {
       font: fonte({ size: 9, color: { argb: COR.AZUL } }),
       numFmt: FMT.USD,
@@ -360,7 +372,9 @@ function renderDetalle(ctx: Ctx, bloque: BloqueModelo): void {
       numFmt: FMT.ARS,
       align: { horizontal: "right", vertical: "middle" },
     });
-    for (let c = COL.CODIGO; c <= COL.SALDO; c++) ws.getRow(n).getCell(c).border = bordaCaixa(c);
+    for (let c = COL.CODIGO; c <= COL.SALDO; c++) {
+      ws.getRow(n).getCell(c).border = bordaCaixa(c);
+    }
   }
 }
 
@@ -591,11 +605,20 @@ function renderDRE(ctx: Ctx, dre: ModeloDREConCheck, plResultadoRow?: number): v
   ]);
 
   renderDREValueRow(ctx, "Otros ingresos", value("OTROS_INGRESOS"));
-  renderDREValueRow(ctx, "Resultado neto operaciones discontinuadas", value("RESULTADO_OPERACIONES_DISCONTINUADAS"));
-  const resultadoEjercicio = renderDREValueRow(ctx, "RESULTADO DEL EJERCICIO", value("RESULTADO_EJERCICIO"), {
-    bold: true,
-    topDouble: true,
-  });
+  renderDREValueRow(
+    ctx,
+    "Resultado neto operaciones discontinuadas",
+    value("RESULTADO_OPERACIONES_DISCONTINUADAS"),
+  );
+  const resultadoEjercicio = renderDREValueRow(
+    ctx,
+    "RESULTADO DEL EJERCICIO",
+    value("RESULTADO_EJERCICIO"),
+    {
+      bold: true,
+      topDouble: true,
+    },
+  );
   renderDRESubtotalRow(ctx, "RESULTADO OPERACIONAL (controle)", [resultadoBruto, totalGastos], {
     muted: true,
   });
@@ -670,20 +693,24 @@ function renderDREValueRow(
   const r = ws.addRow([]);
   const n = r.number;
   const color = opts.muted ? COR.CINZA : COR.AZUL;
-  setText(ws, n, COL.DESC, label, {
-    font: fonte({ bold: opts.bold, color: opts.muted ? { argb: COR.CINZA } : undefined }),
-  });
-  setCell(ws, n, COL.ARS, num(value.ars), {
+  const labelFont = opts.muted
+    ? fonte({ bold: opts.bold, color: { argb: COR.CINZA } })
+    : fonte({ bold: opts.bold });
+  const arsResult = num(value.ars);
+  const usdResult = num(value.usd);
+
+  setText(ws, n, COL.DESC, label, { font: labelFont });
+  setCell(ws, n, COL.ARS, arsResult, {
     font: fonte({ bold: opts.bold, size: 9, color: { argb: color } }),
     numFmt: FMT.ARS,
     align: { horizontal: "right", vertical: "middle" },
   });
-  setCell(ws, n, COL.USD, num(value.usd), {
+  setCell(ws, n, COL.USD, usdResult, {
     font: fonte({ bold: opts.bold, size: 9, color: { argb: opts.muted ? COR.CINZA : COR.AZUL } }),
     numFmt: FMT.USD,
     align: { horizontal: "right", vertical: "middle" },
   });
-  setCell(ws, n, COL.SALDO, num(value.ars), {
+  setCell(ws, n, COL.SALDO, arsResult, {
     font: fonte({ bold: opts.bold, size: 9, color: { argb: color } }),
     numFmt: FMT.ARS,
     align: { horizontal: "right", vertical: "middle" },
@@ -699,6 +726,9 @@ function renderDREValueRow(
     ars: `${colLetra(COL.ARS)}${n}`,
     usd: `${colLetra(COL.USD)}${n}`,
     saldo: `${colLetra(COL.SALDO)}${n}`,
+    arsResult,
+    usdResult,
+    saldoResult: arsResult,
   };
 }
 
@@ -712,25 +742,49 @@ function renderDRESubtotalRow(
   const r = ws.addRow([]);
   const n = r.number;
   const color = opts.muted ? COR.CINZA : COR.AZUL;
+  const fontColor = opts.muted ? { argb: COR.CINZA } : undefined;
+  const formula = (key: keyof Pick<DRECellRef, "ars" | "usd" | "saldo">) =>
+    refs.map((ref) => ref[key]).join("+") || "0";
+  const arsResult = sumRefs(refs, "ars");
+  const usdResult = sumRefs(refs, "usd");
+  const saldoResult = sumRefs(refs, "saldo");
+
   setText(ws, n, COL.CODIGO, label, {
-    font: fonte({ bold: true, size: 10, color: opts.muted ? { argb: COR.CINZA } : undefined }),
+    font: fonte({ bold: true, size: 10, color: fontColor }),
   });
-  const formula = (key: keyof Pick<DRECellRef, "ars" | "usd" | "saldo">) => refs.map((r) => r[key]).join("+") || "0";
-  setCell(ws, n, COL.ARS, { formula: formula("ars"), result: sumRefs(refs, "ars") }, {
-    font: fonte({ bold: true, color: { argb: color } }),
-    numFmt: FMT.ARS,
-    align: { horizontal: "right", vertical: "middle" },
-  });
-  setCell(ws, n, COL.USD, { formula: formula("usd"), result: sumRefs(refs, "usd") }, {
-    font: fonte({ bold: true, color: { argb: opts.muted ? COR.CINZA : COR.AZUL } }),
-    numFmt: FMT.USD,
-    align: { horizontal: "right", vertical: "middle" },
-  });
-  setCell(ws, n, COL.SALDO, { formula: formula("saldo"), result: sumRefs(refs, "saldo") }, {
-    font: fonte({ bold: true, color: { argb: color } }),
-    numFmt: FMT.ARS,
-    align: { horizontal: "right", vertical: "middle" },
-  });
+  setCell(
+    ws,
+    n,
+    COL.ARS,
+    { formula: formula("ars"), result: arsResult },
+    {
+      font: fonte({ bold: true, color: { argb: color } }),
+      numFmt: FMT.ARS,
+      align: { horizontal: "right", vertical: "middle" },
+    },
+  );
+  setCell(
+    ws,
+    n,
+    COL.USD,
+    { formula: formula("usd"), result: usdResult },
+    {
+      font: fonte({ bold: true, color: { argb: opts.muted ? COR.CINZA : COR.AZUL } }),
+      numFmt: FMT.USD,
+      align: { horizontal: "right", vertical: "middle" },
+    },
+  );
+  setCell(
+    ws,
+    n,
+    COL.SALDO,
+    { formula: formula("saldo"), result: saldoResult },
+    {
+      font: fonte({ bold: true, color: { argb: color } }),
+      numFmt: FMT.ARS,
+      align: { horizontal: "right", vertical: "middle" },
+    },
+  );
   for (let c = COL.CODIGO; c <= COL.SALDO; c++) {
     ws.getRow(n).getCell(c).border = mesclarBordas(bordaCaixa(c), BORDA.totalTopo);
   }
@@ -739,6 +793,9 @@ function renderDRESubtotalRow(
     ars: `${colLetra(COL.ARS)}${n}`,
     usd: `${colLetra(COL.USD)}${n}`,
     saldo: `${colLetra(COL.SALDO)}${n}`,
+    arsResult,
+    usdResult,
+    saldoResult,
   };
 }
 
@@ -749,16 +806,15 @@ function sumDREValues(vals: DREValue[]): DREValue {
   };
 }
 
-function sumRefs(refs: DRECellRef[], key: keyof Pick<DRECellRef, "ars" | "usd" | "saldo">): number {
-  // Resultado em cache usado pelo ExcelJS; a fórmula viva continua sendo a fonte.
-  // Os valores exatos serão recalculados pelo Excel/Sheets quando a planilha abrir.
-  return refs.reduce((acc, ref) => {
-    const row = Number(ref[key].replace(/^[A-Z]+/, ""));
-    const col = ref[key].replace(/\d+$/, "");
-    void row;
-    void col;
-    return acc;
-  }, 0);
+function sumRefs(refs: DRECellRef[], key: "ars" | "usd" | "saldo"): number {
+  switch (key) {
+    case "ars":
+      return refs.reduce((acc, ref) => acc + ref.arsResult, 0);
+    case "usd":
+      return refs.reduce((acc, ref) => acc + ref.usdResult, 0);
+    case "saldo":
+      return refs.reduce((acc, ref) => acc + ref.saldoResult, 0);
+  }
 }
 
 // ----- Helpers de célula -------------------------------------------------
