@@ -138,8 +138,8 @@ export function construirModeloDRE(
     lineas,
     impuestos,
     totalImpuestosArs,
-    totalImpostosUsd: convertirAUsd(totalImpuestosArs, tc),
+    totalImpuestosUsd: convertirAUsd(totalImpuestosArs, tc),
     resultadoArs,
     resultadoUsd: convertirAUsd(resultadoArs, tc),
-  } as ModeloDRE;
+  };
 }
