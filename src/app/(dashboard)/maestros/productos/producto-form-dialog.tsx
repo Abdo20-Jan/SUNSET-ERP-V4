@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,7 +10,8 @@ import { toast } from "sonner";
 import {
   actualizarProductoAction,
   crearProductoAction,
-  type ProductoRow,
+  obtenerProductoCosto,
+  type ProductoGridRow,
 } from "@/lib/actions/productos";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +34,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
-export type ProductoFormState = { mode: "create" } | { mode: "edit"; row: ProductoRow };
+export type ProductoFormState = { mode: "create" } | { mode: "edit"; row: ProductoGridRow };
 
 const DECIMAL_2_RE = /^\d+(\.\d{1,2})?$/;
 const DECIMAL_4_RE = /^\d+(\.\d{1,4})?$/;
@@ -72,7 +73,7 @@ function emptyDefaults(): FormValues {
   };
 }
 
-function defaultsFromRow(row: ProductoRow): FormValues {
+function defaultsFromRow(row: ProductoGridRow): FormValues {
   return {
     codigo: row.codigo,
     nombre: row.nombre,
@@ -98,6 +99,14 @@ export function ProductoFormDialog({
 }) {
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
+  // Costo promedio: dato sensible que NO viaja en la lista; se pide on-demand al
+  // abrir el form en modo edición (sólo el del producto editado llega al cliente).
+  // Se etiqueta con el id del producto para saber, en render, si ya cargó el del
+  // registro actual — así el effect sólo hace setState en callbacks async (evita
+  // react-hooks/set-state-in-effect).
+  const [costoFetched, setCostoFetched] = useState<{ id: string; value: string | null } | null>(
+    null,
+  );
   const open = state !== null;
 
   const {
@@ -116,6 +125,25 @@ export function ProductoFormDialog({
     if (!state) return;
     reset(state.mode === "edit" ? defaultsFromRow(state.row) : emptyDefaults());
   }, [state, reset]);
+
+  useEffect(() => {
+    if (!state || state.mode !== "edit") return;
+    const id = state.row.id;
+    let ignore = false;
+    obtenerProductoCosto(id)
+      .then((value) => {
+        if (!ignore) setCostoFetched({ id, value });
+      })
+      .catch(() => {
+        if (!ignore) setCostoFetched({ id, value: null });
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [state]);
+
+  // ¿Ya tenemos el costo del producto que está abierto ahora? Mientras no, "…".
+  const costoListo = state?.mode === "edit" && costoFetched?.id === state.row.id;
 
   const onSubmit = handleSubmit((values) => {
     if (!state) return;
@@ -278,7 +306,13 @@ export function ProductoFormDialog({
                 <Input
                   disabled
                   className="text-right tabular-nums"
-                  value={state?.mode === "edit" ? state.row.costoPromedio : "0.00"}
+                  value={
+                    state?.mode === "edit"
+                      ? costoListo
+                        ? (costoFetched?.value ?? "—")
+                        : "…"
+                      : "0.00"
+                  }
                   readOnly
                 />
                 <p className="text-xs text-muted-foreground">Calculado por COMEX/Ventas.</p>

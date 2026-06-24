@@ -27,6 +27,10 @@ export type ProductoRow = {
   activo: boolean;
 };
 
+// Fila para la grilla del maestro: NO incluye `costoPromedio` (dato sensible que
+// no se renderiza en la lista). El form de edición lo pide on-demand por producto.
+export type ProductoGridRow = Omit<ProductoRow, "costoPromedio">;
+
 function percent4(value: MoneyInput): Prisma.Decimal {
   return new Prisma.Decimal(toDecimal(value).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4));
 }
@@ -190,6 +194,66 @@ export async function listarProductosParaExport(opts: {
   });
 
   return rows.map(mapProductoRow);
+}
+
+// `select` para la grilla: mismo shape que `PRODUCTO_ROW_SELECT` SIN `costoPromedio`.
+const PRODUCTO_GRID_SELECT = {
+  id: true,
+  codigo: true,
+  nombre: true,
+  descripcion: true,
+  marca: true,
+  modelo: true,
+  medida: true,
+  ncm: true,
+  unidad: true,
+  diePorcentaje: true,
+  precioVenta: true,
+  stockActual: true,
+  stockMinimo: true,
+  activo: true,
+} satisfies Prisma.ProductoSelect;
+
+type ProductoGridRowRaw = Prisma.ProductoGetPayload<{ select: typeof PRODUCTO_GRID_SELECT }>;
+
+function mapProductoGridRow(p: ProductoGridRowRaw): ProductoGridRow {
+  return {
+    id: p.id,
+    codigo: p.codigo,
+    nombre: p.nombre,
+    descripcion: p.descripcion,
+    marca: p.marca,
+    modelo: p.modelo,
+    medida: p.medida,
+    ncm: p.ncm,
+    unidad: p.unidad,
+    diePorcentaje: p.diePorcentaje.toFixed(4),
+    precioVenta: p.precioVenta.toFixed(2),
+    stockActual: p.stockActual,
+    stockMinimo: p.stockMinimo,
+    activo: p.activo,
+  };
+}
+
+// Grilla del maestro: TODAS las filas (sin paginación server-side) ordenadas por
+// código. El EnterpriseDataGrid resuelve búsqueda/filtro/orden/paginación en el
+// cliente sobre este set completo. El `costoPromedio` no viaja en el payload.
+export async function listarProductosGrid(): Promise<ProductoGridRow[]> {
+  const rows = await db.producto.findMany({
+    orderBy: { codigo: "asc" },
+    select: PRODUCTO_GRID_SELECT,
+  });
+  return rows.map(mapProductoGridRow);
+}
+
+// Costo promedio de UN producto, pedido on-demand al abrir el form de edición
+// (así el dato sensible no viaja para las ~miles de filas de la lista).
+export async function obtenerProductoCosto(id: string): Promise<string | null> {
+  const p = await db.producto.findUnique({
+    where: { id },
+    select: { costoPromedio: true },
+  });
+  return p ? p.costoPromedio.toFixed(2) : null;
 }
 
 const nullableStr = z
