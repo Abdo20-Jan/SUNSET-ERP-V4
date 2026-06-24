@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   type ColumnDef,
@@ -110,7 +111,14 @@ export function ClientesTable({ clientes, total, cuentas, provincias, vistas, q,
       id: "nombre",
       header: () => <SortableHeader columnId="nombre">Nombre</SortableHeader>,
       meta: { label: "Nombre" },
-      cell: ({ row }) => <span className="text-sm font-medium">{row.original.nombre}</span>,
+      cell: ({ row }) => (
+        <Link
+          href={`/maestros/clientes/${row.original.id}`}
+          className="text-sm font-medium text-foreground hover:text-primary hover:underline"
+        >
+          {row.original.nombre}
+        </Link>
+      ),
     },
     {
       id: "cuit",

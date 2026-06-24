@@ -197,6 +197,17 @@ export async function listarClientesParaExport(opts: {
   return rows.map(mapClienteRow);
 }
 
+// Read-only: ficha individual de cliente (mismo shape `ClienteRow` que la lista
+// y el export). Reutiliza el `select`/`map` canónicos — sin lógica de negocio.
+export async function obtenerClientePorId(id: string): Promise<ClienteRow | null> {
+  if (!id) return null;
+  const row = await db.cliente.findUnique({
+    where: { id },
+    select: CLIENTE_ROW_SELECT,
+  });
+  return row ? mapClienteRow(row) : null;
+}
+
 export async function listarCuentasContablesParaCliente(): Promise<CuentaContableOption[]> {
   const cuentas = await db.cuentaContable.findMany({
     where: {
