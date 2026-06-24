@@ -2,7 +2,17 @@
 
 > Leia este arquivo primeiro ao retomar.
 
-## 0. Estado atual — PR-001 Design Foundation IMPLEMENTADO (2026-06-23, não commitado)
+## 0. Estado atual — PR-002 Global Shell IMPLEMENTADO (2026-06-23, não commitado)
+Após o PR-001, o **PR-002 (Global Shell / Top-Nav / Internal Tabs)** foi implementado e validado **atrás de feature-flag**. Detalhe em [IMPLEMENTATION_NOTES_PR002.md](IMPLEMENTATION_NOTES_PR002.md).
+- **Flag:** `TOP_NAV_ENABLED` (`isTopNavEnabled()` em [features.ts](../../src/lib/features.ts), `server-only`, **default OFF**). OFF → sidebar atual idêntico (zero regressão); ON → novo `<AppShell>` (top-nav textual hierárquico, sem sidebar). Decisão do dono p/ Q3 = **rollout paralelo com flag** (sem big-bang, sem remover sidebar, sem mover rotas).
+- **Entregue (aditivo, flag-gated):** `nav-model.ts` (modelo canônico de 14 módulos derivado das rotas reais; páginas ausentes = `future` "Pronto"); `app-shell.tsx`; `module-mega-menu.tsx` (G-02/G-03 — textual, hierárquico, nada icon-only); `internal-tabs.tsx` (fundação em memória, `openTab()` p/ EntityLink futuro); `global-search.tsx` (⌘K, **só navegação**); `shell-user-menu.tsx`. Edits: `features.ts` + ramo na [layout.tsx](../../src/app/(dashboard)/layout.tsx).
+- **Validação:** `typecheck` ✅ 0 · `build` ✅ 0 (flag **OFF e ON**, ambos "Compiled successfully") · `biome:ci` ✅ (40 warnings pré-existentes; meus 8 arquivos limpos) · `eslint` nos arquivos do PR-002 ✅ exit 0. `pnpm test` ⚠️ **não executável (Docker indisponível)** — PR-002 não toca lógica testada; reexecutar com Docker antes do merge. **QA visual manual pendente** (exige instância logada).
+- **Escopo do diff:** 2 editados (`features.ts`, `layout.tsx`) + 6 componentes novos em `src/components/layout/` + docs. Nada de `prisma/`, auth, rotas, motores, sidebar legado (`app-sidebar`/`nav-items`/`app-header`/`user-menu`/`ui/sidebar` intactos). **Não commitado.**
+- **Próximo:** **PR-003 (EnterpriseDataGrid / Worklist Infra)** — ver [10_PR_ROADMAP.md](10_PR_ROADMAP.md). Ao criar `EntityLink`, consumir `useInternalTabs().openTab()`. Bloqueios do dono Q1/Q2 (permissão/auditoria) seguem gateando PR-005.
+
+---
+
+## 0.1. PR-001 Design Foundation IMPLEMENTADO (2026-06-23, não commitado)
 Após a auditoria, o **PR-001 (Design Foundation)** foi implementado e validado. Detalhe em [IMPLEMENTATION_NOTES_PR001.md](IMPLEMENTATION_NOTES_PR001.md) e guia de consumo em [DESIGN_FOUNDATION.md](DESIGN_FOUNDATION.md).
 - **Entregue (aditivo, opt-in):** tokens de cor semântica (`success/warning/info/process`, light+dark) e de densidade (linha 32px/cabeçalho 34px) em [globals.css](../../src/app/globals.css); utilitários `.table-dense`/`.table-zebra`; `StatusBadge` + `SeverityBadge`; props opt-in `density`/`zebra` no `DataTable`; **piloto** `/maestros/productos`.
 - **Validação:** `typecheck` ✅ (após limpar cache `.next` obsoleto), `biome:ci` ✅ (warnings só pré-existentes), `eslint` nos arquivos do PR-001 ✅ (0 erros), `build` ✅ exit 0. `pnpm test` ⚠️ **não executável aqui (Docker indisponível)** — reexecutar com Docker antes do merge; PR-001 não toca lógica testada.
