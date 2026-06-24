@@ -2,7 +2,19 @@
 
 > Leia este arquivo primeiro ao retomar.
 
-## 0. Estado atual — PR-003 EnterpriseDataGrid / Worklist Infra IMPLEMENTADO (2026-06-23, não commitado)
+## 0. Estado atual — PR-004 Record Pattern / FloatingWorkWindow IMPLEMENTADO (2026-06-24, não commitado)
+Após o PR-003, o **PR-004 (Record Pattern / FloatingWorkWindow / ActionBar / DirtyFooter)** foi implementado e validado. Detalhe em [IMPLEMENTATION_NOTES_PR004.md](IMPLEMENTATION_NOTES_PR004.md).
+- **Reconciliação com o `main`:** `RecordHeader` (+ `RecordTabs`/`StatusBadge`/`RelatedList`/`AuditTrail`) **já existem** em `main` (série NS-4) e são usados por `ventas/[id]`, `asientos/[id]`, `proveedores/[id]`. O PR-004 **reusa** `RecordHeader` (não recria) e entrega só os **5 primitivos que faltavam** + um hook de dirty.
+- **Infra nova (aditiva):** pasta `src/components/record/` com `RecordLayout` (compõe o `RecordHeader` existente), `RecordSection`/`RecordFieldGrid`/`RecordField`, `RecordActionBar` (sticky), `DirtyFooter` (com integração **opt-in** de abas via `useInternalTabsOptional`), `useDirtyState`, e o `FloatingWorkWindow` (janela central movível/redimensionável/maximizável sobre `@base-ui/react/dialog` com `modal="trap-focus"`, gate de fechamento `onRequestClose`, drag/resize por `pointer events` + rAF, SSR-safe). **Sem novos pacotes.**
+- **Decisões do dono:** piloto = **Depósitos** (cadastro puro, 4 campos, zero serviços protegidos) · acesso à ficha = **link no nome** da lista (1 célula aditiva).
+- **Piloto:** nova rota `/maestros/depositos/[id]` (server, `force-dynamic`, `db.deposito.findUnique` direto + contagens read-only) renderiza o record pattern; "Editar" abre o `FloatingWorkWindow` ligado a **`actualizarDepositoAction`** (intocada), com `DirtyFooter` + confirmação de descarte. O diálogo de edição/exclusão da lista permanece intacto (rollback trivial).
+- **Validação:** `typecheck` ✅ 0 · `build` ✅ 0 (rota nova compilada) · `biome:ci` ✅ (warnings só pré-existentes; meus arquivos limpos) · `pnpm test` ✅ **903 passados + 2 skipped**; 1 suite (`entregas-pendientes-loader`) deu **timeout transitório do Testcontainers** → **passa 2/2 no retry isolado** (flake de infra). **QA visual manual pendente** (exige instância logada). e2e por browser **diferido** (suíte service-level).
+- **Escopo do diff:** `?? src/components/record/` (6 arquivos) + `?? maestros/depositos/[id]/` (2 arquivos) + 1 editado (`depositos-table.tsx`, 1 célula linkada) + docs. Nada de `prisma/`, auth, services/actions, motores, `record-header.tsx`/`record-tabs.tsx`/`filter-bar.tsx`/`deposito-form-dialog.tsx`/`lib/actions/depositos.ts`. **Não commitado.**
+- **Próximo:** PRs de módulo migram os **5 drawers de negócio** (tesouraria ×4, asientos) `Sheet`→`FloatingWorkWindow`; um PR futuro pode hospedar **AdvancedFilters** ("Más filtros") na FWW. Bloqueios Q1/Q2 (permissão/auditoria) seguem gateando PR-005.
+
+---
+
+## 0.-1. PR-003 EnterpriseDataGrid / Worklist Infra IMPLEMENTADO (2026-06-23, não commitado)
 Após o PR-002, o **PR-003 (EnterpriseDataGrid / Worklist Infra)** foi implementado e validado. Detalhe em [IMPLEMENTATION_NOTES_PR003.md](IMPLEMENTATION_NOTES_PR003.md).
 - **Infra nova (aditiva):** pasta `src/components/data-grid/` com `EnterpriseDataGrid` (sobre `@tanstack/react-table` 8.21.3) + `worklist-toolbar`, `filter-bar`, `saved-views-bar`, `column-visibility`, `selection-summary-footer`, `entity-link` e `data-grid-helpers` (augmentação de `ColumnMeta` + utils). Cobre G-05/PAGE-STD-01: densidade `dense`/`zebra` (PR-001), **cabeçalho fixo**, **colunas congeladas** (left-pin), busca rápida, chips de filtro, **visões salvas in-memory**, visibilidade de colunas, **seleção + rodapé sticky**, **expansão** (drill-down), paginação e `EntityLink`.
 - **Decisões do dono:** EntityLink **integra** abas internas via hook aditivo `useInternalTabsOptional` (abre registro em aba com `TOP_NAV_ENABLED=ON`; navega normal OFF) · **freeze funcional** no piloto. **Export = superfície desabilitada** ("Pronto — PR-005"; nada de dado sensível, produtos não exibe custo/margem) · **"Más filtros"/FWW = PR-004** (placeholder) · **visões sem persistência** (declarado in-memory).

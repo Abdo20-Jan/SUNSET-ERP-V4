@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { toast } from "sonner";
@@ -56,7 +57,14 @@ export function DepositosTable({ depositos }: { depositos: DepositoRow[] }) {
     {
       id: "nombre",
       header: "Nombre",
-      cell: ({ row }) => <span className="text-sm font-medium">{row.original.nombre}</span>,
+      cell: ({ row }) => (
+        <Link
+          href={`/maestros/depositos/${row.original.id}`}
+          className="text-sm font-medium text-foreground hover:text-primary hover:underline"
+        >
+          {row.original.nombre}
+        </Link>
+      ),
     },
     {
       id: "direccion",
