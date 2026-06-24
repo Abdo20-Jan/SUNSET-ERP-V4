@@ -249,6 +249,8 @@ export function ProductosTable({ productos, total, marcas, vistas, q, marca }: P
         emptyMessage="Aún no hay productos registrados."
         emptyFilteredMessage="No hay productos para los filtros seleccionados."
         isFiltered={total > 0 || q.length > 0 || (marca.length > 0 && marca !== "todas")}
+        density="dense"
+        zebra
       />
 
       <ProductoFormDialog state={formState} onClose={() => setFormState(null)} />

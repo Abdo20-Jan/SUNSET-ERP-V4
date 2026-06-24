@@ -1,15 +1,23 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-type Tono = "neutral" | "info" | "success" | "warning" | "danger";
+/*
+ * StatusBadge — combina o mapa semântico `estado → tono` consumido pelas tabelas
+ * e fichas do domínio (Venta/Compra/Embarque/Asiento/Periodo/…) com os tokens de
+ * status do PR-001 Design Foundation (globals.css). Tons canônicos
+ * (04_DESIGN_SYSTEM): neutral · process · info · warning · success · danger.
+ * Renderização: fundo tonal sutil + texto na cor do tom + borda discreta (NetSuite).
+ * Tokens desconhecidos caen en `neutral` (seguro).
+ */
+type Tono = "neutral" | "process" | "info" | "success" | "warning" | "danger";
 
 const TONO_CLASS: Record<Tono, string> = {
-  neutral: "border-transparent bg-muted text-muted-foreground",
-  info: "border-transparent bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300",
-  success:
-    "border-transparent bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
-  warning: "border-transparent bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
-  danger: "border-transparent bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300",
+  neutral: "bg-muted text-muted-foreground border-border/60",
+  process: "bg-process/12 text-process border-process/25",
+  info: "bg-info/12 text-info border-info/25",
+  success: "bg-success/12 text-success border-success/25",
+  warning: "bg-warning/15 text-warning border-warning/30",
+  danger: "bg-destructive/10 text-destructive border-destructive/25",
 };
 
 /**
