@@ -56,6 +56,18 @@ export function useInternalTabs(): InternalTabsContextValue {
   return ctx;
 }
 
+/**
+ * Variante não-quebrante de {@link useInternalTabs}: retorna `null` quando NÃO
+ * há `<InternalTabsProvider>` na árvore (ex.: shell legado com `TOP_NAV_ENABLED`
+ * OFF). Permite que consumidores opcionais — como o `EntityLink` (PR-003) —
+ * abram registros em aba quando o top-nav está ligado e degradem para navegação
+ * normal quando está desligado, sem lançar erro. Aditivo: não altera nenhum
+ * contrato existente do PR-002.
+ */
+export function useInternalTabsOptional(): InternalTabsContextValue | null {
+  return React.useContext(InternalTabsContext);
+}
+
 export function InternalTabsProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
