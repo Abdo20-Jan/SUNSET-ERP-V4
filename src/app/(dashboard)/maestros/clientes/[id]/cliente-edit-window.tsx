@@ -12,6 +12,7 @@ import { Edit02Icon } from "@hugeicons/core-free-icons";
 import { CondicionIva, TipoCanal } from "@/generated/prisma/client";
 import {
   actualizarClienteAction,
+  type ClienteInput,
   type ClienteRow,
   type CuentaContableOption,
 } from "@/lib/actions/clientes";
@@ -103,24 +104,54 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
+// Helpers de normalização: mantêm baixa a complexidade ciclomática (Codacy ≤ 8)
+// concentrando a coalescência/normalização dos campos opcionais aqui, não nos callers.
+const orEmpty = (v: string | null | undefined): string => v ?? "";
+const blankToUndef = (v: string | undefined): string | undefined =>
+  v && v.length > 0 ? v : undefined;
+
 function defaultsFromCliente(c: ClienteRow): FormValues {
   return {
     nombre: c.nombre,
-    cuit: c.cuit ?? "",
+    cuit: orEmpty(c.cuit),
     tipoCanal: c.tipoCanal,
     condicionIva: c.condicionIva,
     agenteRetencionIva: c.agenteRetencionIva,
     agenteRetencionGanancias: c.agenteRetencionGanancias,
     agenteIibb: c.agenteIibb,
     tipo: c.tipo,
-    direccion: c.direccion ?? "",
-    telefono: c.telefono ?? "",
-    email: c.email ?? "",
+    direccion: orEmpty(c.direccion),
+    telefono: orEmpty(c.telefono),
+    email: orEmpty(c.email),
     estado: c.estado === "inactivo" ? "inactivo" : "activo",
     cuentaContableId: c.cuentaContableId,
     provinciaId: c.provinciaId,
-    alicuotaPercepcionIIBB: c.alicuotaPercepcionIIBB ?? "",
+    alicuotaPercepcionIIBB: orEmpty(c.alicuotaPercepcionIIBB),
     exentoPercepcionIIBB: c.exentoPercepcionIIBB,
+  };
+}
+
+// Monta o payload da action a partir dos valores do form (campos vazios → undefined).
+// Extraído do onSubmit para manter o handler com baixa complexidade ciclomática.
+function buildClientePayload(values: FormValues): ClienteInput {
+  return {
+    nombre: values.nombre,
+    cuit: blankToUndef(values.cuit),
+    tipoCanal: values.tipoCanal,
+    condicionIva: values.condicionIva,
+    agenteRetencionIva: values.agenteRetencionIva,
+    agenteRetencionGanancias: values.agenteRetencionGanancias,
+    agenteIibb: values.agenteIibb,
+    tipo: blankToUndef(values.tipo),
+    direccion: blankToUndef(values.direccion),
+    telefono: blankToUndef(values.telefono),
+    email: blankToUndef(values.email),
+    estado: values.estado,
+    cuentaContableId: values.cuentaContableId ?? null,
+    provinciaId: values.provinciaId ?? null,
+    alicuotaPercepcionIIBB: blankToUndef(values.alicuotaPercepcionIIBB),
+    exentoPercepcionIIBB: values.exentoPercepcionIIBB,
+    crearCuentaAuto: false,
   };
 }
 
@@ -159,28 +190,7 @@ export function ClienteEditWindow({
 
   const onSubmit = handleSubmit((values) => {
     startSaving(async () => {
-      const result = await actualizarClienteAction(cliente.id, {
-        nombre: values.nombre,
-        cuit: values.cuit && values.cuit.length > 0 ? values.cuit : undefined,
-        tipoCanal: values.tipoCanal,
-        condicionIva: values.condicionIva,
-        agenteRetencionIva: values.agenteRetencionIva,
-        agenteRetencionGanancias: values.agenteRetencionGanancias,
-        agenteIibb: values.agenteIibb,
-        tipo: values.tipo && values.tipo.length > 0 ? values.tipo : undefined,
-        direccion: values.direccion && values.direccion.length > 0 ? values.direccion : undefined,
-        telefono: values.telefono && values.telefono.length > 0 ? values.telefono : undefined,
-        email: values.email && values.email.length > 0 ? values.email : undefined,
-        estado: values.estado,
-        cuentaContableId: values.cuentaContableId ?? null,
-        provinciaId: values.provinciaId ?? null,
-        alicuotaPercepcionIIBB:
-          values.alicuotaPercepcionIIBB && values.alicuotaPercepcionIIBB.length > 0
-            ? values.alicuotaPercepcionIIBB
-            : undefined,
-        exentoPercepcionIIBB: values.exentoPercepcionIIBB,
-        crearCuentaAuto: false,
-      });
+      const result = await actualizarClienteAction(cliente.id, buildClientePayload(values));
 
       if (result.ok) {
         toast.success("Cliente actualizado.");
