@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 
 import { auth } from "@/lib/auth";
+import { isTopNavEnabled } from "@/lib/features";
+import { AppShell } from "@/components/layout/app-shell";
 import { AppTopnav } from "@/components/layout/app-topnav";
 import { ShellProvider } from "@/components/layout/shell-provider";
 
@@ -10,6 +12,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!session) redirect("/login");
 
   const modoRetroactivo = session.user.modoRetroactivo ?? false;
+
+  // PR-002: novo global shell (top-nav + abas internas + busca) atrás de feature-flag.
+  // Flag OFF (default) → mantém o shell atual (ShellProvider + AppTopnav) intacto.
+  if (isTopNavEnabled()) {
+    return (
+      <AppShell user={session.user} modoRetroactivo={modoRetroactivo}>
+        {children}
+      </AppShell>
+    );
+  }
 
   return (
     <ShellProvider>
