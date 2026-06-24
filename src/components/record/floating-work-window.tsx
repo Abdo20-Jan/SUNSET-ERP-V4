@@ -95,32 +95,30 @@ export function FloatingWorkWindow({
   const pendingRef = React.useRef<Geometry | null>(null);
   const rafRef = React.useRef<number | null>(null);
   const closingRef = React.useRef(false);
+  const wasOpenRef = React.useRef(false);
 
   const [geometry, setGeometry] = React.useState<Geometry | null>(null);
   const [maximized, setMaximized] = React.useState(defaultMaximized);
 
-  // Centraliza na 1ª abertura sem ler `window` no render (useLayoutEffect → antes do paint).
+  // Na transição fechado→aberto: centra a janela medindo o viewport num layout effect
+  // (antes do paint → sem flash) e restaura o estado de maximização padrão. Não lê `window`
+  // no render; via `useIsomorphicLayoutEffect` não roda no SSR. Re-centra a cada abertura.
   useIsomorphicLayoutEffect(() => {
-    if (!open || geometry) return;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const width = Math.min(initialWidth, vw - VIEWPORT_MARGIN * 2);
-    const height = Math.min(initialHeight, vh - VIEWPORT_MARGIN * 2);
-    setGeometry({
-      left: Math.max(VIEWPORT_MARGIN, Math.round((vw - width) / 2)),
-      top: Math.max(VIEWPORT_MARGIN, Math.round((vh - height) / 3)),
-      width,
-      height,
-    });
-  }, [open, geometry, initialWidth, initialHeight]);
-
-  // Ao fechar, esquece a geometria para recentralizar na próxima abertura.
-  React.useEffect(() => {
-    if (!open) {
-      setGeometry(null);
+    if (open && !wasOpenRef.current) {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const width = Math.min(initialWidth, vw - VIEWPORT_MARGIN * 2);
+      const height = Math.min(initialHeight, vh - VIEWPORT_MARGIN * 2);
+      setGeometry({
+        left: Math.max(VIEWPORT_MARGIN, Math.round((vw - width) / 2)),
+        top: Math.max(VIEWPORT_MARGIN, Math.round((vh - height) / 3)),
+        width,
+        height,
+      });
       setMaximized(defaultMaximized);
     }
-  }, [open, defaultMaximized]);
+    wasOpenRef.current = open;
+  }, [open, initialWidth, initialHeight, defaultMaximized]);
 
   // Re-clampa para dentro do viewport quando a janela do browser é redimensionada.
   React.useEffect(() => {
@@ -166,9 +164,11 @@ export function FloatingWorkWindow({
     });
   }, []);
 
-  const beginInteraction = (mode: Interaction["mode"]) => (e: React.PointerEvent<HTMLElement>) => {
+  // Handlers passados POR REFERÊNCIA (não invocados no render). Uma factory chamada no JSX
+  // (`beginInteraction("move")`) faria o React Compiler ver o acesso aos refs "durante o render".
+  const beginInteraction = (mode: Interaction["mode"], e: React.PointerEvent<HTMLElement>) => {
     if (maximized || interactionRef.current || e.button !== 0) return;
-    if ((e.target as Element).closest("[data-no-drag]")) return;
+    if (mode === "move" && (e.target as Element).closest("[data-no-drag]")) return;
     const panel = popupRef.current;
     if (!panel) return;
     const rect = panel.getBoundingClientRect();
@@ -185,6 +185,9 @@ export function FloatingWorkWindow({
     e.currentTarget.setPointerCapture(e.pointerId);
     e.preventDefault();
   };
+
+  const onMovePointerDown = (e: React.PointerEvent<HTMLElement>) => beginInteraction("move", e);
+  const onResizePointerDown = (e: React.PointerEvent<HTMLElement>) => beginInteraction("resize", e);
 
   const onInteractionMove = (e: React.PointerEvent<HTMLElement>) => {
     const it = interactionRef.current;
@@ -298,7 +301,7 @@ export function FloatingWorkWindow({
         >
           <div
             className="flex shrink-0 cursor-move touch-none items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 select-none"
-            onPointerDown={beginInteraction("move")}
+            onPointerDown={onMovePointerDown}
             onPointerMove={onInteractionMove}
             onPointerUp={endInteraction}
             onPointerCancel={endInteraction}
@@ -343,7 +346,7 @@ export function FloatingWorkWindow({
               role="presentation"
               aria-hidden
               className="absolute right-0 bottom-0 size-4 cursor-nwse-resize touch-none"
-              onPointerDown={beginInteraction("resize")}
+              onPointerDown={onResizePointerDown}
               onPointerMove={onInteractionMove}
               onPointerUp={endInteraction}
               onPointerCancel={endInteraction}
