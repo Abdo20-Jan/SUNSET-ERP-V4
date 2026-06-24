@@ -12,9 +12,10 @@
 import { Decimal, sumMoney } from "@/lib/decimal";
 import { convertirAUsd } from "@/lib/format";
 
-import type { ConceptoDRE } from "../estado-resultados-rt9";
+import type { ConceptoDRE, ConceptoDREId } from "../estado-resultados-rt9";
 
 export type LineaDRE = {
+  id: ConceptoDREId;
   label: string;
   tipo: "ingreso" | "egreso" | "mixto" | "subtotal";
   enfasis: boolean;
@@ -117,6 +118,7 @@ export function construirModeloDRE(
   const lineas: LineaDRE[] = conceptos.map((c) => {
     const ars = c.total.toFixed(2);
     return {
+      id: c.id,
       label: c.label,
       tipo: c.tipo,
       enfasis: c.enfasis,

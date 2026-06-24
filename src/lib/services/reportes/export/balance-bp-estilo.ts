@@ -1,13 +1,12 @@
 // Constantes de estilo do export do Balanço Patrimonial, transcritas 1:1 da
-// planilha artesanal do dono ("BP SUNSET SAS | DÓLAR.xlsx"). Mantidas em módulo
-// próprio para que o renderer (balance-bp-excel.ts) reproduza o visual idêntico
-// ao modelo: cabeçalhos ciano, fonte Arial, formatos contábeis [$ARS]/[$$-409],
-// texto azul nos valores, código de embarque em vermelho, e a grade "boxed"
-// (borda dupla à esquerda da 1ª coluna e à direita da última).
+// planilha artesanal do dono ("BALANÇO PATRIMONIAL NASSER.xlsx"). Mantidas em
+// módulo próprio para que o renderer (balance-bp-excel.ts) reproduza o visual do
+// modelo: cabeçalhos ciano, fonte Arial, formatos contábeis [$ARS]/[$$-409],
+// texto azul nos valores, código de embarque em vermelho, e a grade "boxed".
 //
-// Cores e formatos extraídos célula-a-célula do modelo (Arial é a fonte
-// default; Tahoma itálico nos títulos de seção; números no formato contábil
-// argentino). NÃO inventar — qualquer ajuste deve casar com o arquivo modelo.
+// IMPORTANTE: o template real trabalha na grade A:O. A versão anterior do
+// exportador deslocava tudo para C:Q, o que quebrava fórmulas, bordas, larguras e
+// a leitura visual do BP.
 
 import type { Borders, Fill, Font } from "exceljs";
 
@@ -41,41 +40,41 @@ export function fonte(opts: Partial<Font> = {}): Partial<Font> {
   return { name: FONTE, size: 10, ...opts };
 }
 
-// ----- Colunas (1-indexadas, espelham as letras do modelo) ---------------
-// C=código, D=descrição, E=moeda, F=contêiner, H=ARS, I=USD (lançado),
-// O=TC/espaçador, P=USD (fechamento, =SUM(I:O)), Q=SALDO (USD, seção/total).
+// ----- Colunas (1-indexadas, espelham as letras do modelo A:O) -----------
+// A=código, B=descrição, C/D/E=colunas auxiliares/espaçadores do template,
+// F=ARS, G=data inicial/saldo inicial USD, H:M=6 colunas de movimento,
+// M=TC de cierre no cabeçalho, N=data final/saldo final USD, O=SALDO.
 export const COL = {
-  CODIGO: 3, // C
-  DESC: 4, // D
-  MONEDA: 5, // E
-  CONTENEDOR: 6, // F
-  ARS: 8, // H
-  USD_IN: 9, // I
-  TC: 15, // O
-  USD: 16, // P
-  SALDO: 17, // Q
+  CODIGO: 1, // A
+  DESC: 2, // B
+  MONEDA: 3, // C
+  CONTENEDOR: 4, // D
+  AUX: 5, // E
+  ARS: 6, // F
+  USD_IN: 7, // G
+  TC: 13, // M
+  USD: 14, // N
+  SALDO: 15, // O
 } as const;
 
-// Larguras de coluna do modelo (A..Q). As colunas J..N ficam como o "miolo"
-// de movimentos do modelo (vazias), preservando o espaçamento característico.
+// Larguras de coluna do modelo (A..O). Correspondem ao miolo real da planilha
+// artesanal; antes o export usava A..Q e deixava duas colunas mortas à esquerda.
 export const LARGURAS: { width: number }[] = [
-  { width: 5.2 }, // A
-  { width: 7.0 }, // B
-  { width: 14.7 }, // C
-  { width: 17.5 }, // D
-  { width: 6.2 }, // E
-  { width: 12.7 }, // F
-  { width: 15.2 }, // G
-  { width: 20.5 }, // H
-  { width: 17.8 }, // I
-  { width: 19.0 }, // J
-  { width: 18.5 }, // K
-  { width: 12.0 }, // L
-  { width: 19.3 }, // M
-  { width: 18.5 }, // N
-  { width: 9.0 }, // O
-  { width: 14.7 }, // P
-  { width: 17.5 }, // Q
+  { width: 14.7 }, // A
+  { width: 17.5 }, // B
+  { width: 6.2 }, // C
+  { width: 12.7 }, // D
+  { width: 15.2 }, // E
+  { width: 20.5 }, // F
+  { width: 17.8 }, // G
+  { width: 19.0 }, // H
+  { width: 18.5 }, // I
+  { width: 12.0 }, // J
+  { width: 19.3 }, // K
+  { width: 18.5 }, // L
+  { width: 9.0 }, // M
+  { width: 14.7 }, // N
+  { width: 17.5 }, // O
 ];
 
 // ----- Fills -------------------------------------------------------------
@@ -89,8 +88,8 @@ function lado(style: BorderStyle) {
   return { style };
 }
 
-// Borda "caixa" do corpo: dupla à esquerda da 1ª coluna (C) e à direita da
-// última (Q). Aplicada por coluna.
+// Borda "caixa" do corpo: dupla à esquerda da 1ª coluna (A) e à direita da
+// última (O). Aplicada por coluna.
 export function bordaCaixa(col: number): Partial<Borders> {
   if (col === COL.CODIGO) return { left: lado("double") };
   if (col === COL.SALDO) return { right: lado("double") };

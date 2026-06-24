@@ -107,6 +107,7 @@ const modelo: BalanceBPModelo = {
   dre: {
     lineas: [
       {
+        id: "INGRESOS_VENTAS",
         label: "Ingresos por ventas",
         tipo: "ingreso",
         enfasis: false,
@@ -115,6 +116,25 @@ const modelo: BalanceBPModelo = {
         ars: "139011.00",
       },
       {
+        id: "DEDUCCIONES",
+        label: "Deducciones sobre ventas",
+        tipo: "egreso",
+        enfasis: false,
+        esResultado: false,
+        usd: "0.00",
+        ars: "0.00",
+      },
+      {
+        id: "OTROS_INGRESOS_OPERATIVOS",
+        label: "Otros ingresos operativos",
+        tipo: "ingreso",
+        enfasis: false,
+        esResultado: false,
+        usd: "0.00",
+        ars: "0.00",
+      },
+      {
+        id: "INGRESOS_NETOS",
         label: "Ingresos netos",
         tipo: "subtotal",
         enfasis: false,
@@ -123,6 +143,7 @@ const modelo: BalanceBPModelo = {
         ars: "139011.00",
       },
       {
+        id: "COSTO_VENTAS",
         label: "Costo de ventas",
         tipo: "egreso",
         enfasis: false,
@@ -131,6 +152,79 @@ const modelo: BalanceBPModelo = {
         ars: "-83406.60",
       },
       {
+        id: "RESULTADO_BRUTO",
+        label: "Resultado bruto",
+        tipo: "subtotal",
+        enfasis: false,
+        esResultado: false,
+        usd: "40.00",
+        ars: "55604.40",
+      },
+      {
+        id: "RESULTADOS_FINANCIEROS",
+        label: "Resultados financieros y de tenencia",
+        tipo: "mixto",
+        enfasis: false,
+        esResultado: false,
+        usd: "0.00",
+        ars: "0.00",
+      },
+      {
+        id: "GASTOS_COMERCIALIZACION",
+        label: "Gastos de comercialización",
+        tipo: "egreso",
+        enfasis: false,
+        esResultado: false,
+        usd: "0.00",
+        ars: "0.00",
+      },
+      {
+        id: "GASTOS_ADMINISTRACION",
+        label: "Gastos de administración",
+        tipo: "egreso",
+        enfasis: false,
+        esResultado: false,
+        usd: "0.00",
+        ars: "0.00",
+      },
+      {
+        id: "OTROS_GASTOS_OPERATIVOS",
+        label: "Otros gastos operativos",
+        tipo: "egreso",
+        enfasis: false,
+        esResultado: false,
+        usd: "0.00",
+        ars: "0.00",
+      },
+      {
+        id: "OTROS_INGRESOS",
+        label: "Otros ingresos",
+        tipo: "ingreso",
+        enfasis: false,
+        esResultado: false,
+        usd: "0.00",
+        ars: "0.00",
+      },
+      {
+        id: "OTROS_EGRESOS",
+        label: "Otros egresos",
+        tipo: "egreso",
+        enfasis: false,
+        esResultado: false,
+        usd: "0.00",
+        ars: "0.00",
+      },
+      {
+        id: "IMPUESTO_GANANCIAS",
+        label: "Impuesto a las ganancias",
+        tipo: "egreso",
+        enfasis: false,
+        esResultado: false,
+        usd: "0.00",
+        ars: "0.00",
+      },
+      {
+        id: "RESULTADO_EJERCICIO",
         label: "Resultado del ejercicio",
         tipo: "subtotal",
         enfasis: true,
@@ -150,7 +244,7 @@ const modelo: BalanceBPModelo = {
 };
 
 describe("generarBalanceBPExcel", () => {
-  it("gera um .xlsx no formato do modelo (data inicial · movimentos · data final)", async () => {
+  it("gera um .xlsx no formato do modelo Nasser A:O (data inicial · 6 movimentos · data final)", async () => {
     const bytes = await generarBalanceBPExcel(modelo);
     expect(bytes.length).toBeGreaterThan(0);
 
@@ -189,18 +283,45 @@ describe("generarBalanceBPExcel", () => {
     // Detalhe por embarque (PR2): sub-seção + código do embarque renderizados.
     expect(blob).toContain("Detalle por embarque (informativo)");
     expect(blob).toContain("BR-250827-015CN");
-    // Bloco DRE (PR3): cascata + impostos AR + fórmulas vivas.
+    // Bloco inferior do DRE/gastos: linhas fixas do modelo artesanal.
     expect(blob).toContain("CONFERINDO O DRE");
-    expect(blob).toContain("Ingresos por ventas");
+    expect(blob).toContain("Venda à vista");
+    expect(blob).toContain("Venda a Crédito");
+    expect(blob).toContain("PROVISÃO IR");
+    expect(blob).toContain("PROVISÃO IVA");
+    expect(blob).toContain("INGRESSOS BRUTOS");
+    expect(blob).toContain("Devoluções");
+    expect(blob).toContain("INGRESSOS NETOS");
+    expect(blob).toContain("CMV");
+    expect(blob).toContain("RMA");
+    expect(blob).toContain("RESULTADO BRUTO");
+    expect(blob).toContain("GASTOS");
+    expect(blob).toContain("BANCOS");
+    expect(blob).toContain("GASTOS DIVERSOS");
+    expect(blob).toContain("impostos");
+    expect(blob).toContain("publicidade");
+    expect(blob).toContain("garantia");
+    expect(blob).toContain("desconto");
+    expect(blob).toContain("seguro");
+    expect(blob).toContain("fretes");
     expect(blob).toContain("Impuestos del ejercicio (detalle AR)");
     expect(blob).toContain("CONFERE (DRE = Resultado del PL)");
 
-    // ----- Estrutura do modelo: data inicial · 6 movimentos · data final -----
-    // Cabeçalho "BP DÓLARES" sobre as colunas de movimento + coluna SALDO.
+    // ----- Estrutura do modelo real: A:O -----
+    expect(ws?.actualColumnCount).toBeLessThanOrEqual(15);
+    expect(ws?.getCell("F1").value).toBe(1390.11); // TC espelhada do modelo
+    expect(ws?.getCell("M1").value).toBe(1390.11); // TC âncora usada em fórmulas
+    expect(ws?.getCell("O1").value).toBe("SALDO");
     expect(blob).toContain("BP DÓLARES");
     expect(blob).toContain("SALDO");
-    // DATA FINAL = SUM(I:O) — soma abertura + 6 colunas de movimento.
-    expect(formulas.some((f) => /SUM\(I\d+:O\d+\)/.test(f))).toBe(true);
+
+    // DATA FINAL = SUM(G:M) — soma abertura + 6 colunas de movimento.
+    expect(formulas.some((f) => /SUM\(G\d+:M\d+\)/.test(f))).toBe(true);
+    expect(formulas.some((f) => /SUM\(I\d+:O\d+\)/.test(f))).toBe(false);
+    // ARS = USD final × TC do modelo, ancorada em $M$1.
+    expect(formulas.some((f) => f.includes("*$M$1"))).toBe(true);
+    expect(formulas.some((f) => f.includes("*$O$1"))).toBe(false);
+
     // Datas (inicial/final) com formato d-mmm.
     expect(numFmts.some((f) => f === "d-mmm")).toBe(true);
     // Subtotais/totais por SUM + conferência por subtração.
@@ -212,7 +333,5 @@ describe("generarBalanceBPExcel", () => {
     expect(numFmts.some((f) => f.includes("[$ARS]"))).toBe(true);
     expect(numFmts.some((f) => f.includes("[$$-409]"))).toBe(true);
     expect(fonts.some((f) => f === "Arial")).toBe(true);
-    // ARS = USD × TC (âncora $O$1).
-    expect(formulas.some((f) => f.includes("*$O$1"))).toBe(true);
   });
 });
