@@ -14,6 +14,7 @@ import { convertirAUsd, fmtMoney } from "@/lib/format";
 import { CATALOGO_KPI_VERSION, kpisPorCategoria } from "@/lib/services/bi-kpi-catalogo";
 import { getAnalisisLucro } from "@/lib/services/bi-lucro";
 
+import { stripAnalisisLucro } from "./rentabilidad-strip";
 import { KpiCard } from "../../dashboard/_components/kpi-card";
 import {
   HorizontalBarRankingLazy,
@@ -50,59 +51,69 @@ export async function RentabilidadTab({
   hasta?: Date | null;
   tc?: string | null;
 }) {
-  const { indicadores, inputs, dimensionales } = await getAnalisisLucro({ desde, hasta });
+  // PR-011: strip de costo/margen en la frontera (sin tocar el motor BI). Sin
+  // `margenes.ver` los indicadores llegan en null y las series vacías.
+  const { indicadores, inputs, dimensionales } = await stripAnalisisLucro(
+    await getAnalisisLucro({ desde, hasta }),
+  );
   const symbol = tc ? "USD " : "$ ";
   const money = (n: number) => `${symbol}${fmtMoney(convertirAUsd(n.toString(), tc ?? null))}`;
+  // Versiones null-safe: un indicador strip-eado (null) se muestra como "—".
+  const moneyN = (n: number | null) => (n == null ? "—" : money(n));
+  const pctN = (n: number | null) => (n == null ? "—" : pctFmt.format(n));
+  const accN = (n: number | null): Accent => (n == null ? "neutral" : acc(n));
 
   // Tarjetas catálogo-driven. Los % son TC-invariantes; los montos se convierten.
   const valores: Record<string, { value: string; accent: Accent }> = {
     "rentabilidad.margenBruto": {
-      value: money(indicadores.margenBruto),
-      accent: acc(indicadores.margenBruto),
+      value: moneyN(indicadores.margenBruto),
+      accent: accN(indicadores.margenBruto),
     },
     "rentabilidad.margenBrutoPct": {
-      value: pctFmt.format(indicadores.margenBrutoPct),
-      accent: acc(indicadores.margenBrutoPct),
+      value: pctN(indicadores.margenBrutoPct),
+      accent: accN(indicadores.margenBrutoPct),
     },
-    "rentabilidad.ebit": { value: money(indicadores.ebit), accent: acc(indicadores.ebit) },
+    "rentabilidad.ebit": { value: moneyN(indicadores.ebit), accent: accN(indicadores.ebit) },
     "rentabilidad.margenOperativoPct": {
-      value: pctFmt.format(indicadores.margenOperativoPct),
-      accent: acc(indicadores.margenOperativoPct),
+      value: pctN(indicadores.margenOperativoPct),
+      accent: accN(indicadores.margenOperativoPct),
     },
-    "rentabilidad.ebitda": { value: money(indicadores.ebitda), accent: acc(indicadores.ebitda) },
+    "rentabilidad.ebitda": { value: moneyN(indicadores.ebitda), accent: accN(indicadores.ebitda) },
     "rentabilidad.margenEbitdaPct": {
-      value: pctFmt.format(indicadores.margenEbitdaPct),
-      accent: acc(indicadores.margenEbitdaPct),
+      value: pctN(indicadores.margenEbitdaPct),
+      accent: accN(indicadores.margenEbitdaPct),
     },
     "rentabilidad.resultadoNeto": {
-      value: money(indicadores.resultadoNeto),
-      accent: acc(indicadores.resultadoNeto),
+      value: moneyN(indicadores.resultadoNeto),
+      accent: accN(indicadores.resultadoNeto),
     },
     "rentabilidad.margenNetoPct": {
-      value: pctFmt.format(indicadores.margenNetoPct),
-      accent: acc(indicadores.margenNetoPct),
+      value: pctN(indicadores.margenNetoPct),
+      accent: accN(indicadores.margenNetoPct),
     },
   };
 
   const defs = kpisPorCategoria("rentabilidad");
 
   // Cascada contable (razón RT9): cada nivel con su monto y % sobre ventas.
-  const cascada: { label: string; monto: number; pct: number; enfasis?: boolean }[] = [
-    { label: "Ingresos netos", monto: inputs.ventas, pct: inputs.ventas > 0 ? 1 : 0 },
-    { label: "Resultado bruto", monto: indicadores.margenBruto, pct: indicadores.margenBrutoPct },
-    {
-      label: "Resultado operativo (EBIT)",
-      monto: indicadores.ebit,
-      pct: indicadores.margenOperativoPct,
-    },
-    { label: "EBITDA", monto: indicadores.ebitda, pct: indicadores.margenEbitdaPct },
-    {
-      label: "Resultado neto",
-      monto: indicadores.resultadoNeto,
-      pct: indicadores.margenNetoPct,
-      enfasis: true,
-    },
-  ];
+  // `monto`/`pct` quedan null si falta `margenes.ver` (salvo "Ingresos netos").
+  const cascada: { label: string; monto: number | null; pct: number | null; enfasis?: boolean }[] =
+    [
+      { label: "Ingresos netos", monto: inputs.ventas, pct: inputs.ventas > 0 ? 1 : 0 },
+      { label: "Resultado bruto", monto: indicadores.margenBruto, pct: indicadores.margenBrutoPct },
+      {
+        label: "Resultado operativo (EBIT)",
+        monto: indicadores.ebit,
+        pct: indicadores.margenOperativoPct,
+      },
+      { label: "EBITDA", monto: indicadores.ebitda, pct: indicadores.margenEbitdaPct },
+      {
+        label: "Resultado neto",
+        monto: indicadores.resultadoNeto,
+        pct: indicadores.margenNetoPct,
+        enfasis: true,
+      },
+    ];
 
   return (
     <div className="flex flex-col gap-3">
@@ -144,13 +155,13 @@ export async function RentabilidadTab({
                     </TableCell>
                     <TableCell
                       className={`text-right font-mono tabular-nums ${
-                        c.monto < 0 ? "text-rose-700 dark:text-rose-400" : ""
+                        (c.monto ?? 0) < 0 ? "text-rose-700 dark:text-rose-400" : ""
                       } ${c.enfasis ? "font-semibold" : ""}`}
                     >
-                      {money(c.monto)}
+                      {moneyN(c.monto)}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums text-muted-foreground">
-                      {pctFmt.format(c.pct)}
+                      {pctN(c.pct)}
                     </TableCell>
                   </TableRow>
                 ))}

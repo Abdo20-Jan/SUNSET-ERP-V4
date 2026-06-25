@@ -19,6 +19,7 @@ import {
 import { convertirAUsd, fmtInt, fmtMoney } from "@/lib/format";
 import { getAnalisisGiro } from "@/lib/services/bi-giro";
 import { CATALOGO_KPI_VERSION, kpisPorCategoria } from "@/lib/services/bi-kpi-catalogo";
+import { puedeVerCostoStock, puedeVerMargen } from "@/lib/permisos-masking";
 
 import { KpiCard } from "../../dashboard/_components/kpi-card";
 
@@ -45,7 +46,13 @@ export async function GiroTab({
   hasta?: Date | null;
   tc?: string | null;
 }) {
-  const { indicadores, inputs } = await getAnalisisGiro({ desde, hasta });
+  const [{ indicadores, inputs }, verMargen, verCostoStock] = await Promise.all([
+    getAnalisisGiro({ desde, hasta }),
+    // PR-011: CMV agregado (margenes.ver) e inventario al costo (stock.verCosto).
+    // Los ratios de giro (DSO/DIO/DPO/CCC) son adimensionales → no se enmascaran.
+    puedeVerMargen(),
+    puedeVerCostoStock(),
+  ]);
   const symbol = tc ? "USD " : "$ ";
   const money = (n: number) => `${symbol}${fmtMoney(convertirAUsd(n.toString(), tc ?? null))}`;
 
@@ -68,8 +75,8 @@ export async function GiroTab({
 
   const insumos: { label: string; valor: string }[] = [
     { label: "Ventas del período (c/IVA)", valor: money(inputs.ventasPeriodo) },
-    { label: "CMV del período (al costo)", valor: money(inputs.cmvPeriodo) },
-    { label: "Inventario (al costo)", valor: money(inputs.inventario) },
+    { label: "CMV del período (al costo)", valor: verMargen ? money(inputs.cmvPeriodo) : "—" },
+    { label: "Inventario (al costo)", valor: verCostoStock ? money(inputs.inventario) : "—" },
     { label: "Cuentas por cobrar (1.1.3.*)", valor: money(inputs.cxc) },
     { label: "Proveedores comerciales (2.1.1.*)", valor: money(inputs.cxpComercial) },
     { label: "Días del período", valor: fmtInt(inputs.diasPeriodo) },

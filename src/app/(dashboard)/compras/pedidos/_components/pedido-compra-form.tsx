@@ -68,7 +68,8 @@ type ProductoOpt = {
   id: string;
   codigo: string;
   nombre: string;
-  costoPromedio: string;
+  // `null` sin `costos.ver` (PR-011): prefill de precioUnitario queda vacío.
+  costoPromedio: string | null;
 };
 
 type Props = {
@@ -164,7 +165,8 @@ export function PedidoCompraForm({
     const p = productos.find((x) => x.id === id);
     const current = getValues(`items.${index}.precioUnitario`);
     if (p && (current === "" || current === "0")) {
-      setValue(`items.${index}.precioUnitario`, p.costoPromedio, {
+      // costoPromedio === null ⇒ sin `costos.ver` (PR-011): prefill vacío.
+      setValue(`items.${index}.precioUnitario`, p.costoPromedio ?? "", {
         shouldValidate: true,
       });
     }

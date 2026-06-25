@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireSessionUser } from "@/lib/auth-guard";
+import { puedeVerCosto } from "@/lib/permisos-masking";
 import { db } from "@/lib/db";
 import { registrarAuditoria } from "@/lib/services/auditoria";
 import { Prisma } from "@/generated/prisma/client";
@@ -22,7 +23,9 @@ export type ProductoRow = {
   unidad: string;
   diePorcentaje: string;
   precioVenta: string;
-  costoPromedio: string;
+  // `null` cuando la sesión no tiene `costos.ver` (PR-011): el costo se strip-ea
+  // del payload (lista paginada y export). La grilla ya lo omite vía ProductoGridRow.
+  costoPromedio: string | null;
   stockActual: number;
   stockMinimo: number;
   activo: boolean;
@@ -71,7 +74,7 @@ const PRODUCTO_ROW_SELECT = {
 
 type ProductoRowRaw = Prisma.ProductoGetPayload<{ select: typeof PRODUCTO_ROW_SELECT }>;
 
-function mapProductoRow(p: ProductoRowRaw): ProductoRow {
+function mapProductoRow(p: ProductoRowRaw, verCosto: boolean): ProductoRow {
   return {
     id: p.id,
     codigo: p.codigo,
@@ -84,7 +87,8 @@ function mapProductoRow(p: ProductoRowRaw): ProductoRow {
     unidad: p.unidad,
     diePorcentaje: p.diePorcentaje.toFixed(4),
     precioVenta: p.precioVenta.toFixed(2),
-    costoPromedio: p.costoPromedio.toFixed(2),
+    // Strip en el OUTPUT cuando falta `costos.ver` (PR-011); la query no cambia.
+    costoPromedio: verCosto ? p.costoPromedio.toFixed(2) : null,
     stockActual: p.stockActual,
     stockMinimo: p.stockMinimo,
     activo: p.activo,
@@ -162,8 +166,9 @@ export async function listarProductos(
 
   const marcas = marcasRaw.map((m) => m.marca).filter((m): m is string => !!m && m.length > 0);
 
+  const verCosto = await puedeVerCosto();
   return {
-    rows: rows.map(mapProductoRow),
+    rows: rows.map((p) => mapProductoRow(p, verCosto)),
     total,
     marcas,
   };
@@ -194,7 +199,8 @@ export async function listarProductosParaExport(opts: {
     select: PRODUCTO_ROW_SELECT,
   });
 
-  return rows.map(mapProductoRow);
+  const verCosto = await puedeVerCosto();
+  return rows.map((p) => mapProductoRow(p, verCosto));
 }
 
 // `select` para la grilla: mismo shape que `PRODUCTO_ROW_SELECT` SIN `costoPromedio`.
@@ -250,6 +256,9 @@ export async function listarProductosGrid(): Promise<ProductoGridRow[]> {
 // Costo promedio de UN producto, pedido on-demand al abrir el form de edición
 // (así el dato sensible no viaja para las ~miles de filas de la lista).
 export async function obtenerProductoCosto(id: string): Promise<string | null> {
+  // BE guard (PR-011): sin `costos.ver` no se devuelve el costo. La firma ya
+  // permite null y el form lo renderiza como "—".
+  if (!(await puedeVerCosto())) return null;
   const p = await db.producto.findUnique({
     where: { id },
     select: { costoPromedio: true },

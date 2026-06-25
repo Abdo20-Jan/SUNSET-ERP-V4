@@ -276,7 +276,8 @@ export function CompraForm({
     const p = productos.find((x) => x.id === id);
     const current = getValues(`items.${index}.precioUnitario`);
     if (p && (current === "" || current === "0")) {
-      setValue(`items.${index}.precioUnitario`, p.costoPromedio, {
+      // costoPromedio === null ⇒ sin `costos.ver` (PR-011): prefill vacío.
+      setValue(`items.${index}.precioUnitario`, p.costoPromedio ?? "", {
         shouldValidate: true,
       });
     }
