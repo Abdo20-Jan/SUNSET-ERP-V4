@@ -15,6 +15,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EntityLink } from "@/components/data-grid/entity-link";
+import { PERMISOS } from "@/lib/permisos-catalog";
+import { useHasPermission } from "@/components/auth/permissions-provider";
 
 function formatPrecio(v: string): string {
   const n = Number(v);
@@ -143,6 +145,10 @@ function DetalleField({ label, value }: { label: string; value: string }) {
 }
 
 function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
+  // PR-007 (piloto): la acción destructiva exige `admin.acceso`. Con RBAC OFF el hook devuelve
+  // true (sin cambios); con RBAC ON sin permiso queda deshabilitada con hint (layout estable).
+  // La server action `eliminarProductoAction` no se toca — el backend sigue validando.
+  const canDelete = useHasPermission(PERMISOS.ADMIN_ACCESO);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Acciones" />}>
@@ -154,10 +160,20 @@ function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => 
           Editar
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={onDelete}>
-          <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-          Eliminar
-        </DropdownMenuItem>
+        {canDelete ? (
+          <DropdownMenuItem variant="destructive" onClick={onDelete}>
+            <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+            Eliminar
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem disabled>
+            <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+            Eliminar
+            <span className="ml-auto pl-3 text-[10px] tracking-wide text-muted-foreground uppercase">
+              Sin permiso
+            </span>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

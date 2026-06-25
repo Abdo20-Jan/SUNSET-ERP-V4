@@ -15,6 +15,8 @@ import {
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 
+import { PERMISOS, type PermisoKey } from "@/lib/permisos-catalog";
+
 export type CenterId =
   | "inicio"
   | "comercial"
@@ -25,7 +27,14 @@ export type CenterId =
   | "contabilidad"
   | "configuracion";
 
-export type NavItem = { label: string; href: string; icon: typeof DashboardSquare01Icon };
+// `permission` (PR-007, opcional) gateia o item pelo snapshot do PR-006. Ausente ⇒ sempre
+// visível (sem gating). Filtragem em `nav-permissions.ts`; consumo via `useVisibleCenters`.
+export type NavItem = {
+  label: string;
+  href: string;
+  icon: typeof DashboardSquare01Icon;
+  permission?: PermisoKey;
+};
 export type NavSection = { label: string; items: readonly NavItem[] };
 export type NavCenter = {
   id: CenterId;
@@ -253,7 +262,12 @@ export const CENTERS: readonly NavCenter[] = [
       {
         label: "Sistema",
         items: [
-          { label: "Admin", href: "/admin", icon: UserGroupIcon },
+          {
+            label: "Admin",
+            href: "/admin",
+            icon: UserGroupIcon,
+            permission: PERMISOS.ADMIN_ACCESO,
+          },
           { label: "Mi perfil", href: "/perfil", icon: UserGroupIcon },
         ],
       },

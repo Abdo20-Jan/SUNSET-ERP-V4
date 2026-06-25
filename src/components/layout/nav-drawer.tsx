@@ -6,9 +6,11 @@ import { Menu01Icon } from "@hugeicons/core-free-icons";
 
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { CENTERS } from "@/components/layout/nav-config";
+import { useVisibleCenters } from "@/components/auth/permissions-provider";
 
 export function NavDrawer() {
+  // PR-007: nav filtrado por permissão. Com RBAC OFF devolve o nav completo (sem mudança).
+  const visibleCenters = useVisibleCenters();
   return (
     <Sheet>
       <SheetTrigger
@@ -21,7 +23,7 @@ export function NavDrawer() {
           <SheetTitle>Navegación</SheetTitle>
         </SheetHeader>
         <nav className="flex flex-col gap-3 overflow-y-auto px-3 pb-6">
-          {CENTERS.map((center) => (
+          {visibleCenters.map((center) => (
             <div key={center.id} className="flex flex-col gap-0.5">
               <p className="flex items-center gap-2 px-1 py-1 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground/70">
                 <HugeiconsIcon icon={center.icon} className="size-4" />
