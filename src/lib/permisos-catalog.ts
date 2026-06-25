@@ -57,6 +57,8 @@ export const PERMISOS = {
   VER_PRECIO_MINIMO: "precios.verMinimo",
   /** Ver la valorización de costo del stock (inventario · PR-011). */
   VER_COSTO_STOCK: "stock.verCosto",
+  /** Acceso a la Central de Aprobaciones (Sistema > Aprobaciones · AUTO-01 / PR-013). */
+  APROBACIONES_VER: "aprobaciones.ver",
   // ── Aprobaciones (PR-012 · ANEXO A.3) — dimensión APROBACION. Una clave por
   // tipo de aprobación + dos claves de escalonamiento (tier director/master).
   // El motor de aprobaciones gatea cada transición con `hasPermission(clave)`.
@@ -253,6 +255,11 @@ export const PERMISSION_CATALOG: readonly PermisoCatalogEntry[] = [
     clave: PERMISOS.VER_COSTO_STOCK,
     dimension: DimensionPermiso.INFORMACION,
     descripcion: "Ver la valorización de costo del stock",
+  },
+  {
+    clave: PERMISOS.APROBACIONES_VER,
+    dimension: DimensionPermiso.PAGINA,
+    descripcion: "Ver la Central de Aprobaciones (Sistema > Aprobaciones)",
   },
   ...APROBACION_CATALOG,
 ];

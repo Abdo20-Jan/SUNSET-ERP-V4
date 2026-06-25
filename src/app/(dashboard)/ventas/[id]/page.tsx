@@ -2,8 +2,11 @@ import { notFound } from "next/navigation";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { isStockDualEnabled } from "@/lib/features";
+import { isApprovalsEnabled, isStockDualEnabled } from "@/lib/features";
 import { fmtDate } from "@/lib/format";
+import { TIPOS_VENTA } from "@/lib/services/aprobaciones-constants";
+import { listarAprobacionesDeDocumento } from "@/lib/services/aprobaciones-query";
+import { AutorizacionesTab } from "@/components/aprobaciones/autorizaciones-tab";
 import { listarProveedoresParaGasto } from "@/lib/actions/gastos";
 import {
   listarClientesParaVenta,
@@ -74,10 +77,12 @@ export default async function VentaDetailPage({
   }
 
   const stockDualOn = isStockDualEnabled();
-  // La pestaña Historial aparece siempre; Entregas sólo con stock dual.
+  const approvalsOn = isApprovalsEnabled();
+  // La pestaña Historial aparece siempre (última, 06_RECORD_PATTERN); Entregas
+  // sólo con stock dual; Autorizaciones es aditiva (PR-013) y siempre presente.
   const tabsDisponibles = stockDualOn
-    ? ["general", "entregas", "historial"]
-    : ["general", "historial"];
+    ? ["general", "entregas", "autorizaciones", "historial"]
+    : ["general", "autorizaciones", "historial"];
   const activeTab = resolveActiveTab(sp.tab, tabsDisponibles, "general");
 
   const depositoIds = venta.items.map((it) => it.depositoId).filter((d): d is string => d !== null);
@@ -91,6 +96,7 @@ export default async function VentaDetailPage({
     historialCount,
     session,
     cotizacion,
+    solicitudesVenta,
   ] = await Promise.all([
     db.cliente.findUnique({ where: { id: venta.clienteId }, select: { nombre: true } }),
     db.producto.findMany({
@@ -110,6 +116,8 @@ export default async function VentaDetailPage({
     db.auditLog.count({ where: { tabla: "Venta", registroId: id } }),
     auth(),
     getCotizacionParaFecha(new Date()),
+    // INERTE con APPROVALS_ENABLED off: la query cortocircuita a [] sin tocar la DB.
+    listarAprobacionesDeDocumento("Venta", id),
   ]);
 
   const productosMap: Record<string, { codigo: string; nombre: string }> = {};
@@ -158,6 +166,7 @@ export default async function VentaDetailPage({
         tabs={[
           { value: "general", label: "General" },
           ...(stockDualOn ? [{ value: "entregas", label: "Entregas", count: entregasCount }] : []),
+          { value: "autorizaciones", label: "Autorizaciones", count: solicitudesVenta.length },
           { value: "historial", label: "Historial", count: historialCount },
         ]}
       />
@@ -174,6 +183,15 @@ export default async function VentaDetailPage({
       )}
       {activeTab === "entregas" && (
         <EntregasTab ventaId={venta.id} numero={venta.numero} estado={venta.estado} />
+      )}
+      {activeTab === "autorizaciones" && (
+        <AutorizacionesTab
+          tabla="Venta"
+          registroId={venta.id}
+          solicitudes={solicitudesVenta}
+          approvalsEnabled={approvalsOn}
+          tiposPermitidos={TIPOS_VENTA}
+        />
       )}
       {activeTab === "historial" && <HistorialTab ventaId={venta.id} />}
     </div>
