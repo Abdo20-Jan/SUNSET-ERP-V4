@@ -402,6 +402,20 @@ enum AuditAccion {
   CREATE
   UPDATE
   DELETE
+  CAMBIO_ESTADO
+  APROBACION
+  CANCELACION
+  EXPORTACION
+  VISUALIZACION_SENSIBLE
+  MASTER_OVERRIDE
+}
+
+enum AuditOrigen {
+  MANUAL
+  IMPORTACION
+  AUTOMACION
+  API
+  MASTER_OVERRIDE
 }
 
 // ============================================================
@@ -2164,6 +2178,12 @@ model AuditLog {
   datosNuevos     Json?
   usuarioId       String
   fecha           DateTime    @default(now())
+  // PR-008 (aditivo · retrocompatible): metadata G-07 / CRIT-11. `origen`
+  // default MANUAL backfillea las filas existentes; el resto es nullable.
+  motivo          String?
+  origen          AuditOrigen @default(MANUAL)
+  ip              String?
+  documentoId     String?
 
   usuario User @relation(fields: [usuarioId], references: [id])
 

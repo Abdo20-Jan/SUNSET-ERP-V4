@@ -11,12 +11,19 @@ import { buttonVariants } from "@/components/ui/button";
 import { RecordLayout } from "@/components/record/record-layout";
 import { RecordActionBar } from "@/components/record/record-action-bar";
 import { RecordField, RecordFieldGrid, RecordSection } from "@/components/record/record-section";
+import { RecordTabs } from "@/components/ui/record-tabs";
+import { AuditTrail } from "@/components/ui/audit-trail";
+import { resolveActiveTab } from "@/lib/record-tabs";
+import { getAuditLog } from "@/lib/services/auditoria";
 
 import { ClienteEditWindow } from "./cliente-edit-window";
 
 export const dynamic = "force-dynamic";
 
 type Params = Promise<{ id: string }>;
+type SearchParams = Promise<{ tab?: string }>;
+
+const TABS_CLIENTE = ["general", "historial"] as const;
 
 const TIPO_CANAL_LABEL: Record<TipoCanal, string> = {
   MAYORISTA: "Mayorista / Distribuidor",
@@ -40,16 +47,25 @@ function siNo(value: boolean): string {
   return value ? "Sí" : "No";
 }
 
-export default async function ClienteDetallePage({ params }: { params: Params }) {
+export default async function ClienteDetallePage({
+  params,
+  searchParams,
+}: {
+  params: Params;
+  searchParams: SearchParams;
+}) {
   const { id } = await params;
+  const { tab } = await searchParams;
+  const activeTab = resolveActiveTab(tab, TABS_CLIENTE, "general");
 
   const cliente = await obtenerClientePorId(id);
   if (!cliente) notFound();
 
-  const [ventasCount, cuentas, provincias] = await Promise.all([
+  const [ventasCount, cuentas, provincias, historialCount] = await Promise.all([
     db.venta.count({ where: { clienteId: id } }),
     listarCuentasContablesParaCliente(),
     listarProvincias(),
+    db.auditLog.count({ where: { tabla: "Cliente", registroId: id } }),
   ]);
 
   const activo = cliente.estado === "activo";
@@ -90,58 +106,79 @@ export default async function ClienteDetallePage({ params }: { params: Params })
         </RecordActionBar>
       }
     >
-      <RecordSection title="Datos generales">
-        <RecordFieldGrid>
-          <RecordField label="Nombre">{cliente.nombre}</RecordField>
-          <RecordField label="CUIT">{cliente.cuit ?? "—"}</RecordField>
-          <RecordField label="Tipo de canal">{TIPO_CANAL_LABEL[cliente.tipoCanal]}</RecordField>
-          <RecordField label="Teléfono">{cliente.telefono ?? "—"}</RecordField>
-          <RecordField label="Email">{cliente.email ?? "—"}</RecordField>
-          <RecordField label="Dirección">{cliente.direccion ?? "—"}</RecordField>
-          <RecordField label="Estado">{activo ? "Activo" : "Inactivo"}</RecordField>
-        </RecordFieldGrid>
-      </RecordSection>
+      <RecordTabs
+        activeValue={activeTab}
+        tabs={[
+          { value: "general", label: "General" },
+          { value: "historial", label: "Historial", count: historialCount },
+        ]}
+      />
 
-      <RecordSection title="Datos fiscales">
-        <RecordFieldGrid>
-          <RecordField label="Condición IVA">{condicionLabel}</RecordField>
-          <RecordField label="Provincia">{cliente.provinciaNombre ?? "—"}</RecordField>
-          <RecordField label="Alícuota Percepción IIBB">
-            {cliente.alicuotaPercepcionIIBB ?? "Default jurisdicción"}
-          </RecordField>
-          <RecordField label="Exento Percepción IIBB">
-            {siNo(cliente.exentoPercepcionIIBB)}
-          </RecordField>
-          <RecordField label="Agente retención IVA">{siNo(cliente.agenteRetencionIva)}</RecordField>
-          <RecordField label="Agente retención Ganancias">
-            {siNo(cliente.agenteRetencionGanancias)}
-          </RecordField>
-          <RecordField label="Agente recaudación IIBB">{siNo(cliente.agenteIibb)}</RecordField>
-        </RecordFieldGrid>
-      </RecordSection>
+      {activeTab === "historial" && <HistorialTab clienteId={id} />}
 
-      <RecordSection title="Cuenta contable">
-        <RecordFieldGrid>
-          <RecordField label="Cuenta">
-            {cliente.cuentaContableCodigo ? (
-              <span>
-                <span className="font-mono text-xs text-muted-foreground">
-                  {cliente.cuentaContableCodigo}
-                </span>{" "}
-                {cliente.cuentaContableNombre}
-              </span>
-            ) : (
-              "Sin vincular"
-            )}
-          </RecordField>
-        </RecordFieldGrid>
-      </RecordSection>
+      {activeTab === "general" && (
+        <>
+          <RecordSection title="Datos generales">
+            <RecordFieldGrid>
+              <RecordField label="Nombre">{cliente.nombre}</RecordField>
+              <RecordField label="CUIT">{cliente.cuit ?? "—"}</RecordField>
+              <RecordField label="Tipo de canal">{TIPO_CANAL_LABEL[cliente.tipoCanal]}</RecordField>
+              <RecordField label="Teléfono">{cliente.telefono ?? "—"}</RecordField>
+              <RecordField label="Email">{cliente.email ?? "—"}</RecordField>
+              <RecordField label="Dirección">{cliente.direccion ?? "—"}</RecordField>
+              <RecordField label="Estado">{activo ? "Activo" : "Inactivo"}</RecordField>
+            </RecordFieldGrid>
+          </RecordSection>
 
-      <RecordSection title="Referencias" description="Vínculos del cliente (solo lectura).">
-        <RecordFieldGrid>
-          <RecordField label="Ventas asociadas">{ventasCount}</RecordField>
-        </RecordFieldGrid>
-      </RecordSection>
+          <RecordSection title="Datos fiscales">
+            <RecordFieldGrid>
+              <RecordField label="Condición IVA">{condicionLabel}</RecordField>
+              <RecordField label="Provincia">{cliente.provinciaNombre ?? "—"}</RecordField>
+              <RecordField label="Alícuota Percepción IIBB">
+                {cliente.alicuotaPercepcionIIBB ?? "Default jurisdicción"}
+              </RecordField>
+              <RecordField label="Exento Percepción IIBB">
+                {siNo(cliente.exentoPercepcionIIBB)}
+              </RecordField>
+              <RecordField label="Agente retención IVA">
+                {siNo(cliente.agenteRetencionIva)}
+              </RecordField>
+              <RecordField label="Agente retención Ganancias">
+                {siNo(cliente.agenteRetencionGanancias)}
+              </RecordField>
+              <RecordField label="Agente recaudación IIBB">{siNo(cliente.agenteIibb)}</RecordField>
+            </RecordFieldGrid>
+          </RecordSection>
+
+          <RecordSection title="Cuenta contable">
+            <RecordFieldGrid>
+              <RecordField label="Cuenta">
+                {cliente.cuentaContableCodigo ? (
+                  <span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {cliente.cuentaContableCodigo}
+                    </span>{" "}
+                    {cliente.cuentaContableNombre}
+                  </span>
+                ) : (
+                  "Sin vincular"
+                )}
+              </RecordField>
+            </RecordFieldGrid>
+          </RecordSection>
+
+          <RecordSection title="Referencias" description="Vínculos del cliente (solo lectura).">
+            <RecordFieldGrid>
+              <RecordField label="Ventas asociadas">{ventasCount}</RecordField>
+            </RecordFieldGrid>
+          </RecordSection>
+        </>
+      )}
     </RecordLayout>
   );
+}
+
+async function HistorialTab({ clienteId }: { clienteId: string }) {
+  const entries = await getAuditLog("Cliente", clienteId);
+  return <AuditTrail entries={entries} />;
 }
