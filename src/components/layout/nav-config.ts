@@ -241,7 +241,7 @@ export const CENTERS: readonly NavCenter[] = [
     label: "Configuración",
     icon: UserGroupIcon,
     overviewHref: "/maestros",
-    routePrefixes: ["/maestros", "/admin", "/perfil"],
+    routePrefixes: ["/maestros", "/admin", "/sistema", "/perfil"],
     inUserMenu: true,
     sections: [
       {
@@ -262,6 +262,12 @@ export const CENTERS: readonly NavCenter[] = [
       {
         label: "Sistema",
         items: [
+          {
+            label: "Usuarios y permisos",
+            href: "/sistema/usuarios",
+            icon: UserGroupIcon,
+            permission: PERMISOS.ADMIN_ACCESO,
+          },
           {
             label: "Admin",
             href: "/admin",
