@@ -9,6 +9,10 @@ declare module "next-auth" {
     role: Role;
     monedaPreferida: Moneda | null;
     modoRetroactivo: boolean;
+    // RBAC (PR-006): conveniencia FE. Opcionales: tokens/sesiones previas a
+    // este PR no los traen, y el BE nunca depende de ellos (revalida en DB).
+    permisos?: string[];
+    perfilCodigo?: string;
   }
 
   interface Session {
@@ -19,6 +23,8 @@ declare module "next-auth" {
       role: Role;
       monedaPreferida: Moneda | null;
       modoRetroactivo: boolean;
+      permisos?: string[];
+      perfilCodigo?: string;
     } & DefaultSession["user"];
   }
 }
@@ -31,5 +37,7 @@ declare module "next-auth/jwt" {
     role: Role;
     monedaPreferida: Moneda | null;
     modoRetroactivo: boolean;
+    permisos?: string[];
+    perfilCodigo?: string;
   }
 }

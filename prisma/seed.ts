@@ -7,6 +7,7 @@ import {
   planEntryToSeedRecord,
   validarPlan,
 } from "../src/lib/services/plan-de-cuentas";
+import { PERMISSION_CATALOG, USER_BASE_CLAVES } from "../src/lib/permisos-catalog";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -471,12 +472,78 @@ async function seedProvinciasYJurisdicciones() {
 }
 
 // ============================================================
+// RBAC FOUNDATION (PR-006): catálogo de permisos + perfiles de sistema + grants
+// ============================================================
+
+function upsertPerfilSistema(codigo: string, nombre: string, descripcion: string) {
+  return prisma.perfil.upsert({
+    where: { codigo },
+    update: { nombre, descripcion, esSistema: true, activo: true },
+    create: { codigo, nombre, descripcion, esSistema: true, activo: true },
+  });
+}
+
+async function grantClaves(
+  perfilId: string,
+  catalogo: { id: string; clave: string }[],
+  claves: ReadonlySet<string>,
+) {
+  for (const permiso of catalogo) {
+    if (!claves.has(permiso.clave)) continue;
+    await prisma.perfilPermiso.upsert({
+      where: { perfilId_permisoId: { perfilId, permisoId: permiso.id } },
+      update: {},
+      create: { perfilId, permisoId: permiso.id },
+    });
+  }
+}
+
+// Reproduce el acceso de HOY: ADMIN → todas las claves; USER → sólo base.
+// Idempotente (upserts por clave/codigo/PK compuesta). Con la flag RBAC OFF
+// estos datos quedan inertes; sólo importan cuando se prende RBAC_ENABLED.
+async function seedRbacFoundation() {
+  // (a) Catálogo de permisos — idempotente por `clave`.
+  for (const p of PERMISSION_CATALOG) {
+    await prisma.permiso.upsert({
+      where: { clave: p.clave },
+      update: { dimension: p.dimension, descripcion: p.descripcion },
+      create: { clave: p.clave, dimension: p.dimension, descripcion: p.descripcion },
+    });
+  }
+
+  // (b) Perfiles de sistema — idempotente por `codigo`.
+  const perfilAdmin = await upsertPerfilSistema(
+    "ADMIN",
+    "Administrador",
+    "Reproduce el acceso ADMIN de hoy (todos los permisos).",
+  );
+  const perfilUser = await upsertPerfilSistema(
+    "USER",
+    "Usuario",
+    "Reproduce el acceso USER de hoy (acceso base).",
+  );
+
+  // (c) Grants: ADMIN = todo el catálogo; USER = subconjunto base.
+  const catalogo = await prisma.permiso.findMany({ select: { id: true, clave: true } });
+  await grantClaves(perfilAdmin.id, catalogo, new Set(catalogo.map((c) => c.clave)));
+  await grantClaves(perfilUser.id, catalogo, new Set(USER_BASE_CLAVES));
+
+  // (d) Asigna el perfil ADMIN al usuario admin del seed (idempotente).
+  await prisma.user.update({ where: { username: "admin" }, data: { perfilId: perfilAdmin.id } });
+
+  console.log(
+    `✓ RBAC foundation: ${PERMISSION_CATALOG.length} permisos, perfiles ADMIN/USER, admin→ADMIN`,
+  );
+}
+
+// ============================================================
 // MAIN
 // ============================================================
 
 async function main() {
   console.log("🌱 Iniciando seed (skeleton + analíticas base)...\n");
   await seedAdmin();
+  await seedRbacFoundation();
   await seedPeriodos();
   await seedPlanDeCuentas();
   await seedDepositos();
