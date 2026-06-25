@@ -72,3 +72,42 @@
 - **Acceptance fixo:** AppShell/top-nav; FloatingWorkWindow (sem drawer de negócio); botões com texto; permissão FE+BE; auditoria antes/depois com motivo; densidade 28-30 linhas; ARS/USD dual.
 - **Tests fixos:** `typecheck`+`biome:ci`+`build`+`test` verdes; `test:e2e` quando tocar Comex/contábil/stock.
 - **Rollback fixo:** preferir **feature-flag por página/nav**; migrações reversíveis; piloto antes de rollout.
+
+---
+
+## Continuação — Onda 2+ (pós-PR-012 · atualizado 2026-06-25)
+
+> **Estado executado.** PR-001→005 (fundação) saíram pela série **NS-*** em `main`; PR-006→012
+> (RBAC + auditoria + mascaramento + motor de aprovações) **mergeados** como Onda 0/1 — ver
+> [IMPLEMENTATION_TRIAGE_2026-06-25.md](IMPLEMENTATION_TRIAGE_2026-06-25.md) e
+> [12_TRACEABILITY_MATRIX_AUDITED.md](12_TRACEABILITY_MATRIX_AUDITED.md). A "Fase 2" acima
+> (PR-CLI…PR-BI) é **renumerada como Onda 3** (PR-015+), porque PR-006→012 já foram consumidos.
+> Legenda: tamanho S/M/L/XL · 🔶 toca schema/auth · ⛔ não tocar motor (UI só chama/expõe).
+
+### Onda 2 — Aprovações ao vivo (desbloqueada por PR-012)
+
+| PR | Título | Escopo | Depende | 🔶/⛔ | Risco | Tam |
+|---|---|---|---|---|---|---|
+| **PR-013** | **Central de Aprobaciones UI** (AUTO-01) | worklist `Sistema > Aprobaciones` (EnterpriseDataGrid) + bloco no Dashboard (contador + top-3 por SLA) + aba `Autorizaciones` no documento; ações `aprobar`/`rechazar`/`solicitarInformacion`/`cancelar`; export auditada. Consome `Solicitud`/`Aprobacion` + `getConfigAprobacion`. Chave `aprobaciones.ver`. | PR-010, PR-012 | — | M | L |
+| **PR-014** | **Cabeamento margem baixa** (COM-05 / CRIT-03) | 1ª ação **gateada**: venda com margem < piso cria `Solicitud(MARGEN_BAJA_*)`; o efeito de negócio aplica-se **só** quando `estado=APROBADA`; **liga `APPROVALS_ENABLED`** (+ `RBAC_ENABLED` se preciso p/ a matriz de aprovadores). | PR-007, PR-012, PR-013 | ⛔ só gatear margem | **A** | L |
+
+### Onda 3 — Módulos (a "Fase 2" renumerada)
+
+| PR | Módulo / páginas | Escopo-chave | risco |
+|---|---|---|---|
+| **PR-015** | CLI-01/CLI-02 (PR-CLI) | ficha geral + financeira (saldo/limite por permissão — reusa `permisos-masking`) | A |
+| **PR-016** | MAE-PROD-01 (PR-PROD) | record pattern; custo por permissão; import Excel/duplicidade | M |
+| **PR-017** | INV-01/02 + LOG-01 (PR-INV) | worklists + custo por permissão; estoque por despacho/lote | M |
+| **PR-018** | CX-01..07 (PR-COMEX) | 🔴 **golden ANTES** (CRIT-05); 🔒 motor intocável; cockpit por **seção nomeada** (OD-08); `MemoriaCalculoWindow` | **A** |
+| **PR-019** | FIN-01..05 (PR-FIN) | CxC (11 col + Próxima acción), CxP, Crédito/Cobranza, Programação, Flujo | A |
+| **PR-020** | TES-01..04 (PR-TES) | Bancos/Pagos/Cobranzas/Conciliación; **migrar drawers→FWW** | M |
+| **PR-021** | CONT-01..04 (PR-CONT) | Asientos (+Período OD-07; drawer→FWW), Plan ULTRA, DRE e Balance **separados** (OD-12) | M |
+| **PR-022** | COMP-01/02 (PR-COMP) | OC + worklist; Recepción = **aba** da OC (OD-11), não rota | M |
+| **PR-023** | CRM-01 (PR-CRM) | alinhar Kanban/leads/oportunidades ao record pattern | B |
+| **PR-024** | BI-01 (PR-BI) | export Excel/PDF auditado; favoritos; **sem margem p/ vendedor** | M |
+
+### Dívidas transversais a encaixar nas ondas
+- **Habilitar `RBAC_ENABLED`** em staging + Master atribui grants aos 11 perfis canônicos (shells vazios desde PR-009).
+- **Migrar os 5 drawers de negócio → FloatingWorkWindow** (concentrado em PR-020/PR-021).
+- **Golden files Comex** (CRIT-05) **antes** do PR-018.
+- Escopo de dados **por-perfil** (ANEXO A.4) não modelado (`Perfil` sem `ambito`) — avaliar migration própria se exigido.
