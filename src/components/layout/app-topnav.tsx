@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { TireIcon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 
-import { CENTERS } from "@/components/layout/nav-config";
+import { useVisibleCenters } from "@/components/auth/permissions-provider";
 import { getCenterActivo, getBreadcrumb } from "@/lib/nav/center-activo";
 import { CenterMegaMenu } from "@/components/layout/center-mega-menu";
 import { TopnavUserMenu } from "@/components/layout/topnav-user-menu";
@@ -19,8 +19,10 @@ export function AppTopnav({ user }: { user: { nombre: string; username: string; 
   const activeId = getCenterActivo(pathname);
   const crumbs = getBreadcrumb(pathname);
   const favLabel = crumbs.map((c) => c.label).join(" · ");
-  const barCenters = CENTERS.filter((c) => !c.inUserMenu);
-  const config = CENTERS.find((c) => c.id === "configuracion")!;
+  // PR-007: nav filtrado por permissão. Com RBAC OFF devolve o nav completo (sem mudança).
+  const visibleCenters = useVisibleCenters();
+  const barCenters = visibleCenters.filter((c) => !c.inUserMenu);
+  const config = visibleCenters.find((c) => c.id === "configuracion");
 
   return (
     <header className="sticky top-0 z-20 flex shrink-0 flex-col border-b border-border bg-background/85 backdrop-blur-md">
@@ -43,7 +45,7 @@ export function AppTopnav({ user }: { user: { nombre: string; username: string; 
         </div>
         <div className="flex items-center gap-2">
           <CommandMenu />
-          <TopnavUserMenu user={user} config={config} />
+          {config ? <TopnavUserMenu user={user} config={config} /> : null}
         </div>
       </div>
       {crumbs.length > 0 ? (
