@@ -43,6 +43,10 @@ export const PERMISOS = {
   PERCEPCION_IIBB_RECALCULAR: "percepcionIibb.recalcular",
   /** Anular ventas en masa y liberar para recálculo de Percepción IIBB. */
   PERCEPCION_IIBB_ANULAR_Y_LIBERAR: "percepcionIibb.anularYLiberar",
+  /** Acceso a la worklist global de auditoría (Sistema > Auditoría · AUD-01). */
+  AUDITORIA_VER: "auditoria.ver",
+  /** Exportar la auditoría (CSV/XLSX). La exportación es a su vez auditada. */
+  AUDITORIA_EXPORTAR: "auditoria.exportar",
 } as const;
 
 export type PermisoKey = (typeof PERMISOS)[keyof typeof PERMISOS];
@@ -124,6 +128,16 @@ export const PERMISSION_CATALOG: readonly PermisoCatalogEntry[] = [
     clave: PERMISOS.PERCEPCION_IIBB_ANULAR_Y_LIBERAR,
     dimension: DimensionPermiso.ACCION,
     descripcion: "Anular ventas en masa y liberar Percepción IIBB",
+  },
+  {
+    clave: PERMISOS.AUDITORIA_VER,
+    dimension: DimensionPermiso.PAGINA,
+    descripcion: "Ver la auditoría global (Sistema > Auditoría)",
+  },
+  {
+    clave: PERMISOS.AUDITORIA_EXPORTAR,
+    dimension: DimensionPermiso.EXPORTACION,
+    descripcion: "Exportar la auditoría (auditada)",
   },
 ];
 

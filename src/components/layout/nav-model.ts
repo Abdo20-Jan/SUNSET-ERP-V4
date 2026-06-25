@@ -183,7 +183,7 @@ export const SHELL_MODULES: readonly ShellModule[] = [
     label: "Sistema",
     items: [
       { label: "Permisos", status: "future", pageCode: "PERM-01" },
-      { label: "Auditoría", status: "future", pageCode: "AUD-01" },
+      { label: "Auditoría", href: "/sistema/auditoria", status: "active", pageCode: "AUD-01" },
       { label: "Automatizaciones", status: "future", pageCode: "AUTO-01" },
       { label: "Herramientas admin", href: "/admin/recalcular-percepcion-iibb", status: "active" },
       { label: "Mi perfil", href: "/perfil", status: "active" },
