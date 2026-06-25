@@ -537,6 +537,74 @@ async function seedRbacFoundation() {
 }
 
 // ============================================================
+// PERFILES CANÓNICOS (PR-009 — PERM-01): shells SIN grants
+// ============================================================
+// Los 12 perfiles canónicos del spec PERM-01. "Master" ≈ perfil de sistema
+// ADMIN (ya sembrado por seedRbacFoundation, esSistema=true), así que acá sólo
+// sembramos los 11 restantes como SHELLS: esSistema=false (editables/borrables
+// por el Master en la UI) y SIN grants pre-cargados — el Master configura los
+// permisos por la matriz (PR-009). Idempotente por `codigo`; `update: {}` para
+// no pisar los ajustes que el Master haya hecho luego del primer seed. Con la
+// flag RBAC OFF (default) estos datos quedan inertes: ningún usuario queda
+// asignado a ellos ⇒ CERO cambio de comportamiento.
+const PERFILES_CANONICOS: ReadonlyArray<{ codigo: string; nombre: string; descripcion: string }> = [
+  {
+    codigo: "DIRECTOR",
+    nombre: "Diretor",
+    descripcion: "Visión global, aprobaciones estratégicas.",
+  },
+  {
+    codigo: "FINANCIERO",
+    nombre: "Financeiro",
+    descripcion: "Programación, crédito, cobranza, CxC, CxP.",
+  },
+  {
+    codigo: "TESORERIA",
+    nombre: "Tesouraria",
+    descripcion: "Ejecución de pagos/cobros, conciliación.",
+  },
+  {
+    codigo: "CONTABILIDAD",
+    nombre: "Contabilidade",
+    descripcion: "Asientos, plan de cuentas, DRE, balance.",
+  },
+  { codigo: "COMEX", nombre: "Comex", descripcion: "Procesos de importación, costos, despachos." },
+  {
+    codigo: "COMERCIAL_GESTOR",
+    nombre: "Comercial gestor",
+    descripcion: "Gestión de equipo comercial, aprobaciones comerciales.",
+  },
+  { codigo: "VENDEDOR", nombre: "Vendedor", descripcion: "Cartera propia, sin margen/costo." },
+  { codigo: "INVENTARIO", nombre: "Estoque", descripcion: "Inventario, movimientos, conteo." },
+  { codigo: "LOGISTICA", nombre: "Logística", descripcion: "Entregas, picking, expedición." },
+  {
+    codigo: "COMPRAS",
+    nombre: "Compras",
+    descripcion: "OC nacionales, cotizaciones, proveedores.",
+  },
+  { codigo: "CONSULTA", nombre: "Consulta", descripcion: "Solo lectura, sin datos sensibles." },
+];
+
+async function seedPerfilesCanonicos() {
+  for (const p of PERFILES_CANONICOS) {
+    await prisma.perfil.upsert({
+      where: { codigo: p.codigo },
+      update: {}, // no pisar ajustes del Master tras el primer seed
+      create: {
+        codigo: p.codigo,
+        nombre: p.nombre,
+        descripcion: p.descripcion,
+        esSistema: false,
+        activo: true,
+      },
+    });
+  }
+  console.log(
+    `✓ ${PERFILES_CANONICOS.length} perfiles canónicos (shells sin grants) creados/actualizados`,
+  );
+}
+
+// ============================================================
 // MAIN
 // ============================================================
 
@@ -544,6 +612,7 @@ async function main() {
   console.log("🌱 Iniciando seed (skeleton + analíticas base)...\n");
   await seedAdmin();
   await seedRbacFoundation();
+  await seedPerfilesCanonicos();
   await seedPeriodos();
   await seedPlanDeCuentas();
   await seedDepositos();
