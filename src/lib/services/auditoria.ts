@@ -1,7 +1,7 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { type AuditAccion, Prisma } from "@/generated/prisma/client";
+import { type AuditAccion, type AuditOrigen, Prisma } from "@/generated/prisma/client";
 
 // Cliente mínimo para escribir auditoría: sirve tanto `db` como un `tx` de
 // $transaction (ambos exponen `auditLog`). Espeja el patrón WriterClient de
@@ -17,6 +17,13 @@ type RegistrarAuditoriaInput = {
   // null/undefined a Prisma.JsonNull, así los callers pasan objetos sin castear.
   datosAnteriores?: unknown;
   datosNuevos?: unknown;
+  // PR-008 (aditivo · G-07/CRIT-11): metadata opcional. Los callers previos
+  // (proveedores/ventas) no pasan ninguno → motivo/ip/documentoId quedan null
+  // y origen toma el default MANUAL del schema. Comportamiento idéntico.
+  motivo?: string | null;
+  origen?: AuditOrigen;
+  ip?: string | null;
+  documentoId?: string | null;
 };
 
 function toJsonInput(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
@@ -39,6 +46,12 @@ export async function registrarAuditoria(
       usuarioId: input.usuarioId,
       datosAnteriores: toJsonInput(input.datosAnteriores),
       datosNuevos: toJsonInput(input.datosNuevos),
+      motivo: input.motivo ?? null,
+      ip: input.ip ?? null,
+      documentoId: input.documentoId ?? null,
+      // `origen` sólo cuando viene; si se omite, el default MANUAL del schema
+      // aplica (así no cambia el comportamiento de los callers existentes).
+      ...(input.origen ? { origen: input.origen } : {}),
     },
   });
 }
@@ -50,6 +63,11 @@ export type AuditEntry = {
   usuario: string;
   datosAnteriores: unknown;
   datosNuevos: unknown;
+  // PR-008 (aditivo): metadata G-07/CRIT-11. En filas previas: origen=MANUAL,
+  // motivo/ip = null (la UI no los dibuja cuando no aportan info).
+  motivo: string | null;
+  origen: AuditOrigen;
+  ip: string | null;
 };
 
 // Historial de cambios de un record (más reciente primero). Usa el índice
@@ -69,5 +87,8 @@ export async function getAuditLog(tabla: string, registroId: string): Promise<Au
     usuario: row.usuario.nombre,
     datosAnteriores: row.datosAnteriores,
     datosNuevos: row.datosNuevos,
+    motivo: row.motivo,
+    origen: row.origen,
+    ip: row.ip,
   }));
 }

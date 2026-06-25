@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
+import { registrarAuditoria } from "@/lib/services/auditoria";
 import { Prisma, TipoDeposito } from "@/generated/prisma/client";
 
 export type DepositoRow = {
@@ -45,9 +46,22 @@ export type DepositoInput = z.input<typeof depositoSchema>;
 
 export type DepositoActionResult = { ok: true; id: string } | { ok: false; error: string };
 
+// Campos JSON-safe del depósito que se versionan en la auditoría (todos
+// scalars, sin Decimal ni Date). NO exportar (archivo "use server").
+const SNAPSHOT_DEPOSITO = {
+  nombre: true,
+  direccion: true,
+  activo: true,
+  tipo: true,
+  subtipo: true,
+  jurisdiccion: true,
+  esDeTerceros: true,
+  depositarioRazonSocial: true,
+  depositarioCuit: true,
+} as const;
+
 export async function crearDepositoAction(raw: DepositoInput): Promise<DepositoActionResult> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
 
   const parsed = depositoSchema.safeParse(raw);
   if (!parsed.success) {
@@ -56,9 +70,19 @@ export async function crearDepositoAction(raw: DepositoInput): Promise<DepositoA
   }
 
   try {
-    const created = await db.deposito.create({
-      data: parsed.data,
-      select: { id: true },
+    const created = await db.$transaction(async (tx) => {
+      const { id, ...snapshot } = await tx.deposito.create({
+        data: parsed.data,
+        select: { id: true, ...SNAPSHOT_DEPOSITO },
+      });
+      await registrarAuditoria(tx, {
+        tabla: "Deposito",
+        registroId: id,
+        accion: "CREATE",
+        usuarioId,
+        datosNuevos: snapshot,
+      });
+      return { id };
     });
     revalidatePath("/maestros/depositos");
     revalidatePath("/maestros");
@@ -73,8 +97,7 @@ export async function actualizarDepositoAction(
   id: string,
   raw: DepositoInput,
 ): Promise<DepositoActionResult> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
   if (!id) return { ok: false, error: "Id requerido." };
 
   const parsed = depositoSchema.safeParse(raw);
@@ -84,10 +107,27 @@ export async function actualizarDepositoAction(
   }
 
   try {
-    const updated = await db.deposito.update({
-      where: { id },
-      data: parsed.data,
-      select: { id: true },
+    const updated = await db.$transaction(async (tx) => {
+      const antes = await tx.deposito.findUnique({ where: { id }, select: SNAPSHOT_DEPOSITO });
+      if (!antes)
+        throw new Prisma.PrismaClientKnownRequestError("No existe", {
+          code: "P2025",
+          clientVersion: "",
+        });
+      const { id: updatedId, ...despues } = await tx.deposito.update({
+        where: { id },
+        data: parsed.data,
+        select: { id: true, ...SNAPSHOT_DEPOSITO },
+      });
+      await registrarAuditoria(tx, {
+        tabla: "Deposito",
+        registroId: updatedId,
+        accion: "UPDATE",
+        usuarioId,
+        datosAnteriores: antes,
+        datosNuevos: despues,
+      });
+      return { id: updatedId };
     });
     revalidatePath("/maestros/depositos");
     revalidatePath("/maestros");
@@ -104,32 +144,49 @@ export async function actualizarDepositoAction(
 export async function eliminarDepositoAction(
   id: string,
 ): Promise<{ ok: true; softDeleted: boolean } | { ok: false; error: string }> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
   if (!id) return { ok: false, error: "Id requerido." };
 
-  const [stockCount, embarquesCount] = await Promise.all([
-    db.movimientoStock.count({ where: { depositoId: id } }),
-    db.embarque.count({ where: { depositoDestinoId: id } }),
-  ]);
-
-  const tieneReferencias = stockCount > 0 || embarquesCount > 0;
-
   try {
-    if (tieneReferencias) {
-      await db.deposito.update({
-        where: { id },
-        data: { activo: false },
-        select: { id: true },
+    const { softDeleted } = await db.$transaction(async (tx) => {
+      const antes = await tx.deposito.findUnique({ where: { id }, select: SNAPSHOT_DEPOSITO });
+      if (!antes)
+        throw new Prisma.PrismaClientKnownRequestError("No existe", {
+          code: "P2025",
+          clientVersion: "",
+        });
+
+      const [stockCount, embarquesCount] = await Promise.all([
+        tx.movimientoStock.count({ where: { depositoId: id } }),
+        tx.embarque.count({ where: { depositoDestinoId: id } }),
+      ]);
+
+      if (stockCount > 0 || embarquesCount > 0) {
+        await tx.deposito.update({ where: { id }, data: { activo: false }, select: { id: true } });
+        await registrarAuditoria(tx, {
+          tabla: "Deposito",
+          registroId: id,
+          accion: "UPDATE",
+          usuarioId,
+          datosAnteriores: antes,
+          datosNuevos: { ...antes, activo: false },
+        });
+        return { softDeleted: true };
+      }
+
+      await registrarAuditoria(tx, {
+        tabla: "Deposito",
+        registroId: id,
+        accion: "DELETE",
+        usuarioId,
+        datosAnteriores: antes,
       });
-      revalidatePath("/maestros/depositos");
-      revalidatePath("/maestros");
-      return { ok: true, softDeleted: true };
-    }
-    await db.deposito.delete({ where: { id } });
+      await tx.deposito.delete({ where: { id } });
+      return { softDeleted: false };
+    });
     revalidatePath("/maestros/depositos");
     revalidatePath("/maestros");
-    return { ok: true, softDeleted: false };
+    return { ok: true, softDeleted };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
       return { ok: false, error: "El depósito no existe." };

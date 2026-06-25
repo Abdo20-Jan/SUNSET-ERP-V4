@@ -3,10 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import { crearCuentaParaEntidad, rangoClienteByCanal } from "@/lib/services/cuenta-auto";
 import { PREFIJO_CLIENTES } from "@/lib/services/prefijos-plan";
+import { registrarAuditoria } from "@/lib/services/auditoria";
 import { buildOrderBy, parseSortParams, type SortDir } from "@/lib/table-sort";
 import { CondicionIva, CuentaTipo, Prisma, TipoCanal } from "@/generated/prisma/client";
 
@@ -328,6 +329,43 @@ async function validarCuentaContable(
   return { ok: true };
 }
 
+// Campos JSON-safe del cliente que se versionan en la auditoría. NO exportar:
+// archivo "use server" sólo exporta funciones async.
+const SNAPSHOT_CLIENTE = {
+  nombre: true,
+  cuit: true,
+  tipo: true,
+  tipoCanal: true,
+  condicionIva: true,
+  agenteRetencionIva: true,
+  agenteRetencionGanancias: true,
+  agenteIibb: true,
+  direccion: true,
+  telefono: true,
+  email: true,
+  estado: true,
+  cuentaContableId: true,
+  diasPagoDefault: true,
+  condicionPagoDefault: true,
+  provinciaId: true,
+  localidadId: true,
+  codigoPostalId: true,
+  alicuotaPercepcionIIBB: true,
+  exentoPercepcionIIBB: true,
+} as const;
+
+type ClienteSnapshot = Prisma.ClienteGetPayload<{ select: typeof SNAPSHOT_CLIENTE }>;
+
+// Convierte el snapshot a JSON-safe: alicuotaPercepcionIIBB es Decimal y no
+// entra directo en una columna Json → number | null.
+function serializarCliente(row: ClienteSnapshot): Record<string, unknown> {
+  return {
+    ...row,
+    alicuotaPercepcionIIBB:
+      row.alicuotaPercepcionIIBB == null ? null : Number(row.alicuotaPercepcionIIBB),
+  };
+}
+
 function mapCrearClienteError(err: unknown): ClienteActionResult {
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
     return { ok: false, error: "Ya existe un cliente con ese CUIT." };
@@ -340,8 +378,7 @@ function mapCrearClienteError(err: unknown): ClienteActionResult {
 }
 
 export async function crearClienteAction(raw: ClienteInput): Promise<ClienteActionResult> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
 
   const parsed = clienteBaseSchema.safeParse(raw);
   if (!parsed.success) {
@@ -356,10 +393,18 @@ export async function crearClienteAction(raw: ClienteInput): Promise<ClienteActi
       const cuentaContableId = await resolverCuentaContableCliente(tx, parsed.data);
       const { crearCuentaAuto: _ignore, ...rest } = parsed.data;
       void _ignore;
-      return tx.cliente.create({
+      const { id, ...snapshot } = await tx.cliente.create({
         data: { ...rest, cuentaContableId },
-        select: { id: true },
+        select: { id: true, ...SNAPSHOT_CLIENTE },
       });
+      await registrarAuditoria(tx, {
+        tabla: "Cliente",
+        registroId: id,
+        accion: "CREATE",
+        usuarioId,
+        datosNuevos: serializarCliente(snapshot),
+      });
+      return { id };
     });
     revalidatePath("/maestros/clientes");
     revalidatePath("/maestros");
@@ -384,8 +429,7 @@ export async function actualizarClienteAction(
   id: string,
   raw: ClienteInput,
 ): Promise<ClienteActionResult> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
 
   if (!id) return { ok: false, error: "Id requerido." };
 
@@ -401,10 +445,27 @@ export async function actualizarClienteAction(
   try {
     const { crearCuentaAuto: _ignore, ...rest } = parsed.data;
     void _ignore;
-    const updated = await db.cliente.update({
-      where: { id },
-      data: rest,
-      select: { id: true },
+    const updated = await db.$transaction(async (tx) => {
+      const antes = await tx.cliente.findUnique({ where: { id }, select: SNAPSHOT_CLIENTE });
+      if (!antes)
+        throw new Prisma.PrismaClientKnownRequestError("No existe", {
+          code: "P2025",
+          clientVersion: "",
+        });
+      const { id: updatedId, ...despues } = await tx.cliente.update({
+        where: { id },
+        data: rest,
+        select: { id: true, ...SNAPSHOT_CLIENTE },
+      });
+      await registrarAuditoria(tx, {
+        tabla: "Cliente",
+        registroId: updatedId,
+        accion: "UPDATE",
+        usuarioId,
+        datosAnteriores: serializarCliente(antes),
+        datosNuevos: serializarCliente(despues),
+      });
+      return { id: updatedId };
     });
     revalidatePath("/maestros/clientes");
     revalidatePath("/maestros");
@@ -426,27 +487,49 @@ export async function actualizarClienteAction(
 export async function eliminarClienteAction(
   id: string,
 ): Promise<{ ok: true; softDeleted: boolean } | { ok: false; error: string }> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
   if (!id) return { ok: false, error: "Id requerido." };
 
-  const ventasCount = await db.venta.count({ where: { clienteId: id } });
-
   try {
-    if (ventasCount > 0) {
-      await db.cliente.update({
-        where: { id },
-        data: { estado: "inactivo" },
-        select: { id: true },
+    const { softDeleted } = await db.$transaction(async (tx) => {
+      const antes = await tx.cliente.findUnique({ where: { id }, select: SNAPSHOT_CLIENTE });
+      if (!antes)
+        throw new Prisma.PrismaClientKnownRequestError("No existe", {
+          code: "P2025",
+          clientVersion: "",
+        });
+
+      const ventasCount = await tx.venta.count({ where: { clienteId: id } });
+      if (ventasCount > 0) {
+        await tx.cliente.update({
+          where: { id },
+          data: { estado: "inactivo" },
+          select: { id: true },
+        });
+        await registrarAuditoria(tx, {
+          tabla: "Cliente",
+          registroId: id,
+          accion: "UPDATE",
+          usuarioId,
+          datosAnteriores: serializarCliente(antes),
+          datosNuevos: serializarCliente({ ...antes, estado: "inactivo" }),
+        });
+        return { softDeleted: true };
+      }
+
+      await registrarAuditoria(tx, {
+        tabla: "Cliente",
+        registroId: id,
+        accion: "DELETE",
+        usuarioId,
+        datosAnteriores: serializarCliente(antes),
       });
-      revalidatePath("/maestros/clientes");
-      revalidatePath("/maestros");
-      return { ok: true, softDeleted: true };
-    }
-    await db.cliente.delete({ where: { id } });
+      await tx.cliente.delete({ where: { id } });
+      return { softDeleted: false };
+    });
     revalidatePath("/maestros/clientes");
     revalidatePath("/maestros");
-    return { ok: true, softDeleted: false };
+    return { ok: true, softDeleted };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
       return { ok: false, error: "El cliente no existe." };

@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
+import { requireSessionUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
+import { registrarAuditoria } from "@/lib/services/auditoria";
 import { Prisma } from "@/generated/prisma/client";
 import { money, toDecimal, Decimal, type MoneyInput } from "@/lib/decimal";
 import { parseSortParams, buildOrderBy, type SortDir } from "@/lib/table-sort";
@@ -299,9 +300,37 @@ export type ProductoInput = z.input<typeof productoCrearSchema>;
 
 export type ProductoActionResult = { ok: true; id: string } | { ok: false; error: string };
 
+// Campos del producto que se versionan en la auditoría (los controlados por el
+// form). diePorcentaje/precioVenta son Decimal → se serializan a number.
+// NO exportar (archivo "use server").
+const SNAPSHOT_PRODUCTO = {
+  codigo: true,
+  nombre: true,
+  descripcion: true,
+  marca: true,
+  modelo: true,
+  medida: true,
+  ncm: true,
+  unidad: true,
+  diePorcentaje: true,
+  precioVenta: true,
+  stockMinimo: true,
+  activo: true,
+} as const;
+
+type ProductoSnapshot = Prisma.ProductoGetPayload<{ select: typeof SNAPSHOT_PRODUCTO }>;
+
+// Convierte el snapshot a JSON-safe: los Decimal no entran directo en columna Json.
+function serializarProducto(row: ProductoSnapshot): Record<string, unknown> {
+  return {
+    ...row,
+    diePorcentaje: Number(row.diePorcentaje),
+    precioVenta: Number(row.precioVenta),
+  };
+}
+
 export async function crearProductoAction(raw: ProductoInput): Promise<ProductoActionResult> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
 
   const parsed = productoCrearSchema.safeParse(raw);
   if (!parsed.success) {
@@ -325,22 +354,32 @@ export async function crearProductoAction(raw: ProductoInput): Promise<ProductoA
   } = parsed.data;
 
   try {
-    const created = await db.producto.create({
-      data: {
-        codigo,
-        nombre,
-        descripcion,
-        marca,
-        modelo,
-        medida,
-        ncm,
-        unidad,
-        diePorcentaje: percent4(diePorcentaje),
-        precioVenta: money(precioVenta),
-        stockMinimo,
-        activo,
-      },
-      select: { id: true },
+    const created = await db.$transaction(async (tx) => {
+      const { id, ...snapshot } = await tx.producto.create({
+        data: {
+          codigo,
+          nombre,
+          descripcion,
+          marca,
+          modelo,
+          medida,
+          ncm,
+          unidad,
+          diePorcentaje: percent4(diePorcentaje),
+          precioVenta: money(precioVenta),
+          stockMinimo,
+          activo,
+        },
+        select: { id: true, ...SNAPSHOT_PRODUCTO },
+      });
+      await registrarAuditoria(tx, {
+        tabla: "Producto",
+        registroId: id,
+        accion: "CREATE",
+        usuarioId,
+        datosNuevos: serializarProducto(snapshot),
+      });
+      return { id };
     });
     revalidatePath("/maestros/productos");
     revalidatePath("/maestros");
@@ -358,8 +397,7 @@ export async function actualizarProductoAction(
   id: string,
   raw: ProductoInput,
 ): Promise<ProductoActionResult> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
   if (!id) return { ok: false, error: "Id requerido." };
 
   const parsed = productoCrearSchema.safeParse(raw);
@@ -384,23 +422,40 @@ export async function actualizarProductoAction(
   } = parsed.data;
 
   try {
-    const updated = await db.producto.update({
-      where: { id },
-      data: {
-        codigo,
-        nombre,
-        descripcion,
-        marca,
-        modelo,
-        medida,
-        ncm,
-        unidad,
-        diePorcentaje: percent4(diePorcentaje),
-        precioVenta: money(precioVenta),
-        stockMinimo,
-        activo,
-      },
-      select: { id: true },
+    const updated = await db.$transaction(async (tx) => {
+      const antes = await tx.producto.findUnique({ where: { id }, select: SNAPSHOT_PRODUCTO });
+      if (!antes)
+        throw new Prisma.PrismaClientKnownRequestError("No existe", {
+          code: "P2025",
+          clientVersion: "",
+        });
+      const { id: updatedId, ...despues } = await tx.producto.update({
+        where: { id },
+        data: {
+          codigo,
+          nombre,
+          descripcion,
+          marca,
+          modelo,
+          medida,
+          ncm,
+          unidad,
+          diePorcentaje: percent4(diePorcentaje),
+          precioVenta: money(precioVenta),
+          stockMinimo,
+          activo,
+        },
+        select: { id: true, ...SNAPSHOT_PRODUCTO },
+      });
+      await registrarAuditoria(tx, {
+        tabla: "Producto",
+        registroId: updatedId,
+        accion: "UPDATE",
+        usuarioId,
+        datosAnteriores: serializarProducto(antes),
+        datosNuevos: serializarProducto(despues),
+      });
+      return { id: updatedId };
     });
     revalidatePath("/maestros/productos");
     revalidatePath("/maestros");
@@ -422,34 +477,51 @@ export async function actualizarProductoAction(
 export async function eliminarProductoAction(
   id: string,
 ): Promise<{ ok: true; softDeleted: boolean } | { ok: false; error: string }> {
-  const session = await auth();
-  if (!session) return { ok: false, error: "No autorizado." };
+  const usuarioId = await requireSessionUser();
   if (!id) return { ok: false, error: "Id requerido." };
 
-  const [embarqueCount, compraCount, ventaCount, stockCount] = await Promise.all([
-    db.itemEmbarque.count({ where: { productoId: id } }),
-    db.itemCompra.count({ where: { productoId: id } }),
-    db.itemVenta.count({ where: { productoId: id } }),
-    db.movimientoStock.count({ where: { productoId: id } }),
-  ]);
-
-  const tieneReferencias = embarqueCount > 0 || compraCount > 0 || ventaCount > 0 || stockCount > 0;
-
   try {
-    if (tieneReferencias) {
-      await db.producto.update({
-        where: { id },
-        data: { activo: false },
-        select: { id: true },
+    const { softDeleted } = await db.$transaction(async (tx) => {
+      const antes = await tx.producto.findUnique({ where: { id }, select: SNAPSHOT_PRODUCTO });
+      if (!antes)
+        throw new Prisma.PrismaClientKnownRequestError("No existe", {
+          code: "P2025",
+          clientVersion: "",
+        });
+
+      const [embarqueCount, compraCount, ventaCount, stockCount] = await Promise.all([
+        tx.itemEmbarque.count({ where: { productoId: id } }),
+        tx.itemCompra.count({ where: { productoId: id } }),
+        tx.itemVenta.count({ where: { productoId: id } }),
+        tx.movimientoStock.count({ where: { productoId: id } }),
+      ]);
+
+      if (embarqueCount > 0 || compraCount > 0 || ventaCount > 0 || stockCount > 0) {
+        await tx.producto.update({ where: { id }, data: { activo: false }, select: { id: true } });
+        await registrarAuditoria(tx, {
+          tabla: "Producto",
+          registroId: id,
+          accion: "UPDATE",
+          usuarioId,
+          datosAnteriores: serializarProducto(antes),
+          datosNuevos: serializarProducto({ ...antes, activo: false }),
+        });
+        return { softDeleted: true };
+      }
+
+      await registrarAuditoria(tx, {
+        tabla: "Producto",
+        registroId: id,
+        accion: "DELETE",
+        usuarioId,
+        datosAnteriores: serializarProducto(antes),
       });
-      revalidatePath("/maestros/productos");
-      revalidatePath("/maestros");
-      return { ok: true, softDeleted: true };
-    }
-    await db.producto.delete({ where: { id } });
+      await tx.producto.delete({ where: { id } });
+      return { softDeleted: false };
+    });
     revalidatePath("/maestros/productos");
     revalidatePath("/maestros");
-    return { ok: true, softDeleted: false };
+    return { ok: true, softDeleted };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
       return { ok: false, error: "El producto no existe." };
