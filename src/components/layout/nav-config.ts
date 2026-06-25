@@ -274,6 +274,12 @@ export const CENTERS: readonly NavCenter[] = [
             icon: UserGroupIcon,
             permission: PERMISOS.ADMIN_ACCESO,
           },
+          {
+            label: "Auditoría",
+            href: "/sistema/auditoria",
+            icon: Invoice01Icon,
+            permission: PERMISOS.AUDITORIA_VER,
+          },
           { label: "Mi perfil", href: "/perfil", icon: UserGroupIcon },
         ],
       },
