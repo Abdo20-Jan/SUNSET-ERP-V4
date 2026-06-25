@@ -183,3 +183,27 @@ export function isTopNavEnabled(): boolean {
 export function isRbacEnabled(): boolean {
   return process.env.RBAC_ENABLED === "true";
 }
+
+/**
+ * Feature flag: motor de aprobaciones (PR-012 · AUTO-01 / CRIT-03) — máquina
+ * de estados genérica request → decisión → SLA → escalonamiento.
+ *
+ * **Cuando está OFF (default)**: el motor queda INERTE. Ninguna acción de
+ * negocio lo invoca, y cada función pública de `@/lib/services/aprobaciones`
+ * lanza si se la llama con la flag apagada. Las tablas Solicitud/Aprobacion
+ * existen pero quedan vacías. Cero cambio de comportamiento en toda la app.
+ *
+ * **Cuando está ON**: las acciones gateadas que se cableen más adelante
+ * (PR-014 cablea margen) pueden crear solicitudes y el motor rastrea su estado
+ * de aprobación (sin efectos de negocio — el efecto lo aplica la acción gateada).
+ *
+ * **Activación**: setear `APPROVALS_ENABLED=true`. Default: off.
+ *
+ * **Pre-requisitos** antes de prender la flag:
+ *  1. Migración `add_approvals_engine` aplicada (tablas Solicitud/Aprobacion).
+ *  2. Catálogo de permisos `aprobar.*` sembrado (`seedRbacFoundation`) y, con
+ *     RBAC ON, los perfiles canónicos con sus claves de aprobación asignadas.
+ */
+export function isApprovalsEnabled(): boolean {
+  return process.env.APPROVALS_ENABLED === "true";
+}
