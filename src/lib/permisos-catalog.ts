@@ -47,6 +47,16 @@ export const PERMISOS = {
   AUDITORIA_VER: "auditoria.ver",
   /** Exportar la auditoría (CSV/XLSX). La exportación es a su vez auditada. */
   AUDITORIA_EXPORTAR: "auditoria.exportar",
+  /** Ver el costo unitario / CMV de un producto (campo de costo · PR-011). */
+  VER_COSTO: "costos.ver",
+  /** Ver el margen y la rentabilidad calculada (campo de margen · PR-011). */
+  VER_MARGEN: "margenes.ver",
+  /** Ver el costo landed (costo + flete + impuestos de importación · PR-011). */
+  VER_COSTO_LANDED: "costos.verLanded",
+  /** Ver el precio mínimo de venta (piso de pricing · reservado PR-011). */
+  VER_PRECIO_MINIMO: "precios.verMinimo",
+  /** Ver la valorización de costo del stock (inventario · PR-011). */
+  VER_COSTO_STOCK: "stock.verCosto",
 } as const;
 
 export type PermisoKey = (typeof PERMISOS)[keyof typeof PERMISOS];
@@ -139,11 +149,48 @@ export const PERMISSION_CATALOG: readonly PermisoCatalogEntry[] = [
     dimension: DimensionPermiso.EXPORTACION,
     descripcion: "Exportar la auditoría (auditada)",
   },
+  {
+    clave: PERMISOS.VER_COSTO,
+    dimension: DimensionPermiso.CAMPO,
+    descripcion: "Ver el costo unitario / CMV de un producto",
+  },
+  {
+    clave: PERMISOS.VER_MARGEN,
+    dimension: DimensionPermiso.CAMPO,
+    descripcion: "Ver el margen y la rentabilidad calculada",
+  },
+  {
+    clave: PERMISOS.VER_COSTO_LANDED,
+    dimension: DimensionPermiso.CAMPO,
+    descripcion: "Ver el costo landed (costo + flete + impuestos)",
+  },
+  {
+    clave: PERMISOS.VER_PRECIO_MINIMO,
+    dimension: DimensionPermiso.CAMPO,
+    descripcion: "Ver el precio mínimo de venta",
+  },
+  {
+    clave: PERMISOS.VER_COSTO_STOCK,
+    dimension: DimensionPermiso.INFORMACION,
+    descripcion: "Ver la valorización de costo del stock",
+  },
 ];
 
 /**
  * Claves "base" (no-admin): cualquier usuario activo las tiene. El perfil USER
  * de sistema recibe sólo estas. Con la flag RBAC OFF, una clave que NO esté
  * acá se considera admin-scoped (default conservador: requiere ADMIN).
+ *
+ * PR-011: las 5 claves de costo/margen son BASE a propósito. Con RBAC OFF eso
+ * las vuelve visibles para cualquier usuario activo (= comportamiento de hoy,
+ * cero regresión); con RBAC ON el perfil USER de sistema las recibe igual. La
+ * máscara sólo "muerde" cuando un admin crea un perfil custom que las omite.
  */
-export const USER_BASE_CLAVES: readonly PermisoKey[] = [PERMISOS.APP_ACCESO];
+export const USER_BASE_CLAVES: readonly PermisoKey[] = [
+  PERMISOS.APP_ACCESO,
+  PERMISOS.VER_COSTO,
+  PERMISOS.VER_MARGEN,
+  PERMISOS.VER_COSTO_LANDED,
+  PERMISOS.VER_PRECIO_MINIMO,
+  PERMISOS.VER_COSTO_STOCK,
+];

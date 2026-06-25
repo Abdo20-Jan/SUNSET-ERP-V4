@@ -12,6 +12,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fmtMoney, fmtInt, convertirAUsd, convertirMonto } from "@/lib/format";
 import { getResumenEjecutivo } from "@/lib/services/bi";
+import { puedeVerCostoStock, puedeVerMargen } from "@/lib/permisos-masking";
 
 import { KpiCard } from "../../dashboard/_components/kpi-card";
 import { BarChartMoneyLazy, LineChartMoneyLazy } from "../_components/charts/lazy";
@@ -45,7 +46,13 @@ export async function ResumenTab({
    */
   tcCierre?: string | null;
 }) {
-  const r = await getResumenEjecutivo({ desde, hasta });
+  const [r, verMargen, verCostoStock] = await Promise.all([
+    getResumenEjecutivo({ desde, hasta }),
+    // PR-011: margen agregado (margenes.ver) y stock valorado (stock.verCosto).
+    // El resto (resultado del ejercicio / saldos / CxC / CxP) queda para PR-011b.
+    puedeVerMargen(),
+    puedeVerCostoStock(),
+  ]);
   const k = r.kpis;
   const money = (n: number) => fmtMoney(convertirAUsd(n.toString(), tc ?? null));
   const symbol = tc ? "USD " : "$ ";
@@ -98,10 +105,10 @@ export async function ResumenTab({
         />
         <KpiCard
           label="Margen bruto"
-          value={`${symbol}${money(k.margenBruto)}`}
+          value={verMargen ? `${symbol}${money(k.margenBruto)}` : "—"}
           icon={ChartIncreaseIcon}
-          accent={k.margenBruto >= 0 ? "positive" : "negative"}
-          hint={pctLabel(k.margenBrutoPct)}
+          accent={verMargen ? (k.margenBruto >= 0 ? "positive" : "negative") : "neutral"}
+          hint={verMargen ? pctLabel(k.margenBrutoPct) : "—"}
         />
         <KpiCard
           label="Resultado del ejercicio"
@@ -119,7 +126,7 @@ export async function ResumenTab({
         />
         <KpiCard
           label="Stock valorado"
-          value={`${symbol}${money(k.stockValorado)}`}
+          value={verCostoStock ? `${symbol}${money(k.stockValorado)}` : "—"}
           icon={PackageIcon}
           accent="info"
           hint="Σ costo promedio × cantidad"

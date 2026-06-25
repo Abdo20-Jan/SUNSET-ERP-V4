@@ -3,6 +3,22 @@
 import { type ContenedorEstado, EmbarqueEstado, PedidoEstado } from "@/generated/prisma/client";
 
 import { db } from "@/lib/db";
+import { puedeVerCostoStock } from "@/lib/permisos-masking";
+
+// Strip de la valorización de costo (producto + por depósito) cuando falta
+// `stock.verCosto` (PR-011). Sub-helper puro (complejidad 1).
+function stripCostosMatriz<
+  T extends {
+    costoPromedio: unknown;
+    stockPorDeposito: { costoPromedio: unknown }[];
+  },
+>(p: T): T {
+  return {
+    ...p,
+    costoPromedio: null,
+    stockPorDeposito: p.stockPorDeposito.map((s) => ({ ...s, costoPromedio: null })),
+  };
+}
 
 /**
  * Devuelve la matriz de stock por (producto, depósito) para la UI de
@@ -51,7 +67,11 @@ export async function listarMatrizInventario(opts?: { search?: string; take?: nu
     select: { id: true, nombre: true },
   });
 
-  return { productos, depositos };
+  // Strip BE de la valorización (PR-011); el FE hoy no la muestra (defensa).
+  const verCosto = await puedeVerCostoStock();
+  const productosOut = verCosto ? productos : productos.map(stripCostosMatriz);
+
+  return { productos: productosOut, depositos };
 }
 
 /**

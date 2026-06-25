@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireSessionUser } from "@/lib/auth-guard";
+import { puedeVerCosto } from "@/lib/permisos-masking";
 import { serializarSnapshot } from "@/lib/auditoria-snapshot";
 import { db } from "@/lib/db";
 import { money, precioUnitario as toPrecioUnitario, toDecimal } from "@/lib/decimal";
@@ -62,7 +63,9 @@ export type ProductoParaVenta = {
   codigo: string;
   nombre: string;
   precioVenta: string;
-  costoPromedio: string;
+  // `null` cuando la sesión no tiene `costos.ver` (PR-011): el costo se strip-ea
+  // del payload en el loader; el FE enmascara la rentabilidad como segunda capa.
+  costoPromedio: string | null;
   // Disponible (físico − reservado) sumado en depósitos NACIONALES.
   disponible: number;
 };
@@ -145,6 +148,9 @@ export async function listarClientesParaVenta(): Promise<ClienteParaVenta[]> {
 }
 
 export async function listarProductosParaVenta(): Promise<ProductoParaVenta[]> {
+  // El costo se selecciona igual de la DB (la matemática/datos quedan intactos);
+  // sólo se strip-ea del OUTPUT cuando falta `costos.ver` (PR-011 COM-02).
+  const verCosto = await puedeVerCosto();
   const rows = await db.producto.findMany({
     where: { activo: true },
     orderBy: { codigo: "asc" },
@@ -166,7 +172,7 @@ export async function listarProductosParaVenta(): Promise<ProductoParaVenta[]> {
     codigo: p.codigo,
     nombre: p.nombre,
     precioVenta: p.precioVenta.toString(),
-    costoPromedio: p.costoPromedio.toString(),
+    costoPromedio: verCosto ? p.costoPromedio.toString() : null,
     disponible: p.stockPorDeposito.reduce(
       (acc, s) => acc + (s.cantidadFisica - s.cantidadReservada),
       0,

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { puedeVerCosto } from "@/lib/permisos-masking";
 import { money, sumMoney, toDecimal } from "@/lib/decimal";
 import { CompraEstado, Moneda, PedidoEstado, Prisma } from "@/generated/prisma/client";
 
@@ -348,6 +349,7 @@ export async function listarProveedoresParaPedidoCompra() {
 }
 
 export async function listarProductosParaPedidoCompra() {
+  const verCosto = await puedeVerCosto();
   const rows = await db.producto.findMany({
     where: { activo: true },
     orderBy: { codigo: "asc" },
@@ -357,6 +359,7 @@ export async function listarProductosParaPedidoCompra() {
     id: p.id,
     codigo: p.codigo,
     nombre: p.nombre,
-    costoPromedio: p.costoPromedio.toString(),
+    // Strip cuando falta `costos.ver` (PR-011): prefill de compra queda vacío.
+    costoPromedio: verCosto ? p.costoPromedio.toString() : null,
   }));
 }

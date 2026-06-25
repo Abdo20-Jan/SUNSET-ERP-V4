@@ -25,6 +25,8 @@ import {
 } from "@/lib/actions/ventas";
 import type { ProveedorParaGasto } from "@/lib/actions/gastos";
 import { obtenerPercepcionInfoCliente, type PercepcionInfo } from "@/lib/actions/provincias";
+import { PERMISOS } from "@/lib/permisos-catalog";
+import { useHasPermission } from "@/components/auth/permissions-provider";
 import { fmtMoney } from "@/lib/format";
 import { useCmdShortcut } from "@/lib/hooks/use-cmd-shortcut";
 import { ClienteCombobox, type ClienteOption } from "@/components/cliente-combobox";
@@ -197,6 +199,12 @@ export function VentaForm({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const isEdit = mode === "edit";
+  // PR-011: máscara FE de costo/margen (segunda capa; el BE ya strip-eó el
+  // `costoPromedio` cuando falta `costos.ver`). `verCosto` es el switch maestro
+  // del bloque rentabilidad (el margen se deriva del costo client-side); `verMargen`
+  // gatea además las sub-líneas netas cuando el costo SÍ es visible.
+  const verCosto = useHasPermission(PERMISOS.VER_COSTO);
+  const verMargen = useHasPermission(PERMISOS.VER_MARGEN);
 
   const proveedorOptions: ProveedorOption[] = proveedores.map((p) => ({
     id: p.id,
@@ -427,8 +435,10 @@ export function VentaForm({
       subtotal = subtotal.plus(sub);
       iva = iva.plus(sub.times(pct));
       const prod = productos.find((p) => p.id === it?.productoId);
-      if (prod) {
-        const costo = new Decimal(prod.costoPromedio || "0");
+      // costoPromedio === null ⇒ strip-eado por falta de `costos.ver` (PR-011):
+      // no acumular (evita fabricar margen 100%); `tieneCostos` queda false.
+      if (prod && prod.costoPromedio != null) {
+        const costo = new Decimal(prod.costoPromedio);
         costoTotal = costoTotal.plus(costo.times(qty));
       }
     }
@@ -912,6 +922,8 @@ export function VentaForm({
                 productos={productoOptions}
                 productosFull={productos}
                 depositos={depositos}
+                verCosto={verCosto}
+                verMargen={verMargen}
                 onProductoChange={onProductoChange}
                 onRemove={() => remove(index)}
                 canRemove={fields.length > 1}
@@ -1124,7 +1136,7 @@ export function VentaForm({
                 {fmtMoney(totals.total.toString())} {moneda}
               </span>
             </div>
-            {totals.tieneCostos ? (
+            {totals.tieneCostos && verCosto && verMargen ? (
               <div
                 className="flex items-baseline gap-1"
                 title={`Costo: ${fmtMoney(totals.costoTotal.toString())} · Bruto: ${fmtMoney(totals.utilidadBruta.toString())} · Provisión Ganancias 35%: ${fmtMoney(totals.provisionGanancias.toString())}${totals.flete.gt(0) ? ` · Flete: -${fmtMoney(totals.flete.toString())}` : ""}`}
@@ -1228,6 +1240,8 @@ type ItemRowProps = {
   productos: ProductoOption[];
   productosFull: ProductoParaVenta[];
   depositos: DepositoParaVenta[];
+  verCosto: boolean;
+  verMargen: boolean;
   onProductoChange: (index: number, id: string) => void;
   onRemove: () => void;
   canRemove: boolean;
@@ -1238,12 +1252,70 @@ type ItemRowProps = {
   errorIva?: string;
 };
 
+// Rentabilidad por línea (PR-011): early-returns para mantener `ItemRow` por
+// debajo del límite de complejidad ciclomática (Codacy/Lizard ≤ 8). Sin
+// `costos.ver` → máscara genérica; con costo → bruto, y neto sólo con `verMargen`.
+type RentabilidadLinea = {
+  gananciaBruta: Decimal;
+  gananciaNeta: Decimal;
+  provisionGanancias: Decimal;
+  margenBrutoPct: Decimal;
+  margenNetoPct: Decimal;
+  costoTotal: Decimal;
+};
+
+function RentabilidadCell({
+  rentabilidad,
+  verCosto,
+  verMargen,
+}: {
+  rentabilidad: RentabilidadLinea | null;
+  verCosto: boolean;
+  verMargen: boolean;
+}) {
+  if (!verCosto) {
+    // El tooltip de costo nunca se monta. Genérico — no revela si hay costo o no.
+    return <p className="mt-1 text-xs text-muted-foreground">Margen —</p>;
+  }
+  if (!rentabilidad) {
+    return <p className="mt-1 text-xs text-muted-foreground">Margen — (sin costo)</p>;
+  }
+  return (
+    <div
+      className="mt-1 flex flex-col items-end gap-0"
+      title={`Costo total: ${fmtMoney(rentabilidad.costoTotal.toString())} · Provisión Ganancias 35%: ${fmtMoney(rentabilidad.provisionGanancias.toString())}`}
+    >
+      <p className={"font-mono text-[11px] tabular-nums text-muted-foreground"}>
+        Bruto {rentabilidad.margenBrutoPct.toFixed(2)}% ·{" "}
+        {rentabilidad.gananciaBruta.gte(0) ? "+" : ""}
+        {fmtMoney(rentabilidad.gananciaBruta.toString())}
+      </p>
+      {verMargen ? (
+        <p
+          className={
+            "font-mono text-xs font-semibold tabular-nums " +
+            (rentabilidad.gananciaNeta.gte(0)
+              ? "text-emerald-700 dark:text-emerald-400"
+              : "text-destructive")
+          }
+        >
+          Neto {rentabilidad.margenNetoPct.toFixed(2)}% ·{" "}
+          {rentabilidad.gananciaNeta.gte(0) ? "+" : ""}
+          {fmtMoney(rentabilidad.gananciaNeta.toString())}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function ItemRow({
   index,
   control,
   productos,
   productosFull,
   depositos,
+  verCosto,
+  verMargen,
   onProductoChange,
   onRemove,
   canRemove,
@@ -1282,7 +1354,10 @@ function ItemRow({
   // margen% = ganancia / subtotal × 100.
   const rentabilidad = useMemo(() => {
     if (!productoSel) return null;
-    const costo = new Decimal(productoSel.costoPromedio || "0");
+    // costoPromedio === null ⇒ strip-eado por falta de `costos.ver` (PR-011):
+    // sin costo no hay rentabilidad calculable en el cliente.
+    if (productoSel.costoPromedio == null) return null;
+    const costo = new Decimal(productoSel.costoPromedio);
     if (costo.lte(0)) return null;
     const qty = Number(cantidad ?? 0) || 0;
     if (qty <= 0) return null;
@@ -1352,32 +1427,7 @@ function ItemRow({
         <p className="font-mono text-xs text-muted-foreground tabular-nums">
           {fmtMoney(subtotal.toString())} + IVA {fmtMoney(iva.toString())}
         </p>
-        {rentabilidad ? (
-          <div
-            className="mt-1 flex flex-col items-end gap-0"
-            title={`Costo total: ${fmtMoney(rentabilidad.costoTotal.toString())} · Provisión Ganancias 35%: ${fmtMoney(rentabilidad.provisionGanancias.toString())}`}
-          >
-            <p className={"font-mono text-[11px] tabular-nums text-muted-foreground"}>
-              Bruto {rentabilidad.margenBrutoPct.toFixed(2)}% ·{" "}
-              {rentabilidad.gananciaBruta.gte(0) ? "+" : ""}
-              {fmtMoney(rentabilidad.gananciaBruta.toString())}
-            </p>
-            <p
-              className={
-                "font-mono text-xs font-semibold tabular-nums " +
-                (rentabilidad.gananciaNeta.gte(0)
-                  ? "text-emerald-700 dark:text-emerald-400"
-                  : "text-destructive")
-              }
-            >
-              Neto {rentabilidad.margenNetoPct.toFixed(2)}% ·{" "}
-              {rentabilidad.gananciaNeta.gte(0) ? "+" : ""}
-              {fmtMoney(rentabilidad.gananciaNeta.toString())}
-            </p>
-          </div>
-        ) : (
-          <p className="mt-1 text-xs text-muted-foreground">Margen — (sin costo)</p>
-        )}
+        <RentabilidadCell rentabilidad={rentabilidad} verCosto={verCosto} verMargen={verMargen} />
       </div>
 
       <div className="flex justify-end md:col-span-1">

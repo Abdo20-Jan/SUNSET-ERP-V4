@@ -18,22 +18,32 @@ import {
 } from "@/components/ui/table";
 import { fmtInt, fmtMoney, convertirAUsd, fmtDateOrDash } from "@/lib/format";
 import { type AnalisisBonded, getAnalisisBonded, getAnalisisStock } from "@/lib/services/bi";
+import { puedeVerCostoLanded, puedeVerCostoStock } from "@/lib/permisos-masking";
 
 import { KpiCard } from "../../dashboard/_components/kpi-card";
 import { HorizontalBarRankingLazy } from "../_components/charts/lazy";
 
 export async function StockTab({ tc }: { tc?: string | null }) {
-  const [r, bonded] = await Promise.all([getAnalisisStock(), getAnalisisBonded()]);
+  const [r, bonded, verCostoStock, verLanded] = await Promise.all([
+    getAnalisisStock(),
+    getAnalisisBonded(),
+    // PR-011: valorización de stock NACIONAL (stock.verCosto) y bonded FOB/landed
+    // (costos.verLanded). Sin la clave el valor no cruza al cliente (charts vacíos
+    // + montos "—"); cantidades/aging/contenedores quedan visibles.
+    puedeVerCostoStock(),
+    puedeVerCostoLanded(),
+  ]);
   const money = (n: number) => fmtMoney(convertirAUsd(n.toString(), tc ?? null));
   const symbol = tc ? "USD " : "$ ";
+  const moneyStock = (n: number) => (verCostoStock ? `${symbol}${money(n)}` : "—");
 
   return (
     <div className="flex flex-col gap-3">
-      {bonded ? <BondedSection bonded={bonded} /> : null}
+      {bonded ? <BondedSection bonded={bonded} verLanded={verLanded} /> : null}
       <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <KpiCard
           label="Stock valorado"
-          value={`${symbol}${money(r.kpis.valorado)}`}
+          value={moneyStock(r.kpis.valorado)}
           icon={Coins01Icon}
           accent="positive"
           hint="Σ cantidadFisica × costoPromedio"
@@ -63,13 +73,13 @@ export async function StockTab({ tc }: { tc?: string | null }) {
         <HorizontalBarRankingLazy
           title="Stock valorado por depósito"
           description="Suma costo × cantidad física"
-          data={r.porDeposito}
+          data={verCostoStock ? r.porDeposito : []}
           color="var(--chart-1)"
         />
         <HorizontalBarRankingLazy
           title="Top 10 productos por valor"
           description="Costo × cantidad acumulado por SKU"
-          data={r.topProductosValor}
+          data={verCostoStock ? r.topProductosValor : []}
           color="var(--chart-4)"
         />
       </section>
@@ -176,8 +186,7 @@ export async function StockTab({ tc }: { tc?: string | null }) {
                       {fmtInt(s.cantidad)}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
-                      {symbol}
-                      {money(s.valor)}
+                      {moneyStock(s.valor)}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums text-amber-700 dark:text-amber-400">
                       {fmtInt(s.diasSinMov)}
@@ -238,8 +247,10 @@ export async function StockTab({ tc }: { tc?: string | null }) {
 // PR 5.3 — sección bonded (depósito fiscal), sólo visible con la flag de
 // desconsolidación encendida. Valor inmovilizado en USD (costoFCUnitario),
 // antigüedad (aging) de los contenedores y despachos abiertos por SKU.
-function BondedSection({ bonded }: { bonded: AnalisisBonded }) {
-  const usd = (n: number) => `USD ${fmtMoney(n.toString())}`;
+function BondedSection({ bonded, verLanded }: { bonded: AnalisisBonded; verLanded: boolean }) {
+  // PR-011: el valor inmovilizado bonded sale de costoFCUnitario (FOB/landed) →
+  // gateado por `costos.verLanded`. Sin la clave se muestra "—".
+  const usd = (n: number) => (verLanded ? `USD ${fmtMoney(n.toString())}` : "—");
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border/70 p-3">

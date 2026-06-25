@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { puedeVerCosto } from "@/lib/permisos-masking";
 import { isStockDualEnabled } from "@/lib/features";
 import {
   AsientoError,
@@ -411,7 +412,8 @@ export async function anularEntregaAction(entregaId: string): Promise<ActionResu
 // ---------------------------------------------------------------
 
 export async function listarEntregasDeVenta(ventaId: string) {
-  return db.entregaVenta.findMany({
+  const verCosto = await puedeVerCosto();
+  const rows = await db.entregaVenta.findMany({
     where: { ventaId },
     orderBy: { fecha: "asc" },
     select: {
@@ -437,6 +439,15 @@ export async function listarEntregasDeVenta(ventaId: string) {
       },
     },
   });
+  // Strip del snapshot CMV (costoUnitario) cuando falta `costos.ver` (PR-011).
+  // Defensivo: hoy el FE no lo renderiza, pero igual viaja en el payload.
+  return rows.map((e) => ({
+    ...e,
+    items: e.items.map((it) => ({
+      ...it,
+      costoUnitario: verCosto ? it.costoUnitario : null,
+    })),
+  }));
 }
 
 // Hub de entregas: todas las ventas EMITIDA con despacho físico pendiente

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { puedeVerCosto } from "@/lib/permisos-masking";
 import { money, sumMoney, toDecimal } from "@/lib/decimal";
 import {
   AsientoError,
@@ -50,7 +51,8 @@ export type ProductoParaCompra = {
   id: string;
   codigo: string;
   nombre: string;
-  costoPromedio: string;
+  // `null` sin `costos.ver` (PR-011). Prefill de `precioUnitario` queda vacío.
+  costoPromedio: string | null;
 };
 
 export type ComprasListPage = {
@@ -122,6 +124,7 @@ export async function listarProveedoresParaCompra(): Promise<ProveedorParaCompra
 }
 
 export async function listarProductosParaCompra(): Promise<ProductoParaCompra[]> {
+  const verCosto = await puedeVerCosto();
   const rows = await db.producto.findMany({
     where: { activo: true },
     orderBy: { codigo: "asc" },
@@ -131,7 +134,7 @@ export async function listarProductosParaCompra(): Promise<ProductoParaCompra[]>
     id: p.id,
     codigo: p.codigo,
     nombre: p.nombre,
-    costoPromedio: p.costoPromedio.toString(),
+    costoPromedio: verCosto ? p.costoPromedio.toString() : null,
   }));
 }
 
