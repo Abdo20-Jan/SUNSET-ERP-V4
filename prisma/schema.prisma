@@ -419,6 +419,55 @@ enum AuditOrigen {
 }
 
 // ============================================================
+// APROBACIONES (PR-012 · AUTO-01 / CRIT-03)
+// Motor genérico e INERTE de aprobaciones. Estos enums alimentan
+// `Solicitud`/`Aprobacion` (modelos genéricos ligados polimórficamente al
+// documento por (tabla, registroId), igual que AuditLog). NO se cablean a
+// ninguna acción de negocio; con APPROVALS_ENABLED off el motor queda inerte.
+// ============================================================
+
+// Los 6 estados canónicos de una solicitud de aprobación (AUTO-01).
+enum EstadoSolicitud {
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+  EXPIRADA
+  CANCELADA
+  SOLICITANDO_INFO
+}
+
+// Los 18 tipos de aprobación de la matriz ANEXO A.3. El nombre captura la
+// franja (faixa) porque la matriz exige aprobadores/dupla distintos por franja.
+enum TipoAprobacion {
+  CLIENTE_BLOQUEADO
+  MARGEN_BAJA_5
+  MARGEN_BAJA_10
+  MARGEN_BAJA_MAYOR_10
+  LIMITE_EXCEDIDO_20
+  LIMITE_EXCEDIDO_MAYOR_20
+  PLAZO_ESPECIAL
+  DESCUENTO_ESPECIAL_10
+  PAGO_NORMAL
+  PAGO_ALTO_VALOR
+  COSTO_COMEX_MAYOR_10
+  AJUSTE_STOCK_5
+  AJUSTE_STOCK_MAYOR_5
+  REAPERTURA_COSTO_COMEX
+  REAPERTURA_PERIODO_CONTABLE
+  LANZAMIENTO_MANUAL_CONTABLE
+  ANULAR_VENTA_FACTURADA
+  CANCELAR_PROCESO_COMEX
+}
+
+// Decisión registrada por un aprobador en el log `Aprobacion`. El estado
+// canónico vive en `Solicitud.estado`; esto es el evento individual.
+enum TipoDecisionAprobacion {
+  APROBADA
+  RECHAZADA
+  INFO_SOLICITADA
+}
+
+// ============================================================
 // AUTENTICACIÓN
 // ============================================================
 
@@ -450,6 +499,9 @@ model User {
   savedViews                SavedView[]
   perfil                    Perfil?               @relation(fields: [perfilId], references: [id], onDelete: SetNull)
   usuarioPermisos           UsuarioPermiso[]
+  // PR-012 (aditivo · sólo back-relations virtuales, sin columnas — igual auditLogs).
+  solicitudesSolicitadas    Solicitud[]           @relation("SolicitudSolicitante")
+  aprobacionesRealizadas    Aprobacion[]          @relation("AprobacionAprobador")
 }
 
 // ============================================================
@@ -2189,6 +2241,73 @@ model AuditLog {
 
   @@index([usuarioId])
   @@index([tabla, registroId])
+}
+
+// ============================================================
+// APROBACIONES (PR-012) — modelos genéricos del motor de aprobaciones.
+// Aditivos y genéricos: el documento afectado se referencia POLIMÓRFICAMENTE
+// por (tabla, registroId) — SIN FK a ninguna tabla de negocio (igual AuditLog),
+// así ningún modelo de negocio recibe columnas/FKs nuevas. El motor sólo
+// rastrea el estado de aprobación; el EFECTO de negocio lo aplica luego la
+// acción gateada (PR-014+), nunca acá.
+// ============================================================
+
+model Solicitud {
+  id         String          @id @default(uuid())
+  tipo       TipoAprobacion
+  estado     EstadoSolicitud @default(PENDIENTE)
+  // Vínculo polimórfico al documento de negocio (SIN FK — desacople genérico).
+  tabla      String
+  registroId String
+  // Quien solicita. FK dura a User (infra/auth compartida, igual AuditLog.usuario);
+  // Restrict para no perder la traza si se borra el usuario (los usuarios son
+  // soft vía `activo`). No agrega columnas a User: sólo una back-relation virtual.
+  solicitanteId String
+  motivo        String
+  // Metadata de presentación SOLO (worklist PR-013). El motor NUNCA calcula con
+  // valor/moneda — son datos para mostrar/auditar, no entradas del cálculo.
+  valor  Decimal? @db.Decimal(18, 2)
+  moneda Moneda?
+  // SLA (ANEXO B) y escalonamiento (régua AUTO-01).
+  slaHoras            Int
+  venceEn             DateTime
+  requiereDupla       Boolean  @default(false)
+  // 0 = base · 1 = director · 2 = master (índice en `escalonamiento[]` del config).
+  nivelEscalonamiento Int      @default(0)
+  // Mayor hito de recordatorio ya emitido (0/50/75) — idempotencia del cron.
+  ultimoHitoSla       Int      @default(0)
+  // Resolución.
+  resueltaEn          DateTime?
+  comentarioResolucion String?
+  anexos              Json?
+  datos               Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  solicitante  User         @relation("SolicitudSolicitante", fields: [solicitanteId], references: [id], onDelete: Restrict)
+  aprobaciones Aprobacion[]
+
+  @@index([estado])
+  @@index([tabla, registroId])
+  @@index([venceEn])
+  @@index([solicitanteId])
+}
+
+model Aprobacion {
+  id                  String                 @id @default(uuid())
+  solicitudId         String
+  aprobadorId         String
+  decision            TipoDecisionAprobacion
+  comentario          String?
+  esMasterOverride    Boolean                @default(false)
+  nivelEscalonamiento Int                    @default(0)
+  createdAt           DateTime               @default(now())
+
+  solicitud Solicitud @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
+  aprobador User      @relation("AprobacionAprobador", fields: [aprobadorId], references: [id], onDelete: Restrict)
+
+  @@index([solicitudId])
+  @@index([aprobadorId])
 }
 
 // ============================================================

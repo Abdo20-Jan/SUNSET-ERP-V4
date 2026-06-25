@@ -1,0 +1,61 @@
+name: escalation-approvals
+
+# PR-012 (AUTO-01) — STUB INERTE del cron de escalonamiento de aprobaciones.
+#
+# Procesa la régua SLA (50/75/100%) de las solicitudes abiertas llamando
+# `pnpm db:escalate-approvals` (→ prisma/escalate-approvals.ts →
+# procesarEscalonamientos). NO envía notificaciones: sólo aplica estado y loguea.
+#
+# INERTE por defecto, por DOS candados:
+#   1. SIN bloque `schedule:` → NO corre solo (sólo disparo manual).
+#   2. El script sale no-op si `APPROVALS_ENABLED` != "true" (motor inerte).
+#
+# Para habilitarlo de verdad (fuera del alcance de PR-012):
+#   - agregar `schedule: - cron: "..."`;
+#   - exponer `APPROVALS_ENABLED=true` al step (env);
+#   - revisar que los perfiles aprobadores tengan sus claves `aprobar.*`.
+#
+# Secret: DATABASE_URL_PROD (el mismo de migrate-deploy/validar-*; SIN declarar
+# `environment:`). NO hay `on: pull_request` → el secret nunca se expone a forks.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: escalation-approvals
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  escalate:
+    name: procesar escalonamientos (stub inerte)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm prisma generate
+
+      - name: Procesar escalonamientos
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}
+          DIRECT_DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}
+          # APPROVALS_ENABLED NO se setea a propósito: el motor queda inerte y el
+          # script sale no-op. Habilitar sólo cuando se cablee el flujo (PR-014+).
+        run: pnpm db:escalate-approvals
