@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/card";
 
 import { listarVentasParaRecalculo } from "@/lib/actions/admin-percepcion-iibb";
-import { requireAdminPage } from "@/lib/auth-guard";
+import { PERMISOS, requirePermissionPage } from "@/lib/permisos";
 
 import { RecalculoPercepcionPanel } from "./recalculo-panel";
 
@@ -10,7 +10,9 @@ export const dynamic = "force-dynamic";
 export default async function RecalculoPercepcionIIBBPage() {
   // Defensa en profundidad sobre el gate /admin del proxy: redirige a un USER
   // (que ni siquiera debería ver la lista de vendas EMITIDAS) antes de leer.
-  await requireAdminPage();
+  // Piloto RBAC (PR-006): con RBAC_ENABLED OFF delega en requireAdminPage()
+  // ⇒ comportamiento idéntico; con la flag ON exige la clave admin.acceso.
+  await requirePermissionPage(PERMISOS.ADMIN_ACCESO);
   const ventas = await listarVentasParaRecalculo();
 
   const totalEmitidas = ventas.length;

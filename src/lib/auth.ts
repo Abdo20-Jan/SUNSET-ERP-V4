@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { authConfig } from "@/lib/auth.config";
+import { resolvePermisosParaToken } from "@/lib/permisos-resolver";
 
 const credentialsSchema = z.object({
   username: z.string().min(1),
@@ -43,6 +44,11 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         const ok = await bcrypt.compare(parsed.data.password, user.passwordHash);
         if (!ok) return null;
 
+        // RBAC (PR-006): resuelve el set de permisos para grabarlo en el JWT
+        // (conveniencia FE). Flag-gated y a prueba de fallos: con la flag OFF
+        // devuelve undefined y nunca lanza, así que el login no se ve afectado.
+        const rbac = await resolvePermisosParaToken(user.id);
+
         return {
           id: user.id,
           username: user.username,
@@ -50,6 +56,8 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
           role: user.role,
           monedaPreferida: user.monedaPreferida,
           modoRetroactivo: user.modoRetroactivo,
+          permisos: rbac?.permisos,
+          perfilCodigo: rbac?.perfilCodigo,
         };
       },
     }),

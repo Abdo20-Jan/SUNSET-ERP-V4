@@ -28,6 +28,10 @@ export const authConfig = {
         token.role = user.role;
         token.monedaPreferida = user.monedaPreferida;
         token.modoRetroactivo = user.modoRetroactivo;
+        // RBAC (PR-006). Conveniencia FE; opcional y tolerante a tokens viejos.
+        // `authorize()` (Node) ya resolvió estos campos (o undefined con flag OFF).
+        token.permisos = user.permisos;
+        token.perfilCodigo = user.perfilCodigo;
       }
       if (trigger === "update" && session?.user?.monedaPreferida !== undefined) {
         token.monedaPreferida = session.user.monedaPreferida as Session["user"]["monedaPreferida"];
@@ -44,6 +48,9 @@ export const authConfig = {
       session.user.role = token.role as Session["user"]["role"];
       session.user.monedaPreferida = token.monedaPreferida as Session["user"]["monedaPreferida"];
       session.user.modoRetroactivo = token.modoRetroactivo as Session["user"]["modoRetroactivo"];
+      // Opcionales: tokens legacy no los traen ⇒ quedan undefined (sin romper).
+      session.user.permisos = token.permisos as string[] | undefined;
+      session.user.perfilCodigo = token.perfilCodigo as string | undefined;
       return session;
     },
   },

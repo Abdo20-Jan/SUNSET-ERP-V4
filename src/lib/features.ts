@@ -159,3 +159,27 @@ export function isRetencionGananciasEnabled(): boolean {
 export function isTopNavEnabled(): boolean {
   return process.env.TOP_NAV_ENABLED === "true";
 }
+
+/**
+ * Feature flag: RBAC (PR-006) — perfiles + permisos granulares (G-06/CRIT-10).
+ *
+ * **Cuando está OFF (default)**: comportamiento legacy de dos niveles — ADMIN
+ * vs. usuario activo. El motor `@/lib/permisos` delega en los guards existentes
+ * (`requireAdmin`/`requireAdminPage`) y NO toca las tablas nuevas
+ * (Perfil/Permiso/UsuarioPermiso). Cero regresión.
+ *
+ * **Cuando está ON**: el motor resuelve el set efectivo de permisos desde la DB
+ * — (grants del perfil) ∪ (UsuarioPermiso concedido y no vencido) − (revokes) —
+ * con fast-path ADMIN y fallback por rol cuando `perfilId` es null. El login
+ * además graba el set en el JWT como conveniencia para el FE (PR-007).
+ *
+ * **Activación**: setear `RBAC_ENABLED=true`. Default: off.
+ *
+ * **Pre-requisitos** antes de prender la flag:
+ *  1. Migración `add_rbac_foundation` aplicada (tablas Perfil/Permiso/etc.).
+ *  2. Seed de perfiles de sistema ADMIN/USER (`esSistema`) + catálogo de
+ *     permisos ejecutado (`seedRbacFoundation` en `prisma/seed.ts`).
+ */
+export function isRbacEnabled(): boolean {
+  return process.env.RBAC_ENABLED === "true";
+}

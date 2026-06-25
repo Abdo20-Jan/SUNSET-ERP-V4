@@ -19,6 +19,23 @@ enum Role {
   USER
 }
 
+// RBAC (PR-006): dimensión de cada permiso (G-06/CRIT-10 — "tudo depende de
+// permissão"). Mapea las 10 dimensiones canónicas del spec. Es solo el
+// vocabulario base; PR-007 (PermissionGate FE), PR-009 (UI admin),
+// PR-011 (máscara costo/margen) y PR-012 (aprobaciones) construyen encima.
+enum DimensionPermiso {
+  MODULO // acceso a un módulo entero (Contabilidad, Comex, CRM…)
+  PAGINA // acceso a una página/ruta
+  ACCION // ejecutar una acción (anular, cerrar período, mover asiento…)
+  CAMPO // ver/editar un campo sensible (costo, margen…)
+  INFORMACION // ver una clase de información/dato
+  DOCUMENTO // operar sobre un tipo de documento
+  REPORTE // ver/correr un reporte
+  EXPORTACION // exportar datos (Excel/CSV/PDF)
+  ESCOPO // alcance de datos (carteira/depósito/empresa/processo)
+  APROBACION // actuar en flujos de aprobación (PR-012)
+}
+
 enum CuentaTipo {
   SINTETICA
   ANALITICA
@@ -403,6 +420,10 @@ model User {
   // al cargar facturas históricas en lote para no contaminar la fecha
   // del documento físico.
   modoRetroactivo Boolean  @default(false)
+  // RBAC (PR-006): perfil de acceso opcional. NULL = usuario sin perfil
+  // asignado; el motor de autorización (@/lib/permisos) cae al `role` legacy.
+  // Nullable a propósito: una DB poblada no requiere backfill.
+  perfilId        String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -413,6 +434,84 @@ model User {
   retencionesPracticadas    RetencionPracticada[]
   anticiposProveedorCreados AnticipoProveedor[]
   savedViews                SavedView[]
+  perfil                    Perfil?               @relation(fields: [perfilId], references: [id], onDelete: SetNull)
+  usuarioPermisos           UsuarioPermiso[]
+}
+
+// ============================================================
+// RBAC — PERFILES Y PERMISOS (PR-006 Foundation)
+// ============================================================
+
+// Perfil de acceso (plantilla de permisos asignable a usuarios). `esSistema`
+// marca los 2 perfiles que reproducen el acceso de HOY (ADMIN y USER); la UI
+// de administración (PR-009) no debe permitir borrarlos ni renombrar su
+// `codigo`. Los 12 perfiles canónicos del spec se configuran luego (PR-009).
+model Perfil {
+  id          String   @id @default(uuid())
+  codigo      String   @unique // clave estable: "ADMIN" | "USER"
+  nombre      String // etiqueta legible: "Administrador" | "Usuario"
+  descripcion String?
+  esSistema   Boolean  @default(false) // protege ADMIN/USER de borrado/rename
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permisos PerfilPermiso[]
+  usuarios User[]
+}
+
+// Catálogo de claves de permiso. `clave` es la fuente de verdad del motor de
+// autorización (BE) y del PermissionGate (PR-007, FE). Se siembra desde un
+// registro en código (PERMISSION_CATALOG), nunca a mano, para versionar
+// claves y dimensiones.
+model Permiso {
+  id          String           @id @default(uuid())
+  clave       String           @unique // p.ej. "asientos.anular", "app.acceso"
+  dimension   DimensionPermiso
+  descripcion String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  perfiles PerfilPermiso[]
+  usuarios UsuarioPermiso[]
+
+  @@index([dimension])
+}
+
+// Grant de un permiso a un perfil (M:N). Cascade en ambos lados: borrar un
+// Perfil o un Permiso limpia sus grants. La PK compuesta lo hace idempotente.
+model PerfilPermiso {
+  perfilId  String
+  permisoId String
+  createdAt DateTime @default(now())
+
+  perfil  Perfil  @relation(fields: [perfilId], references: [id], onDelete: Cascade)
+  permiso Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@id([perfilId, permisoId])
+  @@index([permisoId])
+}
+
+// Override por usuario sobre lo que su perfil concede. `concedido`: true = GRANT
+// extra; false = REVOKE (quita un permiso que el perfil sí da). `ambito` (Json?)
+// = data scope opcional (carteira/depósito/empresa/processo). `expiraEn` =
+// permiso temporal; null = permanente. El motor ignora filas con expiraEn < now.
+model UsuarioPermiso {
+  id        String    @id @default(uuid())
+  usuarioId String
+  permisoId String
+  concedido Boolean   @default(true)
+  ambito    Json?
+  expiraEn  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  usuario User    @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  permiso Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, permisoId])
+  @@index([permisoId])
+  @@index([expiraEn])
 }
 
 // Vistas guardadas por usuario y ruta de lista (filtros + orden + columnas
