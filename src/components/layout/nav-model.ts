@@ -49,6 +49,7 @@ export const SHELL_MODULES: readonly ShellModule[] = [
   {
     label: "Comercial",
     items: [
+      { label: "Documentos", href: "/ventas/documentos", status: "active", pageCode: "COM-01" },
       { label: "Ventas", href: "/ventas", status: "active", pageCode: "COM-02" },
       { label: "Pedidos", href: "/ventas/pedidos", status: "active", pageCode: "COM-03" },
       {
