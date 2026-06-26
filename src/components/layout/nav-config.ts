@@ -13,6 +13,7 @@ import {
   Invoice01Icon,
   ChartLineData01Icon,
   UserGroupIcon,
+  CheckmarkBadge01Icon,
 } from "@hugeicons/core-free-icons";
 
 import { PERMISOS, type PermisoKey } from "@/lib/permisos-catalog";
@@ -279,6 +280,12 @@ export const CENTERS: readonly NavCenter[] = [
             href: "/sistema/auditoria",
             icon: Invoice01Icon,
             permission: PERMISOS.AUDITORIA_VER,
+          },
+          {
+            label: "Aprobaciones",
+            href: "/sistema/aprobaciones",
+            icon: CheckmarkBadge01Icon,
+            permission: PERMISOS.APROBACIONES_VER,
           },
           { label: "Mi perfil", href: "/perfil", icon: UserGroupIcon },
         ],

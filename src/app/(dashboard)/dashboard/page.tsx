@@ -13,6 +13,7 @@ import {
 import { auth } from "@/lib/auth";
 import { convertirMonto, fmtInt, fmtMoney } from "@/lib/format";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
+import { getPendientesDashboard } from "@/lib/services/aprobaciones-query";
 import {
   getAlertasDashboard,
   getEmbarquesRecientes,
@@ -30,6 +31,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { MonedaToggle, type Moneda } from "../reportes/_components/moneda-toggle";
 
 import { AlertasCard } from "./_components/alertas-card";
+import { AprobacionesPendientesCard } from "./_components/aprobaciones-pendientes-card";
 import { EmbarquesRecientesCard } from "./_components/embarques-recientes-card";
 import { IngresosEgresosChartLazy } from "./_components/ingresos-egresos-chart-lazy";
 import { KpiCard } from "./_components/kpi-card";
@@ -82,6 +84,11 @@ function StatSkeleton() {
 async function AlertasSection() {
   const alertas = await getAlertasDashboard();
   return <AlertasCard alertas={alertas} />;
+}
+
+async function AprobacionesSection() {
+  const { count, top } = await getPendientesDashboard(3);
+  return <AprobacionesPendientesCard count={count} top={top} />;
 }
 
 async function KpisPrincipales({ moneda, tc }: Pres) {
@@ -225,6 +232,10 @@ export default async function DashboardPage({
 
       <Suspense fallback={<CardSkeleton rows={2} />}>
         <AlertasSection />
+      </Suspense>
+
+      <Suspense fallback={<CardSkeleton rows={3} />}>
+        <AprobacionesSection />
       </Suspense>
 
       <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
