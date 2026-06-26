@@ -28,6 +28,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -129,7 +130,11 @@ export function SavedViews({ ruta, vistas, columnVisibility, onApplyColumns }: P
           Vistas
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-72">
-          <DropdownMenuLabel>Vistas guardadas</DropdownMenuLabel>
+          {/* Menu.GroupLabel (DropdownMenuLabel) exige MenuGroupContext: SIEMPRE dentro de un
+              DropdownMenuGroup, o base-ui lanza el error al abrir el menú. */}
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Vistas guardadas</DropdownMenuLabel>
+          </DropdownMenuGroup>
           {vistas.length === 0 ? (
             <p className="px-2 py-1.5 text-sm text-muted-foreground">
               Aún no hay vistas guardadas.
