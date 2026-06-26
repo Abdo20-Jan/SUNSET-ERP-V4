@@ -26,6 +26,9 @@ import {
 import type { ProveedorParaGasto } from "@/lib/actions/gastos";
 import { obtenerPercepcionInfoCliente, type PercepcionInfo } from "@/lib/actions/provincias";
 import { PERMISOS } from "@/lib/permisos-catalog";
+import type { TipoAprobacion } from "@/generated/prisma/enums";
+import { resolverFaixaMargen } from "@/lib/services/margen-aprobacion-faixas";
+import { SolicitarAutorizacionWindow } from "@/components/aprobaciones/solicitar-autorizacion-window";
 import { useHasPermission } from "@/components/auth/permissions-provider";
 import { fmtMoney } from "@/lib/format";
 import { useCmdShortcut } from "@/lib/hooks/use-cmd-shortcut";
@@ -172,7 +175,26 @@ type Props = {
   depositos: DepositoParaVenta[];
   proveedores: ProveedorParaGasto[];
   defaultFecha?: string;
+  /** PR-014: motor de aprobaciones ON → habilita "Solicitar autorización" de margen. */
+  approvalsEnabled?: boolean;
+  /** PR-014: faixa de margen computada en el server (para vendedor con costo enmascarado). */
+  tipoMargenRequerido?: TipoAprobacion | null;
 };
+
+// PR-014: tipo de aprobación de margen requerido para la venta en edición. Con
+// costo visible usa el margen LIVE (responde a la edición); enmascarado, el flag
+// del server (snapshot del último guardado). null = sobre el piso / sin gate.
+function resolverTipoMargenRequerido(args: {
+  approvalsEnabled: boolean;
+  isEdit: boolean;
+  verCosto: boolean;
+  margenNetoPct: Decimal;
+  tipoServidor: TipoAprobacion | null;
+}): TipoAprobacion | null {
+  if (!args.approvalsEnabled || !args.isEdit) return null;
+  if (args.verCosto) return resolverFaixaMargen(args.margenNetoPct)?.tipo ?? null;
+  return args.tipoServidor;
+}
 
 function todayISO(): string {
   const d = new Date();
@@ -195,9 +217,12 @@ export function VentaForm({
   depositos,
   proveedores,
   defaultFecha,
+  approvalsEnabled = false,
+  tipoMargenRequerido = null,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [solicitarMargenOpen, setSolicitarMargenOpen] = useState(false);
   const isEdit = mode === "edit";
   // PR-011: máscara FE de costo/margen (segunda capa; el BE ya strip-eó el
   // `costoPromedio` cuando falta `costos.ver`). `verCosto` es el switch maestro
@@ -482,6 +507,16 @@ export function VentaForm({
       tieneCostos: costoTotal.gt(0),
     };
   }, [items, iibb, otros, flete, productos, percepcionInfo.factor]);
+
+  // PR-014: tipo de aprobación de margen requerido (COM-05). INERTE: con la flag
+  // off `approvalsEnabled` es false → null → no se renderiza nada.
+  const tipoMargen = resolverTipoMargenRequerido({
+    approvalsEnabled,
+    isEdit,
+    verCosto,
+    margenNetoPct: totals.margenNetoPct,
+    tipoServidor: tipoMargenRequerido,
+  });
 
   // Comparación cheques recibidos vs total facturado. El asiento
   // automático debita 1.1.4.20 por la suma real de los cheques; si
@@ -1161,6 +1196,22 @@ export function VentaForm({
             ) : null}
           </div>
           <div className="flex items-center gap-2">
+            {tipoMargen ? (
+              <span className="inline-flex items-center gap-1 rounded-md bg-warning/10 px-2 py-1 text-xs font-medium text-warning">
+                <HugeiconsIcon icon={Alert02Icon} size={14} />
+                Requiere autorización de margen
+              </span>
+            ) : null}
+            {tipoMargen && isEdit ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSolicitarMargenOpen(true)}
+                disabled={isPending}
+              >
+                Solicitar autorización
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="ghost"
@@ -1178,6 +1229,19 @@ export function VentaForm({
           </div>
         </div>
       </div>
+      {isEdit && tipoMargen ? (
+        <SolicitarAutorizacionWindow
+          open={solicitarMargenOpen}
+          onClose={() => setSolicitarMargenOpen(false)}
+          onDone={() => {
+            setSolicitarMargenOpen(false);
+            router.refresh();
+          }}
+          tabla="Venta"
+          registroId={initialData!.id}
+          tiposPermitidos={[tipoMargen]}
+        />
+      ) : null}
     </form>
   );
 }

@@ -6,6 +6,7 @@ import { isApprovalsEnabled, isStockDualEnabled } from "@/lib/features";
 import { fmtDate } from "@/lib/format";
 import { TIPOS_VENTA } from "@/lib/services/aprobaciones-constants";
 import { listarAprobacionesDeDocumento } from "@/lib/services/aprobaciones-query";
+import { resolverFaixaMargenVenta } from "@/lib/services/margen-aprobacion";
 import { AutorizacionesTab } from "@/components/aprobaciones/autorizaciones-tab";
 import { listarProveedoresParaGasto } from "@/lib/actions/gastos";
 import {
@@ -58,11 +59,14 @@ export default async function VentaDetailPage({
   if (!venta) notFound();
 
   if (venta.estado === "BORRADOR") {
-    const [clientes, productos, depositos, proveedores] = await Promise.all([
+    const approvalsOn = isApprovalsEnabled();
+    const [clientes, productos, depositos, proveedores, faixaMargen] = await Promise.all([
       listarClientesParaVenta(),
       listarProductosParaVenta(),
       listarDepositosParaVenta(),
       listarProveedoresParaGasto(),
+      // INERTE: sólo se computa con la flag ON; lee la faixa para el badge del BORRADOR.
+      approvalsOn ? resolverFaixaMargenVenta(id) : Promise.resolve(null),
     ]);
     return (
       <VentaForm
@@ -72,6 +76,8 @@ export default async function VentaDetailPage({
         productos={productos}
         depositos={depositos}
         proveedores={proveedores}
+        approvalsEnabled={approvalsOn}
+        tipoMargenRequerido={faixaMargen?.tipo ?? null}
       />
     );
   }
