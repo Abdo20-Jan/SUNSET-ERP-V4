@@ -5,9 +5,13 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { money, toDecimal } from "@/lib/decimal";
+import {
+  calcularResumenSimulacion,
+  type SimulacionInput,
+} from "@/lib/services/simulacion-importacion";
 import type { ProveedorOption } from "@/components/proveedor-combobox";
 import type { ProductoOption } from "@/components/producto-combobox";
-import { Incoterm, Moneda, TipoCostoEmbarque } from "@/generated/prisma/client";
+import { Incoterm, Moneda, Prisma, TipoCostoEmbarque } from "@/generated/prisma/client";
 
 const moneyRegex = /^\d+(?:\.\d{1,2})?$/;
 const rateRegex = /^\d+(?:\.\d{1,6})?$/;
@@ -69,43 +73,60 @@ export type SimulacionDetalle = {
   updatedAt: string;
 };
 
+// Campos que la lista necesita para reconstruir el cálculo canónico de cada
+// simulación. CRIT-06: la lista usa la MISMA función real que el detalle —
+// `calcularResumenSimulacion` (→ `calcularRateioEmbarque`) — en vez de
+// reimplementar el rateio. `include` (no `select`) trae además todos los
+// escalares (die/tasa/arancel/iva/…/tipoCambio).
+const LISTA_INCLUDE = {
+  proveedor: { select: { id: true, nombre: true, pais: true } },
+  items: { select: { cantidad: true, precioUnitarioFob: true } },
+  costos: { select: { subtotal: true, moneda: true, tipoCambio: true } },
+} satisfies Prisma.SimulacionImportacionInclude;
+
+type SimulacionListaRow = Prisma.SimulacionImportacionGetPayload<{ include: typeof LISTA_INCLUDE }>;
+
+/**
+ * Arma el `SimulacionInput` (todo como string, igual que el detalle vía
+ * `obtenerSimulacionPorId`) para alimentar `calcularResumenSimulacion`. Así la
+ * lista y el detalle comparten exactamente la misma fuente de cálculo.
+ */
+function simulacionInputDeRegistro(s: SimulacionListaRow): SimulacionInput {
+  return {
+    moneda: s.moneda,
+    tipoCambio: s.tipoCambio.toString(),
+    valorFleteOrigen: s.valorFleteOrigen?.toString() ?? null,
+    valorSeguroOrigen: s.valorSeguroOrigen?.toString() ?? null,
+    die: s.die.toString(),
+    tasaEstadistica: s.tasaEstadistica.toString(),
+    arancelSim: s.arancelSim.toString(),
+    iva: s.iva.toString(),
+    ivaAdicional: s.ivaAdicional.toString(),
+    ganancias: s.ganancias.toString(),
+    iibb: s.iibb.toString(),
+    items: s.items.map((it) => ({
+      cantidad: it.cantidad,
+      precioUnitarioFob: it.precioUnitarioFob.toString(),
+    })),
+    costos: s.costos.map((c) => ({
+      subtotal: c.subtotal.toString(),
+      moneda: c.moneda,
+      tipoCambio: c.tipoCambio.toString(),
+    })),
+  };
+}
+
 export async function listarSimulaciones(): Promise<SimulacionRow[]> {
   const rows = await db.simulacionImportacion.findMany({
     orderBy: { createdAt: "desc" },
-    include: {
-      proveedor: { select: { id: true, nombre: true, pais: true } },
-      items: { select: { cantidad: true, precioUnitarioFob: true } },
-      costos: { select: { subtotal: true, tipoCambio: true } },
-    },
+    include: LISTA_INCLUDE,
   });
 
   return rows.map((s) => {
-    const fobTotal = s.items.reduce(
-      (acc, it) => acc.plus(toDecimal(it.precioUnitarioFob).times(it.cantidad)),
-      toDecimal(0),
-    );
-    const tcEmb = toDecimal(s.tipoCambio);
-    const fobArs = fobTotal.times(tcEmb);
-    const fleteOrigenArs = s.valorFleteOrigen
-      ? toDecimal(s.valorFleteOrigen).times(tcEmb)
-      : toDecimal(0);
-    const seguroOrigenArs = s.valorSeguroOrigen
-      ? toDecimal(s.valorSeguroOrigen).times(tcEmb)
-      : toDecimal(0);
-    const costosArs = s.costos.reduce(
-      (acc, c) => acc.plus(toDecimal(c.subtotal).times(toDecimal(c.tipoCambio))),
-      toDecimal(0),
-    );
-    const tributosArs = toDecimal(s.die)
-      .plus(toDecimal(s.tasaEstadistica))
-      .plus(toDecimal(s.arancelSim))
-      .times(tcEmb);
-    const costoTotal = fobArs
-      .plus(fleteOrigenArs)
-      .plus(seguroOrigenArs)
-      .plus(costosArs)
-      .plus(tributosArs);
-
+    // CRIT-06: la lista exhibe el MISMO costo nacionalizado que el detalle
+    // (calcularResumenSimulacion → calcularRateioEmbarque), sin reimplementar
+    // la aritmética del rateio. Read-only: no persiste nada.
+    const resumen = calcularResumenSimulacion(simulacionInputDeRegistro(s));
     return {
       id: s.id,
       codigo: s.codigo,
@@ -115,8 +136,8 @@ export async function listarSimulaciones(): Promise<SimulacionRow[]> {
       incoterm: s.incoterm,
       proveedor: s.proveedor,
       itemsCount: s.items.length,
-      fobTotal: fobTotal.toDecimalPlaces(2).toString(),
-      costoTotalNacionalizado: costoTotal.toDecimalPlaces(2).toString(),
+      fobTotal: resumen.fobTotal.toFixed(2),
+      costoTotalNacionalizado: resumen.costoTotalNacionalizadoArs.toFixed(2),
       createdAt: s.createdAt.toISOString(),
     };
   });
