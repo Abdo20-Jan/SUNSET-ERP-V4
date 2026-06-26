@@ -21,6 +21,7 @@ import { getOrCreateCuenta } from "@/lib/services/cuenta-auto";
 import { VENTA_CODIGOS } from "@/lib/services/cuenta-registry";
 import { calcularPercepcionIIBB } from "@/lib/services/percepcion-iibb";
 import { crearEntregaBorradorPorDefecto } from "@/lib/services/entrega-borrador";
+import { verificarAprobacionMargenVenta } from "@/lib/services/margen-aprobacion";
 import { aplicarReservaSPD, liberarReservaSPD } from "@/lib/services/stock";
 import {
   getDepositoPorDefecto,
@@ -858,6 +859,10 @@ export async function emitirVentaAction(
   ventaId: string,
 ): Promise<{ ok: true; numeroAsiento: number } | { ok: false; error: string }> {
   const usuarioId = await requireSessionUser();
+  // PR-014: gate de margen baja (COM-05). INERTE con APPROVALS_ENABLED off (retorna
+  // ok sin tocar la DB). Corre ANTES de la tx → el efecto queda byte-idéntico.
+  const gateMargen = await verificarAprobacionMargenVenta(ventaId);
+  if (!gateMargen.ok) return gateMargen;
   try {
     const result = await db.$transaction(async (tx) => {
       const v = await tx.venta.findUnique({
