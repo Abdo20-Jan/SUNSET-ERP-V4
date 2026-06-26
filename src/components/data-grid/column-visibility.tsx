@@ -15,6 +15,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -31,7 +32,11 @@ export function ColumnVisibility<T>({ table }: { table: Table<T> }) {
         Columnas
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-52">
-        <DropdownMenuLabel>Mostrar columnas</DropdownMenuLabel>
+        {/* Menu.GroupLabel (DropdownMenuLabel) exige MenuGroupContext: SIEMPRE dentro de un
+            DropdownMenuGroup, o base-ui lanza el error al abrir el menú. */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Mostrar columnas</DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         {columns.map((column) => {
           const meta = column.columnDef.meta;
