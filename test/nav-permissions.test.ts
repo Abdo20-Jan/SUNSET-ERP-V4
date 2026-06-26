@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { DashboardSquare01Icon } from "@hugeicons/core-free-icons";
 
 import { CENTERS, type NavCenter } from "@/components/layout/nav-config";
+import { SHELL_MODULES, type ShellModule } from "@/components/layout/nav-model";
 import { PERMISOS } from "@/lib/permisos-catalog";
 import {
   filterCentersByPermission,
+  filterModulesByPermission,
   hasClientPermission,
 } from "@/components/layout/nav-permissions";
 
@@ -114,5 +116,60 @@ describe("filterCentersByPermission", () => {
     expect(result).toHaveLength(1);
     expect(result[0].sections).toHaveLength(1);
     expect(result[0].sections[0].label).toBe("Visible");
+  });
+});
+
+function findModItem(modules: readonly ShellModule[], href: string) {
+  return modules.flatMap((m) => m.items ?? []).find((i) => i.href === href);
+}
+
+describe("filterModulesByPermission (top-nav, PR-015)", () => {
+  it("con permisos undefined devuelve el top-nav intacto (misma referencia, cero regresión)", () => {
+    const result = filterModulesByPermission(SHELL_MODULES, undefined);
+    expect(result).toBe(SHELL_MODULES);
+    expect(findModItem(result, "/sistema/usuarios")).toBeDefined();
+  });
+
+  it("sin permisos de sistema oculta los ítems gateados y conserva los libres", () => {
+    const result = filterModulesByPermission(SHELL_MODULES, [PERMISOS.APP_ACCESO]);
+    expect(findModItem(result, "/sistema/usuarios")).toBeUndefined(); // ADMIN_ACCESO
+    expect(findModItem(result, "/sistema/aprobaciones")).toBeUndefined(); // APROBACIONES_VER
+    expect(findModItem(result, "/sistema/auditoria")).toBeUndefined(); // AUDITORIA_VER
+    expect(findModItem(result, "/admin/recalcular-percepcion-iibb")).toBeUndefined(); // ADMIN_ACCESO
+    expect(findModItem(result, "/perfil")).toBeDefined(); // sin gate
+  });
+
+  it("con los permisos correctos los ítems gateados permanecen visibles", () => {
+    const result = filterModulesByPermission(SHELL_MODULES, [
+      PERMISOS.ADMIN_ACCESO,
+      PERMISOS.AUDITORIA_VER,
+      PERMISOS.APROBACIONES_VER,
+    ]);
+    expect(findModItem(result, "/sistema/usuarios")).toBeDefined();
+    expect(findModItem(result, "/sistema/aprobaciones")).toBeDefined();
+    expect(findModItem(result, "/sistema/auditoria")).toBeDefined();
+  });
+
+  it("los módulos-folha (sin items, ej. Dashboard/BI) siempre pasan", () => {
+    const result = filterModulesByPermission(SHELL_MODULES, [PERMISOS.APP_ACCESO]);
+    expect(result.find((m) => m.label === "Dashboard")).toBeDefined();
+    expect(result.find((m) => m.label === "BI")).toBeDefined();
+  });
+
+  it("un módulo-pai totalmente gateado se elimina; con permiso se conserva íntegro", () => {
+    const fixture: ShellModule[] = [
+      {
+        label: "Solo Admin",
+        items: [
+          { label: "A", href: "/x/a", status: "active", permission: PERMISOS.ADMIN_ACCESO },
+          { label: "B", href: "/x/b", status: "active", permission: PERMISOS.ADMIN_ACCESO },
+        ],
+      },
+    ];
+    expect(filterModulesByPermission(fixture, [PERMISOS.APP_ACCESO])).toHaveLength(0);
+
+    const allowed = filterModulesByPermission(fixture, [PERMISOS.ADMIN_ACCESO]);
+    expect(allowed).toHaveLength(1);
+    expect(allowed[0].items).toHaveLength(2);
   });
 });

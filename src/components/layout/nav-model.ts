@@ -8,13 +8,21 @@
  * por isso CxC/CxP/Flujo seguem apontando às rotas atuais `/tesoreria/*` e
  * `/reportes/*`).
  *
- * Páginas ainda inexistentes (COM-05, CLI-02, FIN-03, FIN-04, PERM-01,
- * AUD-01, AUTO-01) entram como `status: "future"` → renderizadas desabilitadas
- * ("Pronto"), nunca navegam. Editar SÓ este arquivo para ajustar o menu.
+ * Páginas ainda inexistentes (COM-05, CLI-02, FIN-03, FIN-04, AUTO-01) entram
+ * como `status: "future"` → renderizadas desabilitadas ("Pronto"), nunca
+ * navegam. Editar SÓ este arquivo para ajustar o menu.
  *
- * Coexiste temporariamente com `nav-items.ts` (fonte do sidebar legado). Os
- * dois convergem quando o sidebar for aposentado num PR posterior.
+ * Coexiste com `nav-config.ts` (fonte do shell legado), mantido um release
+ * atrás do kill-switch `TOP_NAV_ENABLED=false`; ambos serão unificados quando o
+ * legado for removido (PR-015b).
+ *
+ * `permission` (PR-007, opcional) gateia o item pelo snapshot do PR-006 via
+ * `useVisibleModules`/`filterModulesByPermission`. Ausente ⇒ sempre visível
+ * (sem gating). Com RBAC OFF o snapshot chega `undefined` e nada é filtrado.
  */
+
+import type { PermisoKey } from "@/lib/permisos-catalog";
+import { PERMISOS } from "@/lib/permisos-catalog";
 
 export type ShellNavStatus = "active" | "future";
 
@@ -24,6 +32,8 @@ export type ShellNavItem = {
   status: ShellNavStatus;
   /** page_code canônico (referência/documentação). */
   pageCode?: string;
+  /** Permissão (PR-007) que gateia o item. Ausente ⇒ sempre visível. */
+  permission?: PermisoKey;
 };
 
 export type ShellModule = {
@@ -158,6 +168,11 @@ export const SHELL_MODULES: readonly ShellModule[] = [
       },
       { label: "Libro diario", href: "/reportes/libro-diario", status: "active" },
       { label: "Libro mayor", href: "/reportes/libro-mayor", status: "active" },
+      {
+        label: "Balance de sumas y saldos",
+        href: "/contabilidad/reportes/balance",
+        status: "active",
+      },
     ],
   },
   {
@@ -182,10 +197,33 @@ export const SHELL_MODULES: readonly ShellModule[] = [
   {
     label: "Sistema",
     items: [
-      { label: "Permisos", status: "future", pageCode: "PERM-01" },
-      { label: "Auditoría", href: "/sistema/auditoria", status: "active", pageCode: "AUD-01" },
+      {
+        label: "Permisos",
+        href: "/sistema/usuarios",
+        status: "active",
+        pageCode: "PERM-01",
+        permission: PERMISOS.ADMIN_ACCESO,
+      },
+      {
+        label: "Auditoría",
+        href: "/sistema/auditoria",
+        status: "active",
+        pageCode: "AUD-01",
+        permission: PERMISOS.AUDITORIA_VER,
+      },
+      {
+        label: "Aprobaciones",
+        href: "/sistema/aprobaciones",
+        status: "active",
+        permission: PERMISOS.APROBACIONES_VER,
+      },
       { label: "Automatizaciones", status: "future", pageCode: "AUTO-01" },
-      { label: "Herramientas admin", href: "/admin/recalcular-percepcion-iibb", status: "active" },
+      {
+        label: "Herramientas admin",
+        href: "/admin/recalcular-percepcion-iibb",
+        status: "active",
+        permission: PERMISOS.ADMIN_ACCESO,
+      },
       { label: "Mi perfil", href: "/perfil", status: "active" },
     ],
   },
@@ -204,10 +242,14 @@ export function isModuleActive(pathname: string, mod: ShellModule): boolean {
 
 export type NavTarget = { moduleLabel: string; label: string; href: string };
 
-/** Alvos navegáveis (status active + href) achatados — fonte do GlobalSearch. */
-export function flattenNavTargets(): NavTarget[] {
+/**
+ * Alvos navegáveis (status active + href) achatados — fonte do GlobalSearch.
+ * Aceita uma lista de módulos já filtrada por permissão (`useVisibleModules`);
+ * default = `SHELL_MODULES` (sem filtro), mantendo a chamada legada.
+ */
+export function flattenNavTargets(modules: readonly ShellModule[] = SHELL_MODULES): NavTarget[] {
   const targets: NavTarget[] = [];
-  for (const mod of SHELL_MODULES) {
+  for (const mod of modules) {
     if (mod.href) {
       targets.push({ moduleLabel: mod.label, label: mod.label, href: mod.href });
     }

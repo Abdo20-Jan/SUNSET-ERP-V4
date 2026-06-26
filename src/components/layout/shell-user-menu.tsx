@@ -17,6 +17,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -55,12 +56,16 @@ export function ShellUserMenu({ user }: ShellUserMenuProps) {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" sideOffset={6} className="min-w-56">
-        <DropdownMenuLabel className="font-normal">
-          <div className="flex flex-col">
-            <span className="truncate text-sm font-medium text-foreground">{user.nombre}</span>
-            <span className="truncate text-xs text-muted-foreground">{user.role}</span>
-          </div>
-        </DropdownMenuLabel>
+        {/* Menu.GroupLabel (DropdownMenuLabel) exige MenuGroupContext: SIEMPRE dentro de un
+            DropdownMenuGroup, o base-ui lanza el error al abrir el menú. */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="font-normal">
+            <div className="flex flex-col">
+              <span className="truncate text-sm font-medium text-foreground">{user.nombre}</span>
+              <span className="truncate text-xs text-muted-foreground">{user.role}</span>
+            </div>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem render={<Link href="/perfil" />}>
           <HugeiconsIcon icon={UserCircleIcon} strokeWidth={2} />

@@ -24,6 +24,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { useVisibleModules } from "@/components/auth/permissions-provider";
 import { flattenNavTargets, type NavTarget } from "@/components/layout/nav-model";
 
 function groupByModule(targets: NavTarget[]): Map<string, NavTarget[]> {
@@ -39,7 +40,9 @@ function groupByModule(targets: NavTarget[]): Map<string, NavTarget[]> {
 export function GlobalSearch() {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
-  const grouped = React.useMemo(() => groupByModule(flattenNavTargets()), []);
+  // PR-015: respeita o filtro de permissão do top-nav. Com RBAC OFF cobre todos os alvos.
+  const modules = useVisibleModules();
+  const grouped = React.useMemo(() => groupByModule(flattenNavTargets(modules)), [modules]);
 
   React.useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

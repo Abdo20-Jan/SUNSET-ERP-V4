@@ -6,6 +6,7 @@
 // sempre revalida (regra G-06 / PERM-01 §6).
 
 import type { NavCenter, NavItem, NavSection } from "@/components/layout/nav-config";
+import type { ShellModule, ShellNavItem } from "@/components/layout/nav-model";
 
 /**
  * Predicado base do FE. `permisos === undefined` (RBAC OFF / token legacy) ⇒ libera tudo.
@@ -56,4 +57,40 @@ export function filterCentersByPermission(
   return centers
     .map((center) => filterCenter(center, permisos))
     .filter((center): center is NavCenter => center !== null);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Top-nav (SHELL_MODULES) — mesma máscara aplicada ao shell novo (PR-015).
+// ───────────────────────────────────────────────────────────────────────────
+
+function isModuleItemAllowed(item: ShellNavItem, permisos: readonly string[] | undefined): boolean {
+  return item.permission === undefined || hasClientPermission(permisos, item.permission);
+}
+
+/**
+ * Filtra um módulo do top-nav. Módulo-folha (sem `items`, ex.: Dashboard/BI) passa intacto.
+ * Módulo-pai tem os itens filtrados por permissão; se ficar sem itens, retorna `null`.
+ */
+function filterModule(
+  mod: ShellModule,
+  permisos: readonly string[] | undefined,
+): ShellModule | null {
+  if (!mod.items) return mod;
+  const items = mod.items.filter((item) => isModuleItemAllowed(item, permisos));
+  return items.length > 0 ? { ...mod, items } : null;
+}
+
+/**
+ * Aplica as permissões ao top-nav (SHELL_MODULES). Com `permisos === undefined` devolve a mesma
+ * árvore (zero regressão e referência estável). Caso contrário remove itens sem permissão e
+ * módulos-pais que ficaram vazios.
+ */
+export function filterModulesByPermission(
+  modules: readonly ShellModule[],
+  permisos: readonly string[] | undefined,
+): readonly ShellModule[] {
+  if (permisos === undefined) return modules;
+  return modules
+    .map((mod) => filterModule(mod, permisos))
+    .filter((mod): mod is ShellModule => mod !== null);
 }

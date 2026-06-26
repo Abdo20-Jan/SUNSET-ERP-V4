@@ -17,7 +17,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // PR-007: expõe o snapshot de permissões do PR-006 (`session.user.permisos`) ao FE via um
   // provider client fino. Envolve ambos os shells; com RBAC OFF chega `undefined` e nada muda.
   if (isTopNavEnabled()) {
-    // PR-002: novo global shell (top-nav + abas internas + busca) atrás de feature-flag.
+    // PR-015 cutover: AppShell é o chrome DEFAULT (top-nav + abas internas + busca + favoritos).
     return (
       <PermissionsProvider permisos={session.user.permisos}>
         <AppShell user={session.user} modoRetroactivo={modoRetroactivo}>
@@ -27,7 +27,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
     );
   }
 
-  // Flag OFF (default) → mantém o shell atual (ShellProvider + AppTopnav) intacto.
+  // Kill-switch: `TOP_NAV_ENABLED=false` restaura o shell legado (ShellProvider + AppTopnav) intacto,
+  // por um release (rollback reversível). Remoção física do legado fica para um PR posterior (PR-015b).
   return (
     <PermissionsProvider permisos={session.user.permisos}>
       <ShellProvider>
