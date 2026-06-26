@@ -4,8 +4,10 @@ import { createContext, useContext, useMemo } from "react";
 
 import type { PermisoKey } from "@/lib/permisos-catalog";
 import { CENTERS, type NavCenter } from "@/components/layout/nav-config";
+import { SHELL_MODULES, type ShellModule } from "@/components/layout/nav-model";
 import {
   filterCentersByPermission,
+  filterModulesByPermission,
   hasClientPermission,
 } from "@/components/layout/nav-permissions";
 
@@ -35,6 +37,15 @@ export function useHasPermission(key: PermisoKey): boolean {
 export function useVisibleCenters(): readonly NavCenter[] {
   const { permisos } = usePermissions();
   return useMemo(() => filterCentersByPermission(CENTERS, permisos), [permisos]);
+}
+
+/**
+ * SHELL_MODULES (top-nav, PR-015) já filtrado pelas permissões atuais. Com RBAC OFF devolve o
+ * nav completo (referência estável). Consumido por `ModuleMegaMenu`, `GlobalSearch` e o drawer mobile.
+ */
+export function useVisibleModules(): readonly ShellModule[] {
+  const { permisos } = usePermissions();
+  return useMemo(() => filterModulesByPermission(SHELL_MODULES, permisos), [permisos]);
 }
 
 /**

@@ -137,27 +137,25 @@ export function isRetencionGananciasEnabled(): boolean {
 }
 
 /**
- * Feature flag: top-nav global (PR-002 — reconstrucción UI/UX). Reemplaza la
- * navegación lateral (sidebar) por un menú superior textual jerárquico +
- * pestañas internas + búsqueda global, exigido por la baseline (G-02).
+ * Feature flag: top-nav global (PR-002 → cutover PR-015 — reconstrucción UI/UX).
+ * El shell global (menú superior textual jerárquico + pestañas internas +
+ * búsqueda global, exigido por G-02) es el chrome **por defecto** desde el
+ * cutover.
  *
- * **Cuando está OFF (default)**: `(dashboard)/layout.tsx` monta el shell actual
- * idéntico — `SidebarProvider` + `AppSidebar` + `AppHeader`. Cero cambio para
- * el usuario; cero regresión.
+ * **Default (sin la variable, o cualquier valor ≠ `"false"`)**:
+ * `(dashboard)/layout.tsx` monta `<AppShell>` (top-nav + abas internas +
+ * GlobalSearch + breadcrumb + favoritos), SIN sidebar. Ninguna ruta cambia: el
+ * menú sólo re-rotula/agrupa rutas existentes (ver `nav-model.ts`).
  *
- * **Cuando está ON**: el layout monta `<AppShell>` (top-nav + abas internas +
- * GlobalSearch de navegación + breadcrumb), SIN sidebar. Ninguna ruta cambia:
- * el menú sólo re-rotula/agrupa rutas existentes (ver `nav-model.ts`).
- *
- * **Activación**: setear `TOP_NAV_ENABLED=true` en las variables de ambiente.
- * Default: off. Rollback = apagar la flag (vuelve al sidebar). Pensado para un
- * rollout paralelo: prender en staging, validar por módulo, recién después
- * retirar el sidebar legado en un PR posterior.
+ * **Kill-switch / rollback**: setear `TOP_NAV_ENABLED=false` (literal) restaura
+ * el shell legado (`AppTopnav`) intacto. El cluster legado se mantiene en el
+ * árbol un release para permitir el rollback por flag; su remoción física queda
+ * para un PR posterior (PR-015b), recién tras un release de soak verificado.
  *
  * **Sin pre-requisitos** de datos/migración: es puramente de presentación.
  */
 export function isTopNavEnabled(): boolean {
-  return process.env.TOP_NAV_ENABLED === "true";
+  return process.env.TOP_NAV_ENABLED !== "false";
 }
 
 /**

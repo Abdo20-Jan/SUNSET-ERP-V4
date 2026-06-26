@@ -23,25 +23,23 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  isHrefActive,
-  isModuleActive,
-  SHELL_MODULES,
-  type ShellModule,
-} from "@/components/layout/nav-model";
+import { useVisibleModules } from "@/components/auth/permissions-provider";
+import { isHrefActive, isModuleActive, type ShellModule } from "@/components/layout/nav-model";
 
 const topItemBase =
   "flex h-7 shrink-0 items-center gap-1 rounded-md px-2.5 text-[13px] font-medium whitespace-nowrap transition-colors";
 
 export function ModuleMegaMenu() {
   const pathname = usePathname();
+  // PR-015: nav filtrado por permissão. Com RBAC OFF devolve o nav completo (sem mudança).
+  const modules = useVisibleModules();
 
   return (
     <nav
       aria-label="Navegación principal"
       className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-thin"
     >
-      {SHELL_MODULES.map((mod) =>
+      {modules.map((mod) =>
         mod.items ? (
           <ModuleDropdown key={mod.label} mod={mod} pathname={pathname} />
         ) : (
