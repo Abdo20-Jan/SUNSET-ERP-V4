@@ -179,6 +179,14 @@ type Props = {
   approvalsEnabled?: boolean;
   /** PR-014: faixa de margen computada en el server (para vendedor con costo enmascarado). */
   tipoMargenRequerido?: TipoAprobacion | null;
+  /** PR-018: hospedado en una FloatingWorkWindow → footer in-flow (sin barra `fixed`). */
+  embedded?: boolean;
+  /** PR-018: el host (ventana) cancela/descarta en vez de navegar con `router.back()`. */
+  onCancel?: () => void;
+  /** PR-018: el host cierra+refresca tras guardar/emitir (en vez de `router.push`). */
+  onSuccess?: (result: { id: string; numero: string; emitted: boolean }) => void;
+  /** PR-018: burbujea `formState.isDirty` al host (gate de descarte de la ventana). */
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 // PR-014: tipo de aprobación de margen requerido para la venta en edición. Con
@@ -219,6 +227,10 @@ export function VentaForm({
   defaultFecha,
   approvalsEnabled = false,
   tipoMargenRequerido = null,
+  embedded = false,
+  onCancel,
+  onSuccess,
+  onDirtyChange,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -362,7 +374,7 @@ export function VentaForm({
     handleSubmit,
     setValue,
     getValues,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -375,6 +387,12 @@ export function VentaForm({
     append: appendCheque,
     remove: removeCheque,
   } = useFieldArray({ control, name: "cheques" });
+
+  // PR-018: burbujea el estado dirty al host (FloatingWorkWindow) para el gate de
+  // descarte. No-op cuando se renderiza como página (sin `onDirtyChange`).
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const moneda = useWatch({ control, name: "moneda" });
   const fecha = useWatch({ control, name: "fecha" });
@@ -616,8 +634,12 @@ export function VentaForm({
       });
       if (result.ok) {
         toast.success(`Venta ${result.numero} guardada (BORRADOR).`);
-        router.push(`/ventas/${result.id}`);
-        router.refresh();
+        if (onSuccess) {
+          onSuccess({ id: result.id, numero: result.numero, emitted: false });
+        } else {
+          router.push(`/ventas/${result.id}`);
+          router.refresh();
+        }
       } else {
         toast.error(result.error);
       }
@@ -670,16 +692,30 @@ export function VentaForm({
       const emit = await emitirVentaAction(saved.id);
       if (emit.ok) {
         toast.success(`Venta ${saved.numero} emitida (asiento Nº ${emit.numeroAsiento}).`);
-        router.push(`/ventas/${saved.id}`);
-        router.refresh();
+        if (onSuccess) {
+          onSuccess({ id: saved.id, numero: saved.numero, emitted: true });
+        } else {
+          router.push(`/ventas/${saved.id}`);
+          router.refresh();
+        }
       } else {
         toast.error(emit.error);
       }
     });
   });
 
+  // PR-018: en modo `embedded` el footer va in-flow (sticky al fondo del scroll de
+  // la ventana) en vez de una barra `fixed` anclada al viewport. `-mx-4 -mb-4`
+  // sangra el padding `p-4` del cuerpo de la FloatingWorkWindow.
+  const footerClass = embedded
+    ? "sticky bottom-0 z-10 -mx-4 -mb-4 border-t bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80"
+    : "fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80";
+
   return (
-    <form onSubmit={submitGuardar} className="flex flex-col gap-6 pb-32">
+    <form
+      onSubmit={submitGuardar}
+      className={embedded ? "flex flex-col gap-6" : "flex flex-col gap-6 pb-32"}
+    >
       <div className="flex flex-col gap-1">
         <h1 className="text-[15px] font-semibold tracking-tight">
           {isEdit ? `Editar venta ${initialData!.numero}` : "Nueva venta"}
@@ -1148,7 +1184,7 @@ export function VentaForm({
         </div>
       )}
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <div className={footerClass}>
         <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center justify-between gap-4 px-4 py-3 lg:px-8">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
             <Total label="Subtotal" value={totals.subtotal.toString()} />
@@ -1215,7 +1251,7 @@ export function VentaForm({
             <Button
               type="button"
               variant="ghost"
-              onClick={() => router.back()}
+              onClick={() => (onCancel ? onCancel() : router.back())}
               disabled={isPending}
             >
               Cancelar
