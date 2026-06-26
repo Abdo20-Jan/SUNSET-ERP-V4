@@ -75,6 +75,7 @@ export const CENTERS: readonly NavCenter[] = [
       {
         label: "Ventas",
         items: [
+          { label: "Documentos", href: "/ventas/documentos", icon: Invoice01Icon },
           { label: "Ventas", href: "/ventas", icon: ShoppingBag03Icon },
           { label: "Pedidos", href: "/ventas/pedidos", icon: ShoppingBag03Icon },
           { label: "Entregas", href: "/entregas", icon: TruckDeliveryIcon },
