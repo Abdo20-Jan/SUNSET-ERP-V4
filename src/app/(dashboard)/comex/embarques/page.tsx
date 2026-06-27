@@ -1,143 +1,52 @@
-import Link from "next/link";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon } from "@hugeicons/core-free-icons";
-
-import { auth } from "@/lib/auth";
-import { listarEmbarques, type EmbarqueListFilters } from "@/lib/actions/embarques";
-import { db } from "@/lib/db";
+import { listarEmbarques } from "@/lib/actions/embarques";
+import { hasPermission, PERMISOS } from "@/lib/permisos";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
-import { EmbarqueEstado, Moneda } from "@/generated/prisma/client";
-import { buttonVariants } from "@/components/ui/button";
+import { parseVista, VISTAS } from "@/lib/services/comex-worklist-derivaciones";
+import type { Moneda } from "@/generated/prisma/client";
 import { Card } from "@/components/ui/card";
-import { Pagination } from "@/components/ui/pagination";
-import { parsePaginationParams } from "@/components/ui/pagination-params";
 
-import { MonedaToggle } from "../../reportes/_components/moneda-toggle";
+import { EmbarquesViewsBar } from "./_components/embarques-views-bar";
+import { EmbarquesWorklist } from "./_components/embarques-worklist";
 
-import { EmbarquesFilters } from "./embarques-filters";
-import { EmbarquesTable } from "./embarques-table";
-import { EmbarquesTabs, type EmbarqueTabKey } from "./embarques-tabs";
+type SearchParams = Promise<{ vista?: string; moneda?: string }>;
 
-type SearchParams = Promise<{
-  tab?: string;
-  moneda?: string;
-  pres?: string;
-  page?: string;
-  perPage?: string;
-}>;
-
-const TAB_ESTADOS: Record<EmbarqueTabKey, EmbarqueEstado[]> = {
-  transito: [EmbarqueEstado.EN_TRANSITO],
-  porto: [EmbarqueEstado.EN_PUERTO, EmbarqueEstado.EN_ZONA_PRIMARIA, EmbarqueEstado.EN_ADUANA],
-  finalizados: [EmbarqueEstado.DESPACHADO, EmbarqueEstado.EN_DEPOSITO, EmbarqueEstado.CERRADO],
-  borrador: [EmbarqueEstado.BORRADOR],
-};
-
-const TAB_LABELS: Record<EmbarqueTabKey, string> = {
-  transito: "en tránsito",
-  porto: "en puerto",
-  finalizados: "finalizados",
-  borrador: "borradores",
-};
-
-function parseTab(v: string | undefined): EmbarqueTabKey {
-  if (v === "transito" || v === "porto" || v === "finalizados" || v === "borrador") {
-    return v;
-  }
-  return "transito";
-}
-
-function parseMoneda(v: string | undefined): Moneda | null {
-  if (v === "ARS") return Moneda.ARS;
-  if (v === "USD") return Moneda.USD;
-  return null;
+function parseMoneda(v: string | undefined): Moneda | undefined {
+  if (v === "ARS") return "ARS";
+  if (v === "USD") return "USD";
+  return undefined;
 }
 
 export const dynamic = "force-dynamic";
 
 export default async function EmbarquesPage({ searchParams }: { searchParams: SearchParams }) {
-  const [params, session, cotizacion] = await Promise.all([
-    searchParams,
-    auth(),
+  const params = await searchParams;
+  const vista = parseVista(params.vista);
+  const moneda = parseMoneda(params.moneda);
+
+  // Gate de costo server-side: `verCosto` decide si `costoTotal` viaja al cliente.
+  // `tc` (cierre) sólo para el resumen de selección (suma FOB ARS/USD).
+  const [verCosto, cotizacion] = await Promise.all([
+    hasPermission(PERMISOS.VER_COSTO_LANDED),
     getCotizacionParaFecha(new Date()),
   ]);
-
-  const tab = parseTab(params.tab);
-  const moneda = parseMoneda(params.moneda);
-  const { page, perPage } = parsePaginationParams(params);
-
-  // Moneda de PRESENTACIÓN (default USD), independiente del filtro `?moneda`
-  // (que filtra embarques por su moneda nativa). Por eso el toggle usa `?pres`.
-  const pres: Moneda =
-    params.pres === "ARS"
-      ? "ARS"
-      : params.pres === "USD"
-        ? "USD"
-        : session?.user.monedaPreferida === "ARS"
-          ? "ARS"
-          : "USD";
   const tc = cotizacion ? cotizacion.valor.toString() : null;
-  const tcInfo = cotizacion
-    ? {
-        valor: cotizacion.valor.toString(),
-        fecha: cotizacion.fecha.toISOString().slice(0, 10),
-        fuente: cotizacion.fuente,
-      }
-    : null;
 
-  const filtros: EmbarqueListFilters & { page: number; perPage: number } = {
-    estado: TAB_ESTADOS[tab],
-    page,
-    perPage,
-  };
-  if (moneda) filtros.moneda = moneda;
-
-  const [{ rows, total }, grouped] = await Promise.all([
-    listarEmbarques(filtros),
-    db.embarque.groupBy({
-      by: ["estado"],
-      _count: { _all: true },
-    }),
-  ]);
-
-  const countByEstado = new Map<EmbarqueEstado, number>(
-    grouped.map((g) => [g.estado, g._count._all]),
-  );
-  const counts = {
-    transito: TAB_ESTADOS.transito.reduce((a, e) => a + (countByEstado.get(e) ?? 0), 0),
-    porto: TAB_ESTADOS.porto.reduce((a, e) => a + (countByEstado.get(e) ?? 0), 0),
-    finalizados: TAB_ESTADOS.finalizados.reduce((a, e) => a + (countByEstado.get(e) ?? 0), 0),
-    borrador: TAB_ESTADOS.borrador.reduce((a, e) => a + (countByEstado.get(e) ?? 0), 0),
-  };
-
-  const filtroTags: string[] = [TAB_LABELS[tab]];
-  if (moneda) filtroTags.push(`moneda ${moneda}`);
+  const { rows, total } = await listarEmbarques({ vista, moneda, verCosto });
+  const vistaLabel = VISTAS.find((v) => v.id === vista)?.label ?? "Todos";
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-[15px] font-semibold tracking-tight">Embarques</h1>
-          <p className="text-sm text-muted-foreground">
-            {total} embarque{total === 1 ? "" : "s"} · {filtroTags.join(" · ")}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <MonedaToggle current={pres} tcInfo={tcInfo} param="pres" />
-          <Link href="/comex/embarques/nuevo" className={buttonVariants({ variant: "default" })}>
-            <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-            Nuevo embarque
-          </Link>
-        </div>
+      <div className="flex flex-col gap-1">
+        <h1 className="text-[15px] font-semibold tracking-tight">Embarques</h1>
+        <p className="text-sm text-muted-foreground">
+          {total} proceso{total === 1 ? "" : "s"} · {vistaLabel}
+          {moneda ? ` · moneda ${moneda}` : ""}
+        </p>
       </div>
 
-      <EmbarquesTabs current={tab} counts={counts} />
-
-      <EmbarquesFilters selectedMoneda={moneda ?? "all"} />
-
       <Card className="py-0">
-        <EmbarquesTable data={rows} pres={pres} tc={tc} />
-        <Pagination page={page} perPage={perPage} total={total} className="border-t" />
+        <EmbarquesViewsBar />
+        <EmbarquesWorklist rows={rows} tc={tc} verCosto={verCosto} />
       </Card>
     </div>
   );

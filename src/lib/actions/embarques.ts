@@ -35,85 +35,189 @@ import {
   Prisma,
   TipoCostoEmbarque,
 } from "@/generated/prisma/client";
+import type { ContenedorEstado } from "@/generated/prisma/client";
+import {
+  type CostoLite,
+  deriveBloqueo,
+  deriveEtaTono,
+  deriveStatusCosto,
+  deriveStatusPago,
+  type EtaTono,
+  fobEnUsd,
+  resolverVistaFiltro,
+  type StatusCostoUi,
+  type StatusPagoUi,
+  type VistaId,
+} from "@/lib/services/comex-worklist-derivaciones";
 import { embarqueInputSchema, type GuardarEmbarqueInput } from "./embarque-schema";
 
-export type EmbarqueRow = {
+export type EmbarqueWorklistRow = {
   id: string;
   codigo: string;
   estado: EmbarqueEstado;
   moneda: Moneda;
   tipoCambio: string;
+  /** FOB en moneda NATIVA del embarque. */
   fobTotal: string;
-  cifTotal: string;
-  costoTotal: string;
+  /** FOB normalizado a USD (valor comercial; ARS-nativo ÷ TC del embarque). */
+  fobUsd: string;
+  /** Landed cost (ARS). `null` cuando el caller no tiene `VER_COSTO_LANDED` (gate). */
+  costoTotal: string | null;
   incoterm: Incoterm | null;
   lugarIncoterm: string | null;
-  proveedor: {
-    id: string;
-    nombre: string;
-    pais: string;
-  };
-  itemsCount: number;
-  createdAt: string;
+  proveedor: { id: string; nombre: string; pais: string };
+  /** Plano (= proveedor.nombre) para quick-search / chips client del grid. */
+  proveedorNombre: string;
+  cantidadNeumaticos: number;
+  fechaLlegada: string | null;
+  etaTono: EtaTono;
+  updatedAt: string;
+  nombreBuque: string | null;
+  contenedores: { numero: string; estado: ContenedorEstado }[];
+  facturasLocales: {
+    id: number;
+    numero: string | null;
+    estado: EmbarqueCostoEstadoUi;
+    fechaVencimiento: string | null;
+    momento: "ZONA_PRIMARIA" | "DESPACHO";
+  }[];
+  statusCosto: StatusCostoUi;
+  statusPago: StatusPagoUi | null;
+  bloqueo: string | null;
 };
 
-export type EmbarqueListFilters = {
-  estado?: EmbarqueEstado | EmbarqueEstado[];
+export type EmbarqueWorklistFiltros = {
+  vista?: VistaId;
   moneda?: Moneda;
   proveedorId?: string;
+  perPage?: number;
+  /** Resuelto por el caller (page/export) con `hasPermission(VER_COSTO_LANDED)`. */
+  verCosto: boolean;
 };
 
-export type EmbarquesListPage = {
-  rows: EmbarqueRow[];
+export type EmbarquesWorklistPage = {
+  rows: EmbarqueWorklistRow[];
   total: number;
 };
 
+const WORKLIST_MAX = 2000;
+
+type EmbarqueWorklistRecord = Prisma.EmbarqueGetPayload<{
+  include: {
+    proveedor: { select: { id: true; nombre: true; pais: true } };
+    contenedores: { select: { numeroContenedor: true; estado: true } };
+    costos: {
+      select: {
+        id: true;
+        facturaNumero: true;
+        estado: true;
+        fechaVencimiento: true;
+        momento: true;
+      };
+    };
+  };
+}>;
+
+function mapEmbarqueWorklistRow(
+  e: EmbarqueWorklistRecord,
+  ctx: { now: Date; verCosto: boolean; cantidad: number },
+): EmbarqueWorklistRow {
+  const costosLite: CostoLite[] = e.costos.map((c) => ({
+    estado: c.estado,
+    fechaVencimiento: c.fechaVencimiento,
+  }));
+  return {
+    id: e.id,
+    codigo: e.codigo,
+    estado: e.estado,
+    moneda: e.moneda,
+    tipoCambio: e.tipoCambio.toString(),
+    fobTotal: e.fobTotal.toString(),
+    fobUsd: fobEnUsd(e.fobTotal.toString(), e.moneda, e.tipoCambio.toString()),
+    costoTotal: ctx.verCosto ? e.costoTotal.toString() : null,
+    incoterm: e.incoterm,
+    lugarIncoterm: e.lugarIncoterm,
+    proveedor: e.proveedor,
+    proveedorNombre: e.proveedor.nombre,
+    cantidadNeumaticos: ctx.cantidad,
+    fechaLlegada: e.fechaLlegada ? e.fechaLlegada.toISOString() : null,
+    etaTono: deriveEtaTono(e.fechaLlegada, e.estado, ctx.now),
+    updatedAt: e.updatedAt.toISOString(),
+    nombreBuque: e.nombreBuque,
+    contenedores: e.contenedores.map((c) => ({ numero: c.numeroContenedor, estado: c.estado })),
+    facturasLocales: e.costos.map((c) => ({
+      id: c.id,
+      numero: c.facturaNumero,
+      estado: c.estado,
+      fechaVencimiento: c.fechaVencimiento ? c.fechaVencimiento.toISOString() : null,
+      momento: c.momento,
+    })),
+    statusCosto: deriveStatusCosto(costosLite, e.estado),
+    statusPago: deriveStatusPago(costosLite, ctx.now),
+    bloqueo: deriveBloqueo(costosLite, ctx.now),
+  };
+}
+
+/**
+ * Lectura de la worklist Comex de procesos (PR-020 / CX-02). EXTENSIÓN ADITIVA y
+ * de SÓLO LECTURA: includes/selects estrechos de campos EXISTENTES + derivaciones
+ * de display. NO toca write/cálculo ni el motor de rateio/despacho/costo (G-09).
+ * `costoTotal` se gatea por `verCosto` para que el costo NUNCA llegue al cliente
+ * sin permiso.
+ *
+ * read-only worklist projection — never consumed by rateio/despacho/asiento.
+ */
 export async function listarEmbarques(
-  filtros?: EmbarqueListFilters & { page?: number; perPage?: number },
-): Promise<EmbarquesListPage> {
+  filtros: EmbarqueWorklistFiltros,
+): Promise<EmbarquesWorklistPage> {
+  const now = new Date();
   const where: Prisma.EmbarqueWhereInput = {};
-  if (filtros?.estado) {
-    where.estado = Array.isArray(filtros.estado) ? { in: filtros.estado } : filtros.estado;
-  }
-  if (filtros?.moneda) where.moneda = filtros.moneda;
-  if (filtros?.proveedorId) where.proveedorId = filtros.proveedorId;
+  const vistaFiltro = resolverVistaFiltro(filtros.vista ?? "todos", now);
+  if (vistaFiltro.estado) where.estado = { in: vistaFiltro.estado };
+  if (vistaFiltro.etaHasta) where.fechaLlegada = { not: null, lte: vistaFiltro.etaHasta };
+  if (filtros.moneda) where.moneda = filtros.moneda;
+  if (filtros.proveedorId) where.proveedorId = filtros.proveedorId;
 
-  const page = Math.max(1, Math.floor(filtros?.page ?? 1));
-  const perPage = Math.max(1, Math.min(500, Math.floor(filtros?.perPage ?? 50)));
-  const skip = (page - 1) * perPage;
+  const take = Math.max(1, Math.min(WORKLIST_MAX, Math.floor(filtros.perPage ?? WORKLIST_MAX)));
 
-  const [embarques, total] = await Promise.all([
+  const [embarques, total, sums] = await Promise.all([
     db.embarque.findMany({
       where,
       orderBy: { createdAt: "desc" },
+      take,
       include: {
         proveedor: { select: { id: true, nombre: true, pais: true } },
-        _count: { select: { items: true } },
+        contenedores: { select: { numeroContenedor: true, estado: true } },
+        // Narrow select: NUNCA campos monetarios (iva/iibb/otros/lineas) — el gate
+        // de costo se rompería si viajaran al cliente. Sólo señales operativas.
+        costos: {
+          select: {
+            id: true,
+            facturaNumero: true,
+            estado: true,
+            fechaVencimiento: true,
+            momento: true,
+          },
+        },
       },
-      take: perPage,
-      skip,
     }),
     db.embarque.count({ where }),
+    db.itemEmbarque.groupBy({
+      by: ["embarqueId"],
+      where: { embarque: where },
+      _sum: { cantidad: true },
+    }),
   ]);
 
-  return {
-    rows: embarques.map((e) => ({
-      id: e.id,
-      codigo: e.codigo,
-      estado: e.estado,
-      moneda: e.moneda,
-      tipoCambio: e.tipoCambio.toString(),
-      fobTotal: e.fobTotal.toString(),
-      cifTotal: e.cifTotal.toString(),
-      costoTotal: e.costoTotal.toString(),
-      incoterm: e.incoterm,
-      lugarIncoterm: e.lugarIncoterm,
-      proveedor: e.proveedor,
-      itemsCount: e._count.items,
-      createdAt: e.createdAt.toISOString(),
-    })),
-    total,
-  };
+  const cantidadPorEmbarque = new Map(sums.map((s) => [s.embarqueId, s._sum.cantidad ?? 0]));
+  const rows = embarques.map((e) =>
+    mapEmbarqueWorklistRow(e, {
+      now,
+      verCosto: filtros.verCosto,
+      cantidad: cantidadPorEmbarque.get(e.id) ?? 0,
+    }),
+  );
+  return { rows, total };
 }
 
 export async function listarProveedoresParaEmbarque(): Promise<ProveedorOption[]> {
