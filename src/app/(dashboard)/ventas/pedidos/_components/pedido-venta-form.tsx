@@ -63,8 +63,8 @@ const formSchema = z
 
 type FormValues = z.input<typeof formSchema>;
 
-type ClienteOpt = { id: string; nombre: string; diasPagoDefault: number | null };
-type ProductoOpt = {
+export type ClienteOpt = { id: string; nombre: string; diasPagoDefault: number | null };
+export type ProductoOpt = {
   id: string;
   codigo: string;
   nombre: string;
@@ -77,6 +77,14 @@ type Props = {
   initialData?: PedidoVentaDetalle;
   clientes: ClienteOpt[];
   productos: ProductoOpt[];
+  /** PR-019: hospedado en FloatingWorkWindow → footer in-flow (sin `fixed`/`pb-32`). */
+  embedded?: boolean;
+  /** PR-019: el host cancela (cierra la ventana) en vez de `router.back()`. */
+  onCancel?: () => void;
+  /** PR-019: el host cierra + refresca en vez de `router.push` al detalle. */
+  onSuccess?: (result: { id: number; numero: string }) => void;
+  /** PR-019: burbujea `formState.isDirty` para el gate de descarte de la ventana. */
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 function todayISO(): string {
@@ -85,7 +93,17 @@ function todayISO(): string {
   return d.toISOString().slice(0, 10);
 }
 
-export function PedidoVentaForm({ mode, numeroSugerido, initialData, clientes, productos }: Props) {
+export function PedidoVentaForm({
+  mode,
+  numeroSugerido,
+  initialData,
+  clientes,
+  productos,
+  embedded = false,
+  onCancel,
+  onSuccess,
+  onDirtyChange,
+}: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const isEdit = mode === "edit";
@@ -135,7 +153,7 @@ export function PedidoVentaForm({ mode, numeroSugerido, initialData, clientes, p
     handleSubmit,
     setValue,
     getValues,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -152,6 +170,11 @@ export function PedidoVentaForm({ mode, numeroSugerido, initialData, clientes, p
       setValue("tipoCambio", "1", { shouldValidate: true });
     }
   }, [moneda, setValue]);
+
+  // PR-019: burbujea el estado dirty al host (FloatingWorkWindow) para el gate de descarte.
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const onProductoChange = (index: number, id: string) => {
     setValue(`items.${index}.productoId`, id, { shouldValidate: true });
@@ -196,8 +219,12 @@ export function PedidoVentaForm({ mode, numeroSugerido, initialData, clientes, p
       });
       if (result.ok) {
         toast.success(`Pedido ${result.numero} guardado.`);
-        router.push(`/ventas/pedidos/${result.id}`);
-        router.refresh();
+        if (onSuccess) {
+          onSuccess({ id: result.id, numero: result.numero });
+        } else {
+          router.push(`/ventas/pedidos/${result.id}`);
+          router.refresh();
+        }
       } else {
         toast.error(result.error);
       }
@@ -207,7 +234,10 @@ export function PedidoVentaForm({ mode, numeroSugerido, initialData, clientes, p
   useCmdShortcut("s", () => submit(), !isPending);
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-6 pb-32">
+    <form
+      onSubmit={submit}
+      className={embedded ? "flex flex-col gap-6" : "flex flex-col gap-6 pb-32"}
+    >
       <div className="flex flex-col gap-1">
         <h1 className="text-[15px] font-semibold tracking-tight">
           {isEdit ? `Editar pedido ${initialData!.numero}` : "Nuevo pedido de venta (OV)"}
@@ -350,8 +380,20 @@ export function PedidoVentaForm({ mode, numeroSugerido, initialData, clientes, p
         </CardContent>
       </Card>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 backdrop-blur">
-        <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center justify-between gap-4 px-4 py-3 lg:px-8">
+      <div
+        className={
+          embedded
+            ? "sticky bottom-0 z-30 -mx-px border-t bg-background/95 backdrop-blur"
+            : "fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 backdrop-blur"
+        }
+      >
+        <div
+          className={
+            embedded
+              ? "flex flex-wrap items-center justify-between gap-4 px-4 py-3"
+              : "mx-auto flex max-w-screen-2xl flex-wrap items-center justify-between gap-4 px-4 py-3 lg:px-8"
+          }
+        >
           <div className="flex items-baseline gap-2">
             <span className="text-xs uppercase tracking-wide text-muted-foreground">
               Total estimado
@@ -364,7 +406,7 @@ export function PedidoVentaForm({ mode, numeroSugerido, initialData, clientes, p
             <Button
               type="button"
               variant="ghost"
-              onClick={() => router.back()}
+              onClick={() => (onCancel ? onCancel() : router.back())}
               disabled={isPending}
             >
               Cancelar
