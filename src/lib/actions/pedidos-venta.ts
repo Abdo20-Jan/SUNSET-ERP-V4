@@ -53,6 +53,8 @@ export type PedidoVentaDetalle = {
   tipoCambio: string;
   estado: PedidoEstado;
   observaciones: string | null;
+  /** Timestamp de la última actualización (record header · PR-019). */
+  updatedAt: string;
   items: Array<{
     id: number;
     productoId: string;
@@ -77,6 +79,7 @@ export async function obtenerPedidoVentaPorId(id: number): Promise<PedidoVentaDe
     tipoCambio: p.tipoCambio.toString(),
     estado: p.estado,
     observaciones: p.observaciones,
+    updatedAt: p.updatedAt.toISOString(),
     items: p.items.map((it) => ({
       id: it.id,
       productoId: it.productoId,
