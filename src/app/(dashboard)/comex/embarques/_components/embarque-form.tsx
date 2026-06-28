@@ -272,8 +272,25 @@ export type DepositoOption = {
   nombre: string;
 };
 
+/*
+ * PR-021 (CX-03) — props aditivas opcionales para hospedar el form en una
+ * FloatingWorkWindow desde el Record `[id]`, espejando el patrón PR-018/019:
+ *   - `embedded`     → footer in-flow (sin barra full-page) + sin h1 propio.
+ *   - `onCancel`     → el host (ventana) cancela/descarta en vez de navegar.
+ *   - `onSuccess`    → el host cierra+refresca tras guardar (en vez de router.push).
+ *   - `onDirtyChange`→ burbujea `formState.isDirty` al host (gate de descarte).
+ * Sin estos props (p.ej. `nuevo/page.tsx`) el comportamiento es IDÉNTICO al actual.
+ * Grid, cálculo, llamadas al motor, schema y validación quedan INTACTOS.
+ */
+type EmbeddedProps = {
+  embedded?: boolean;
+  onCancel?: () => void;
+  onSuccess?: (result: { id: string; codigo: string }) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+};
+
 type Props =
-  | {
+  | ({
       mode: "create";
       proveedores: ProveedorOption[];
       productos: ProductoOption[];
@@ -281,8 +298,8 @@ type Props =
       cuentasGasto: CuentaOption[];
       codigoSugerido: string;
       defaultFecha?: string;
-    }
-  | {
+    } & EmbeddedProps)
+  | ({
       mode: "edit";
       proveedores: ProveedorOption[];
       productos: ProductoOption[];
@@ -293,7 +310,7 @@ type Props =
       defaultFecha?: string;
       contenedorEnabled: boolean;
       contenedores: ContenedorPackingDTO[];
-    };
+    } & EmbeddedProps);
 
 export function EmbarqueForm(props: Props) {
   const router = useRouter();
@@ -301,6 +318,10 @@ export function EmbarqueForm(props: Props) {
 
   const readonly = props.mode === "edit" ? props.readonly : false;
   const isEdit = props.mode === "edit";
+
+  // PR-021: props aditivas (comunes a ambos arms) para el host FloatingWorkWindow.
+  const embedded = props.embedded ?? false;
+  const { onCancel, onSuccess, onDirtyChange } = props;
 
   const defaultValues: FormValues =
     props.mode === "create"
@@ -400,12 +421,18 @@ export function EmbarqueForm(props: Props) {
     register,
     handleSubmit,
     setValue,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
     defaultValues,
   });
+
+  // PR-021: burbujea el estado dirty al host (FloatingWorkWindow) para el gate de
+  // descarte. No-op cuando se renderiza como página (sin `onDirtyChange`).
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const { fields, append, remove } = useFieldArray({
     control,
@@ -592,8 +619,13 @@ export function EmbarqueForm(props: Props) {
         toast.success(
           isEdit ? `Embarque ${result.codigo} actualizado.` : `Embarque ${result.codigo} creado.`,
         );
-        router.push("/comex/embarques");
-        router.refresh();
+        // PR-021: el host (ventana) cierra+refresca; sin host, navegación actual.
+        if (onSuccess) {
+          onSuccess({ id: result.id, codigo: result.codigo });
+        } else {
+          router.push("/comex/embarques");
+          router.refresh();
+        }
       } else {
         toast.error(result.error);
       }
@@ -602,18 +634,22 @@ export function EmbarqueForm(props: Props) {
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-[15px] font-semibold tracking-tight">
-            {isEdit ? "Editar embarque" : "Nuevo embarque"}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {isEdit
-              ? `Código: ${defaultValues.codigo}`
-              : "Registre los datos generales, ítems, costos logísticos y tributos."}
-          </p>
+      {/* PR-021: en `embedded` la FloatingWorkWindow ya muestra el título; ocultamos
+          el h1 propio para no duplicarlo. */}
+      {!embedded && (
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-[15px] font-semibold tracking-tight">
+              {isEdit ? "Editar embarque" : "Nuevo embarque"}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {isEdit
+                ? `Código: ${defaultValues.codigo}`
+                : "Registre los datos generales, ítems, costos logísticos y tributos."}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {readonly && (
         <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
@@ -1280,11 +1316,18 @@ export function EmbarqueForm(props: Props) {
         />
       )}
 
-      {/* Spacer pra que el contenido no quede oculto detrás del action bar */}
-      <div className="h-16" aria-hidden />
+      {/* Spacer pra que el contenido no quede oculto detrás del action bar
+          (innecesario en `embedded`: la ventana ya provee scroll propio). */}
+      {!embedded && <div className="h-16" aria-hidden />}
 
-      {/* Sticky action bar */}
-      <div className="sticky bottom-0 -mx-4 mt-2 border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/75 md:-mx-6 md:px-6">
+      {/* Sticky action bar — en `embedded` se sangra al padding p-4 de la ventana. */}
+      <div
+        className={
+          embedded
+            ? "sticky bottom-0 z-10 -mx-4 -mb-4 mt-2 border-t bg-background/95 px-4 py-3 backdrop-blur supports-backdrop-filter:bg-background/80"
+            : "sticky bottom-0 -mx-4 mt-2 border-t bg-background/95 px-4 py-3 backdrop-blur supports-backdrop-filter:bg-background/75 md:-mx-6 md:px-6"
+        }
+      >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-xs text-muted-foreground">
             <span className="text-muted-foreground">FOB:</span>{" "}
@@ -1299,7 +1342,7 @@ export function EmbarqueForm(props: Props) {
             <Button
               type="button"
               variant="outline"
-              onClick={() => router.push("/comex/embarques")}
+              onClick={() => (onCancel ? onCancel() : router.push("/comex/embarques"))}
               disabled={isSubmitting}
             >
               {readonly ? "Volver" : "Cancelar"}
