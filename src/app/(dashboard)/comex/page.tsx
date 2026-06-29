@@ -1,118 +1,66 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  CargoShipIcon,
-  Calculator01Icon,
-  Invoice01Icon,
-  ReceiptDollarIcon,
-  TruckDeliveryIcon,
-  UserGroupIcon,
-} from "@hugeicons/core-free-icons";
+import { Calculator01Icon, CargoShipIcon, UserGroupIcon } from "@hugeicons/core-free-icons";
 
 import { auth } from "@/lib/auth";
-import { convertirMonto, fmtInt, fmtMoney } from "@/lib/format";
+import { hasPermission, PERMISOS } from "@/lib/permisos";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
-import { getResumenComex } from "@/lib/services/comex-overview";
-import { getEmbarquesRecientes } from "@/lib/services/dashboard";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { getCockpitData } from "@/lib/services/comex-cockpit";
+import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/layout/page-header";
 
 import { MonedaToggle, type Moneda } from "../reportes/_components/moneda-toggle";
-import { KpiCard } from "../dashboard/_components/kpi-card";
-import { EmbarquesRecientesCard } from "../dashboard/_components/embarques-recientes-card";
-
-const SECTIONS = [
-  {
-    href: "/comex/embarques",
-    icon: CargoShipIcon,
-    title: "Embarques",
-    description: "Importaciones: FOB, CIF, tributos aduaneros y costo nacionalizado",
-  },
-  {
-    href: "/comex/proveedores",
-    icon: UserGroupIcon,
-    title: "Proveedores exterior",
-    description: "Saldos en USD por proveedor, embarque y factura — referencia abierta",
-  },
-  {
-    href: "/comex/simulaciones",
-    icon: Calculator01Icon,
-    title: "Simulaciones",
-    description:
-      "Simulador de costos de importación: nacionalizado y rentabilidad sin generar asientos",
-  },
-] as const;
+import { Cockpit } from "./_components/cockpit";
 
 export const dynamic = "force-dynamic";
 
-type Pres = { moneda: Moneda; tc: string | null };
+const ACCESOS = [
+  { href: "/comex/embarques", icon: CargoShipIcon, label: "Embarques" },
+  { href: "/comex/proveedores", icon: UserGroupIcon, label: "Proveedores exterior" },
+  { href: "/comex/simulaciones", icon: Calculator01Icon, label: "Simulaciones" },
+] as const;
 
-function KpiSkeleton() {
+function CockpitSkeleton() {
   return (
-    <Card>
-      <CardHeader className="gap-3">
-        <Skeleton className="h-4 w-32" />
-        <Skeleton className="h-7 w-20" />
-        <Skeleton className="h-3 w-24" />
-      </CardHeader>
-    </Card>
-  );
-}
-
-function ListSkeleton() {
-  return (
-    <Card>
-      <CardHeader className="gap-3">
-        <Skeleton className="h-5 w-40" />
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-4 w-full" />
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+        {["kpi-1", "kpi-2", "kpi-3", "kpi-4"].map((k) => (
+          <Card key={k} size="sm" className="gap-1.5 py-2.5">
+            <Skeleton className="mx-3 h-3 w-28" />
+            <Skeleton className="mx-3 h-5 w-20" />
+          </Card>
         ))}
-      </CardHeader>
-    </Card>
+      </div>
+      <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2 xl:grid-cols-3">
+        {["b-1", "b-2", "b-3", "b-4", "b-5", "b-6"].map((k) => (
+          <Card key={k} size="sm" className="gap-2 py-3">
+            <Skeleton className="mx-3 h-4 w-40" />
+            <Skeleton className="mx-3 h-4 w-full" />
+            <Skeleton className="mx-3 h-4 w-full" />
+          </Card>
+        ))}
+      </div>
+    </div>
   );
 }
 
-async function ComexKpis({ moneda, tc }: Pres) {
-  const r = await getResumenComex();
-  return (
-    <>
-      <KpiCard
-        label="Embarques activos"
-        value={fmtInt(r.activos)}
-        icon={CargoShipIcon}
-        accent="info"
-        hint={`${fmtInt(r.total)} en total`}
-      />
-      <KpiCard
-        label="En tránsito"
-        value={fmtInt(r.enTransito)}
-        icon={TruckDeliveryIcon}
-        accent="neutral"
-        hint="En tránsito o en puerto"
-      />
-      <KpiCard
-        label="En aduana"
-        value={fmtInt(r.enAduana)}
-        icon={Invoice01Icon}
-        accent="warning"
-        hint="Zona primaria, aduana o despachado"
-      />
-      <KpiCard
-        label="Deuda exterior"
-        value={fmtMoney(convertirMonto(r.deudaExteriorUsd, "USD", moneda, tc))}
-        icon={ReceiptDollarIcon}
-        accent="warning"
-        hint="Saldo USD con proveedores del exterior"
-      />
-    </>
-  );
-}
-
-async function EmbarquesSection() {
-  const embarques = await getEmbarquesRecientes();
-  return <EmbarquesRecientesCard embarques={embarques} />;
+async function CockpitSection({
+  now,
+  moneda,
+  tc,
+}: {
+  now: Date;
+  moneda: Moneda;
+  tc: string | null;
+}) {
+  // Gate server-side: `verCosto` (VER_COSTO_LANDED) gobierna el strip de TODO
+  // valor financiero (FOB/CFR, cash-out, sección Financeiro). El costo NUNCA
+  // viaja al cliente sin permiso (CRIT-10).
+  const verCosto = await hasPermission(PERMISOS.VER_COSTO_LANDED);
+  const data = await getCockpitData({ now, verCosto });
+  return <Cockpit data={data} moneda={moneda} tc={tc} />;
 }
 
 export default async function ComexPage({
@@ -120,10 +68,11 @@ export default async function ComexPage({
 }: {
   searchParams: Promise<{ moneda?: string }>;
 }) {
+  const now = new Date();
   const [params, session, cotizacion] = await Promise.all([
     searchParams,
     auth(),
-    getCotizacionParaFecha(new Date()),
+    getCotizacionParaFecha(now),
   ]);
 
   const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
@@ -143,45 +92,25 @@ export default async function ComexPage({
     <div className="flex flex-col gap-3">
       <PageHeader
         title="Comex"
-        description="Gestión de importaciones y costos aduaneros."
+        description="Cockpit operacional de importaciones — alertas, indicadores y pendencias."
         actions={<MonedaToggle current={moneda} tcInfo={tcInfo} />}
       />
 
-      <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-        <Suspense
-          fallback={
-            <>
-              <KpiSkeleton />
-              <KpiSkeleton />
-              <KpiSkeleton />
-              <KpiSkeleton />
-            </>
-          }
-        >
-          <ComexKpis moneda={moneda} tc={tc} />
-        </Suspense>
-      </section>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {SECTIONS.map((s) => (
-          <Link key={s.href} href={s.href} className="group">
-            <Card className="transition-colors group-hover:border-primary/40">
-              <CardContent className="flex items-start gap-3">
-                <div className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <HugeiconsIcon icon={s.icon} strokeWidth={2} />
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-sm font-medium">{s.title}</span>
-                  <span className="text-xs text-muted-foreground">{s.description}</span>
-                </div>
-              </CardContent>
-            </Card>
+      <nav className="flex flex-wrap items-center gap-2">
+        {ACCESOS.map((a) => (
+          <Link
+            key={a.href}
+            href={a.href}
+            className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            <HugeiconsIcon icon={a.icon} className="size-3.5" strokeWidth={2} />
+            {a.label}
           </Link>
         ))}
-      </div>
+      </nav>
 
-      <Suspense fallback={<ListSkeleton />}>
-        <EmbarquesSection />
+      <Suspense fallback={<CockpitSkeleton />}>
+        <CockpitSection now={now} moneda={moneda} tc={tc} />
       </Suspense>
     </div>
   );
