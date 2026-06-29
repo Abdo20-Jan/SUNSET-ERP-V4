@@ -25,8 +25,11 @@ import type {
 import type { ArriboItem } from "@/lib/services/comex-cockpit";
 import type { Moneda } from "@/generated/prisma/client";
 
+import { cockpitFiltrosToQuery } from "@/lib/services/comex-cockpit-filtros";
+
 import { CockpitAlertasBand } from "./cockpit-alertas-band";
 import { CockpitBloque, type CockpitBloqueRow } from "./cockpit-bloque";
+import { CockpitFiltros } from "./cockpit-filtros";
 import { CockpitIndicadores } from "./cockpit-indicadores";
 
 /**
@@ -134,14 +137,20 @@ export function Cockpit({
   data,
   moneda,
   tc,
+  verCosto,
 }: {
   data: CockpitData;
   moneda: Moneda;
   tc: string | null;
+  verCosto: boolean;
 }) {
-  const { indicadores, operacion, documentos, custos, financeiro } = data;
+  const { indicadores, operacion, documentos, custos, financeiro, proveedorOpciones } = data;
+  // [Ver todos] preserva la moneda de presentación (único filtro que la worklist lee
+  // además de `vista`; proveedor/eta/estado no son consumidos por esa ruta aún).
+  const arribosHref = `/comex/embarques?${cockpitFiltrosToQuery({ vista: "proximos", moneda })}`;
   return (
     <div className="flex flex-col gap-3">
+      <CockpitFiltros proveedorOpciones={proveedorOpciones} verCosto={verCosto} />
       <CockpitAlertasBand criticos={operacion.procesosCriticos} />
       <CockpitIndicadores indicadores={indicadores} moneda={moneda} tc={tc} />
 
@@ -158,7 +167,7 @@ export function Cockpit({
           title="Próximos arribos ≤15d"
           icon={CargoShipIcon}
           count={operacion.proximosArribos.length}
-          verTodosHref="/comex/embarques?vista=proximos"
+          verTodosHref={arribosHref}
           rows={rowsArribos(operacion.proximosArribos)}
           emptyMsg="Sin arribos en 15 días"
         />

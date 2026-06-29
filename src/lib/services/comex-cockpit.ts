@@ -46,6 +46,11 @@ import {
   type StatusPagoUi,
 } from "@/lib/services/comex-worklist-derivaciones";
 import {
+  aplicarFiltrosEnriched,
+  type CockpitFiltros,
+  type ProveedorOpcion,
+} from "@/lib/services/comex-cockpit-filtros";
+import {
   type ContenedorEstado,
   EmbarqueEstado,
   type Moneda,
@@ -136,6 +141,8 @@ export type CockpitData = {
   custos: CostoPendienteItem[];
   /** `null` cuando falta VER_COSTO_LANDED (sección Financeiro OMITIDA). */
   financeiro: CockpitFinanceiro | null;
+  /** Proveedores con procesos abiertos (para el filtro; NO incluye valores). */
+  proveedorOpciones: ProveedorOpcion[];
 };
 
 // ── Lectura batched (1 query de embarques + 1 de saldos exterior) ────────────
@@ -149,6 +156,7 @@ const EMBARQUE_COCKPIT_SELECT = {
   fobTotal: true,
   fechaLlegada: true,
   updatedAt: true,
+  proveedorId: true, // escalar NO-monetario: alimenta opciones + filtro de Proveedor (PR-022b)
   proveedor: { select: { nombre: true } },
   contenedores: { select: { estado: true, numeroBL: true } },
   // Narrow: SÓLO señales operativas (estado/venc). Nunca columnas monetarias
@@ -161,6 +169,7 @@ type EmbarqueCockpitRecord = Prisma.EmbarqueGetPayload<{ select: typeof EMBARQUE
 /** Proyección enriquecida (una pasada de derivaciones puras por embarque). */
 type Enriched = {
   ref: CockpitProcesoRef;
+  proveedorId: string;
   fechaLlegada: Date | null;
   updatedAt: Date;
   fobUsd: string;
@@ -180,6 +189,7 @@ function enrich(e: EmbarqueCockpitRecord, now: Date): Enriched {
   const activos = e.contenedores.filter((c) => c.estado !== "CANCELADO");
   return {
     ref: { id: e.id, codigo: e.codigo, proveedorNombre: e.proveedor.nombre, estado: e.estado },
+    proveedorId: e.proveedorId,
     fechaLlegada: e.fechaLlegada,
     updatedAt: e.updatedAt,
     fobUsd: fobEnUsd(e.fobTotal.toString(), e.moneda as Moneda, e.tipoCambio.toString()),
@@ -300,6 +310,7 @@ type FacturaConContexto = {
   fechaVencimiento: string | null;
   embarqueId: string | null;
   embarqueCodigo: string | null;
+  proveedorId: string;
   proveedorNombre: string;
 };
 
@@ -313,6 +324,7 @@ function aplanarFacturasExterior(saldos: ProveedorExteriorSaldo[]): FacturaConCo
           fechaVencimiento: f.fechaVencimiento,
           embarqueId: emb.embarqueId,
           embarqueCodigo: emb.embarqueCodigo,
+          proveedorId: p.proveedorId,
           proveedorNombre: p.proveedorNombre,
         });
       }
@@ -323,6 +335,7 @@ function aplanarFacturasExterior(saldos: ProveedorExteriorSaldo[]): FacturaConCo
         fechaVencimiento: f.fechaVencimiento,
         embarqueId: null,
         embarqueCodigo: null,
+        proveedorId: p.proveedorId,
         proveedorNombre: p.proveedorNombre,
       });
     }
@@ -338,11 +351,20 @@ function vencHasta(iso: string, hastaMs: number): boolean {
 function mapPagosExteriores(
   saldos: ProveedorExteriorSaldo[],
   now: Date,
-): { items: PagoExteriorItem[]; cashOut30dUsd: string; sinFechaCount: number } {
+  proveedorId?: string,
+): {
+  items: PagoExteriorItem[];
+  cashOut30dUsd: string;
+  sinFechaCount: number;
+  /** Embarques con pago exterior ≤30d (uncapped) — alimenta el foco `pagos`. */
+  embarqueIds: ReadonlySet<string>;
+} {
   const hastaMs = now.getTime() + PAGO_EXTERIOR_DIAS * MS_DIA;
-  const planas = aplanarFacturasExterior(saldos);
+  const todas = aplanarFacturasExterior(saldos);
+  // Narrowing de Proveedor (única dimensión semánticamente aplicable a pagos).
+  const planas = proveedorId ? todas.filter((x) => x.proveedorId === proveedorId) : todas;
   const sinFechaCount = planas.filter((x) => x.fechaVencimiento == null).length;
-  const items = planas
+  const proximos = planas
     .filter((x) => x.fechaVencimiento != null && vencHasta(x.fechaVencimiento, hastaMs))
     .map((x) => ({
       embarqueId: x.embarqueId,
@@ -352,8 +374,20 @@ function mapPagosExteriores(
       fechaVencimiento: x.fechaVencimiento as string,
     }))
     .sort((a, b) => a.fechaVencimiento.localeCompare(b.fechaVencimiento));
-  const cashOut30dUsd = sumMoney(items.map((i) => i.saldoUsd)).toString();
-  return { items: items.slice(0, BLOQUE_LIMIT), cashOut30dUsd, sinFechaCount };
+  const embarqueIds = new Set<string>(
+    proximos.map((p) => p.embarqueId).filter((id): id is string => id != null),
+  );
+  const cashOut30dUsd = sumMoney(proximos.map((i) => i.saldoUsd)).toString();
+  return { items: proximos.slice(0, BLOQUE_LIMIT), cashOut30dUsd, sinFechaCount, embarqueIds };
+}
+
+/** Opciones de Proveedor del universo cargado (distinct id→nombre, ordenado). */
+function proveedorOpcionesDe(enriched: Enriched[]): ProveedorOpcion[] {
+  const porId = new Map<string, string>();
+  for (const e of enriched) porId.set(e.proveedorId, e.ref.proveedorNombre);
+  return [...porId.entries()]
+    .map(([id, nombre]) => ({ id, nombre }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -363,9 +397,19 @@ function mapPagosExteriores(
  * (embarques abiertos + saldos exterior), todo derivado en memoria. `now`
  * inyectado por el caller (page). `verCosto` resuelto por el caller con
  * `hasPermission(VER_COSTO_LANDED)`: gobierna el strip de TODO valor financiero.
+ *
+ * `filtros` (PR-022b, opcional): narrowing ADITIVO e in-memory sobre el universo
+ * ya cargado — la query base NO cambia. Con `filtros` ausente/vacío el resultado
+ * es idéntico a PR-022a (narrowing no-op). Nunca amplía el payload ni el `select`;
+ * los valores financieros siguen gateados igual bajo cualquier filtro.
  */
-export async function getCockpitData(opts: { now: Date; verCosto: boolean }): Promise<CockpitData> {
+export async function getCockpitData(opts: {
+  now: Date;
+  verCosto: boolean;
+  filtros?: CockpitFiltros;
+}): Promise<CockpitData> {
   const { now, verCosto } = opts;
+  const filtros = opts.filtros ?? {};
   const [embarques, saldos] = await Promise.all([
     db.embarque.findMany({
       where: { estado: { not: EmbarqueEstado.CERRADO } },
@@ -376,18 +420,31 @@ export async function getCockpitData(opts: { now: Date; verCosto: boolean }): Pr
   ]);
 
   const enriched = embarques.map((e) => enrich(e, now));
-  const criticos = filtrarCriticos(enriched);
-  const { items: pagosExteriores, cashOut30dUsd, sinFechaCount } = mapPagosExteriores(saldos, now);
+  const proveedorOpciones = proveedorOpcionesDe(enriched);
+
+  // Pagos ≤30d, narrados sólo por Proveedor (resto de dimensiones N/A a pagos).
+  const pagos = mapPagosExteriores(saldos, now, filtros.proveedorId);
+  // El foco `pagos` consume data financiera GATEADA: sin VER_COSTO_LANDED no narra
+  // (set vacío) y se ignora el foco → cockpit normal, financeiro omitido. Sin leak.
+  const pagosEmbarqueIds: ReadonlySet<string> = verCosto ? pagos.embarqueIds : new Set<string>();
+  const filtrosEfectivos: CockpitFiltros =
+    filtros.foco === "pagos" && !verCosto ? { ...filtros, foco: undefined } : filtros;
+
+  const visibles = aplicarFiltrosEnriched(enriched, filtrosEfectivos, { now, pagosEmbarqueIds });
+  const criticos = filtrarCriticos(visibles);
 
   return {
-    indicadores: mapIndicadores(enriched, cashOut30dUsd, criticos.length, verCosto),
+    indicadores: mapIndicadores(visibles, pagos.cashOut30dUsd, criticos.length, verCosto),
     operacion: {
       procesosCriticos: criticos.slice(0, BLOQUE_LIMIT).map(toProcesoCriticoItem),
-      proximosArribos: mapProximosArribos(enriched, now, verCosto),
-      sinActualizacion: mapSinActualizacion(enriched, now),
+      proximosArribos: mapProximosArribos(visibles, now, verCosto),
+      sinActualizacion: mapSinActualizacion(visibles, now),
     },
-    documentos: mapDocumentosProxy(enriched),
-    custos: mapCostosPendientes(enriched),
-    financeiro: verCosto ? { pagosExteriores, sinFechaCount } : null,
+    documentos: mapDocumentosProxy(visibles),
+    custos: mapCostosPendientes(visibles),
+    financeiro: verCosto
+      ? { pagosExteriores: pagos.items, sinFechaCount: pagos.sinFechaCount }
+      : null,
+    proveedorOpciones,
   };
 }

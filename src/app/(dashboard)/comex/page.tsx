@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { hasPermission, PERMISOS } from "@/lib/permisos";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { getCockpitData } from "@/lib/services/comex-cockpit";
+import { type CockpitFiltros, parseCockpitFiltros } from "@/lib/services/comex-cockpit-filtros";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/layout/page-header";
@@ -50,23 +51,32 @@ async function CockpitSection({
   now,
   moneda,
   tc,
+  filtros,
 }: {
   now: Date;
   moneda: Moneda;
   tc: string | null;
+  filtros: CockpitFiltros;
 }) {
   // Gate server-side: `verCosto` (VER_COSTO_LANDED) gobierna el strip de TODO
   // valor financiero (FOB/CFR, cash-out, sección Financeiro). El costo NUNCA
-  // viaja al cliente sin permiso (CRIT-10).
+  // viaja al cliente sin permiso (CRIT-10). El `filtros` sólo narra (PR-022b).
   const verCosto = await hasPermission(PERMISOS.VER_COSTO_LANDED);
-  const data = await getCockpitData({ now, verCosto });
-  return <Cockpit data={data} moneda={moneda} tc={tc} />;
+  const data = await getCockpitData({ now, verCosto, filtros });
+  return <Cockpit data={data} moneda={moneda} tc={tc} verCosto={verCosto} />;
 }
 
 export default async function ComexPage({
   searchParams,
 }: {
-  searchParams: Promise<{ moneda?: string }>;
+  searchParams: Promise<{
+    moneda?: string;
+    vista?: string;
+    proveedor?: string;
+    eta_desde?: string;
+    eta_hasta?: string;
+    estado?: string;
+  }>;
 }) {
   const now = new Date();
   const [params, session, cotizacion] = await Promise.all([
@@ -78,6 +88,8 @@ export default async function ComexPage({
   const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
   const moneda: Moneda =
     params.moneda === "ARS" ? "ARS" : params.moneda === "USD" ? "USD" : monedaPreferida;
+
+  const { filtros } = parseCockpitFiltros(params, now);
 
   const tc = cotizacion ? cotizacion.valor.toString() : null;
   const tcInfo = cotizacion
@@ -110,7 +122,7 @@ export default async function ComexPage({
       </nav>
 
       <Suspense fallback={<CockpitSkeleton />}>
-        <CockpitSection now={now} moneda={moneda} tc={tc} />
+        <CockpitSection now={now} moneda={moneda} tc={tc} filtros={filtros} />
       </Suspense>
     </div>
   );
