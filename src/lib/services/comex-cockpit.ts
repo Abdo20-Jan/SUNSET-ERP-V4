@@ -50,6 +50,7 @@ import {
   type CockpitFiltros,
   type ProveedorOpcion,
 } from "@/lib/services/comex-cockpit-filtros";
+import { type CalendarioData, construirCalendario } from "@/lib/services/comex-cockpit-calendario";
 import {
   type ContenedorEstado,
   EmbarqueEstado,
@@ -143,6 +144,12 @@ export type CockpitData = {
   financeiro: CockpitFinanceiro | null;
   /** Proveedores con procesos abiertos (para el filtro; NO incluye valores). */
   proveedorOpciones: ProveedorOpcion[];
+  /**
+   * Calendario operacional semanal (PR-022c, sección OD-08 «Operação»). Eventos
+   * derivados SÓLO de fechas armazenadas del MISMO universo filtrado (`visibles`);
+   * date/event-based, sin ningún valor monetario.
+   */
+  calendario: CalendarioData;
 };
 
 // ── Lectura batched (1 query de embarques + 1 de saldos exterior) ────────────
@@ -157,11 +164,28 @@ const EMBARQUE_COCKPIT_SELECT = {
   fechaLlegada: true,
   updatedAt: true,
   proveedorId: true, // escalar NO-monetario: alimenta opciones + filtro de Proveedor (PR-022b)
+  // Fechas ARMAZENADAS de nivel Embarque para el calendario operacional (PR-022c).
+  // SÓLO columnas de fecha — ningún campo monetario (anti-leak intacto).
+  fechaEmpaque: true,
+  fechaSalida: true,
+  fechaTransbordo: true,
+  fechaZonaPrimaria: true,
+  fechaCierre: true,
   proveedor: { select: { nombre: true } },
-  contenedores: { select: { estado: true, numeroBL: true } },
+  // +fechas de contenedor (traslado DF / desconsolidación) para el calendario.
+  contenedores: {
+    select: {
+      estado: true,
+      numeroBL: true,
+      fechaTrasladoDF: true,
+      fechaDesconsolidacion: true,
+    },
+  },
   // Narrow: SÓLO señales operativas (estado/venc). Nunca columnas monetarias
   // de EmbarqueCosto — romperían el anti-leak del gate de costo.
   costos: { select: { estado: true, fechaVencimiento: true } },
+  // Fecha de oficialización/liberación del despacho (calendario, sin valores).
+  despachos: { select: { fecha: true } },
 } satisfies Prisma.EmbarqueSelect;
 
 type EmbarqueCockpitRecord = Prisma.EmbarqueGetPayload<{ select: typeof EMBARQUE_COCKPIT_SELECT }>;
@@ -433,6 +457,14 @@ export async function getCockpitData(opts: {
   const visibles = aplicarFiltrosEnriched(enriched, filtrosEfectivos, { now, pagosEmbarqueIds });
   const criticos = filtrarCriticos(visibles);
 
+  // Calendario (PR-022c): deriva del MISMO conjunto filtrado `visibles` — sin 2ª
+  // query, sin recompute, sin tocar el motor. Sólo agrupa fechas armazenadas.
+  const visibleIds = new Set(visibles.map((v) => v.ref.id));
+  const calendario = construirCalendario(
+    embarques.filter((e) => visibleIds.has(e.id)),
+    now,
+  );
+
   return {
     indicadores: mapIndicadores(visibles, pagos.cashOut30dUsd, criticos.length, verCosto),
     operacion: {
@@ -446,5 +478,6 @@ export async function getCockpitData(opts: {
       ? { pagosExteriores: pagos.items, sinFechaCount: pagos.sinFechaCount }
       : null,
     proveedorOpciones,
+    calendario,
   };
 }

@@ -29,6 +29,7 @@ import { cockpitFiltrosToQuery } from "@/lib/services/comex-cockpit-filtros";
 
 import { CockpitAlertasBand } from "./cockpit-alertas-band";
 import { CockpitBloque, type CockpitBloqueRow } from "./cockpit-bloque";
+import { CockpitCalendario } from "./cockpit-calendario";
 import { CockpitFiltros } from "./cockpit-filtros";
 import { CockpitIndicadores } from "./cockpit-indicadores";
 
@@ -144,7 +145,8 @@ export function Cockpit({
   tc: string | null;
   verCosto: boolean;
 }) {
-  const { indicadores, operacion, documentos, custos, financeiro, proveedorOpciones } = data;
+  const { indicadores, operacion, documentos, custos, financeiro, proveedorOpciones, calendario } =
+    data;
   // [Ver todos] preserva la moneda de presentación (único filtro que la worklist lee
   // además de `vista`; proveedor/eta/estado no son consumidos por esa ruta aún).
   const arribosHref = `/comex/embarques?${cockpitFiltrosToQuery({ vista: "proximos", moneda })}`;
@@ -214,6 +216,10 @@ export function Cockpit({
           footnote="Proxy: contenedores sin BL (no hay modelo de documentos)"
         />
       </div>
+
+      {/* Calendario operacional semanal (PR-022c · OD-08 «Operação»), largura total
+          abajo de los 6 bloques. Mismo universo filtrado (`filtros` 022b). */}
+      <CockpitCalendario data={calendario} />
     </div>
   );
 }
