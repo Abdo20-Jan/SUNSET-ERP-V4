@@ -32,6 +32,9 @@ import {
 } from "@/lib/services/comex-cockpit-filtros";
 import type { EmbarqueEstado } from "@/generated/prisma/client";
 
+import { CockpitBuscaRapida } from "./cockpit-busca-rapida";
+import { CockpitUltimaVista } from "./cockpit-ultima-vista";
+
 type Patch = Record<string, string | null>;
 const TODOS = "all";
 
@@ -102,6 +105,7 @@ export function CockpitFiltros({
 
   return (
     <div className="flex flex-col gap-2.5 rounded-md border bg-card p-3">
+      <CockpitUltimaVista />
       <div className="flex flex-wrap items-center gap-1">
         {vistas.map((v) => (
           <Button
@@ -116,6 +120,7 @@ export function CockpitFiltros({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <CockpitBuscaRapida />
         <Select
           value={proveedorActivo}
           onValueChange={(v) => updateUrl({ proveedor: v === TODOS ? null : v })}

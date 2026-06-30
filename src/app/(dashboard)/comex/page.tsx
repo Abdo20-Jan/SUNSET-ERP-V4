@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/layout/page-header";
 
 import { MonedaToggle, type Moneda } from "../reportes/_components/moneda-toggle";
 import { Cockpit } from "./_components/cockpit";
+import { CockpitExportDia } from "./_components/cockpit-export-dia";
 
 export const dynamic = "force-dynamic";
 
@@ -79,10 +80,11 @@ export default async function ComexPage({
   }>;
 }) {
   const now = new Date();
-  const [params, session, cotizacion] = await Promise.all([
+  const [params, session, cotizacion, puedeExportar] = await Promise.all([
     searchParams,
     auth(),
     getCotizacionParaFecha(now),
+    hasPermission(PERMISOS.COMEX_COCKPIT_EXPORTAR),
   ]);
 
   const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
@@ -105,7 +107,12 @@ export default async function ComexPage({
       <PageHeader
         title="Comex"
         description="Cockpit operacional de importaciones — alertas, indicadores y pendencias."
-        actions={<MonedaToggle current={moneda} tcInfo={tcInfo} />}
+        actions={
+          <div className="flex items-center gap-2">
+            <MonedaToggle current={moneda} tcInfo={tcInfo} />
+            {puedeExportar ? <CockpitExportDia /> : null}
+          </div>
+        }
       />
 
       <nav className="flex flex-wrap items-center gap-2">

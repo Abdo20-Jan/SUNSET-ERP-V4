@@ -84,7 +84,12 @@ export function CockpitBloque({
       ) : (
         <ul className="divide-y">
           {rows.map((row) => (
-            <li key={row.id} className="flex items-center justify-between gap-2 px-3 py-1.5">
+            <li
+              key={row.id}
+              data-cockpit-row
+              data-busca={`${row.codigo} ${row.proveedorNombre} ${row.detalle} ${row.metric}`.toLowerCase()}
+              className="flex items-center justify-between gap-2 px-3 py-1.5"
+            >
               <span className="flex min-w-0 flex-col gap-0.5">
                 <EntityLink label={row.codigo} href={row.href} tabLabel={row.codigo} />
                 <span className="truncate text-[11px] text-muted-foreground">
