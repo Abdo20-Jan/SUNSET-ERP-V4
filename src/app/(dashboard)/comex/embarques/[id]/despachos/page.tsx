@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/layout/page-header";
+import { EntityLink } from "@/components/data-grid/entity-link";
 import { fmtMoney } from "@/lib/format";
 
 import { DespachoActions } from "./_components/despacho-actions";
@@ -250,7 +251,12 @@ export default async function DespachosEmbarquePage({ params }: { params: PagePa
                     return (
                       <Fragment key={d.id}>
                         <tr>
-                          <td className="px-2.5 py-1.5 font-mono">{d.codigo}</td>
+                          <td className="px-2.5 py-1.5 font-mono">
+                            <EntityLink
+                              label={d.codigo}
+                              href={`/comex/embarques/${id}/despachos/${d.id}`}
+                            />
+                          </td>
                           <td className="px-2.5 py-1.5">
                             {new Date(d.fecha).toLocaleDateString("es-AR")}
                           </td>
