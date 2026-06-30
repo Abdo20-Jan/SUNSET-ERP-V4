@@ -47,6 +47,8 @@ export const PERMISOS = {
   AUDITORIA_VER: "auditoria.ver",
   /** Exportar la auditoría (CSV/XLSX). La exportación es a su vez auditada. */
   AUDITORIA_EXPORTAR: "auditoria.exportar",
+  /** Exportar el Cockpit Operacional Comex (briefing del día · CX-01 / PR-022d). La exportación es a su vez auditada. */
+  COMEX_COCKPIT_EXPORTAR: "comex.cockpit.exportar",
   /** Ver el costo unitario / CMV de un producto (campo de costo · PR-011). */
   VER_COSTO: "costos.ver",
   /** Ver el margen y la rentabilidad calculada (campo de margen · PR-011). */
@@ -230,6 +232,11 @@ export const PERMISSION_CATALOG: readonly PermisoCatalogEntry[] = [
     clave: PERMISOS.AUDITORIA_EXPORTAR,
     dimension: DimensionPermiso.EXPORTACION,
     descripcion: "Exportar la auditoría (auditada)",
+  },
+  {
+    clave: PERMISOS.COMEX_COCKPIT_EXPORTAR,
+    dimension: DimensionPermiso.EXPORTACION,
+    descripcion: "Exportar el Cockpit Operacional Comex (briefing del día · auditada)",
   },
   {
     clave: PERMISOS.VER_COSTO,
