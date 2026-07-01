@@ -76,7 +76,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
+    "@biomejs/biome": "^2.5.1",
     "@eslint/eslintrc": "^3",
     "@playwright/test": "^1.61.0",
     "@tailwindcss/postcss": "^4",
