@@ -4,6 +4,7 @@ import { obtenerDespachoPorId } from "@/lib/actions/despachos";
 import { puedeVerCostoLanded } from "@/lib/permisos-masking";
 import { resolveActiveTab } from "@/lib/record-tabs";
 
+import { proyectarCostos } from "./_components/costos-vista";
 import { DESPACHO_TABS, DespachoRecord } from "./_components/despacho-record";
 import { proyectarDespacho } from "./_components/despacho-vista";
 
@@ -29,5 +30,12 @@ export default async function DespachoRecordPage({
   const { vista, financiero } = proyectarDespacho(detalle, verCosto);
   const activeTab = resolveActiveTab(sp.tab, DESPACHO_TABS, "resumen");
 
-  return <DespachoRecord vista={vista} financiero={financiero} activeTab={activeTab} />;
+  // Lazy: la memoria de costo (que invoca el motor read-only) sólo se computa al
+  // abrir la pestaña Costos y con permiso — fuera de ahí, ningún valor cruza.
+  const costos =
+    activeTab === "costos" ? await proyectarCostos(despachoId, vista, financiero, verCosto) : null;
+
+  return (
+    <DespachoRecord vista={vista} financiero={financiero} activeTab={activeTab} costos={costos} />
+  );
 }
