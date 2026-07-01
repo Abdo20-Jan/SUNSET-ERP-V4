@@ -59,6 +59,8 @@ export const PERMISOS = {
   VER_PRECIO_MINIMO: "precios.verMinimo",
   /** Ver la valorización de costo del stock (inventario · PR-011). */
   VER_COSTO_STOCK: "stock.verCosto",
+  /** Ver el saldo de bancos/caja y los agregados de saldo de tesorería (campo · PR-025). */
+  VER_SALDO: "tesoreria.verSaldo",
   /** Acceso a la Central de Aprobaciones (Sistema > Aprobaciones · AUTO-01 / PR-013). */
   APROBACIONES_VER: "aprobaciones.ver",
   // ── Aprobaciones (PR-012 · ANEXO A.3) — dimensión APROBACION. Una clave por
@@ -264,6 +266,11 @@ export const PERMISSION_CATALOG: readonly PermisoCatalogEntry[] = [
     descripcion: "Ver la valorización de costo del stock",
   },
   {
+    clave: PERMISOS.VER_SALDO,
+    dimension: DimensionPermiso.CAMPO,
+    descripcion: "Ver el saldo de bancos/caja y agregados de saldo de tesorería",
+  },
+  {
     clave: PERMISOS.APROBACIONES_VER,
     dimension: DimensionPermiso.PAGINA,
     descripcion: "Ver la Central de Aprobaciones (Sistema > Aprobaciones)",
@@ -280,6 +287,9 @@ export const PERMISSION_CATALOG: readonly PermisoCatalogEntry[] = [
  * las vuelve visibles para cualquier usuario activo (= comportamiento de hoy,
  * cero regresión); con RBAC ON el perfil USER de sistema las recibe igual. La
  * máscara sólo "muerde" cuando un admin crea un perfil custom que las omite.
+ *
+ * PR-025: `VER_SALDO` sigue el mismo criterio — BASE, para que las worklists de
+ * tesorería muestren saldo a todo usuario activo con RBAC OFF (cero regresión).
  */
 export const USER_BASE_CLAVES: readonly PermisoKey[] = [
   PERMISOS.APP_ACCESO,
@@ -288,4 +298,5 @@ export const USER_BASE_CLAVES: readonly PermisoKey[] = [
   PERMISOS.VER_COSTO_LANDED,
   PERMISOS.VER_PRECIO_MINIMO,
   PERMISOS.VER_COSTO_STOCK,
+  PERMISOS.VER_SALDO,
 ];

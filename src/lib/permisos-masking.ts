@@ -43,6 +43,11 @@ export function puedeVerCostoStock(): Promise<boolean> {
   return chequear(PERMISOS.VER_COSTO_STOCK);
 }
 
+/** ¿Puede ver el saldo de bancos/caja y los agregados de saldo de tesorería (PR-025)? */
+export function puedeVerSaldo(): Promise<boolean> {
+  return chequear(PERMISOS.VER_SALDO);
+}
+
 /**
  * Strip genérico de un campo: devuelve `value` cuando `allowed`, si no `null`.
  * Puro y sin `await` — el caller resuelve el booleano UNA vez y enmascara N
