@@ -16,6 +16,7 @@ import {
   puedeVerCostoLanded,
   puedeVerCostoStock,
   puedeVerMargen,
+  puedeVerSaldo,
 } from "@/lib/permisos-masking";
 import { USER_BASE_CLAVES } from "@/lib/permisos-catalog";
 import { isAdminScopedKey } from "@/lib/permisos-resolver";
@@ -28,6 +29,7 @@ describe("permisos-masking · wrappers delegan en hasPermission con la clave cor
     ["puedeVerMargen", puedeVerMargen, PERMISOS.VER_MARGEN],
     ["puedeVerCostoStock", puedeVerCostoStock, PERMISOS.VER_COSTO_STOCK],
     ["puedeVerCostoLanded", puedeVerCostoLanded, PERMISOS.VER_COSTO_LANDED],
+    ["puedeVerSaldo", puedeVerSaldo, PERMISOS.VER_SALDO],
   ];
 
   for (const [nombre, fn, clave] of casos) {
@@ -53,13 +55,14 @@ describe("maskField", () => {
   });
 });
 
-describe("invariante zero-regresión: las 5 claves de costo/margen son BASE", () => {
+describe("invariante zero-regresión: las claves de campo (costo/margen/saldo) son BASE", () => {
   const claves = [
     PERMISOS.VER_COSTO,
     PERMISOS.VER_MARGEN,
     PERMISOS.VER_COSTO_LANDED,
     PERMISOS.VER_PRECIO_MINIMO,
     PERMISOS.VER_COSTO_STOCK,
+    PERMISOS.VER_SALDO,
   ];
 
   for (const clave of claves) {

@@ -1,13 +1,12 @@
-import {
-  listarCuentasBancariasConSaldo,
-  listarCuentasContablesDisponibles,
-} from "@/lib/actions/cuentas-bancarias";
+import { listarCuentasContablesDisponibles } from "@/lib/actions/cuentas-bancarias";
 import { auth } from "@/lib/auth";
+import { puedeVerSaldo } from "@/lib/permisos-masking";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
+import { listarCuentasBancariasWorklist } from "@/lib/services/cuenta-bancaria-worklist";
 import { Card } from "@/components/ui/card";
 
 import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
-import { CuentasBancariasTable } from "./cuentas-table";
+import { CuentasWorklist } from "./cuentas-worklist";
 
 type SearchParams = Promise<{ moneda?: string }>;
 
@@ -18,8 +17,9 @@ export default async function CuentasBancariasPage({
 }: {
   searchParams: SearchParams;
 }) {
+  const verSaldo = await puedeVerSaldo();
   const [cuentas, cuentasContables, params, session, cotizacion] = await Promise.all([
-    listarCuentasBancariasConSaldo(),
+    listarCuentasBancariasWorklist(verSaldo),
     listarCuentasContablesDisponibles(),
     searchParams,
     auth(),
@@ -44,19 +44,20 @@ export default async function CuentasBancariasPage({
         <div className="flex flex-col gap-1">
           <h1 className="text-[15px] font-semibold tracking-tight">Cuentas bancarias</h1>
           <p className="text-sm text-muted-foreground">
-            {cuentas.length} cuenta{cuentas.length === 1 ? "" : "s"} · saldos calculados desde
-            asientos contabilizados
+            {cuentas.length} cuenta{cuentas.length === 1 ? "" : "s"}
+            {verSaldo ? " · saldos calculados desde asientos contabilizados" : ""}
           </p>
         </div>
         <MonedaToggle current={moneda} tcInfo={tcInfo} />
       </div>
 
-      <Card className="py-0">
-        <CuentasBancariasTable
-          data={cuentas}
+      <Card className="py-0 p-3">
+        <CuentasWorklist
+          rows={cuentas}
           cuentasContables={cuentasContables}
           moneda={moneda}
           tc={tc}
+          verSaldo={verSaldo}
         />
       </Card>
     </div>
