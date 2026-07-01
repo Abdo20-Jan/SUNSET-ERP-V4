@@ -294,7 +294,7 @@ function DespachoTabContent({
     items: <ItemsTab vista={vista} financiero={financiero} />,
     tributos: <TributosTab financiero={financiero} />,
     facturas: <FacturasTab vista={vista} financiero={financiero} />,
-    costos: <CostosTabContent costos={costos} />,
+    costos: <CostosTabContent costos={costos} despachoId={vista.id} />,
     asiento: <AsientoTab vista={vista} />,
     documentos: <DocumentosTab />,
     auditoria: <AuditoriaTab despachoId={vista.id} />,
