@@ -14,6 +14,8 @@ import { RecordField, RecordFieldGrid, RecordSection } from "@/components/record
 import { EntityLink } from "@/components/data-grid/entity-link";
 
 import { DespachoActions } from "../../_components/despacho-actions";
+import type { CostosVista } from "./costos-vista";
+import { CostosTabContent } from "./costos/costos-tab-content";
 import type { DespachoFinanciero, DespachoVista } from "./despacho-vista";
 
 /*
@@ -233,38 +235,6 @@ function FacturasTab({
   );
 }
 
-function CostosTab({ financiero }: { financiero: DespachoFinanciero | null }) {
-  if (!financiero) {
-    return (
-      <RecordSection title="Costos">
-        <p className="text-[12px] text-muted-foreground">{COSTO_OCULTO}</p>
-      </RecordSection>
-    );
-  }
-  return (
-    <RecordSection
-      title="Costos"
-      description="Resumen de costo del despacho (valores almacenados, sin recálculo)."
-    >
-      <RecordFieldGrid>
-        <RecordField label="Costo landed ítems (ARS)">
-          {fmtMoney(financiero.landedItemsTotal)}
-        </RecordField>
-        <RecordField label="Tributos capitalizables (DIE + Tasa + Arancel)">
-          {fmtMoney(financiero.tributosCapitalizables)}
-        </RecordField>
-        <RecordField label="Cash-out / crédito (IVA + IIBB + Ganancias — no costo)">
-          {fmtMoney(financiero.tributosCashOut)}
-        </RecordField>
-      </RecordFieldGrid>
-      <p className="text-[12px] text-muted-foreground">
-        Detalle completo de costos (clasificación, cash-out vs costo, memoria de cálculo):
-        disponible en PR-023b/PR-023c.
-      </p>
-    </RecordSection>
-  );
-}
-
 function AsientoTab({ vista }: { vista: DespachoVista }) {
   return (
     <RecordSection title="Asiento">
@@ -310,10 +280,12 @@ function DespachoTabContent({
   activeTab,
   vista,
   financiero,
+  costos,
 }: {
   activeTab: string;
   vista: DespachoVista;
   financiero: DespachoFinanciero | null;
+  costos: CostosVista | null;
 }): ReactNode {
   // Mapa de elementos (lazy: el componente sólo se ejecuta al renderizar el
   // elegido) → dispatcher de complejidad 1, sin switch de 8 ramas.
@@ -322,7 +294,7 @@ function DespachoTabContent({
     items: <ItemsTab vista={vista} financiero={financiero} />,
     tributos: <TributosTab financiero={financiero} />,
     facturas: <FacturasTab vista={vista} financiero={financiero} />,
-    costos: <CostosTab financiero={financiero} />,
+    costos: <CostosTabContent costos={costos} />,
     asiento: <AsientoTab vista={vista} />,
     documentos: <DocumentosTab />,
     auditoria: <AuditoriaTab despachoId={vista.id} />,
@@ -334,10 +306,12 @@ export function DespachoRecord({
   vista,
   financiero,
   activeTab,
+  costos,
 }: {
   vista: DespachoVista;
   financiero: DespachoFinanciero | null;
   activeTab: string;
+  costos: CostosVista | null;
 }) {
   return (
     <RecordLayout
@@ -403,7 +377,12 @@ export function DespachoRecord({
         ]}
       />
 
-      <DespachoTabContent activeTab={activeTab} vista={vista} financiero={financiero} />
+      <DespachoTabContent
+        activeTab={activeTab}
+        vista={vista}
+        financiero={financiero}
+        costos={costos}
+      />
     </RecordLayout>
   );
 }
