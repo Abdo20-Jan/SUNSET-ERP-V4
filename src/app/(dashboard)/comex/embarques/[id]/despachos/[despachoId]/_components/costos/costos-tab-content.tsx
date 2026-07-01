@@ -1,6 +1,7 @@
 import { fmtMoney } from "@/lib/format";
 import { RecordField, RecordFieldGrid, RecordSection } from "@/components/record/record-section";
 
+import { MemoriaCalculoWindow } from "../memoria-calculo-window";
 import type { CostosVista } from "../costos-vista";
 import { CostoConsistencia } from "./costo-consistencia";
 import { CostoFacturasVinculadas } from "./costo-facturas-vinculadas";
@@ -44,12 +45,21 @@ function CostosLegacy({ costos }: { costos: Extract<CostosVista, { kind: "LEGACY
   );
 }
 
-function CostosCruzado({ costos }: { costos: Extract<CostosVista, { kind: "CRUZADO" }> }) {
+function CostosCruzado({
+  costos,
+  despachoId,
+}: {
+  costos: Extract<CostosVista, { kind: "CRUZADO" }>;
+  despachoId: string;
+}) {
   return (
     <div className="flex flex-col gap-3">
       <CostoResumenLanded componentes={costos.componentes} baseRateio={costos.baseRateio} />
       <CostoTotalesComponente componentes={costos.componentes} />
       <CostoPorItem items={costos.items} />
+      {/* PR-023c: memoria de cálculo detallada (participación/ajuste) + Simular + export
+          auditado. Sólo se monta dentro de la rama CRUZADO ya gateada server-side. */}
+      <MemoriaCalculoWindow despachoId={despachoId} estado={costos.estado} />
       <CostoTributosPercepciones tributos={costos.tributos} />
       <CostoFacturasVinculadas facturas={costos.facturas} />
       <CostoConsistencia consistencia={costos.consistencia} />
@@ -59,7 +69,13 @@ function CostosCruzado({ costos }: { costos: Extract<CostosVista, { kind: "CRUZA
 
 /** Dispatcher read-only de la pestaña Costos. `costos === null` ⇒ oculto por
  * permiso (el valor jamás se serializó server-side). */
-export function CostosTabContent({ costos }: { costos: CostosVista | null }) {
+export function CostosTabContent({
+  costos,
+  despachoId,
+}: {
+  costos: CostosVista | null;
+  despachoId: string;
+}) {
   if (costos === null) return <MensajeSimple mensaje={COSTO_OCULTO} />;
   if (costos.kind === "COSTOS_ABIERTOS") {
     return (
@@ -67,5 +83,5 @@ export function CostosTabContent({ costos }: { costos: CostosVista | null }) {
     );
   }
   if (costos.kind === "LEGACY") return <CostosLegacy costos={costos} />;
-  return <CostosCruzado costos={costos} />;
+  return <CostosCruzado costos={costos} despachoId={despachoId} />;
 }
