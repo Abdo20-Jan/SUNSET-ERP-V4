@@ -38,6 +38,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { PagarVepDespachoWorkWindow } from "./pagar-vep-despacho-work-window";
 import type { CuentaBancariaArsOption } from "./vep-section";
 
 import type { Moneda } from "../../reportes/_components/moneda-toggle";
@@ -145,7 +146,7 @@ export function VepDespachoSection({
         </CardContent>
       </Card>
 
-      <PagarVepDespachoDialog
+      <PagarVepDespachoWorkWindow
         vep={pagar}
         cuentasBancarias={cuentasBancarias}
         saldoCreditoAduana={saldoCreditoAduana}
@@ -156,7 +157,10 @@ export function VepDespachoSection({
   );
 }
 
-function PagarVepDespachoDialog({
+// PR-025b-2: dialog legado mantido en árbol como dead export (rollback) — la
+// superficie viva es `PagarVepDespachoWorkWindow` (mismo body/action, sólo
+// cambió el contenedor Dialog → FloatingWorkWindow, G-04).
+export function PagarVepDespachoDialog({
   vep,
   cuentasBancarias,
   saldoCreditoAduana,
