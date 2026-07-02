@@ -42,7 +42,10 @@ import {
 } from "@/components/ui/table";
 
 import type { Moneda } from "../../reportes/_components/moneda-toggle";
-import { PrestamoDetalleSheet } from "./prestamo-detalle-sheet";
+// TES-02 · PR-025b: el detalle abre en FloatingWorkWindow (G-04, sin drawer
+// lateral). El sheet legado `prestamo-detalle-sheet.tsx` queda en árbol, no
+// importado (rollback).
+import { PrestamoDetalleWorkWindow } from "./prestamo-detalle-work-window";
 
 function estadoVariant(estado: AsientoEstado): "default" | "outline" | "secondary" {
   switch (estado) {
@@ -275,7 +278,7 @@ export function PrestamosTable({
         </DialogContent>
       </Dialog>
 
-      <PrestamoDetalleSheet
+      <PrestamoDetalleWorkWindow
         prestamoId={detalle?.id ?? null}
         open={detalle !== null}
         onOpenChange={(open) => {
