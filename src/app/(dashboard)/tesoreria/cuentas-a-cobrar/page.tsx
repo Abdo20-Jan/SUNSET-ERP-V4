@@ -4,7 +4,6 @@ import { Alert02Icon, Calendar03Icon, CheckmarkCircle02Icon } from "@hugeicons/c
 
 import { Card, CardContent } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
-import { DateBadge } from "@/components/ui/date-badge";
 import {
   Table,
   TableBody,
@@ -17,15 +16,12 @@ import { auth } from "@/lib/auth";
 import { fmtMoney, fmtMontoPres, pickSaldoNativo } from "@/lib/format";
 import { toDecimal } from "@/lib/decimal";
 import { convertirBucket, sumarBucketsNativos, sumarSaldosNativos } from "@/lib/aging-presentacion";
+import { puedeVerSaldo } from "@/lib/permisos-masking";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
-import {
-  getCuentasACobrar,
-  getSaldosPorClienteConAging,
-  type CxCRow,
-  type SaldoClienteAging,
-  type VentaPendiente,
-} from "@/lib/services/cuentas-a-cobrar";
+import { listarCuentasACobrarWorklist } from "@/lib/services/cuentas-a-cobrar-worklist";
+import type { CxCRow } from "@/lib/services/cuentas-a-cobrar";
 
+import { CuentasACobrarWorklist } from "./cuentas-a-cobrar-worklist";
 import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
 
 type SearchParams = Promise<{ filtro?: string; moneda?: string }>;
@@ -33,13 +29,36 @@ type SearchParams = Promise<{ filtro?: string; moneda?: string }>;
 export const dynamic = "force-dynamic";
 
 export default async function CuentasACobrarPage({ searchParams }: { searchParams: SearchParams }) {
-  const [params, session, cotizacion, data, clientes] = await Promise.all([
+  // Gate VER_SALDO (TES-03 · PR-025c, espejo de saldos-proveedores/PR-025b):
+  // TODA la página son agregados de saldo (aging por cliente, KPIs, ventas
+  // pendientes, valores a cobrar) → sin permiso se omite la superficie entera
+  // ANTES de cualquier fetch (el motor de aging ni se invoca; nada monetario
+  // entra al payload RSC). Aviso server-rendered — NO usar el PermissionGate
+  // client como control (serializaría los datos igual).
+  const verSaldo = await puedeVerSaldo();
+  if (!verSaldo) {
+    return (
+      <div className="flex flex-col gap-3">
+        <h1 className="text-[15px] font-semibold tracking-tight">Cuentas a cobrar</h1>
+        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 px-4 text-center">
+          <p className="text-sm font-medium text-foreground">Acceso restringido</p>
+          <p className="max-w-md text-xs text-muted-foreground">
+            Necesitás el permiso de saldos de tesorería (tesoreria.verSaldo) para ver las cuentas a
+            cobrar.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const [params, session, cotizacion, worklistData] = await Promise.all([
     searchParams,
     auth(),
     getCotizacionParaFecha(new Date()),
-    getCuentasACobrar(),
-    getSaldosPorClienteConAging(),
+    listarCuentasACobrarWorklist(verSaldo),
   ]);
+  const data = worklistData?.cuentas ?? { clientes: [], valoresACobrar: [], totalGeneral: "0.00" };
+  const clientes = worklistData?.clientes ?? [];
 
   const { filtro } = params;
   const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
@@ -153,11 +172,11 @@ export default async function CuentasACobrarPage({ searchParams }: { searchParam
         <KpiCard label="Saldo contable total" value={`${totalContable} ${moneda}`} tone="muted" />
       </div>
 
-      <ClientesSection
-        list={list}
+      <CuentasACobrarWorklist
+        clientes={list}
         moneda={moneda}
         tc={tc}
-        emptyMsg={
+        emptyMessage={
           filtro === "vencidas"
             ? "Ningún cliente con facturas vencidas."
             : "Sin saldos pendientes a cobrar."
@@ -174,206 +193,6 @@ export default async function CuentasACobrarPage({ searchParams }: { searchParam
         />
       )}
     </div>
-  );
-}
-
-// =============================================================
-// Sección principal — Clientes con detalle de ventas pendientes
-// =============================================================
-function ClientesSection({
-  list,
-  moneda,
-  tc,
-  emptyMsg,
-}: {
-  list: SaldoClienteAging[];
-  moneda: Moneda;
-  tc: string | null;
-  emptyMsg: string;
-}) {
-  if (list.length === 0) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold">Clientes</h2>
-          <p className="rounded-lg border border-dashed bg-muted/30 p-4 text-center text-sm text-muted-foreground">
-            {emptyMsg}
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex flex-col gap-0.5">
-          <h2 className="text-sm font-semibold">Clientes</h2>
-          <p className="text-xs text-muted-foreground">
-            {list.length} cliente{list.length === 1 ? "" : "s"} con saldo deudor. Detalle de
-            facturas con aging de vencimiento.
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          {list.map((c) => (
-            <ClienteCard key={c.clienteId} cliente={c} moneda={moneda} tc={tc} />
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ClienteCard({
-  cliente,
-  moneda,
-  tc,
-}: {
-  cliente: SaldoClienteAging;
-  moneda: Moneda;
-  tc: string | null;
-}) {
-  const cobrarHref = (() => {
-    const params = new URLSearchParams({
-      tipo: "COBRO",
-      monto: cliente.saldoTotal,
-      descripcion: `Cobro de ${cliente.clienteNombre}`,
-    });
-    if (cliente.cuentaContableId != null) {
-      params.set("cuentaContableId", String(cliente.cuentaContableId));
-    }
-    return `/tesoreria/movimientos/nuevo?${params.toString()}`;
-  })();
-
-  // Saldo y buckets en presentación native-aware.
-  const saldoPick = pickSaldoNativo(cliente.saldoTotal, cliente.saldoTotalUsd);
-  const buckets = sumarBucketsNativos(
-    cliente.ventas.map((v) => ({ bucket: v.bucket, moneda: v.moneda, montoNativo: v.montoNativo })),
-  );
-
-  return (
-    <div className="rounded-lg border bg-card">
-      <div className="flex items-start justify-between gap-3 border-b p-3">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium">{cliente.clienteNombre}</span>
-            {cliente.cuentaCodigo && (
-              <span className="font-mono text-[11px] text-muted-foreground">
-                {cliente.cuentaCodigo}
-              </span>
-            )}
-          </div>
-          {cliente.cuit && (
-            <span className="text-xs text-muted-foreground">CUIT {cliente.cuit}</span>
-          )}
-          <div className="mt-1 flex items-center gap-2 text-xs">
-            {toDecimal(cliente.vencido).gt(0) && (
-              <span className="rounded-full border border-red-300 bg-red-50 px-2 py-0.5 font-medium text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
-                Vencido: {fmtMoney(convertirBucket(buckets.vencida, moneda, tc))}
-              </span>
-            )}
-            {toDecimal(cliente.proximo).gt(0) && (
-              <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-medium text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-                ≤ 7d: {fmtMoney(convertirBucket(buckets.proxima, moneda, tc))}
-              </span>
-            )}
-            {toDecimal(cliente.alDia).gt(0) && (
-              <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-                Al día: {fmtMoney(convertirBucket(buckets.al_dia, moneda, tc))}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <span className="font-mono text-base font-semibold tabular-nums">
-            {moneda} {fmtMontoPres(saldoPick.valor, saldoPick.monedaNativa, moneda, tc)}
-          </span>
-          <Link href={cobrarHref} className={buttonVariants({ variant: "default", size: "sm" })}>
-            <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} className="size-3.5" />
-            Cobrar
-          </Link>
-        </div>
-      </div>
-
-      {cliente.ventas.length > 0 && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-44">Venta</TableHead>
-              <TableHead className="w-32">Fecha</TableHead>
-              <TableHead className="w-32">Vencimiento</TableHead>
-              <TableHead className="w-20">Estado</TableHead>
-              <TableHead className="text-right">Pendiente</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {cliente.ventas.map((v) => (
-              <VentaRow key={v.id} venta={v} moneda={moneda} tc={tc} />
-            ))}
-          </TableBody>
-        </Table>
-      )}
-    </div>
-  );
-}
-
-function VentaRow({
-  venta,
-  moneda,
-  tc,
-}: {
-  venta: VentaPendiente;
-  moneda: Moneda;
-  tc: string | null;
-}) {
-  const fechaVenc = venta.fechaVencimiento ? new Date(venta.fechaVencimiento) : null;
-  const fecha = new Date(venta.fecha);
-
-  const bucketLabel: Record<VentaPendiente["bucket"], string> = {
-    vencida: "Vencida",
-    proxima: "Próxima",
-    al_dia: "Al día",
-    sin_fecha: "—",
-  };
-
-  const bucketClass: Record<VentaPendiente["bucket"], string> = {
-    vencida:
-      "border-red-300 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200",
-    proxima:
-      "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
-    al_dia:
-      "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200",
-    sin_fecha: "border-muted bg-muted/50 text-muted-foreground",
-  };
-
-  return (
-    <TableRow>
-      <TableCell className="font-mono text-xs">
-        <Link
-          href={`/ventas/${venta.id}`}
-          className="underline underline-offset-2 hover:text-foreground"
-        >
-          {venta.numero}
-        </Link>
-      </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
-        {fecha.toLocaleDateString("es-AR", { timeZone: "UTC" })}
-      </TableCell>
-      <TableCell>
-        <DateBadge fecha={fechaVenc} />
-      </TableCell>
-      <TableCell>
-        <span
-          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${bucketClass[venta.bucket]}`}
-        >
-          {bucketLabel[venta.bucket]}
-        </span>
-      </TableCell>
-      <TableCell className="text-right font-mono tabular-nums">
-        {fmtMontoPres(venta.montoNativo, venta.moneda as Moneda, moneda, tc)}
-      </TableCell>
-    </TableRow>
   );
 }
 
