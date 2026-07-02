@@ -2,13 +2,12 @@ import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Alert02Icon, Calendar03Icon, CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 
-import {
-  getSaldosPorProveedorConAging,
-  listarProveedoresParaIntermediario,
-} from "@/lib/services/cuentas-a-pagar";
+import { listarProveedoresParaIntermediario } from "@/lib/services/cuentas-a-pagar";
 import { listarCuentasBancariasParaMovimiento } from "@/lib/actions/movimientos-tesoreria";
+import { listarSaldosProveedoresWorklist } from "@/lib/services/saldos-proveedores-worklist";
 import { getDefaultFecha } from "@/lib/server/fecha-default";
 import { auth } from "@/lib/auth";
+import { puedeVerSaldo } from "@/lib/permisos-masking";
 import { fmtMoney } from "@/lib/format";
 import { convertirBucket, sumarBucketsNativos, sumarSaldosNativos } from "@/lib/aging-presentacion";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
@@ -17,7 +16,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 
 import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
-import { SaldosBatchPago } from "./saldos-batch-pago";
+// TES-02 · PR-025b: la page monta la worklist (EnterpriseDataGrid + panel
+// batch). El componente legado `saldos-batch-pago.tsx` queda en árbol, no
+// importado (rollback).
+import { SaldosProveedoresWorklist } from "./saldos-proveedores-worklist";
 
 type SearchParams = Promise<{ filtro?: string; moneda?: string }>;
 
@@ -28,16 +30,38 @@ export default async function SaldosProveedoresPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const [params, session, cotizacion, todos, cuentasBancarias, intermediarios, defaultFecha] =
+  // Gate VER_SALDO (PR-025): TODA la página son agregados de saldo (aging,
+  // KPIs, per-factura) y el batch-pago es saldo-driven → sin permiso se omite
+  // la superficie entera ANTES de cualquier fetch (el motor de aging ni se
+  // invoca; nada monetario entra al payload RSC). Aviso server-rendered — NO
+  // usar el PermissionGate client como control (serializaría los datos igual).
+  const verSaldo = await puedeVerSaldo();
+  if (!verSaldo) {
+    return (
+      <div className="flex flex-col gap-3">
+        <h1 className="text-[15px] font-semibold tracking-tight">Saldos por proveedor</h1>
+        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 px-4 text-center">
+          <p className="text-sm font-medium text-foreground">Acceso restringido</p>
+          <p className="max-w-md text-xs text-muted-foreground">
+            Necesitás el permiso de saldos de tesorería (tesoreria.verSaldo) para ver los saldos por
+            proveedor.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const [params, session, cotizacion, todosRaw, cuentasBancarias, intermediarios, defaultFecha] =
     await Promise.all([
       searchParams,
       auth(),
       getCotizacionParaFecha(new Date()),
-      getSaldosPorProveedorConAging(),
+      listarSaldosProveedoresWorklist(verSaldo),
       listarCuentasBancariasParaMovimiento(),
       listarProveedoresParaIntermediario(),
       getDefaultFecha(),
     ]);
+  const todos = todosRaw ?? [];
 
   const { filtro } = params;
   const monedaPreferida: Moneda = session?.user.monedaPreferida === "ARS" ? "ARS" : "USD";
@@ -142,7 +166,7 @@ export default async function SaldosProveedoresPage({
         />
       </div>
 
-      <SaldosBatchPago
+      <SaldosProveedoresWorklist
         proveedores={list}
         intermediarios={intermediarios}
         cuentasBancarias={cuentasBancarias}

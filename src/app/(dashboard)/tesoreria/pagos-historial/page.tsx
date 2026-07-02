@@ -5,8 +5,13 @@ import { fmtMontoPres } from "@/lib/format";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { Moneda } from "@/generated/prisma/client";
 
+import { Card } from "@/components/ui/card";
+
 import { MonedaToggle, type Moneda as MonedaPres } from "../../reportes/_components/moneda-toggle";
-import { PagosHistorialTable } from "./pagos-historial-table";
+// TES-02 · PR-025b: la page monta la worklist (EnterpriseDataGrid). La tabla
+// legada `pagos-historial-table.tsx` sigue VIVA — la consume la pestaña Pagos
+// de la ficha de proveedor (maestros/proveedores/[id]).
+import { PagosHistorialWorklist } from "./pagos-historial-worklist";
 import { PagosHistorialFilters } from "./pagos-historial-filters";
 
 type SearchParams = Promise<{
@@ -104,7 +109,9 @@ export default async function PagosHistorialPage({ searchParams }: { searchParam
         selectedHasta={params.hasta ?? ""}
       />
 
-      <PagosHistorialTable pagos={pagos} />
+      <Card className="py-0 p-3">
+        <PagosHistorialWorklist pagos={pagos} />
+      </Card>
     </div>
   );
 }

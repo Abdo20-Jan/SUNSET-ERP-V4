@@ -43,7 +43,10 @@ import {
 } from "@/components/ui/table";
 
 import type { Moneda } from "../../reportes/_components/moneda-toggle";
-import { AnticipoDetalleSheet } from "./anticipo-detalle-sheet";
+// TES-02 · PR-025b: el detalle abre en FloatingWorkWindow (G-04, sin drawer
+// lateral). El sheet legado `anticipo-detalle-sheet.tsx` queda en árbol, no
+// importado (rollback).
+import { AnticipoDetalleWorkWindow } from "./anticipo-detalle-work-window";
 
 const ESTADO_LABEL: Record<EstadoAnticipo, string> = {
   VIGENTE: "Vigente",
@@ -262,7 +265,7 @@ export function AnticiposTable({
         </DialogContent>
       </Dialog>
 
-      <AnticipoDetalleSheet
+      <AnticipoDetalleWorkWindow
         anticipoId={detalle?.id ?? null}
         proveedorId={detalle?.proveedor.id ?? null}
         open={detalle !== null}
