@@ -41,6 +41,9 @@ import {
 
 import type { RefuerzoVepPendiente, VepEmbarque } from "@/lib/services/cuentas-a-pagar";
 
+import { PagarRefuerzoVepWorkWindow } from "./pagar-refuerzo-vep-work-window";
+import { PagarVepWorkWindow } from "./pagar-vep-work-window";
+
 import type { Moneda } from "../../reportes/_components/moneda-toggle";
 
 export type CuentaBancariaArsOption = {
@@ -237,14 +240,14 @@ export function VepSection({
         </Card>
       )}
 
-      <PagarVepDialog
+      <PagarVepWorkWindow
         vep={pagar}
         cuentasBancarias={cuentasBancarias}
         saldoCreditoAduana={saldoCreditoAduana}
         onClose={() => setPagar(null)}
         defaultFecha={defaultFecha}
       />
-      <PagarRefuerzoVepDialog
+      <PagarRefuerzoVepWorkWindow
         refuerzo={pagarRefuerzo}
         cuentasBancarias={cuentasBancarias}
         saldoCreditoAduana={saldoCreditoAduana}
@@ -255,7 +258,10 @@ export function VepSection({
   );
 }
 
-function PagarVepDialog({
+// PR-025b-2: dialog legado mantido en árbol como dead export (rollback) — la
+// superficie viva es `PagarVepWorkWindow` (mismo body/action, sólo cambió el
+// contenedor Dialog → FloatingWorkWindow, G-04).
+export function PagarVepDialog({
   vep,
   cuentasBancarias,
   saldoCreditoAduana,
@@ -531,7 +537,10 @@ function PagarVepDialog({
   );
 }
 
-function PagarRefuerzoVepDialog({
+// PR-025b-2: dialog legado mantido en árbol como dead export (rollback) — la
+// superficie viva es `PagarRefuerzoVepWorkWindow` (mismo body/action, sólo
+// cambió el contenedor Dialog → FloatingWorkWindow, G-04).
+export function PagarRefuerzoVepDialog({
   refuerzo,
   cuentasBancarias,
   saldoCreditoAduana,

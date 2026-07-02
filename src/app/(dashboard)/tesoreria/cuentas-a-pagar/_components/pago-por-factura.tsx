@@ -47,16 +47,20 @@ import {
 } from "@/components/ui/table";
 import { ConceptoRG830 } from "@/generated/prisma/client";
 
+import { PagoFacturaWorkWindow } from "./pago-factura-work-window";
+
 import type { Moneda } from "../../../reportes/_components/moneda-toggle";
 
-const CONCEPTO_LABEL: Record<ConceptoRG830, string> = {
+// PR-025b-2: os símbolos module-scope compartilhados com `PagoFacturaWorkWindow`
+// ganharam `export` (sem mudança de corpo) para evitar duas cópias vivas.
+export const CONCEPTO_LABEL: Record<ConceptoRG830, string> = {
   BIENES_DE_CAMBIO: "Bienes de cambio",
   HONORARIOS: "Honorarios",
   ALQUILERES: "Alquileres",
   SERVICIOS_GENERALES: "Servicios generales",
   LOCACIONES_SERVICIOS: "Locaciones / servicios",
 };
-const CONCEPTO_VALUES = Object.keys(CONCEPTO_LABEL) as ConceptoRG830[];
+export const CONCEPTO_VALUES = Object.keys(CONCEPTO_LABEL) as ConceptoRG830[];
 
 type FacturaPendiente = {
   origen: "compra" | "embarque" | "gasto";
@@ -84,7 +88,7 @@ type SaldoProveedorAging = {
   facturas: FacturaPendiente[];
 };
 
-type FacturaConProveedor = FacturaPendiente & {
+export type FacturaConProveedor = FacturaPendiente & {
   proveedorId: string;
   proveedorNombre: string;
   cuentaContableId: number | null;
@@ -99,27 +103,27 @@ type Props = {
   tc: string | null;
 };
 
-const ORIGEN_LABEL: Record<FacturaPendiente["origen"], string> = {
+export const ORIGEN_LABEL: Record<FacturaPendiente["origen"], string> = {
   compra: "Compra",
   gasto: "Gasto",
   embarque: "Costo embarque",
 };
 
-const ORIGEN_BADGE: Record<FacturaPendiente["origen"], string> = {
+export const ORIGEN_BADGE: Record<FacturaPendiente["origen"], string> = {
   compra: "C",
   gasto: "G",
   embarque: "EMB",
 };
 
-function todayIso(): string {
+export function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function facturaKey(f: { origen: string; id: string }): string {
+export function facturaKey(f: { origen: string; id: string }): string {
   return `${f.origen}-${f.id}`;
 }
 
-function sumarMontos(facturas: FacturaConProveedor[]): string {
+export function sumarMontos(facturas: FacturaConProveedor[]): string {
   let total = 0;
   for (const f of facturas) total += Number(f.monto);
   return total.toFixed(2);
@@ -462,7 +466,7 @@ export function PagoPorFactura({
         )}
       </CardContent>
 
-      <PagoFacturaDialog
+      <PagoFacturaWorkWindow
         open={dialogOpen}
         facturas={selectedFacturas}
         cuentasBancarias={cuentasBancarias}
@@ -479,7 +483,10 @@ export function PagoPorFactura({
   );
 }
 
-function PagoFacturaDialog({
+// PR-025b-2: dialog legado mantido en árbol como dead export (rollback) — la
+// superficie viva es `PagoFacturaWorkWindow` (mismo body/actions, sólo cambió
+// el contenedor Dialog → FloatingWorkWindow, G-04).
+export function PagoFacturaDialog({
   open,
   facturas,
   cuentasBancarias,
