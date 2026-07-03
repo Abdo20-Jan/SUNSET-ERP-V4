@@ -1,29 +1,46 @@
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, ArrowLeftRightIcon } from "@hugeicons/core-free-icons";
+import { Add01Icon } from "@hugeicons/core-free-icons";
 
 import { db } from "@/lib/db";
-import { AsientoEstado, Prisma } from "@/generated/prisma/client";
 import { buttonVariants } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Pagination } from "@/components/ui/pagination";
-import { parsePaginationParams } from "@/components/ui/pagination-params";
-import { DateRangeFilter } from "@/components/date-range-filter";
+import { Card, CardContent } from "@/components/ui/card";
+import { listarAsientosWorklist } from "@/lib/services/asientos-worklist";
 
-import { AsientosFilters } from "./asientos-filters";
-import { AsientosTable, type AsientoRow } from "./asientos-table";
+import {
+  ASIENTOS_VISTAS,
+  type AsientosVista,
+  type PeriodoOption,
+  resolverAsientosVista,
+  resolverPeriodoDefault,
+} from "./asientos-presentacion";
+import { AsientosWorklist } from "./asientos-worklist";
+import { MoverPeriodoLink, PeriodoCuentaFilters } from "./periodo-cuenta-filters";
 
-const ESTADO_VALUES = new Set<AsientoEstado>([
-  AsientoEstado.BORRADOR,
-  AsientoEstado.CONTABILIZADO,
-  AsientoEstado.ANULADO,
-]);
+/*
+ * Worklist canónica de asientos (CONT-01 · PR-028, OD-07). Sustituye la tabla
+ * legada (`asientos-table.tsx` + `asiento-detalle-sheet.tsx`, conservadas en
+ * árbol NO importadas = rollback) por EnterpriseDataGrid + FloatingWorkWindow.
+ *
+ * Filtrado server-driven por URL (lección PR-010): `?vista=` (presets
+ * oficiales) · `?periodo=<id>|todos` (filtro principal — default: el período
+ * que contiene hoy) · `?cuentaId=` (asientos que tocan la cuenta) ·
+ * `?desde/?hasta` (refinamiento opcional por fecha). Migración de params
+ * legados: `estado`→vista `anulados`/chip client · `q`→quickSearch client ·
+ * `page/perPage`→paginación del grid (sin deep-links externos — degradan a
+ * "todos").
+ */
+
+const ESTADO_LEGADO_A_VISTA: Record<string, AsientosVista> = {
+  ANULADO: "anulados",
+};
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function parseEstado(value: string | undefined): AsientoEstado | null {
-  if (!value) return null;
-  return ESTADO_VALUES.has(value as AsientoEstado) ? (value as AsientoEstado) : null;
+function parseId(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 function parseDate(value: string | undefined): Date | undefined {
@@ -42,89 +59,109 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function firstOfMonthIso(): string {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-}
-
 type SearchParams = Promise<{
+  vista?: string;
+  periodo?: string;
+  cuentaId?: string;
   desde?: string;
   hasta?: string;
+  /** Param legado (pre-PR-028) — degrada a la vista equivalente. */
   estado?: string;
-  q?: string;
-  page?: string;
-  perPage?: string;
 }>;
 
 export const dynamic = "force-dynamic";
 
+const BASE_HREF = "/contabilidad/asientos";
+
+function buildHref(
+  vista: AsientosVista,
+  params: { periodo?: string; cuentaId?: string; desde?: string; hasta?: string },
+): string {
+  const qp = new URLSearchParams();
+  if (vista !== "todos") qp.set("vista", vista);
+  if (params.periodo) qp.set("periodo", params.periodo);
+  if (params.cuentaId) qp.set("cuentaId", params.cuentaId);
+  if (params.desde) qp.set("desde", params.desde);
+  if (params.hasta) qp.set("hasta", params.hasta);
+  const qs = qp.toString();
+  return qs ? `${BASE_HREF}?${qs}` : BASE_HREF;
+}
+
+function resolverVistaConLegado(params: { vista?: string; estado?: string }): AsientosVista {
+  const vista = resolverAsientosVista(params.vista);
+  if (vista !== "todos") return vista;
+  if (params.estado && ESTADO_LEGADO_A_VISTA[params.estado]) {
+    return ESTADO_LEGADO_A_VISTA[params.estado];
+  }
+  return vista;
+}
+
 export default async function AsientosPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
-  const { page, perPage } = parsePaginationParams(params);
 
-  const estadoFilter = parseEstado(params.estado);
-  const qFilter = params.q?.trim() ?? "";
-
-  const desdeStr = params.desde ?? firstOfMonthIso();
-  const hastaStr = params.hasta ?? todayIso();
-  const fechaDesde = parseDate(desdeStr);
-  const fechaHasta = endOfDay(hastaStr);
-
-  const where: Prisma.AsientoWhereInput = {};
-  if (fechaDesde || fechaHasta) {
-    where.fecha = {
-      ...(fechaDesde && { gte: fechaDesde }),
-      ...(fechaHasta && { lte: fechaHasta }),
-    };
-  }
-  if (estadoFilter) where.estado = estadoFilter;
-  if (qFilter.length > 0) {
-    where.descripcion = { contains: qFilter, mode: "insensitive" };
-  }
-
-  const [asientos, total] = await Promise.all([
-    db.asiento.findMany({
-      where,
-      orderBy: [{ fecha: "desc" }, { numero: "desc" }],
+  const [periodosDb, cuentas] = await Promise.all([
+    db.periodoContable.findMany({
+      orderBy: { fechaInicio: "desc" },
       select: {
         id: true,
-        numero: true,
-        fecha: true,
-        descripcion: true,
+        codigo: true,
+        nombre: true,
         estado: true,
-        origen: true,
-        moneda: true,
-        totalDebe: true,
-        totalHaber: true,
-        periodo: { select: { codigo: true } },
+        fechaInicio: true,
+        fechaFin: true,
       },
-      take: perPage,
-      skip: (page - 1) * perPage,
     }),
-    db.asiento.count({ where }),
+    db.cuentaContable.findMany({
+      where: { tipo: "ANALITICA", activa: true },
+      orderBy: { codigo: "asc" },
+      select: { id: true, codigo: true, nombre: true },
+    }),
   ]);
 
-  const rows: AsientoRow[] = asientos.map((a) => ({
-    id: a.id,
-    numero: a.numero,
-    fecha: a.fecha,
-    descripcion: a.descripcion,
-    estado: a.estado,
-    origen: a.origen,
-    moneda: a.moneda,
-    totalDebe: a.totalDebe.toFixed(2),
-    totalHaber: a.totalHaber.toFixed(2),
-    periodoCodigo: a.periodo.codigo,
+  const periodos: PeriodoOption[] = periodosDb.map((p) => ({
+    id: p.id,
+    codigo: p.codigo,
+    nombre: p.nombre,
+    estado: p.estado,
+    fechaInicio: p.fechaInicio.toISOString(),
+    fechaFin: p.fechaFin.toISOString(),
   }));
 
-  const rangoLabel =
-    fechaDesde && fechaHasta
-      ? `del ${desdeStr} al ${hastaStr}`
-      : fechaHasta
-        ? `hasta ${hastaStr}`
-        : fechaDesde
-          ? `desde ${desdeStr}`
-          : "histórico completo";
+  const vista = resolverVistaConLegado(params);
+
+  // Período: `todos` explícito → sin filtro; id válido → ese; ausente/ inválido
+  // → default (el período que contiene hoy — el contador trabaja mes a mes).
+  let periodoSel: number | "todos";
+  const periodoParam = parseId(params.periodo);
+  if (params.periodo === "todos") {
+    periodoSel = "todos";
+  } else if (periodoParam !== undefined && periodos.some((p) => p.id === periodoParam)) {
+    periodoSel = periodoParam;
+  } else {
+    periodoSel = resolverPeriodoDefault(periodos, todayIso())?.id ?? "todos";
+  }
+
+  const cuentaId = parseId(params.cuentaId);
+  const fechaDesde = parseDate(params.desde);
+  const fechaHasta = endOfDay(params.hasta);
+
+  const { rows, total, truncado, kpis } = await listarAsientosWorklist({
+    vista,
+    periodoId: periodoSel === "todos" ? undefined : periodoSel,
+    cuentaId,
+    fechaDesde,
+    fechaHasta,
+  });
+
+  const periodoActivo = periodoSel === "todos" ? null : periodos.find((p) => p.id === periodoSel);
+  const rangoLabel = periodoActivo ? `período ${periodoActivo.codigo}` : "todos los períodos";
+
+  const hrefParams = {
+    periodo: params.periodo,
+    cuentaId: params.cuentaId,
+    desde: params.desde,
+    hasta: params.hasta,
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -136,13 +173,19 @@ export default async function AsientosPage({ searchParams }: { searchParams: Sea
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            href="/contabilidad/asientos/mover-periodo"
-            className={buttonVariants({ variant: "outline" })}
-          >
-            <HugeiconsIcon icon={ArrowLeftRightIcon} strokeWidth={2} />
-            Mover de período
-          </Link>
+          {ASIENTOS_VISTAS.map((v) => (
+            <Link
+              key={v.id}
+              href={buildHref(v.id, hrefParams)}
+              className={buttonVariants({
+                variant: vista === v.id ? "default" : "outline",
+                size: "sm",
+              })}
+            >
+              {v.label}
+            </Link>
+          ))}
+          <MoverPeriodoLink />
           <Link
             href="/contabilidad/asientos/nuevo"
             className={buttonVariants({ variant: "default" })}
@@ -153,15 +196,45 @@ export default async function AsientosPage({ searchParams }: { searchParams: Sea
         </div>
       </div>
 
-      <div className="flex flex-col gap-3">
-        <DateRangeFilter initialDesde={desdeStr} initialHasta={hastaStr} />
-        <AsientosFilters selectedEstado={estadoFilter ?? "all"} query={qFilter} />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <KpiCard label="Borradores" value={kpis.borradores} />
+        <KpiCard label="Contabilizados" value={kpis.contabilizados} />
+        <KpiCard label="Anulados" value={kpis.anulados} />
       </div>
 
-      <Card className="py-0">
-        <AsientosTable data={rows} />
-        <Pagination page={page} perPage={perPage} total={total} className="border-t" />
-      </Card>
+      <PeriodoCuentaFilters
+        periodos={periodos}
+        selectedPeriodoId={periodoSel}
+        cuentas={cuentas}
+        selectedCuentaId={cuentaId ?? null}
+      />
+
+      {truncado && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          Mostrando los primeros {rows.length} asientos de {total} — refiná el período o los filtros
+          para ver el resto. La exportación espeja este mismo corte.
+        </p>
+      )}
+
+      <AsientosWorklist
+        rows={rows}
+        emptyMessage={
+          vista === "todos"
+            ? "No hay asientos para el período seleccionado."
+            : "No hay asientos para la vista seleccionada."
+        }
+      />
     </div>
+  );
+}
+
+function KpiCard({ label, value }: { label: string; value: number }) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-1">
+        <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
+        <span className="font-mono text-xl font-semibold tabular-nums">{value}</span>
+      </CardContent>
+    </Card>
   );
 }
