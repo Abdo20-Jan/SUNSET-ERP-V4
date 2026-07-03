@@ -156,8 +156,29 @@ export const CENTERS: readonly NavCenter[] = [
     label: "Finanzas",
     icon: CreditCardIcon,
     overviewHref: "/tesoreria",
-    routePrefixes: ["/tesoreria", "/gastos", "/gastos-fijos"],
+    routePrefixes: ["/finanzas", "/tesoreria", "/gastos", "/gastos-fijos"],
     sections: [
+      {
+        // Vistas de gestión per-documento (FIN-01/FIN-02 · PR-026):
+        // "Finanzas programa · Tesorería ejecuta" (OD-09). Gate real =
+        // server-side en las pages (`VER_SALDO` página-entera); acá sólo el
+        // reflejo de nav (clave BASE ⇒ sin cambio visible con RBAC off).
+        label: "Gestión financiera",
+        items: [
+          {
+            label: "Cuentas a cobrar (gestión)",
+            href: "/finanzas/cuentas-a-cobrar",
+            icon: ReceiptDollarIcon,
+            permission: PERMISOS.VER_SALDO,
+          },
+          {
+            label: "Cuentas a pagar (gestión)",
+            href: "/finanzas/cuentas-a-pagar",
+            icon: ReceiptDollarIcon,
+            permission: PERMISOS.VER_SALDO,
+          },
+        ],
+      },
       {
         label: "Tesorería",
         items: [

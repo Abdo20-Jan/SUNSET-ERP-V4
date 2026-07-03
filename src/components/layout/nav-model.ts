@@ -4,9 +4,9 @@
  * Fonte de dados PURA (sem JSX) do `ModuleMegaMenu`, `GlobalSearch` e
  * `InternalTabs`. Deriva dos page_codes canônicos (SHELL-01) e das rotas
  * **reais** do `(dashboard)`. Só re-rotula/agrupa rotas existentes — **não**
- * cria, move nem renomeia rota alguma (Q5 Finanças×Tesouraria fica diferido;
- * por isso CxC/CxP/Flujo seguem apontando às rotas atuais `/tesoreria/*` e
- * `/reportes/*`).
+ * cria, move nem renomeia rota alguma (Q5 Finanças×Tesouraria: resolvido no
+ * PR-026 — FIN-01/FIN-02 apontam às vistas de gestión `/finanzas/*`; a
+ * execução segue acessível em `/tesoreria/*` e Flujo em `/reportes/*`).
  *
  * Páginas ainda inexistentes (COM-05, CLI-02, FIN-03, FIN-04, AUTO-01) entram
  * como `status: "future"` → renderizadas desabilitadas ("Pronto"), nunca
@@ -102,17 +102,34 @@ export const SHELL_MODULES: readonly ShellModule[] = [
   {
     label: "Finanzas",
     items: [
+      // PR-026 resuelve el Q5 Finanzas×Tesorería (placement A del dueño):
+      // FIN-01/FIN-02 son las vistas de GESTIÓN per-documento nuevas
+      // ("Finanzas programa · Tesorería ejecuta"); las rutas /tesoreria/*
+      // siguen accesibles abajo como vista de ejecución. `permission` es
+      // reflejo de nav — el control real es server-side en las pages.
+      {
+        label: "Cuentas a cobrar (gestión)",
+        href: "/finanzas/cuentas-a-cobrar",
+        status: "active",
+        pageCode: "FIN-01",
+        permission: PERMISOS.VER_SALDO,
+      },
+      {
+        label: "Cuentas a pagar (gestión)",
+        href: "/finanzas/cuentas-a-pagar",
+        status: "active",
+        pageCode: "FIN-02",
+        permission: PERMISOS.VER_SALDO,
+      },
       {
         label: "Cuentas a cobrar",
         href: "/tesoreria/cuentas-a-cobrar",
         status: "active",
-        pageCode: "FIN-01",
       },
       {
         label: "Cuentas a pagar",
         href: "/tesoreria/cuentas-a-pagar",
         status: "active",
-        pageCode: "FIN-02",
       },
       { label: "Saldos por proveedor", href: "/tesoreria/saldos-proveedores", status: "active" },
       {
