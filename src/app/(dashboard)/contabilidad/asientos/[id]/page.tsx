@@ -1,14 +1,18 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { format } from "date-fns";
 
 import { getAsientoDetalle, type AsientoDetalle } from "@/lib/actions/asientos";
 import { getAuditLog } from "@/lib/services/auditoria";
+import { documentoOrigen } from "@/lib/services/bi-drill-down";
 import { db } from "@/lib/db";
 import { resolveActiveTab } from "@/lib/record-tabs";
 import { AuditTrail } from "@/components/ui/audit-trail";
 import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { RecordHeader } from "@/components/layout/record-header";
+import { AdaptiveRecordHeader } from "@/components/record/adaptive-record-header";
+import { RecordActionBar } from "@/components/record/record-action-bar";
 import { RecordTabs } from "@/components/ui/record-tabs";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Separator } from "@/components/ui/separator";
@@ -20,6 +24,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+
+import { AsientoRecordActions } from "./asiento-record-actions";
 
 type PageParams = Promise<{ id: string }>;
 type SearchParams = Promise<{ tab?: string }>;
@@ -40,30 +46,70 @@ export default async function AsientoDetallePage({
   const detalle = result.detalle;
 
   const activeTab = resolveActiveTab(sp.tab, ["general", "historial"], "general");
-  const historialCount = await db.auditLog.count({
-    where: { tabla: "Asiento", registroId: id },
-  });
+  // Fetches ADITIVOS display-only (PR-028): historial count (pre-existente),
+  // documento de origen ([Ver origen] — reuso bi-drill-down, nunca se extiende
+  // `getAsientoDetalle`) y estado del período (badge "Cerrado" + link mover).
+  const [historialCount, doc, asientoPeriodo] = await Promise.all([
+    db.auditLog.count({ where: { tabla: "Asiento", registroId: id } }),
+    documentoOrigen(id),
+    db.asiento.findUnique({
+      where: { id },
+      select: { periodoId: true, periodo: { select: { estado: true } } },
+    }),
+  ]);
+  if (!asientoPeriodo) notFound();
+  const periodoCerrado = asientoPeriodo.periodo.estado === "CERRADO";
 
   return (
     <div className="flex flex-col gap-3">
-      <RecordHeader
+      <AdaptiveRecordHeader
         breadcrumb={[
           { label: "Asientos", href: "/contabilidad/asientos" },
           { label: `Asiento Nº ${detalle.numero}` },
         ]}
-        title={`Asiento Nº ${detalle.numero}`}
-        status={
+        codigo={`Asiento Nº ${detalle.numero}`}
+        status={<StatusBadge estado={detalle.estado} />}
+        indicators={
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge estado={detalle.estado} />
             <Badge variant="outline" className="font-mono text-xs">
               {detalle.periodoCodigo}
             </Badge>
             <Badge variant="ghost" className="text-xs">
               {detalle.origen}
             </Badge>
+            {periodoCerrado && (
+              <Badge variant="secondary" className="text-[10px] uppercase">
+                Período cerrado
+              </Badge>
+            )}
           </div>
         }
-        subtitle={detalle.descripcion}
+        entidad={<span className="text-sm">{detalle.descripcion}</span>}
+        valor={<span className="font-mono text-sm tabular-nums">{detalle.totalDebe}</span>}
+        meta={[
+          { label: "Fecha", value: format(detalle.fecha, "dd/MM/yyyy") },
+          { label: "Moneda", value: detalle.moneda },
+          {
+            label: "TC",
+            value: Number(detalle.tipoCambio).toFixed(detalle.moneda === "ARS" ? 2 : 6),
+          },
+        ]}
+      />
+
+      <RecordActionBar
+        left={<VerOrigenLink doc={doc} />}
+        right={
+          <AsientoRecordActions
+            asiento={{
+              id: detalle.id,
+              numero: detalle.numero,
+              descripcion: detalle.descripcion,
+              fecha: detalle.fecha.toISOString(),
+              estado: detalle.estado,
+            }}
+            periodoId={asientoPeriodo.periodoId}
+          />
+        }
       />
 
       <RecordTabs
@@ -77,6 +123,26 @@ export default async function AsientoDetallePage({
       {activeTab === "general" && <GeneralTab detalle={detalle} />}
       {activeTab === "historial" && <HistorialTab asientoId={id} />}
     </div>
+  );
+}
+
+/**
+ * [Ver origen] (OD-07 Q&A estructural 9): navega al documento de origen del
+ * asiento; deshabilitado con hint para asientos sin origen (manual/ajuste o
+ * relación sin ruta). Server-safe — el href viene resuelto de bi-drill-down.
+ */
+function VerOrigenLink({ doc }: { doc: Awaited<ReturnType<typeof documentoOrigen>> }) {
+  if (!doc) {
+    return (
+      <Button variant="outline" disabled title="Asiento manual — sin documento de origen">
+        Ver origen
+      </Button>
+    );
+  }
+  return (
+    <Link href={doc.href} className={buttonVariants({ variant: "outline" })}>
+      Ver origen: {doc.etiqueta}
+    </Link>
   );
 }
 
