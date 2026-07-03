@@ -55,6 +55,18 @@ function firstOfMonthIso(): string {
   return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 }
 
+// Los valores de los inputs de fecha se URL-encodean (URLSearchParams) antes
+// de entrar al href (CodeQL js/xss-through-dom — texto del DOM jamás crudo).
+function buildReporteHref(
+  cuenta: CuentaLibroMayorTarget | null,
+  desde: string,
+  hasta: string,
+): string {
+  if (!cuenta) return "/reportes/libro-mayor";
+  const qs = new URLSearchParams({ cuentaId: String(cuenta.id), desde, hasta });
+  return `/reportes/libro-mayor?${qs.toString()}`;
+}
+
 export function CuentaLibroMayorWindow({ cuenta, open, onOpenChange }: Props) {
   const [detalle, setDetalle] = useState<LibroMayorDetalle | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -100,9 +112,7 @@ export function CuentaLibroMayorWindow({ cuenta, open, onOpenChange }: Props) {
     fetchDetalle(cuentaId, { desde, hasta });
   };
 
-  const reporteHref = cuenta
-    ? `/reportes/libro-mayor?cuentaId=${cuenta.id}&desde=${desde}&hasta=${hasta}`
-    : "/reportes/libro-mayor";
+  const reporteHref = buildReporteHref(cuenta, desde, hasta);
 
   return (
     <FloatingWorkWindow
