@@ -1,120 +1,191 @@
 import Link from "next/link";
-import {
-  Building03Icon,
-  FactoryIcon,
-  PackageIcon,
-  TruckDeliveryIcon,
-} from "@hugeicons/core-free-icons";
+import { Alert02Icon, Building03Icon, PackageIcon } from "@hugeicons/core-free-icons";
 
-import {
-  listarEnProduccion,
-  listarEnTransito,
-  listarMatrizInventario,
-  listarStockAduanero,
-} from "@/lib/actions/inventario";
-import { isContenedorDesconsolidacionEnabled, isStockDualEnabled } from "@/lib/features";
+import { buttonVariants } from "@/components/ui/button";
 import { fmtInt } from "@/lib/format";
+import { puedeVerCostoStock } from "@/lib/permisos-masking";
+import {
+  DIAS_SIN_MOVIMIENTO,
+  filtrarPorVista,
+  type InventarioVista,
+  type InventarioWorklistRow,
+  listarInventarioWorklist,
+  ordenarPorDeposito,
+  resolverDias,
+  resolverVista,
+} from "@/lib/services/inventario-worklist";
 
 import { KpiCard } from "../dashboard/_components/kpi-card";
-import { InventarioTabs } from "./_components/inventario-tabs";
+import { InventarioWorklist } from "./_components/inventario-worklist";
 
-type SearchParams = Promise<{ q?: string; tab?: string }>;
+type SearchParams = Promise<{ vista?: string; agrupar?: string; dias?: string }>;
 
 export const dynamic = "force-dynamic";
 
+const BASE_HREF = "/inventario";
+
+// Sub-vistas oficiales data-backed (presets de URL server-side — lección
+// PR-010). [Divergencias]/[Bloqueado]/[Reservado] del OD-04 no tienen backing
+// model → omitidas (IMPLEMENTATION_NOTES_PR027).
+const VISTAS: Array<{ id: InventarioVista; label: string }> = [
+  { id: "todas", label: "Todas" },
+  { id: "bajo-minimo", label: "Bajo mínimo" },
+  { id: "negativos", label: "Negativos" },
+  { id: "en-transito", label: "En tránsito" },
+  { id: "en-fiscal", label: "En fiscal" },
+  { id: "futuro-comex", label: "Futuro Comex" },
+  { id: "sin-movimiento", label: "Sin movimiento" },
+];
+
+function buildHref(vista: InventarioVista, agrupar: boolean, dias: number): string {
+  const qp = new URLSearchParams();
+  if (vista !== "todas") qp.set("vista", vista);
+  if (agrupar) qp.set("agrupar", "deposito");
+  if (vista === "sin-movimiento" && dias !== 90) qp.set("dias", String(dias));
+  const qs = qp.toString();
+  return qs ? `${BASE_HREF}?${qs}` : BASE_HREF;
+}
+
+// KPIs mínimos del módulo operativo (G-08): conteos/sumas sobre TODAS las
+// filas (la vista filtra sólo el grid, espejo fin-cxc). Sin `stockActual`:
+// el Σ físico es la suma de TODOS los depósitos (semántica documentada).
+function kpisInventario(rows: InventarioWorklistRow[]) {
+  const productos = new Set(rows.map((r) => r.productoId));
+  const bajoMinimo = new Set(rows.flatMap((r) => (r.bajoMinimo ? [r.productoId] : [])));
+  return {
+    fisicoTotal: rows.reduce((acc, r) => acc + r.fisico, 0),
+    productos: productos.size,
+    negativos: rows.filter((r) => r.fisico < 0 || r.disponible < 0).length,
+    bajoMinimo: bajoMinimo.size,
+  };
+}
+
 export default async function InventarioPage({ searchParams }: { searchParams: SearchParams }) {
-  const { q, tab } = await searchParams;
+  const params = await searchParams;
 
-  const flagAduana = isContenedorDesconsolidacionEnabled();
+  // Gate de costo PRE-resuelto (PR-011): la proyección excluye la query de
+  // valorización sin la clave — el número no sale del SQL y la columna del
+  // grid ni se construye. Cantidades/alertas visibles a toda sesión (espejo
+  // de la página actual — sin permiso de acceso propio).
+  const verCosto = await puedeVerCostoStock();
+  const { rows } = await listarInventarioWorklist(verCosto);
 
-  const [{ productos, depositos }, transito, produccion, aduana] = await Promise.all([
-    listarMatrizInventario({ search: q }),
-    listarEnTransito({ search: q }),
-    listarEnProduccion({ search: q }),
-    flagAduana ? listarStockAduanero({ search: q }) : Promise.resolve(null),
-  ]);
+  const vista = resolverVista(params.vista);
+  const dias = resolverDias(params.dias);
+  const agrupar = params.agrupar === "deposito";
 
-  const flagSuffix = isStockDualEnabled() ? "" : " · stock dual: OFF";
+  // `?agrupar=deposito` es SÓLO presentación (el grid no tiene grouping):
+  // mismas filas contiguas por depósito — mismo multiset, mismos totales
+  // (trabado por test). Default: producto-céntrico (codigo, depósito).
+  const base = agrupar ? ordenarPorDeposito(rows) : rows;
+  const rowsVista = filtrarPorVista(base, vista, dias);
 
-  const tabsValidas = new Set<string>([
-    ...depositos.map((d) => d.id),
-    "transito",
-    "produccion",
-    ...(flagAduana ? ["aduana"] : []),
-  ]);
-  const initialTab = tab && tabsValidas.has(tab) ? tab : (depositos[0]?.id ?? "transito");
+  const kpis = kpisInventario(rows);
 
   return (
-    <main className="container mx-auto space-y-6 p-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Inventario</h1>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-[15px] font-semibold tracking-tight">Inventario · Stock general</h1>
           <p className="text-sm text-muted-foreground">
-            {productos.length} productos · {depositos.length} depósitos
-            {flagSuffix}
+            Una fila por producto × depósito (fuente: stock por depósito). Los movimientos entre
+            depósitos viven en{" "}
+            <Link href="/inventario/transferencias" className="underline underline-offset-2">
+              Transferencias
+            </Link>
+            .
           </p>
         </div>
-        <Link
-          href="/inventario/transferencias"
-          className="rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
-        >
-          Transferencias
-        </Link>
-      </header>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {VISTAS.map((v) => (
+            <Link
+              key={v.id}
+              href={buildHref(v.id, agrupar, dias)}
+              className={buttonVariants({
+                variant: vista === v.id ? "default" : "outline",
+                size: "sm",
+              })}
+            >
+              {v.label}
+            </Link>
+          ))}
+          <Link
+            href={buildHref(vista, !agrupar, dias)}
+            className={buttonVariants({ variant: agrupar ? "default" : "outline", size: "sm" })}
+          >
+            Por depósito
+          </Link>
+          <Link
+            href="/inventario/transferencias"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Transferencias
+          </Link>
+        </div>
+      </div>
 
-      <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+      {vista === "sin-movimiento" ? (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span>Sin movimiento hace</span>
+          {DIAS_SIN_MOVIMIENTO.map((d) => (
+            <Link
+              key={d}
+              href={buildHrefDias(agrupar, d)}
+              className={buttonVariants({
+                variant: dias === d ? "default" : "outline",
+                size: "sm",
+              })}
+            >
+              {d}d
+            </Link>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <KpiCard
-          label="Productos"
-          value={fmtInt(productos.length)}
+          label="Σ físico"
+          value={fmtInt(kpis.fisicoTotal)}
           icon={PackageIcon}
           accent="info"
-          hint="SKUs con stock físico"
+          hint="Unidades en todos los depósitos"
         />
         <KpiCard
-          label="Depósitos"
-          value={fmtInt(depositos.length)}
+          label="Productos"
+          value={fmtInt(kpis.productos)}
           icon={Building03Icon}
           accent="neutral"
-          hint="Activos"
+          hint="SKUs con stock o pipeline comex"
         />
         <KpiCard
-          label="En tránsito"
-          value={fmtInt(transito.filas.length)}
-          icon={TruckDeliveryIcon}
-          accent="neutral"
-          hint="Productos en embarques no nacionalizados"
+          label="Negativos"
+          value={fmtInt(kpis.negativos)}
+          icon={Alert02Icon}
+          accent={kpis.negativos > 0 ? "negative" : "neutral"}
+          hint="Posiciones con físico o disponible < 0"
         />
         <KpiCard
-          label="En producción"
-          value={fmtInt(produccion.filas.length)}
-          icon={FactoryIcon}
-          accent="neutral"
-          hint="Productos pedidos a fábrica sin embarcar"
+          label="Bajo mínimo"
+          value={fmtInt(kpis.bajoMinimo)}
+          icon={Alert02Icon}
+          accent={kpis.bajoMinimo > 0 ? "warning" : "neutral"}
+          hint="Productos bajo su stock mínimo"
         />
-      </section>
+      </div>
 
-      <form className="flex gap-2" action="/inventario">
-        <input
-          type="search"
-          name="q"
-          defaultValue={q ?? ""}
-          placeholder="Buscar por código o nombre…"
-          className="flex-1 rounded-md border bg-background px-3 py-2"
-        />
-        {tab ? <input type="hidden" name="tab" value={tab} /> : null}
-        <button type="submit" className="rounded-md border px-4 py-2 hover:bg-muted">
-          Buscar
-        </button>
-      </form>
-
-      <InventarioTabs
-        productos={productos}
-        depositos={depositos}
-        enTransito={transito.filas}
-        enProduccion={produccion.filas}
-        stockAduanero={aduana?.filas ?? null}
-        initialTab={initialTab}
+      <InventarioWorklist
+        rows={rowsVista}
+        verCosto={verCosto}
+        emptyMessage={
+          vista === "todas"
+            ? "Sin posiciones de stock."
+            : "Ninguna posición para la vista seleccionada."
+        }
       />
-    </main>
+    </div>
   );
+}
+
+function buildHrefDias(agrupar: boolean, dias: number): string {
+  return buildHref("sin-movimiento", agrupar, dias);
 }
