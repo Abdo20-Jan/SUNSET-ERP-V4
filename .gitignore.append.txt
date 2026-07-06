@@ -1,0 +1,4 @@
+# Agentic local runtime
+.ai_runtime/
+.hermes/
+.DS_Store
