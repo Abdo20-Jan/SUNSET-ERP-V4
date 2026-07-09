@@ -32,9 +32,9 @@ function pickInitialCierre(value: unknown): string {
   return "";
 }
 
-type StageOption = { id: string; nombre: string };
-type LeadOption = { id: string; nombre: string; empresa: string | null };
-type ClienteOption = { id: string; nombre: string };
+export type StageOption = { id: string; nombre: string };
+export type LeadOption = { id: string; nombre: string; empresa: string | null };
+export type ClienteOption = { id: string; nombre: string };
 
 type Props = {
   mode: "create" | "edit";
@@ -43,9 +43,26 @@ type Props = {
   stages: StageOption[];
   leads: LeadOption[];
   clientes: ClienteOption[];
+  // Aditivo (PR-030): hospedaje en FloatingWorkWindow (record de oportunidad).
+  // Sin host (páginas /nueva existentes) el comportamiento es EL MISMO de antes.
+  embedded?: boolean;
+  onCancel?: () => void;
+  onSuccess?: (r: { id: string }) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
-export function OportunidadForm({ mode, opId, initial, stages, leads, clientes }: Props) {
+export function OportunidadForm({
+  mode,
+  opId,
+  initial,
+  stages,
+  leads,
+  clientes,
+  embedded,
+  onCancel,
+  onSuccess,
+  onDirtyChange,
+}: Props) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -63,16 +80,33 @@ export function OportunidadForm({ mode, opId, initial, stages, leads, clientes }
         setError(result.error);
         return;
       }
-      const id = mode === "create" ? result.data.id : opId;
+      const id = mode === "create" ? result.data.id : (opId as string);
+      // Hospedado en ventana: el host cierra y refresca — sin router.push.
+      if (onSuccess) {
+        onSuccess({ id });
+        return;
+      }
       router.push(`/crm/oportunidades/${id}`);
       router.refresh();
     });
   }
 
+  function handleCancel() {
+    if (onCancel) {
+      onCancel();
+      return;
+    }
+    router.back();
+  }
+
   const cierreInicial = pickInitialCierre(initial?.cierreEstimado);
 
   return (
-    <form action={handleSubmit} className="space-y-4">
+    <form
+      action={handleSubmit}
+      onChange={() => onDirtyChange?.(true)}
+      className={embedded ? "space-y-4 p-1" : "space-y-4"}
+    >
       <label className="flex flex-col gap-1 text-sm">
         <span>
           Título <span className="text-red-700">*</span>
@@ -209,7 +243,7 @@ export function OportunidadForm({ mode, opId, initial, stages, leads, clientes }
         </button>
         <button
           type="button"
-          onClick={() => router.back()}
+          onClick={handleCancel}
           className="rounded-md border px-4 py-2 hover:bg-muted"
         >
           Cancelar

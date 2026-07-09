@@ -212,7 +212,7 @@ export const SHELL_MODULES: readonly ShellModule[] = [
       { label: "Panel", href: "/crm", status: "active", pageCode: "CRM-01" },
       { label: "Leads", href: "/crm/leads", status: "active" },
       { label: "Oportunidades", href: "/crm/oportunidades", status: "active" },
-      { label: "Pipeline", href: "/crm/oportunidades/pipeline", status: "active" },
+      { label: "Pipeline", href: "/crm/oportunidades?vista=tablero", status: "active" },
       { label: "Contactos", href: "/crm/contactos", status: "active" },
       { label: "Actividades", href: "/crm/actividades", status: "active" },
     ],

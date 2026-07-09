@@ -14,6 +14,14 @@ type Props = {
   mode: "create" | "edit";
   leadId?: string;
   initial?: Partial<LeadInput>;
+  /** PR-030: hospedado en FloatingWorkWindow → sólo ajusta container/footer. */
+  embedded?: boolean;
+  /** PR-030: el host cancela (cierra la ventana) en vez de router.back(). */
+  onCancel?: () => void;
+  /** PR-030: el host cierra + refresca en vez de router.push al detalle. */
+  onSuccess?: (id: string) => void;
+  /** PR-030: burbujea el dirty para el gate de descarte de la ventana. */
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 function buildLeadInput(formData: FormData): LeadInput {
@@ -34,49 +42,55 @@ function pickSubmitLabel(pending: boolean, mode: "create" | "edit"): string {
   return mode === "create" ? "Crear lead" : "Guardar cambios";
 }
 
-export function LeadForm({ mode, leadId, initial }: Props) {
+// Layout embedded (FloatingWorkWindow) vs full-page — helpers nombrados
+// (gate Lizard CCN≤8).
+function formClassName(embedded: boolean): string {
+  if (embedded) return "flex h-full flex-col gap-4 overflow-y-auto p-1";
+  return "space-y-4";
+}
+
+function footerClassName(embedded: boolean): string {
+  if (embedded) return "mt-auto flex justify-end gap-3 border-t pt-3";
+  return "flex gap-3";
+}
+
+export function LeadForm({
+  mode,
+  leadId,
+  initial,
+  embedded = false,
+  onCancel,
+  onSuccess,
+  onDirtyChange,
+}: Props) {
   const router = useRouter();
-  const { submit, pending, error } = useLeadFormSubmit(mode, leadId);
+  const { submit, pending, error } = useLeadFormSubmit(mode, leadId, onSuccess);
+  // Normalizado una vez (CCN baja): mismos defaults que los `initial?.x` previos.
+  const init: Partial<LeadInput> = initial ?? {};
 
   function handleSubmit(formData: FormData) {
     submit(buildLeadInput(formData));
   }
 
-  return (
-    <form action={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Field label="Nombre" name="nombre" defaultValue={initial?.nombre} required />
-        <Field label="Empresa" name="empresa" defaultValue={initial?.empresa} />
-        <Field label="CUIT" name="cuit" defaultValue={initial?.cuit} />
-        <Field label="Email" name="email" type="email" defaultValue={initial?.email} />
-        <Field label="Teléfono" name="telefono" defaultValue={initial?.telefono} />
-        <EnumSelect
-          label="Fuente"
-          name="fuente"
-          defaultValue={initial?.fuente ?? "ORGANICO"}
-          options={LEAD_FUENTES}
-        />
-        <EnumSelect
-          label="Estado"
-          name="estado"
-          defaultValue={initial?.estado ?? "NUEVO"}
-          options={LEAD_ESTADOS}
-        />
-      </div>
+  function handleCancel() {
+    if (onCancel) {
+      onCancel();
+      return;
+    }
+    router.back();
+  }
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span>Notas</span>
-        <textarea
-          name="notas"
-          defaultValue={initial?.notas ?? ""}
-          rows={3}
-          className="rounded-md border px-3 py-2"
-        />
-      </label>
+  return (
+    <form
+      action={handleSubmit}
+      onChange={() => onDirtyChange?.(true)}
+      className={formClassName(embedded)}
+    >
+      <LeadFields init={init} />
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
-      <div className="flex gap-3">
+      <div className={footerClassName(embedded)}>
         <button
           type="submit"
           disabled={pending}
@@ -86,13 +100,51 @@ export function LeadForm({ mode, leadId, initial }: Props) {
         </button>
         <button
           type="button"
-          onClick={() => router.back()}
+          onClick={handleCancel}
           className="rounded-md border px-4 py-2 hover:bg-muted"
         >
           Cancelar
         </button>
       </div>
     </form>
+  );
+}
+
+// Campos del lead SIN cambios (mismos name/defaultValue que antes del
+// PR-030) — sólo extraídos a componente nombrado (gate Lizard CCN≤8).
+function LeadFields({ init }: { init: Partial<LeadInput> }) {
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Field label="Nombre" name="nombre" defaultValue={init.nombre} required />
+        <Field label="Empresa" name="empresa" defaultValue={init.empresa} />
+        <Field label="CUIT" name="cuit" defaultValue={init.cuit} />
+        <Field label="Email" name="email" type="email" defaultValue={init.email} />
+        <Field label="Teléfono" name="telefono" defaultValue={init.telefono} />
+        <EnumSelect
+          label="Fuente"
+          name="fuente"
+          defaultValue={init.fuente ?? "ORGANICO"}
+          options={LEAD_FUENTES}
+        />
+        <EnumSelect
+          label="Estado"
+          name="estado"
+          defaultValue={init.estado ?? "NUEVO"}
+          options={LEAD_ESTADOS}
+        />
+      </div>
+
+      <label className="flex flex-col gap-1 text-sm">
+        <span>Notas</span>
+        <textarea
+          name="notas"
+          defaultValue={init.notas ?? ""}
+          rows={3}
+          className="rounded-md border px-3 py-2"
+        />
+      </label>
+    </>
   );
 }
 
