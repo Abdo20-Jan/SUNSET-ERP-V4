@@ -17,7 +17,13 @@ function buildTargetUrl(mode: Mode, leadId: string | undefined, createdId: strin
   return `/crm/leads/${id}`;
 }
 
-export function useLeadFormSubmit(mode: Mode, leadId: string | undefined) {
+export function useLeadFormSubmit(
+  mode: Mode,
+  leadId: string | undefined,
+  // PR-030 (aditivo): host embedded (FloatingWorkWindow) cierra/refresca en
+  // vez de navegar. Sin `onSuccess`, el flujo original queda INTACTO.
+  onSuccess?: (id: string) => void,
+) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +34,11 @@ export function useLeadFormSubmit(mode: Mode, leadId: string | undefined) {
       const result = await callAction(mode, leadId, input);
       if (!result.ok) {
         setError(result.error);
+        return;
+      }
+      if (onSuccess) {
+        onSuccess(result.data.id);
+        router.refresh();
         return;
       }
       router.push(buildTargetUrl(mode, leadId, result.data.id));

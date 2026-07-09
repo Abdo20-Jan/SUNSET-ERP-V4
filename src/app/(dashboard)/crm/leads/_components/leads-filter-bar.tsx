@@ -4,13 +4,17 @@ export function LeadsFilterBar({
   q,
   estado,
   fuente,
+  vista,
 }: {
   q: string | undefined;
   estado: string | undefined;
   fuente: string | undefined;
+  /** PR-030 (aditivo): preserva el preset `?vista=` al filtrar. */
+  vista?: string;
 }) {
   return (
     <form className="flex flex-wrap items-end gap-3" method="get">
+      {vista ? <input type="hidden" name="vista" value={vista} /> : null}
       <label className="flex flex-col text-sm">
         <span className="text-muted-foreground">Buscar</span>
         <input

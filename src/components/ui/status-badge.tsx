@@ -79,6 +79,11 @@ const ESTADO_TONO: Record<string, Tono> = {
   VIGENTE: "info",
   // borradores / neutros
   BORRADOR: "neutral",
+  // CRM · LeadEstado (PR-030, aditivo) — NUEVO ya existe arriba (info).
+  CONTACTADO: "process",
+  CALIFICADO: "info",
+  DESCALIFICADO: "danger",
+  CONVERTIDO: "success",
 };
 
 function tonoDe(estado: string): Tono {

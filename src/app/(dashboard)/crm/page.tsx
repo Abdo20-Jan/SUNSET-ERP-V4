@@ -101,7 +101,7 @@ export default async function CrmDashboardPage() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <NavTile
-          href="/crm/oportunidades/pipeline"
+          href="/crm/oportunidades?vista=tablero"
           title="Pipeline kanban"
           description="Ver oportunidades por etapa, mover entre stages."
         />
