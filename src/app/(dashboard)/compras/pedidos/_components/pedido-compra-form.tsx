@@ -63,8 +63,8 @@ const formSchema = z
 
 type FormValues = z.input<typeof formSchema>;
 
-type ProveedorOpt = { id: string; nombre: string; pais: string };
-type ProductoOpt = {
+export type ProveedorOpt = { id: string; nombre: string; pais: string };
+export type ProductoOpt = {
   id: string;
   codigo: string;
   nombre: string;
@@ -78,6 +78,14 @@ type Props = {
   initialData?: PedidoCompraDetalle;
   proveedores: ProveedorOpt[];
   productos: ProductoOpt[];
+  /** PR-029: hospedado en FloatingWorkWindow → footer in-flow (sin `fixed`/`pb-32`). */
+  embedded?: boolean;
+  /** PR-029: el host cancela (cierra la ventana) en vez de `router.back()`. */
+  onCancel?: () => void;
+  /** PR-029: el host cierra + refresca en vez de `router.push` al detalle. */
+  onSuccess?: (result: { id: number; numero: string }) => void;
+  /** PR-029: burbujea `formState.isDirty` para el gate de descarte de la ventana. */
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 function todayISO(): string {
@@ -92,6 +100,10 @@ export function PedidoCompraForm({
   initialData,
   proveedores,
   productos,
+  embedded = false,
+  onCancel,
+  onSuccess,
+  onDirtyChange,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -142,7 +154,7 @@ export function PedidoCompraForm({
     handleSubmit,
     setValue,
     getValues,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -159,6 +171,11 @@ export function PedidoCompraForm({
       setValue("tipoCambio", "1", { shouldValidate: true });
     }
   }, [moneda, setValue]);
+
+  // PR-029: burbujea el estado dirty al host (FloatingWorkWindow) para el gate de descarte.
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const onProductoChange = (index: number, id: string) => {
     setValue(`items.${index}.productoId`, id, { shouldValidate: true });
@@ -204,8 +221,12 @@ export function PedidoCompraForm({
       });
       if (result.ok) {
         toast.success(`Pedido ${result.numero} guardado.`);
-        router.push(`/compras/pedidos/${result.id}`);
-        router.refresh();
+        if (onSuccess) {
+          onSuccess({ id: result.id, numero: result.numero });
+        } else {
+          router.push(`/compras/pedidos/${result.id}`);
+          router.refresh();
+        }
       } else {
         toast.error(result.error);
       }
@@ -215,7 +236,10 @@ export function PedidoCompraForm({
   useCmdShortcut("s", () => submit(), !isPending);
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-6 pb-32">
+    <form
+      onSubmit={submit}
+      className={embedded ? "flex flex-col gap-6" : "flex flex-col gap-6 pb-32"}
+    >
       <div className="flex flex-col gap-1">
         <h1 className="text-[15px] font-semibold tracking-tight">
           {isEdit ? `Editar pedido ${initialData!.numero}` : "Nuevo pedido de compra (OC)"}
@@ -358,8 +382,20 @@ export function PedidoCompraForm({
         </CardContent>
       </Card>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 backdrop-blur">
-        <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center justify-between gap-4 px-4 py-3 lg:px-8">
+      <div
+        className={
+          embedded
+            ? "sticky bottom-0 z-30 -mx-px border-t bg-background/95 backdrop-blur"
+            : "fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 backdrop-blur"
+        }
+      >
+        <div
+          className={
+            embedded
+              ? "flex flex-wrap items-center justify-between gap-4 px-4 py-3"
+              : "mx-auto flex max-w-screen-2xl flex-wrap items-center justify-between gap-4 px-4 py-3 lg:px-8"
+          }
+        >
           <div className="flex items-baseline gap-2">
             <span className="text-xs uppercase tracking-wide text-muted-foreground">
               Total estimado
@@ -372,7 +408,7 @@ export function PedidoCompraForm({
             <Button
               type="button"
               variant="ghost"
-              onClick={() => router.back()}
+              onClick={() => (onCancel ? onCancel() : router.back())}
               disabled={isPending}
             >
               Cancelar

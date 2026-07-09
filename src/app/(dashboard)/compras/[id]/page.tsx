@@ -51,7 +51,7 @@ export default async function CompraDetailPage({
     );
   }
 
-  const [proveedor, productos, asiento, params2, session, cotizacion] = await Promise.all([
+  const [proveedor, productos, asiento, pedido, params2, session, cotizacion] = await Promise.all([
     db.proveedor.findUnique({
       where: { id: compra.proveedorId },
       select: { nombre: true },
@@ -63,6 +63,13 @@ export default async function CompraDetailPage({
     compra.asientoId
       ? db.asiento.findUnique({
           where: { id: compra.asientoId },
+          select: { numero: true },
+        })
+      : Promise.resolve(null),
+    // PR-029: número de la OC de origen para el link reverso factura→pedido.
+    compra.pedidoCompraId != null
+      ? db.pedidoCompra.findUnique({
+          where: { id: compra.pedidoCompraId },
           select: { numero: true },
         })
       : Promise.resolve(null),
@@ -94,6 +101,7 @@ export default async function CompraDetailPage({
       proveedorNombre={proveedor?.nombre ?? "—"}
       productosMap={productosMap}
       asientoNumero={asiento?.numero ?? null}
+      pedidoNumero={pedido?.numero ?? null}
       moneda={moneda}
       tc={tc}
       tcInfo={tcInfo}
