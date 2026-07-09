@@ -196,8 +196,14 @@ export const SHELL_MODULES: readonly ShellModule[] = [
   {
     label: "Compras",
     items: [
-      { label: "Órdenes de compra", href: "/compras", status: "active", pageCode: "COMP-01" },
-      { label: "Pedidos de compra", href: "/compras/pedidos", status: "active" },
+      { label: "Órdenes de compra", href: "/compras", status: "active" },
+      // PR-029: COMP-01 es la worklist canónica de OC (pedidos), no la de facturas.
+      {
+        label: "Pedidos de compra",
+        href: "/compras/pedidos",
+        status: "active",
+        pageCode: "COMP-01",
+      },
     ],
   },
   {

@@ -9,6 +9,7 @@ import { CancelCircleIcon } from "@hugeicons/core-free-icons";
 import { anularCompraAction, type CompraDetalle } from "@/lib/actions/compras";
 import { fmtDate, fmtMontoPres, fmtTipoCambio } from "@/lib/format";
 import { MonedaToggle, type Moneda } from "../../reportes/_components/moneda-toggle";
+import { EntityLink } from "@/components/data-grid/entity-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,6 +36,8 @@ type Props = {
   proveedorNombre: string;
   productosMap: Record<string, { codigo: string; nombre: string }>;
   asientoNumero: number | null;
+  /** PR-029: número de la OC de origen (si `compra.pedidoCompraId`). */
+  pedidoNumero?: string | null;
   moneda: Moneda;
   tc: string | null;
   tcInfo: { valor: string; fecha: string; fuente: string | null } | null;
@@ -64,11 +67,59 @@ function estadoVariant(
   }
 }
 
+// Card de datos del documento (extraído — CCN bajo el gate Lizard/Codacy).
+function DatosCard({
+  compra,
+  asientoNumero,
+  pedidoNumero,
+}: {
+  compra: CompraDetalle;
+  asientoNumero: number | null;
+  pedidoNumero: string | null;
+}) {
+  return (
+    <Card>
+      <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Field label="Fecha">{fmtDate(new Date(compra.fecha))}</Field>
+        <Field label="Vencimiento">
+          <DateBadge fecha={compra.fechaVencimiento} relative />
+        </Field>
+        <Field label="Tipo de cambio">
+          {compra.moneda === "ARS" ? "—" : `1 USD = ${fmtTipoCambio(compra.tipoCambio)} ARS`}
+        </Field>
+        <Field label="Asiento contable">
+          {asientoNumero != null ? (
+            <span className="font-mono">Nº {asientoNumero}</span>
+          ) : (
+            <span className="text-muted-foreground">Sin asiento</span>
+          )}
+        </Field>
+        <Field label="Pedido (OC)">
+          {compra.pedidoCompraId != null ? (
+            <EntityLink
+              label={pedidoNumero ?? `#${compra.pedidoCompraId}`}
+              href={`/compras/pedidos/${compra.pedidoCompraId}`}
+            />
+          ) : (
+            <span className="text-muted-foreground">Sin pedido</span>
+          )}
+        </Field>
+        {compra.notas && (
+          <Field label="Notas" wide>
+            {compra.notas}
+          </Field>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function CompraDetailView({
   compra,
   proveedorNombre,
   productosMap,
   asientoNumero,
+  pedidoNumero = null,
   moneda,
   tc,
   tcInfo,
@@ -141,29 +192,7 @@ export function CompraDetailView({
         />
       </div>
 
-      <Card>
-        <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Field label="Fecha">{fmtDate(new Date(compra.fecha))}</Field>
-          <Field label="Vencimiento">
-            <DateBadge fecha={compra.fechaVencimiento} relative />
-          </Field>
-          <Field label="Tipo de cambio">
-            {compra.moneda === "ARS" ? "—" : `1 USD = ${fmtTipoCambio(compra.tipoCambio)} ARS`}
-          </Field>
-          <Field label="Asiento contable">
-            {asientoNumero != null ? (
-              <span className="font-mono">Nº {asientoNumero}</span>
-            ) : (
-              <span className="text-muted-foreground">Sin asiento</span>
-            )}
-          </Field>
-          {compra.notas && (
-            <Field label="Notas" wide>
-              {compra.notas}
-            </Field>
-          )}
-        </CardContent>
-      </Card>
+      <DatosCard compra={compra} asientoNumero={asientoNumero} pedidoNumero={pedidoNumero} />
 
       <Card className="py-0">
         <Table>

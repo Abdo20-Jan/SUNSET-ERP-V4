@@ -10,6 +10,7 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { listarCompras } from "@/lib/actions/compras";
 import { getCotizacionParaFecha } from "@/lib/services/cotizacion";
 import { getCuentasAPagar } from "@/lib/services/cuentas-a-pagar";
@@ -23,7 +24,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { MonedaToggle, type Moneda } from "../reportes/_components/moneda-toggle";
 import { KpiCard } from "../dashboard/_components/kpi-card";
 
-import { ComprasTable } from "./_components/compras-table";
+import { flattenCompras, type PedidoVinculo } from "./_components/compras-presentacion";
+import { ComprasWorklist } from "./_components/compras-worklist";
 
 type SearchParams = Promise<{ page?: string; perPage?: string; moneda?: string }>;
 
@@ -56,6 +58,29 @@ async function PorPagarKpi({ moneda, tc }: { moneda: Moneda; tc: string | null }
   );
 }
 
+// Vínculo OC↔factura de las filas cargadas: 2 queries acotadas a la página
+// (la 2ª depende de los ids de la 1ª). Va aparte porque `listarCompras` es
+// action protegida (no se edita); espejo exacto en `compras-export.ts`.
+async function cargarPedidoPorCompra(compraIds: string[]): Promise<Map<string, PedidoVinculo>> {
+  const vinculos = await db.compra.findMany({
+    where: { id: { in: compraIds }, pedidoCompraId: { not: null } },
+    select: { id: true, pedidoCompraId: true },
+  });
+  const pedidoIds = vinculos.map((v) => v.pedidoCompraId).filter((id): id is number => id !== null);
+  const pedidos = await db.pedidoCompra.findMany({
+    where: { id: { in: pedidoIds } },
+    select: { id: true, numero: true },
+  });
+  const pedidoPorId = new Map(pedidos.map((p) => [p.id, p]));
+  const map = new Map<string, PedidoVinculo>();
+  for (const v of vinculos) {
+    if (v.pedidoCompraId === null) continue;
+    const pedido = pedidoPorId.get(v.pedidoCompraId);
+    if (pedido) map.set(v.id, pedido);
+  }
+  return map;
+}
+
 export default async function ComprasPage({ searchParams }: { searchParams: SearchParams }) {
   const [params, session, cotizacion] = await Promise.all([
     searchParams,
@@ -83,6 +108,7 @@ export default async function ComprasPage({ searchParams }: { searchParams: Sear
     page,
     perPage,
   });
+  const pedidoPorCompra = await cargarPedidoPorCompra(rows.map((r) => r.id));
 
   return (
     <div className="flex flex-col gap-3">
@@ -139,10 +165,11 @@ export default async function ComprasPage({ searchParams }: { searchParams: Sear
         />
       </section>
 
-      <Card className="py-0">
-        <ComprasTable data={rows} moneda={moneda} tc={tc} />
+      {/* Worklist canónica (EnterpriseDataGrid); la <Pagination> server
+          externa sigue debajo del grid, dentro de la misma Card (via children). */}
+      <ComprasWorklist rows={flattenCompras(rows, pedidoPorCompra)} moneda={moneda} tc={tc}>
         <Pagination page={page} perPage={perPage} total={total} className="border-t" />
-      </Card>
+      </ComprasWorklist>
     </div>
   );
 }
