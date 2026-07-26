@@ -61,7 +61,7 @@
     "decimal.js": "^10.6.0",
     "exceljs": "^4.4.0",
     "next": "^16",
-    "next-auth": "5.0.0-beta.31",
+    "next-auth": "5.0.0-beta.32",
     "next-themes": "^0.4.6",
     "pdf-lib": "^1.17.1",
     "pg": "^8.21.0",
