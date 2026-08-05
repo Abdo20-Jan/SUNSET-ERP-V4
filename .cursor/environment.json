@@ -1,0 +1,13 @@
+{
+  "name": "SUNSET ERP v4",
+  "user": "ubuntu",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "next-dev",
+      "command": "pnpm dev"
+    }
+  ],
+  "ports": [{ "name": "next-dev", "port": 3000 }]
+}
