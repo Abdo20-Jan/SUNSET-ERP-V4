@@ -9,5 +9,5 @@
       "command": "pnpm dev"
     }
   ],
-  "ports": [3000]
+  "ports": [{ "name": "next-dev", "port": 3000 }]
 }
